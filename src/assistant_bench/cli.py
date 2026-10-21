@@ -90,10 +90,11 @@ def _load_cases(family: Family) -> list[Case]:
         case []:
             return cases
         case [case_id]:
-            message = f'case {case_id} changed, give it a new ID'
+            message = f'case {case_id!r} changed, give it a new ID'
         case changed:
-            message = f'cases {", ".join(changed)} changed, give each a new ID'
-    raise typer.BadParameter(message, param_hint='FAMILY')
+            ids = ', '.join(repr(case_id) for case_id in changed)
+            message = f'cases {ids} changed, give each a new ID'
+    raise typer.BadParameter(f'family {family.name!r}: {message}', param_hint='FAMILY')
 
 
 def _family_systems(family: Family) -> list[System]:

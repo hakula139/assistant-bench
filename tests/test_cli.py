@@ -5,11 +5,13 @@ from typing import Any
 
 import pytest
 from harbor.models.job.config import JobConfig
+from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
 
 from assistant_bench import jobs
 from assistant_bench.cli import app
 from assistant_bench.families import load_cases, load_family
+from support import write_trial
 
 
 runner = CliRunner()
@@ -102,20 +104,28 @@ class TestCheck:
     @pytest.mark.parametrize(
         ('edited', 'expected'),
         [
-            (['en-greeting'], 'case en-greeting changed, give it a new ID'),
+            (
+                ['en-greeting'],
+                "family 'smoke-text': case 'en-greeting' changed, give it a new ID",
+            ),
             (
                 ['en-greeting', 'zh-greeting'],
-                'cases en-greeting, zh-greeting changed, give each a new ID',
+                "family 'smoke-text': cases 'en-greeting', 'zh-greeting' changed, "
+                'give each a new ID',
             ),
         ],
     )
-    def test_rejects_cases_changed_under_their_rendered_ids(
+    def test_rejects_cases_edited_after_a_trial_ran_them(
         self, data_dir: Path, edited: list[str], expected: str
     ) -> None:
+        job_dir = data_dir / 'jobs' / 'smoke-text' / 'job-1'
         for case_id in edited:
             task_dir = data_dir / 'tasks' / 'smoke-text' / case_id
             task_dir.mkdir(parents=True)
             (task_dir / 'instruction.md').write_text('An earlier wording.')
+            agent = AgentConfig(name='oracle')
+            write_trial(job_dir, f'{case_id}__1', agent, task=f'smoke-text/{case_id}')
+        (job_dir / 'result.json').write_text('{}')
 
         exit_code, message = invoke('check', 'smoke-text')
 

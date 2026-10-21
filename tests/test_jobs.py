@@ -1,16 +1,12 @@
 import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, SourceJobConfig
-from harbor.models.task.id import LocalTaskId
 from harbor.models.task.task import Task
-from harbor.models.trial.config import AgentConfig, TaskConfig, TrialConfig
-from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
-from harbor.models.verifier.result import VerifierResult
+from harbor.models.trial.config import AgentConfig
 
 from assistant_bench import jobs
 from assistant_bench.families import (
@@ -21,7 +17,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import REPO_ROOT
-from support import make_system
+from support import make_system, write_trial
 
 
 VOTES = Family(
@@ -57,18 +53,36 @@ class TestRenderTasks:
 
 
 class TestChangedCases:
-    def test_names_cases_whose_instruction_differs_from_the_rendered_task(
-        self,
-    ) -> None:
+    @staticmethod
+    def record_trials(data_dir: Path, family: str, *case_ids: str) -> None:
+        job_dir = data_dir / 'jobs' / family / 'job-1'
+        for case_id in case_ids:
+            agent = AgentConfig(name='oracle')
+            write_trial(job_dir, f'{case_id}__1', agent, task=f'{family}/{case_id}')
+        (job_dir / 'result.json').write_text('{}')
+
+    def test_names_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
         jobs.render_tasks(family, cases)
-        edited = [cases[0].model_copy(update={'instruction': 'Reworded.'}), cases[1]]
+        self.record_trials(data_dir, 'smoke-text', 'en-greeting')
+        edited = [
+            case.model_copy(update={'instruction': 'Reworded.'}) for case in cases
+        ]
         new = edited[0].model_copy(update={'id': 'en-greeting-2'})
 
         changed = jobs.changed_cases(family, [*edited, new])
 
         assert changed == ['en-greeting']
+
+    def test_keeps_carriage_returns_when_comparing(self, data_dir: Path) -> None:
+        family = load_family('smoke-text')
+        (case, _) = load_cases(family)
+        crlf = case.model_copy(update={'instruction': 'Line one.\r\nLine two.'})
+        jobs.render_tasks(family, [crlf])
+        self.record_trials(data_dir, 'smoke-text', case.id)
+
+        assert jobs.changed_cases(family, [crlf]) == []
 
 
 class TestCaseJob:
@@ -158,46 +172,6 @@ class TestRunJob:
 
 
 class TestIngest:
-    @staticmethod
-    def write_trial(
-        job_dir: Path,
-        name: str,
-        agent: AgentConfig,
-        *,
-        task: str,
-        context: AgentContext | None = None,
-        reward: float | None = None,
-        error: str | None = None,
-        output: str | None = None,
-    ) -> None:
-        trial_dir = job_dir / name
-        (trial_dir / 'agent').mkdir(parents=True)
-        if output is not None:
-            (trial_dir / 'agent' / 'output.txt').write_text(output)
-        exception = ExceptionInfo(
-            exception_type=error or '',
-            exception_message='',
-            exception_traceback='',
-            occurred_at=datetime(2026, 10, 21, tzinfo=UTC),
-        )
-        result = TrialResult(
-            task_name=task,
-            trial_name=name,
-            trial_uri=f'file://{trial_dir}',
-            task_id=LocalTaskId(path=Path('/tasks') / task),
-            task_checksum='0',
-            config=TrialConfig(
-                task=TaskConfig(path=Path('/tasks') / task), agent=agent
-            ),
-            agent_info=AgentInfo(name=agent.name or 'generate', version='1'),
-            agent_result=context,
-            verifier_result=None
-            if reward is None
-            else VerifierResult(rewards={'reward': reward}),
-            exception_info=exception if error else None,
-        )
-        (trial_dir / 'result.json').write_text(result.model_dump_json())
-
     def test_collects_generations_and_errors(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
         system = make_system()
@@ -205,7 +179,7 @@ class TestIngest:
             import_path='assistant_bench.harnesses.generate:Generate',
             kwargs={'system': system.name, 'fingerprint': system.fingerprint},
         )
-        self.write_trial(
+        write_trial(
             job_dir,
             'b__1',
             generate,
@@ -225,7 +199,7 @@ class TestIngest:
                 },
             ),
         )
-        self.write_trial(job_dir, 'a__1', generate, task='f/a', error='TimeoutError')
+        write_trial(job_dir, 'a__1', generate, task='f/a', error='TimeoutError')
 
         outputs = jobs.ingest(VOTES, {system.name: system})
 
@@ -269,10 +243,10 @@ class TestIngest:
             settings=VotesSettings(scorer='votes', samples=1, max_output_tokens=300),
         )
         jobs_dir = data_dir / 'jobs' / 'f'
-        self.write_trial(
+        write_trial(
             jobs_dir / 'job-1', 'a__1', generate, task='f/a', error='TimeoutError'
         )
-        self.write_trial(jobs_dir / 'job-2', 'a__2', generate, task='f/a', output='Hi.')
+        write_trial(jobs_dir / 'job-2', 'a__2', generate, task='f/a', output='Hi.')
 
         outputs = jobs.ingest(family, {system.name: system})
 
@@ -280,11 +254,33 @@ class TestIngest:
             ('job-2', 'a', None, 'Hi.')
         ]
 
+    def test_keeps_a_renamed_system_beside_its_old_name(self, data_dir: Path) -> None:
+        system = make_system()
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(scorer='votes', samples=1, max_output_tokens=300),
+        )
+        jobs_dir = data_dir / 'jobs' / 'f'
+        for job, name in (('job-1', 'old-name'), ('job-2', 'new-name')):
+            agent = AgentConfig(
+                import_path='assistant_bench.harnesses.generate:Generate',
+                kwargs={'system': name, 'fingerprint': system.fingerprint},
+            )
+            write_trial(jobs_dir / job, 'a__1', agent, task='f/a', output=name)
+
+        outputs = jobs.ingest(family, {})
+
+        assert [(o.system, o.text) for o in outputs] == [
+            ('new-name', 'new-name'),
+            ('old-name', 'old-name'),
+        ]
+
     def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
         oracle = AgentConfig(name='oracle')
         for family in ('f', 'g'):
             job_dir = data_dir / 'jobs' / family / 'job-1'
-            self.write_trial(job_dir, 'a__1', oracle, task=f'{family}/a', reward=1.0)
+            write_trial(job_dir, 'a__1', oracle, task=f'{family}/a', reward=1.0)
 
         (scored,) = jobs.ingest(TESTS, {})
         (voted,) = jobs.ingest(VOTES, {})
@@ -295,7 +291,7 @@ class TestIngest:
     def test_leaves_a_system_missing_from_the_catalog_unpriced(
         self, data_dir: Path
     ) -> None:
-        self.write_trial(
+        write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
             AgentConfig(import_path='x:Y', kwargs={'system': 'retired'}),

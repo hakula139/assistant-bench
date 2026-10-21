@@ -67,12 +67,18 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
 
 
 def changed_cases(family: Family, cases: list[Case]) -> list[str]:
-    """Returns the IDs of cases whose instruction differs from their rendered task."""
+    """Returns the IDs of cases whose instruction differs from the task a trial ran."""
+    ran = {
+        output.case
+        for job_dir in _finished_jobs(family)
+        for output in read_trials(family, job_dir, {})
+    }
     return [
         case.id
         for case in cases
-        if (instruction := _task_dir(family, case) / 'instruction.md').exists()
-        and instruction.read_text() != case.instruction
+        if case.id in ran
+        and (_task_dir(family, case) / 'instruction.md').read_text(newline='')
+        != case.instruction
     ]
 
 
@@ -87,29 +93,28 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     that no earlier job completed with the same task version and agent config.
     """
     assert family.settings.max_output_tokens is not None
-    jobs_dir = data_dir() / 'jobs' / family.name
     agents = [
-        HARNESSES[system.harness].model_copy(
-            update={
-                'model_name': system.route,
-                'n_concurrent': ROUTE_CONCURRENCY,
-                'concurrency_group': system.route,
-                'kwargs': GenerateOptions(
-                    system=system.name,
-                    fingerprint=system.fingerprint,
-                    effort=system.effort,
-                    system_prompt=system.prompt,
-                    max_output_tokens=family.settings.max_output_tokens,
-                ).model_dump(),
-            }
+        trial_config.AgentConfig(
+            name=HARNESSES[system.harness].name,
+            import_path=HARNESSES[system.harness].import_path,
+            model_name=system.route,
+            n_concurrent=ROUTE_CONCURRENCY,
+            concurrency_group=system.route,
+            kwargs=GenerateOptions(
+                system=system.name,
+                fingerprint=system.fingerprint,
+                effort=system.effort,
+                system_prompt=system.prompt,
+                max_output_tokens=family.settings.max_output_tokens,
+            ).model_dump(),
         )
         for system in systems
     ]
     sources = [
-        SourceJobConfig(action='diff', type='local', path=result.parent)
-        for result in sorted(jobs_dir.glob('*/result.json'))
+        SourceJobConfig(action='diff', type='local', path=job_dir)
+        for job_dir in _finished_jobs(family)
     ]
-    return _job(family, jobs_dir, agents, tasks, sources)
+    return _job(family, data_dir() / 'jobs' / family.name, agents, tasks, sources)
 
 
 def oracle_job(family: Family) -> JobConfig:
@@ -120,10 +125,20 @@ def oracle_job(family: Family) -> JobConfig:
     return _job(
         family,
         data_dir() / 'checks' / family.name,
-        [HARNESSES['oracle']],
+        [
+            trial_config.AgentConfig(
+                name=HARNESSES['oracle'].name,
+                import_path=HARNESSES['oracle'].import_path,
+            )
+        ],
         sorted((FAMILIES_DIR / family.name / 'tasks').iterdir()),
         [],
     )
+
+
+def _finished_jobs(family: Family) -> list[Path]:
+    jobs_dir = data_dir() / 'jobs' / family.name
+    return sorted(result.parent for result in jobs_dir.glob('*/result.json'))
 
 
 def _job(
@@ -205,12 +220,12 @@ class Output(BaseModel):
 def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     """Reads the family's trials into `outputs/<family>.jsonl`.
 
-    Each case and fingerprint keeps at most `samples` outputs, preferring successful
-    trials, so an errored trial drops out once a rerun replaces it. Costs come from
-    the current catalog price of each system name, so a system missing from
-    `systems` or without a price reports as unpriced.
+    Each case, system, and fingerprint keeps at most `samples` outputs, preferring
+    successful trials, so an errored trial drops out once a rerun replaces it. Costs
+    come from the current catalog price of each system name, so a system missing
+    from `systems` or without a price reports as unpriced.
     """
-    groups: defaultdict[tuple[str, str | None], list[Output]] = defaultdict(list)
+    groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
     for output in sorted(
         (
             output
@@ -219,7 +234,7 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
         ),
         key=lambda output: (output.error is not None, output.job, output.trial),
     ):
-        groups[(output.case, output.fingerprint)].append(output)
+        groups[(output.case, output.system, output.fingerprint)].append(output)
     outputs = sorted(
         (
             output

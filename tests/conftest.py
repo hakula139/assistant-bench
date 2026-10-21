@@ -1,4 +1,5 @@
 import json
+import ssl
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -6,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import trustme
 
 from assistant_bench import families
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
@@ -37,6 +39,25 @@ def export(monkeypatch: pytest.MonkeyPatch) -> NixosConfigExport:
 
 @pytest.fixture
 def endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
+    yield from serve_stub(tmp_path)
+
+
+@pytest.fixture
+def tls_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
+    """The stub endpoint over TLS, with a certificate for 127.0.0.1 from a test CA."""
+    ca = trustme.CA()
+    ca_file = tmp_path / 'ca.pem'
+    ca.cert_pem.write_to_path(str(ca_file))
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ca.issue_cert('127.0.0.1').configure_cert(context)
+    yield from serve_stub(tmp_path, context, ca_file)
+
+
+def serve_stub(
+    tmp_path: Path,
+    context: ssl.SSLContext | None = None,
+    ca_file: Path | None = None,
+) -> Iterator[StubEndpoint]:
     key_file = tmp_path / 'api-key'
     key_file.write_text('test-key\n')
     stub: StubEndpoint
@@ -63,7 +84,15 @@ def endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
             pass
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    stub = StubEndpoint(url=f'http://127.0.0.1:{server.server_port}', key_file=key_file)
+    scheme = 'http'
+    if context is not None:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        scheme = 'https'
+    stub = StubEndpoint(
+        url=f'{scheme}://127.0.0.1:{server.server_port}',
+        key_file=key_file,
+        ca_file=ca_file,
+    )
     thread = threading.Thread(
         target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True
     )

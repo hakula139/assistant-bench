@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import certifi
 import openai
 import pytest
 from harbor.environments.base import BaseEnvironment
@@ -180,11 +179,18 @@ class TestRun:
         assert len(endpoint.requests) == 1
         assert not (tmp_path / 'output.txt').exists()
 
-    def test_loads_the_ca_bundle_the_env_names(
-        self, endpoint: StubEndpoint, tmp_path: Path
+    def test_trusts_only_the_ca_bundle_the_env_names(
+        self, tls_endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
+        assert tls_endpoint.ca_file is not None
+
+        with pytest.raises(openai.APIConnectionError):
+            run_agent(tls_endpoint, tmp_path)
         _, output = run_agent(
-            endpoint, tmp_path, env={'BENCH_API_CA_FILE': certifi.where()}
+            tls_endpoint,
+            tmp_path,
+            env={'BENCH_API_CA_FILE': str(tls_endpoint.ca_file)},
         )
 
         assert output.read_text() == 'Hello there.'
+        assert len(tls_endpoint.requests) == 1

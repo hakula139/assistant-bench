@@ -177,7 +177,11 @@ def resolve_system(
     if entry is None:
         raise ValueError(f'system {name!r}: unknown catalog model {config.model!r}')
 
-    if len(entry.channel_id) != 1:
+    if not entry.channel_id:
+        raise ValueError(
+            f'system {name!r}: catalog model {config.model!r} has no channel'
+        )
+    if len(entry.channel_id) > 1:
         channels = ', '.join(entry.channel_id)
         raise ValueError(
             f'system {name!r}: catalog model {config.model!r} has channels '

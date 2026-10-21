@@ -188,6 +188,10 @@ class TestResolveSystem:
                 "system 'x': the model takes no effort",
             ),
             (
+                SystemConfig(model='acme-unrouted'),
+                "system 'x': catalog model 'acme-unrouted' has no channel",
+            ),
+            (
                 SystemConfig(model='acme-routed'),
                 "system 'x': catalog model 'acme-routed' has channels acme, router, "
                 'so set its `route` and `price` instead',

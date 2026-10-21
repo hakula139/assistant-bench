@@ -30,7 +30,9 @@ statix
 substituters
 taplo
 trixie
+trustme
 typer
 unbilled
+unrouted
 venv
 virtualenv

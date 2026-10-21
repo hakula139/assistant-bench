@@ -1,8 +1,15 @@
 """Builders and the stub endpoint shared by the tests."""
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from harbor.models.agent.context import AgentContext
+from harbor.models.task.id import LocalTaskId
+from harbor.models.trial.config import AgentConfig, TaskConfig, TrialConfig
+from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
+from harbor.models.verifier.result import VerifierResult
 
 from assistant_bench.catalog import Price, System
 
@@ -20,6 +27,44 @@ def make_system(**overrides: Any) -> System:
         'price': Price(input=2.0, output=10.0, cache_read=0.2),
     }
     return System(**(fields | overrides))
+
+
+def write_trial(
+    job_dir: Path,
+    name: str,
+    agent: AgentConfig,
+    *,
+    task: str,
+    context: AgentContext | None = None,
+    reward: float | None = None,
+    error: str | None = None,
+    output: str | None = None,
+) -> None:
+    trial_dir = job_dir / name
+    (trial_dir / 'agent').mkdir(parents=True)
+    if output is not None:
+        (trial_dir / 'agent' / 'output.txt').write_text(output)
+    exception = ExceptionInfo(
+        exception_type=error or '',
+        exception_message='',
+        exception_traceback='',
+        occurred_at=datetime(2026, 10, 21, tzinfo=UTC),
+    )
+    result = TrialResult(
+        task_name=task,
+        trial_name=name,
+        trial_uri=f'file://{trial_dir}',
+        task_id=LocalTaskId(path=Path('/tasks') / task),
+        task_checksum='0',
+        config=TrialConfig(task=TaskConfig(path=Path('/tasks') / task), agent=agent),
+        agent_info=AgentInfo(name=agent.name or 'generate', version='1'),
+        agent_result=context,
+        verifier_result=None
+        if reward is None
+        else VerifierResult(rewards={'reward': reward}),
+        exception_info=exception if error else None,
+    )
+    (trial_dir / 'result.json').write_text(result.model_dump_json())
 
 
 # ── Stub Endpoint ──
@@ -66,6 +111,7 @@ class StubEndpoint:
 
     url: str
     key_file: Path
+    ca_file: Path | None = None
     requests: list[Request] = field(default_factory=list)
     status: int = 200
     response: dict[str, Any] = field(default_factory=completion)
