@@ -187,6 +187,7 @@
           src = ./.;
         };
 
+        cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
         flock = pkgs.lib.getExe pkgs.flock;
         git = pkgs.lib.getExe pkgs.git;
       in
@@ -210,14 +211,18 @@
               pnpm
             ]);
 
-          # git-hooks.nix stores a hooks path relative to the main checkout, which linked worktrees
-          # can't resolve (cachix/git-hooks.nix#688), so unset it to fall back to the shared hooks
-          # directory. The lock keeps a concurrent load from setting it while `pre-commit install`
-          # runs, since pre-commit refuses to install with the path set. The hooks' Python packages
-          # also fill PYTHONPATH, which would shadow the project's virtualenv, so unset it.
+          # Other repositories enter this shell for its tools, so hooks install only where the
+          # repository's flake.nix is this flake. git-hooks.nix stores a hooks path relative to the
+          # main checkout, which linked worktrees can't resolve (cachix/git-hooks.nix#688), so unset
+          # it to fall back to the shared hooks directory. The lock keeps a concurrent load from
+          # setting it while `pre-commit install` runs, since pre-commit refuses to install with the
+          # path set. The hooks' Python packages also fill PYTHONPATH, which would shadow the
+          # project's virtualenv, so unset it.
           shellHook = ''
             unset PYTHONPATH
-            if common=$(${git} rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+            if toplevel=$(${git} rev-parse --show-toplevel 2>/dev/null) \
+              && ${cmp} -s ${./flake.nix} "$toplevel/flake.nix"; then
+              common=$(${git} rev-parse --path-format=absolute --git-common-dir)
               (
                 ${flock} 9
                 ${preCommit.config.installationScript}
