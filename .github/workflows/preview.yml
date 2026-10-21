@@ -15,29 +15,18 @@ env:
   CACHIX_NAME: hakula
 
 jobs:
-  credentials:
-    name: Check Credentials
-    runs-on: ubuntu-latest
-    outputs:
-      present: ${{ steps.check.outputs.present }}
-    steps:
-      # Pull requests from forks receive no secrets, so their previews skip as well.
-      - name: Check Cloudflare credentials
-        id: check
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
+  build:
+    # Pull requests from forks and Dependabot receive no deploy secrets.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    uses: ./.github/workflows/build.yml
+    with:
+      upload-artifact: true
 
   preview:
     name: Deploy Preview
-    needs: credentials
-    if: needs.credentials.outputs.present == 'true'
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -57,8 +46,11 @@ jobs:
       - name: Install dependencies
         run: nix develop -c pnpm install
 
-      - name: Build site
-        run: nix develop -c pnpm build
+      - name: Download site artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: web/dist/
 
       - name: Upload preview version
         env:

@@ -64,8 +64,8 @@ jobs:
       - name: Test
         run: nix develop -c pnpm test
 
-      - name: Build site
-        run: nix develop -c pnpm build
+  build:
+    uses: ./.github/workflows/build.yml
 
   python-check:
     name: Python Check
@@ -140,6 +140,7 @@ jobs:
     needs:
       - flake-check
       - node-check
+      - build
       - python-check
       - harbor-smoke
     runs-on: ubuntu-latest
