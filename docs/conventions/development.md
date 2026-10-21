@@ -35,10 +35,13 @@ Commands stay minimal, and settings live in config files:
 | Systems under test                                                            | `systems.toml`                                      |
 | A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                     |
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time |
+| Session size, repeat share, and seed votes                                    | `arena/service.py` and `arena/scheduler.py`         |
+| The arena's loopback ports and render policy                                  | `arena/api.py`                                      |
+| Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                |
 | The model endpoint                                                            | The ignored `.env`                                  |
 | Prettier, markdownlint, cspell, Taplo, and shfmt                              | Their own files at the repository root              |
 
-Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, and the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
+Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and `BENCH_LOCAL`, which `bench serve` sets for its own build of the vote page. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
 
 ## Toolchain and Pins
 

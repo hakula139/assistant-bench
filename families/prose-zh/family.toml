@@ -1,8 +1,10 @@
 scorer = "votes"
 systems = ["opus-5.5", "gpt-6.1-sol", "gemini-4-argon", "gemini-3.8-flash", "deepseek-v4.1-flash"]
+reference = "gemini-3.8-flash"
 language = "zh"
 samples = 2
 max_output_tokens = 16000
+categories = ["code-comment", "docs", "explanation", "message", "pr-description", "reply"]
 
 [gates]
 min_chars = 40

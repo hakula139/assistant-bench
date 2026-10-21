@@ -12,8 +12,9 @@ import pytest
 import trustme
 
 from assistant_bench import families
+from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
-from support import EXPORT_FILE, Request, StubEndpoint
+from support import EXPORT_FILE, Clock, Request, StubEndpoint
 
 
 PROXY_VARS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
@@ -119,3 +120,15 @@ def serve_stub(
     yield stub
     server.shutdown()
     thread.join()
+
+
+@pytest.fixture
+def clock() -> Clock:
+    return Clock()
+
+
+@pytest.fixture
+def store(data_dir: Path) -> Iterator[VoteStore]:
+    store = VoteStore(votes_file())
+    yield store
+    store.close()

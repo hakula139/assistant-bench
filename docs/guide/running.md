@@ -1,6 +1,6 @@
 # Running
 
-Learn how to point the bench at a model endpoint, check and run a family, and collect its outputs, with the setup covered in [Quickstart](quickstart.md).
+Learn how to point the bench at a model endpoint, check and run a family, collect its outputs, vote on them, and close a round, with the setup covered in [Quickstart](quickstart.md).
 
 ## The Model Endpoint
 
@@ -45,6 +45,22 @@ uv run bench ingest smoke-text
 
 `bench ingest` reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint and preferring successful trials, so a rerun replaces an earlier error. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/prose.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
 
+## Voting
+
+```bash
+uv run bench serve
+```
+
+`bench serve` builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every family scored by votes that has outputs, and it runs until interrupted. Open that address exactly, since the API admits no other host. A session holds up to 30 votes, each recorded as soon as it is cast, and [Arena](../design/arena.md) covers how pairs are chosen.
+
+## Closing a Round
+
+```bash
+uv run bench close prose-zh
+```
+
+`bench close` fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+
 ## The Data Directory
 
 Everything a run produces stays out of Git under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`:
@@ -55,7 +71,8 @@ assistant-bench/
 ├── checks/<family>/<job>/                  # Oracle jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
 ├── outputs/<family>.jsonl                  # Records written by `bench ingest`
-└── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
+├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
+└── votes.sqlite                            # Sessions, votes, and undos from `bench serve`
 ```
 
 Run `harbor view` on a family's job directory to browse its trials.

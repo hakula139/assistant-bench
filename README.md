@@ -16,6 +16,8 @@ Early development. What works today:
 - **Families:** `prose-zh` and `prose-en`, with 30 committed writing cases each and gates that reject empty, truncated, wrong-language, or Traditional-script outputs, plus the `smoke` and `smoke-text` families that check the setup
 - **Runs:** one chat-completions call per trial through any OpenAI-compatible endpoint, with reruns that generate only missing trials
 - **Outputs:** one record per trial with the text or reward, token counts, cost at catalog prices, latency, and provenance
+- **Arena:** a local vote page serving blind pairs, with a balanced seed, adaptive pairing, swapped repeats, and automatic losses for outputs that fail a gate
+- **Reports:** Bradley-Terry scores with case-clustered bootstrap intervals and rank spreads, written as aggregate JSON under `reports/`
 
 ## Usage
 
@@ -28,14 +30,16 @@ cp .env.example .env                        # Then fill in the endpoint variable
 uv run bench check smoke                    # Run Harbor's oracle on the smoke task
 uv run bench run smoke-text                 # Send each smoke case to every listed system
 uv run bench ingest smoke-text              # Collect the replies into the data directory
+uv run bench serve                          # Vote on blind pairs at http://127.0.0.1:8790/vote/
+uv run bench close smoke-text               # Write the family's report under reports/
 ```
 
-The [quickstart](docs/guide/quickstart.md) walks through the setup, and [Running](docs/guide/running.md) covers the endpoint, reruns, and the data directory.
+The [quickstart](docs/guide/quickstart.md) walks through the setup, and [Running](docs/guide/running.md) covers the endpoint, reruns, voting, closing a round, and the data directory.
 
 ## Documentation
 
 - [User guide](docs/guide/): quickstart, running a family, authoring cases, families, and systems
-- [Design](docs/design/): architecture, systems, and the prose families
+- [Design](docs/design/): architecture, systems, the arena, ranking, reports, and the prose families
 - [Conventions](docs/conventions/) and [`AGENTS.md`](AGENTS.md): how changes are written and checked
 
 ## License

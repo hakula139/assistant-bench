@@ -2,6 +2,7 @@
 
 import tomllib
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -10,11 +11,17 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
 class _Settings(BaseModel):
+    """Settings every family shares.
+
+    `categories` lists the categories its cases may carry, which reports publish.
+    """
+
     model_config = ConfigDict(extra='forbid', frozen=True)
 
     systems: list[str] = []
     samples: int = Field(ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
+    categories: list[str] = []
 
 
 type Language = Literal['en', 'zh']
@@ -63,13 +70,23 @@ class Gates(BaseModel):
 class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes.
 
-    `language` is the language every output must be written in, which the gates
-    check when it is set.
+    `reference` names the listed system whose score anchors the board at 1000,
+    `render` says whether the vote page shows outputs as text or as sandboxed
+    HTML, and `language` is the language every output must be written in, which
+    the gates check when it is set.
     """
 
     scorer: Literal['votes']
+    reference: str
+    render: Literal['text', 'html'] = 'text'
     language: Language | None = None
     gates: Gates = Gates()
+
+    @model_validator(mode='after')
+    def _check_reference(self) -> Self:
+        if self.reference not in self.systems:
+            raise ValueError(f'reference {self.reference!r} is not in systems')
+        return self
 
 
 class TaskTestsSettings(_Settings):
@@ -107,6 +124,11 @@ class Case(BaseModel):
     checklist: list[str] = []
 
 
+def family_names() -> list[str]:
+    """Return the name of every directory under `families/` holding a `family.toml`."""
+    return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
+
+
 def load_family(name: str) -> Family:
     """Read `family.toml` and infer where the family's tasks come from.
 
@@ -140,7 +162,8 @@ def load_cases(family: Family) -> list[Case]:
     Raises
     ------
     ValueError
-        Two cases share an ID, within one file or across both.
+        Two cases share an ID, within one file or across both, or a case's
+        category is missing from the family's `categories`.
     """
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',
@@ -161,6 +184,16 @@ def load_cases(family: Family) -> list[Case]:
                     f'family {family.name!r}: case {case.id!r} appears at '
                     f'{sources[case.id]} and {source}'
                 )
+            if case.category not in family.settings.categories:
+                raise ValueError(
+                    f'family {family.name!r}: case {case.id!r} at {source} has '
+                    f'category {case.category!r}, which categories does not list'
+                )
             cases[case.id] = case
             sources[case.id] = source
     return list(cases.values())
+
+
+def case_task(family: Family, case_id: str) -> Path:
+    """Return the directory that `jobs.render_tasks` installs a case's task in."""
+    return data_dir() / 'tasks' / family.name / case_id

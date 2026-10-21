@@ -1,24 +1,34 @@
 """The `bench` command."""
 
+import os
 import subprocess
 from collections import Counter
+from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 
-from assistant_bench import jobs, revisions
+from assistant_bench import jobs, report, revisions
+from assistant_bench.arena import api
+from assistant_bench.arena.service import Arena, load_families
+from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import System, load_export, load_systems
 from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.paths import REPO_ROOT
 
+
+LOCAL_SITE_VAR = 'BENCH_LOCAL'
+SITE_DIR = REPO_ROOT / 'web' / 'dist'
 
 app = typer.Typer(no_args_is_help=True)
 
 
 @app.callback()
 def main() -> None:
-    """Run families on the systems under test and collect their outputs."""
+    """Run families on the systems under test, vote on their outputs, and report."""
     load_dotenv(find_dotenv(usecwd=True))
 
 
@@ -80,6 +90,49 @@ def ingest(family: str) -> None:
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
+
+
+@app.command()
+def serve() -> None:
+    """Build the local vote page and serve it for every family with outputs."""
+    families = load_families()
+    if not families:
+        typer.echo('No family scored by votes has outputs yet', err=True)
+        raise typer.Exit(1)
+    try:
+        subprocess.run(
+            ['pnpm', '--filter', 'web', 'build'],
+            check=True,
+            cwd=REPO_ROOT,
+            env={**os.environ, LOCAL_SITE_VAR: '1'},
+        )
+    except subprocess.CalledProcessError as error:
+        raise typer.Exit(error.returncode) from error
+    page = SITE_DIR / api.VOTE_DIR / 'index.html'
+    if not page.is_file():
+        typer.echo(
+            f'No vote page at {page}. Build the site with '
+            f'`{LOCAL_SITE_VAR}=1 pnpm --filter web build` and fix what it reports.',
+            err=True,
+        )
+        raise typer.Exit(1)
+    with closing(VoteStore(votes_file())) as store:
+        typer.echo(
+            f'Voting on {", ".join(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/'
+        )
+        api.serve(Arena(store, families, api.RENDER_ORIGIN), SITE_DIR)
+
+
+@app.command()
+def close(family: str) -> None:
+    """Write the family's report to `reports/<family>/<round>.json`."""
+    selected = _load_family(family)
+    try:
+        with closing(VoteStore(votes_file())) as store:
+            closed = report.close(selected, store, datetime.now(UTC))
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+    typer.echo(f'Report written to {report.write_report(closed)}')
 
 
 @app.command()

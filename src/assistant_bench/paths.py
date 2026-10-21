@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FAMILIES_DIR = REPO_ROOT / 'families'
+REPORTS_DIR = REPO_ROOT / 'reports'
 
 
 def data_dir() -> Path:

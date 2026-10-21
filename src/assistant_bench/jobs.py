@@ -16,7 +16,6 @@ from harbor.models.task import config as task_config
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
 from harbor.publisher.packager import Packager
-from pydantic import BaseModel
 
 from assistant_bench.catalog import System
 from assistant_bench.families import (
@@ -26,9 +25,11 @@ from assistant_bench.families import (
     Settings,
     TaskTestsSettings,
     VotesSettings,
+    case_task,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
+from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 from assistant_bench.scoring.gates import failed_gates
 
@@ -87,11 +88,6 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
             installed.parent.mkdir(parents=True, exist_ok=True)
             paths.append(task.rename(installed))
         return paths
-
-
-def case_task(family: Family, case_id: str) -> Path:
-    """Return the directory that `render_tasks` installs a case's task in."""
-    return data_dir() / 'tasks' / family.name / case_id
 
 
 def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
@@ -241,35 +237,6 @@ def run_job(config: JobConfig) -> Path:
 # ── Ingest ──
 
 
-class Output(BaseModel):
-    """One trial of a family, as the arena and the reports read it.
-
-    `gate_failures` lists the gates a voted output fails, so an empty list admits
-    it to votes and any failure resolves its pairs automatically. It is `None` for
-    an errored trial and for a family whose scorer has no gates.
-    """
-
-    trial: str
-    job: str
-    case: str
-    system: str
-    fingerprint: str | None
-    nixos_config_rev: str | None
-    error: str | None
-    text: str | None
-    reward: float | None
-    gate_failures: list[Gate] | None
-    finish_reason: str | None
-    input_tokens: int | None
-    cached_tokens: int | None
-    output_tokens: int | None
-    reasoning_tokens: int | None
-    cost_usd: float | None
-    latency_sec: float | None
-    response_model: str | None
-    request_id: str | None
-
-
 def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
@@ -297,11 +264,7 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )
 
-    outputs_file = data_dir() / 'outputs' / f'{family.name}.jsonl'
-    outputs_file.parent.mkdir(parents=True, exist_ok=True)
-    outputs_file.write_text(
-        ''.join(f'{output.model_dump_json()}\n' for output in outputs)
-    )
+    write_outputs(family.name, outputs)
     return outputs
 
 

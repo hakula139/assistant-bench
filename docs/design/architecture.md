@@ -1,6 +1,6 @@
 # Architecture
 
-assistant-bench limits its code to the parts Harbor lacks: resolving systems, rendering cases into Harbor tasks, the single-call agent, and collecting trials into output records, while Harbor schedules trials, runs containers and verifiers, retries failures, and records every job.
+assistant-bench limits its code to the parts Harbor lacks: resolving systems, rendering cases into Harbor tasks, the single-call agent, collecting trials into output records, the voting arena, and the ranking and reports, while Harbor schedules trials, runs containers and verifiers, retries failures, and records every job.
 
 ## Module Map
 
@@ -9,11 +9,20 @@ src/assistant_bench/
 ├── cli.py                                  # The Typer `bench` command
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and ingest
 ├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
-├── scoring/
-│   └── gates.py                            # Eligibility gates for voted outputs
+├── report.py                               # The report schema, one results variant per scorer, and closing a round
+├── arena/
+│   ├── api.py                              # The FastAPI vote API and the render origin
+│   ├── service.py                          # Sessions and blinded pairs
+│   ├── scheduler.py                        # Pair choice: swapped repeats, the balanced seed, adaptive pairing
+│   ├── resolution.py                       # Results the outputs settle: gate failures and identical text
+│   └── store.py                            # The append-only SQLite vote store
+├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
 │   ├── __init__.py                         # Harness name to a Harbor agent name or import path
 │   └── generate.py                         # The single-call agent
+├── scoring/
+│   ├── gates.py                            # Eligibility gates for voted outputs
+│   └── ranking.py                          # Bradley-Terry fit, clustered bootstrap, rank spread
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
 └── paths.py                                # Repo and data directory locations
@@ -24,12 +33,13 @@ src/assistant_bench/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
-2. `jobs` and `revisions`
-3. `scoring` and `harnesses`
-4. `families` and `catalog`
-5. `paths`
+2. `jobs`, `revisions`, and `report`
+3. `arena`
+4. `scoring`, `harnesses`, and `outputs`
+5. `families` and `catalog`
+6. `paths`
 
-`families` is separated from `jobs` so that code reading family settings needs no Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 
@@ -45,6 +55,8 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 1. `bench run <family>` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml` naming a stock image, builds a job config with one agent per system listed in `family.toml`, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent, where `Generate` sends one chat-completions request from the host, writes the reply to `output.txt` in the trial's agent logs, and records tokens, latency, the finish reason, the response model, the request ID, and the nixos-config rev on the trial's `AgentContext`.
 3. `bench ingest <family>` reads the trials of the family's jobs into `outputs/<family>.jsonl`, pricing tokens from the catalog, running the gates when the scorer is `votes`, and taking the reward when it is `tests`.
+4. `bench serve` serves the vote page for every family scored by votes that has outputs, and the [arena](arena.md) records each vote in `votes.sqlite` in the data directory.
+5. `bench close <family>` fits the [ranking](ranking.md) over the family's votes on its current outputs, or aggregates a `tests` family's rewards, and writes the [report](reports.md) to `reports/<family>/<round>.json`.
 
 `bench check <family>` validates a family, and for a `tests` family it also runs Harbor's oracle on every task, placing its jobs under `checks/` so that ingest never reads them.
 
