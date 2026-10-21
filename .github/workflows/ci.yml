@@ -58,6 +58,15 @@ jobs:
       - name: Spell check
         run: nix develop -c pnpm spellcheck
 
+      - name: Type check
+        run: nix develop -c pnpm typecheck
+
+      - name: Test
+        run: nix develop -c pnpm test
+
+      - name: Build site
+        run: nix develop -c pnpm build
+
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
