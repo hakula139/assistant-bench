@@ -36,7 +36,7 @@ const standing = z.strictObject({
   preliminary: z.boolean(),
   votes: z.int(),
   decisive_votes: z.int(),
-  both_bad_rate: z.number(),
+  both_bad_rate: z.number().nullable(),
   outputs: z.int(),
   gate_failure_rate: z.number().nullable(),
   mean_cost_usd: z.number().nullable(),
@@ -69,6 +69,7 @@ const categoryBoard = z.strictObject({
   category: z.string(),
   votes: z.int(),
   standings: z.array(categoryStanding),
+  unranked: z.array(z.string()),
 });
 
 const raterAgreement = z.strictObject({
@@ -87,8 +88,10 @@ const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   reference: z.string(),
   votes: z.int(),
+  dropped_votes: z.int(),
   sessions: z.int(),
   standings: z.array(standing),
+  unranked: z.array(z.string()),
   head_to_head: z.array(headToHead),
   categories: z.array(categoryBoard),
   position: z.number(),
@@ -96,7 +99,7 @@ const votesResults = z.strictObject({
   separability: z.number().nullable(),
   split_half_tau: z.number().nullable(),
   rater_agreement: raterAgreement,
-  decision,
+  decision: decision.nullable(),
 });
 
 // ── Tests Results ──

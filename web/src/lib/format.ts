@@ -37,9 +37,16 @@ const tieBreaks: Record<Decision['tie_break'], string> = {
   latency: 'the lower latency',
 };
 
-/** Says how a leader that shares rank 1 was chosen, or null when it alone ranks first. */
-export const formatTieBreak = ({ separated, tie_break }: Decision) =>
-  separated ? null : `tied at rank 1, chosen by ${tieBreaks[tie_break]}`;
+/**
+ * Qualifies a round's leader: why the round has none, how a tie with the top score was broken, or
+ * null when the leader is separated from every other eligible system.
+ */
+export const formatLeaderNote = (decision: Decision | null) =>
+  decision === null
+    ? 'none while every system is preliminary'
+    : decision.separated
+      ? null
+      : `tied with the top score, chosen by ${tieBreaks[decision.tie_break]}`;
 
 export const formatRank = (best: number, worst: number) =>
   best === worst ? `${best}` : `${best}–${worst}`;

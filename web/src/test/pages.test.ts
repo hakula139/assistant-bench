@@ -40,7 +40,9 @@ describe('family page', () => {
   test('renders the votes board with the round summary', async () => {
     const html = await render(FamilyPage, { family: await family() });
 
-    expect(text(html)).toContain('Leader acme-large tied at rank 1, chosen by the lower cost');
+    expect(text(html)).toContain(
+      'Leader acme-large tied with the top score, chosen by the lower cost',
+    );
   });
 });
 
@@ -51,7 +53,7 @@ describe('system page', () => {
     const html = await render(SystemPage, { family: 'arena', system: 'acme-pro', rounds });
 
     expect(text(html)).toContain(
-      'acme-pro Score 965 (915–1,017) Rank 1–5 Votes 122 (96 decisive) Round 2026-10-21',
+      'acme-pro Score 965 (915–1,018) Rank 1–5 Votes 122 (96 decisive) Round 2026-10-21',
     );
   });
 });

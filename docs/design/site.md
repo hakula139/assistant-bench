@@ -6,8 +6,8 @@ The site under `web/` has two views built from one Astro project and one compone
 
 Each family scored by votes gets a page at `/<family>/` showing one round, with the round and category filters kept in the URL:
 
-- **Round summary:** the leader and, when several systems share rank 1, the tie-break that chose it, beside the vote and session counts and the diagnostics that [Ranking](ranking.md#diagnostics) defines. Rater agreement below the floor adds a warning.
-- **Leaderboard:** a sortable table whose interval column is a forest plot on one axis shared by every row, with a rule at the reference system's score and hollow dots for preliminary systems. Choosing a category swaps in that category's refit, which has no rank spread.
+- **Round summary:** the [decision](ranking.md#decision), naming the leader and the tie-break that chose it when another eligible system ties with the top score, or saying there is none while every system is preliminary. Beside it sit the vote and session counts, the votes left out of the fit, and the diagnostics that [Ranking](ranking.md#diagnostics) defines, and rater agreement below the floor adds a warning.
+- **Leaderboard:** a sortable table whose interval column is a forest plot on one axis shared by every row, with a rule at the reference system's score and hollow dots for preliminary systems. Choosing a category swaps in that category's refit, which has no rank spread. The board's or the category's unranked systems follow the table by name, since they have no score.
 - **Categories:** a system by category heatmap on a five-step sequential ramp, with each cell's score and vote count, and preliminary cells framed by a hatch.
 - **Cost and latency:** score with its interval against the mean cost per output and against the p50 latency, both on log axes, with the Pareto frontier drawn as a step line and its systems labelled.
 

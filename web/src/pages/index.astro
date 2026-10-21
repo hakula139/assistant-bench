@@ -1,24 +1,26 @@
 ---
 import { FamiliesTable, type FamilySummary } from '@/components/site/FamiliesTable';
 import Base from '@/layouts/Base.astro';
-import { formatTieBreak } from '@/lib/format';
+import { formatLeaderNote } from '@/lib/format';
 import type { Report } from '@/lib/report';
 import { getFamilies, latest } from '@/lib/reports';
 
 function standing(
   results: Report['results'],
-): Pick<FamilySummary, 'leader' | 'tieBreak' | 'measure'> {
+): Pick<FamilySummary, 'systems' | 'leader' | 'leaderNote' | 'measure'> {
   switch (results.scorer) {
     case 'votes':
       return {
-        leader: results.decision.leader,
-        tieBreak: formatTieBreak(results.decision),
+        systems: results.standings.length + results.unranked.length,
+        leader: results.decision?.leader,
+        leaderNote: formatLeaderNote(results.decision),
         measure: `${results.votes} votes`,
       };
     case 'tests':
       return {
+        systems: results.standings.length,
         leader: results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate)[0]?.system,
-        tieBreak: null,
+        leaderNote: null,
         measure: 'Task tests',
       };
   }
@@ -26,13 +28,7 @@ function standing(
 
 const families = (await getFamilies()).map((family): FamilySummary => {
   const { round, results } = latest(family);
-  return {
-    name: family.name,
-    round,
-    rounds: family.rounds.length,
-    systems: results.standings.length,
-    ...standing(results),
-  };
+  return { name: family.name, round, rounds: family.rounds.length, ...standing(results) };
 });
 ---
 

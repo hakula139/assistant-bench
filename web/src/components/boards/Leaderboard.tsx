@@ -230,11 +230,12 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
           sortDescFirst: true,
           meta: { numeric: true },
         }),
-        helper.accessor((row) => row.standing.both_bad_rate, {
+        helper.accessor((row) => row.standing.both_bad_rate ?? undefined, {
           id: 'both-bad',
           header: 'Both bad',
           sortDescFirst: false,
-          cell: ({ getValue }) => formatPercent(getValue()),
+          sortUndefined: 'last',
+          cell: ({ getValue }) => formatPercent(getValue() ?? null),
           meta: { numeric: true },
         }),
         helper.accessor((row) => row.standing.gate_failure_rate ?? undefined, {

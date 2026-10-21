@@ -14,8 +14,8 @@ export interface FamilySummary {
   rounds: number;
   systems: number;
   leader: string | undefined;
-  /** How a leader sharing rank 1 was chosen, as in "tied at rank 1, chosen by the lower cost". */
-  tieBreak: string | null;
+  /** Qualifies the leader, as in "tied with the top score, chosen by the lower cost". */
+  leaderNote: string | null;
   /** How the family scores, as in "300 votes" or "Task tests". */
   measure: string;
 }
@@ -43,8 +43,8 @@ export function FamiliesTable({ families }: { families: FamilySummary[] }) {
             </TableCell>
             <TableCell>
               {family.leader ?? MISSING}
-              {family.tieBreak !== null && (
-                <span className="block text-xs text-muted-foreground">{family.tieBreak}</span>
+              {family.leaderNote !== null && (
+                <span className="block text-xs text-muted-foreground">{family.leaderNote}</span>
               )}
             </TableCell>
             <TableCell className="text-right tabular-nums">{family.systems}</TableCell>

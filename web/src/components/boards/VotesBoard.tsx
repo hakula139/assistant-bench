@@ -25,8 +25,8 @@ import {
   formatPercent,
   formatScore,
   formatSeconds,
+  formatLeaderNote,
   formatTau,
-  formatTieBreak,
 } from '@/lib/format';
 import type { VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
@@ -79,16 +79,16 @@ function scatterPoints(rows: LeaderboardRow[], x: (row: LeaderboardRow) => numbe
 
 function RoundSummary({ results }: { results: VotesResults }) {
   const { decision, rater_agreement: agreement } = results;
-  const tieBreak = formatTieBreak(decision);
+  const note = formatLeaderNote(decision);
   return (
     <div className="space-y-3">
       <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:flex sm:flex-wrap">
         <div>
           <dt className="text-muted-foreground">Leader</dt>
           <dd className="font-medium">
-            {decision.leader}
-            {tieBreak !== null && (
-              <span className="block text-xs font-normal text-muted-foreground">{tieBreak}</span>
+            {decision?.leader ?? MISSING}
+            {note !== null && (
+              <span className="block text-xs font-normal text-muted-foreground">{note}</span>
             )}
           </dd>
         </div>
@@ -98,6 +98,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
             {results.votes}{' '}
             <span className="font-normal text-muted-foreground">
               over {results.sessions} sessions
+              {results.dropped_votes > 0 && `, ${results.dropped_votes} more left out`}
             </span>
           </dd>
         </div>
@@ -147,6 +148,10 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
   const { round: activeRound, results } = rounds.find((item) => item.round === roundName) ?? latest;
   const categories = results.categories.map((board) => board.category);
   const activeCategory = categories.includes(category) ? category : ALL;
+  const unranked =
+    activeCategory === ALL
+      ? results.unranked
+      : (results.categories.find((board) => board.category === activeCategory)?.unranked ?? []);
 
   const rows = useMemo(() => leaderboardRows(results, activeCategory), [results, activeCategory]);
   const reference = rows.find((row) => row.standing.system === results.reference)?.score;
@@ -201,6 +206,13 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
           reference={reference}
           href={href}
         />
+        {unranked.length > 0 && (
+          <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
+            {unranked.length === 1
+              ? `Unranked: ${unranked[0]}. No comparison connects it to the reference system, so it has no score yet.`
+              : `Unranked: ${unranked.join(', ')}. No comparison connects them to the reference system, so they have no score yet.`}
+          </p>
+        )}
 
         {categories.length > 0 && (
           <Section title="Categories">

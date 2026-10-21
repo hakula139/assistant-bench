@@ -18,7 +18,9 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
       </p>
       <p>
         An output that fails a family's gates, for example by being truncated or written in the
-        wrong script, loses its pair without a vote. Two identical outputs tie without a vote.
+        wrong script, loses its pair without a vote. Two identical outputs tie without a vote. A
+        vote on a retired case, on an output that has since left or now fails a gate, or on a pair
+        the outputs now settle stays recorded but is left out of the fit.
       </p>
     </section>
 
@@ -27,17 +29,22 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
       <p>
         A Bradley-Terry model fits every vote in the family, counting ties and both-bad votes as
         half a win and absorbing any preference for the left pane in a separate term. Scores sit on
-        an Elo-like scale with the family's reference system at 1,000.
+        an Elo-like scale with the family's reference system at 1,000. Scores compare only among
+        systems that comparisons connect to the reference, so any other voted system is listed as
+        unranked, without a score.
       </p>
       <p>
-        The 95% intervals come from bootstrap resamples drawn by case. A system's rank spans from 1
-        plus the systems whose interval lies entirely above its own, to 1 plus the systems whose
-        interval reaches above its lower bound. A system with fewer than 40 decisive votes is marked
-        preliminary.
+        The 95% intervals come from 1,000 bootstrap resamples drawn by case. A system's rank spans
+        from 1 plus the systems whose interval lies entirely above its own, to 1 plus the systems
+        whose interval reaches above its lower bound. A system with fewer than 40 decisive votes,
+        the votes won by either side, is marked preliminary.
       </p>
       <p>
-        When several systems can rank first, the leader is the one with the lower mean cost per
-        output, then the lower median latency, and finally the higher score.
+        Only systems that are not preliminary can lead, so a round in which every system is
+        preliminary has no leader. Among them, a system ties with the top-scoring one when the 95%
+        interval of the difference between their scores, paired within each bootstrap resample,
+        contains 0. A tie goes to the lower mean cost per output, then to the lower median latency,
+        where a known value beats a missing one, and finally to the higher score.
       </p>
     </section>
 
@@ -47,7 +54,8 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
         Each round reports how far its order can be trusted. Rater agreement is how often a
         side-swapped repeat matched its original vote, and below 70% the separations are weaker than
         the intervals suggest. Separated pairs is the share of system pairs whose intervals do not
-        overlap, and split-half τ compares the orders fit to odd and even sessions.
+        overlap, and split-half τ compares the orders fit to odd and even sessions over the systems
+        both halves connect to the reference.
       </p>
     </section>
 

@@ -2,18 +2,25 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 
 import { VotesBoard } from '@/components/boards/VotesBoard';
-import { reportSchema } from '@/lib/report';
+import { reportSchema, type VotesResults } from '@/lib/report';
 import { readFixture } from '@/test/fixture';
 
-async function render(): Promise<string> {
+/** Renders the fixture's board, with `change` applied to its results. */
+async function render(change: Partial<VotesResults> = {}): Promise<string> {
   const report = reportSchema.parse(await readFixture());
   if (report.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
   }
   // The fixture lists standings by score, so reversing them leaves the board to sort.
-  const results = { ...report.results, standings: report.results.standings.toReversed() };
+  const results = {
+    ...report.results,
+    standings: report.results.standings.toReversed(),
+    ...change,
+  };
   return renderToString(<VotesBoard family="arena" rounds={[{ round: report.round, results }]} />);
 }
+
+const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
 describe('VotesBoard', () => {
   test('lists the systems by score, best first', async () => {
@@ -24,11 +31,25 @@ describe('VotesBoard', () => {
     expect(systems).toEqual(['acme-large', 'acme-pro', 'acme-small', 'acme-flash', 'acme-mini']);
   });
 
-  test('names the leader and how its tie at rank 1 was broken', async () => {
+  test('names the leader and how its tie with the top score was broken', async () => {
     const html = await render();
 
-    expect(html).toMatch(
-      /Leader<\/dt><dd[^>]*>acme-large<span[^>]*>tied at rank 1, chosen by the lower cost</,
+    expect(text(html)).toContain(
+      'Leader acme-large tied with the top score, chosen by the lower cost',
+    );
+  });
+
+  test('names no leader while every system is preliminary', async () => {
+    const html = await render({ decision: null });
+
+    expect(text(html)).toContain('Leader – none while every system is preliminary');
+  });
+
+  test('names the unranked systems after the table', async () => {
+    const html = await render({ unranked: ['acme-new', 'acme-old'] });
+
+    expect(text(html)).toContain(
+      'Unranked: acme-new, acme-old. No comparison connects them to the reference system',
     );
   });
 });
