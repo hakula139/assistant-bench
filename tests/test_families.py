@@ -27,9 +27,30 @@ def write_family(
         (directory / 'tasks').mkdir()
 
 
-def case_line(case_id: str, source: str = 'synthetic') -> str:
-    case = {'id': case_id, 'category': 'reply', 'source': source, 'instruction': 'Hi.'}
+def case_line(
+    case_id: str, source: str = 'synthetic', category: str = 'message'
+) -> str:
+    case = {'id': case_id, 'category': category, 'source': source, 'instruction': 'Hi.'}
     return json.dumps(case) + '\n'
+
+
+def write_case_family(families_dir: Path) -> Path:
+    """Write family `f` listing the `message` category, returning its cases file."""
+    write_family(
+        families_dir,
+        'f',
+        """\
+        scorer = "votes"
+        systems = ["large"]
+        samples = 1
+        max_output_tokens = 300
+        categories = ["message"]
+        reference = "large"
+        """,
+        cases=True,
+        tasks=False,
+    )
+    return families_dir / 'f' / 'cases.jsonl'
 
 
 class TestLoadFamily:
@@ -99,6 +120,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            systems = ["large"]
             samples = 1
             reference = "large"
             """,
@@ -107,6 +129,24 @@ class TestLoadFamily:
         )
 
         with pytest.raises(ValueError, match='case families need max_output_tokens'):
+            load_family('f')
+
+    def test_requires_the_reference_among_the_systems(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "votes"
+            systems = ["large", "small"]
+            samples = 1
+            max_output_tokens = 300
+            reference = "medium"
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        with pytest.raises(ValidationError, match="reference 'medium' is not in"):
             load_family('f')
 
     def test_rejects_inverted_length_bounds(self, families_dir: Path) -> None:
@@ -137,6 +177,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            systems = ["large"]
             samples = 1
             max_output_tokens = 300
             reference = "large"
@@ -201,19 +242,7 @@ class TestLoadCases:
         )
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "votes"
-            samples = 1
-            max_output_tokens = 300
-            reference = "large"
-            """,
-            cases=True,
-            tasks=False,
-        )
-        path = families_dir / 'f' / 'cases.jsonl'
+        path = write_case_family(families_dir)
         path.write_text(case_line('a') + '\n' + case_line('a'))
 
         with pytest.raises(ValueError) as error:
@@ -221,4 +250,18 @@ class TestLoadCases:
 
         assert str(error.value) == (
             f"family 'f': case 'a' appears at {path}:1 and {path}:3"
+        )
+
+    def test_rejects_a_category_the_family_does_not_list(
+        self, families_dir: Path
+    ) -> None:
+        path = write_case_family(families_dir)
+        path.write_text(case_line('a') + case_line('b', category='private-topic'))
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value) == (
+            f"family 'f': case 'b' at {path}:2 has category 'private-topic', "
+            'which categories does not list'
         )

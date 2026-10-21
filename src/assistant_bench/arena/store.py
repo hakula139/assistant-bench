@@ -20,6 +20,8 @@ type Flag = Literal['meaning', 'punctuation', 'register', 'script', 'length']
 # Ties and both-bad votes count as half a win for each side.
 _LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 
+SCHEMA_VERSION = 1
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -55,6 +57,28 @@ _APPEND_ONLY = """
 CREATE TRIGGER IF NOT EXISTS {table}_no_{action} BEFORE {action} ON {table}
 BEGIN SELECT RAISE(ABORT, 'the vote store is append-only'); END;
 """
+# `INSERT OR REPLACE` deletes the row it replaces without firing DELETE triggers.
+_NO_REPLACE = """
+CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table}
+WHEN EXISTS (SELECT 1 FROM {table} WHERE {key} = NEW.{key})
+BEGIN SELECT RAISE(ABORT, 'the vote store is append-only'); END;
+"""
+_KEYS = {'sessions': 'id', 'votes': 'id', 'undos': 'vote'}
+_VOTE_COLUMNS = (
+    'session',
+    'case_id',
+    *(
+        f'{side}_{key}'
+        for side in 'ab'
+        for key in ('system', 'fingerprint', 'job', 'trial')
+    ),
+    'choice',
+    'flags',
+    'note',
+    'duration_sec',
+    'repeat_of',
+    'recorded_at',
+)
 
 
 class Session(BaseModel):
@@ -116,7 +140,13 @@ class Vote(Ballot):
 
 
 class VoteStore:
-    """Sessions and votes in SQLite, where an undo is a row of its own."""
+    """Sessions and votes in SQLite, where an undo is a row of its own.
+
+    Raises
+    ------
+    ValueError
+        The file holds a schema version other than `SCHEMA_VERSION`.
+    """
 
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,10 +154,24 @@ class VoteStore:
         # need not be the thread that opened it.
         self._db = sqlite3.connect(path, autocommit=True, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._db.execute('PRAGMA foreign_keys = ON')
+        (version,) = self._db.execute('PRAGMA user_version').fetchone()
+        if version == 0:
+            self._create()
+        elif version != SCHEMA_VERSION:
+            self._db.close()
+            raise ValueError(
+                f'{path} has schema version {version}, '
+                f'while this bench reads version {SCHEMA_VERSION}'
+            )
+
+    def _create(self) -> None:
         self._db.executescript(_SCHEMA)
-        for table in ('sessions', 'votes', 'undos'):
+        for table, key in _KEYS.items():
             for action in ('UPDATE', 'DELETE'):
                 self._db.execute(_APPEND_ONLY.format(table=table, action=action))
+            self._db.execute(_NO_REPLACE.format(table=table, key=key))
+        self._db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
     def close(self) -> None:
         self._db.close()
@@ -135,7 +179,7 @@ class VoteStore:
     def start_session(self, family: str, at: datetime) -> Session:
         session = Session(id=uuid.uuid4().hex, family=family, started_at=at)
         self._db.execute(
-            'INSERT INTO sessions VALUES (?, ?, ?)',
+            'INSERT INTO sessions (id, family, started_at) VALUES (?, ?, ?)',
             (session.id, family, at.isoformat()),
         )
         return session
@@ -156,8 +200,8 @@ class VoteStore:
 
     def record(self, ballot: Ballot, at: datetime) -> Vote:
         cursor = self._db.execute(
-            'INSERT INTO votes VALUES '
-            '(NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            f'INSERT INTO votes ({", ".join(_VOTE_COLUMNS)}) '
+            f'VALUES ({", ".join("?" * len(_VOTE_COLUMNS))})',
             (
                 ballot.session,
                 ballot.case,
@@ -175,7 +219,10 @@ class VoteStore:
         return Vote(id=cursor.lastrowid, recorded_at=at, **dict(ballot))
 
     def undo(self, vote_id: int, at: datetime) -> None:
-        self._db.execute('INSERT INTO undos VALUES (?, ?)', (vote_id, at.isoformat()))
+        self._db.execute(
+            'INSERT INTO undos (vote, undone_at) VALUES (?, ?)',
+            (vote_id, at.isoformat()),
+        )
 
     def votes(self, family: str) -> list[Vote]:
         """Return the family's votes that no undo withdrew, in recording order."""

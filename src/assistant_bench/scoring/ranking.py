@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 import numpy as np
 import numpy.typing as npt
-from scipy import optimize, special, stats
+from scipy import optimize, sparse, special, stats
 
 
 type Floats = npt.NDArray[np.float64]
@@ -26,6 +26,7 @@ class Comparison(NamedTuple):
     """One vote or a share of one, with `score` the left side's result.
 
     `score` is 1, 0, or 0.5 for a tie, and `weight` the share of a vote it counts.
+    `sided` marks a vote, whose pane order the left-side intercept models.
     """
 
     left: str
@@ -33,17 +34,22 @@ class Comparison(NamedTuple):
     score: float
     case: str
     weight: float = 1.0
+    sided: bool = True
 
 
 @dataclass(frozen=True)
 class Matchups:
-    """Votes as parallel arrays of system and case indices."""
+    """Votes as parallel arrays of system and case indices.
+
+    `sided` holds 1 for a row that the left-side intercept applies to, else 0.
+    """
 
     systems: tuple[str, ...]
     left: Indices
     right: Indices
     score: Floats
     weight: Floats
+    sided: Floats
     cluster: Indices
 
     @classmethod
@@ -60,10 +66,38 @@ class Matchups:
             right=np.array([index[c.right] for c in comparisons], dtype=np.intp),
             score=np.array([c.score for c in comparisons], dtype=np.float64),
             weight=np.array([c.weight for c in comparisons], dtype=np.float64),
+            sided=np.array([c.sided for c in comparisons], dtype=np.float64),
             cluster=np.array(
                 [cases.setdefault(c.case, len(cases)) for c in comparisons],
                 dtype=np.intp,
             ),
+        )
+
+    def component(self, system: str) -> Matchups:
+        """Keep the systems that comparisons connect to `system`, with their rows.
+
+        Strengths are comparable only within one connected component, since the
+        penalty centers each component on its own.
+        """
+        k = len(self.systems)
+        graph = sparse.coo_array(
+            (np.ones(len(self.left)), (self.left, self.right)), shape=(k, k)
+        )
+        _, labels = sparse.csgraph.connected_components(graph, directed=False)
+        kept = labels == labels[self.systems.index(system)]
+        rows = kept[self.left]
+        index = np.cumsum(kept) - 1
+        _, cluster = np.unique(self.cluster[rows], return_inverse=True)
+        return Matchups(
+            systems=tuple(
+                s for s, keep in zip(self.systems, kept, strict=True) if keep
+            ),
+            left=index[self.left[rows]],
+            right=index[self.right[rows]],
+            score=self.score[rows],
+            weight=self.weight[rows],
+            sided=self.sided[rows],
+            cluster=cluster.astype(np.intp),
         )
 
 
@@ -78,12 +112,16 @@ class Fit:
 
 @dataclass(frozen=True)
 class Ratings:
-    """Scores on the Elo-like scale with their bootstrap intervals."""
+    """Scores on the Elo-like scale with their bootstrap intervals.
+
+    `draws` holds each resample's scores, one row per resample.
+    """
 
     systems: tuple[str, ...]
     score: Floats
     lower: Floats
     upper: Floats
+    draws: Floats
     position: float
 
 
@@ -93,7 +131,9 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     `covariate` adds a per-vote feature, such as a length difference.
     """
     columns = [] if covariate is None else [covariate]
-    x = _design(matchups.left, matchups.right, len(matchups.systems), columns)
+    x = _design(
+        matchups.left, matchups.right, matchups.sided, len(matchups.systems), columns
+    )
     theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
     return _fit(theta, len(matchups.systems))
 
@@ -102,13 +142,15 @@ def bootstrap(matchups: Matchups, resamples: int = RESAMPLES) -> Floats:
     """Refit on cases drawn with replacement, returning one row of strengths each.
 
     Votes on one case are correlated, so each draw takes all of a case's votes.
-    The votes of each ordered pair collapse into one weighted row, which keeps a
-    refit cheap.
+    The votes of each ordered pair and sidedness collapse into one weighted row,
+    which keeps a refit cheap.
     """
     k = len(matchups.systems)
-    sides = np.stack([matchups.left, matchups.right], axis=1)
-    pairs, pair_of_vote = np.unique(sides, axis=0, return_inverse=True)
-    x = _design(pairs[:, 0], pairs[:, 1], k, [])
+    keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
+    pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
+    x = _design(
+        pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp), pairs[:, 2], k, []
+    )
     membership = np.zeros((len(matchups.score), len(pairs)))
     membership[np.arange(len(matchups.score)), pair_of_vote] = 1
 
@@ -141,14 +183,30 @@ def rate(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Rati
     point = fit(matchups)
     shift = point.strength[matchups.systems.index(reference)]
     draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, resamples) - shift)
-    tail = (1 - CONFIDENCE) / 2 * 100
+    lower, upper = _interval(draws)
     return Ratings(
         systems=matchups.systems,
         score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),
-        lower=np.percentile(draws, tail, axis=0),
-        upper=np.percentile(draws, 100 - tail, axis=0),
+        lower=lower,
+        upper=upper,
+        draws=draws,
         position=ELO_PER_LOGIT * point.position,
     )
+
+
+def ties(ratings: Ratings, candidates: Sequence[int]) -> list[int]:
+    """Return the candidates tied with the top-scoring one, itself included.
+
+    A candidate ties when the interval of its score's difference from the top's,
+    paired within each resample, contains 0.
+    """
+    top = max(candidates, key=lambda i: ratings.score[i])
+    lower, upper = _interval(ratings.draws[:, candidates] - ratings.draws[:, [top]])
+    return [
+        i
+        for i, low, high in zip(candidates, lower, upper, strict=True)
+        if low <= 0 <= high
+    ]
 
 
 def rank_spread(lower: Floats, upper: Floats) -> tuple[Indices, Indices]:
@@ -181,12 +239,19 @@ def rank_agreement(first: Floats, second: Floats) -> float | None:
     return None if np.isnan(statistic) else statistic
 
 
-def _design(left: Indices, right: Indices, k: int, columns: list[Floats]) -> Floats:
+def _interval(draws: Floats) -> tuple[Floats, Floats]:
+    tail = (1 - CONFIDENCE) / 2 * 100
+    return np.percentile(draws, tail, axis=0), np.percentile(draws, 100 - tail, axis=0)
+
+
+def _design(
+    left: Indices, right: Indices, sided: Floats, k: int, columns: list[Floats]
+) -> Floats:
     rows = np.arange(len(left))
     x = np.zeros((len(left), k + 1 + len(columns)))
     x[rows, left] = 1
     x[rows, right] = -1
-    x[:, k] = 1
+    x[:, k] = sided
     for offset, column in enumerate(columns, start=k + 1):
         x[:, offset] = column
     return x

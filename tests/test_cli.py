@@ -31,19 +31,20 @@ def invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-def write_cases_family(families_dir: Path, systems: str) -> None:
+def write_cases_family(families_dir: Path, systems: str, scorer: str = 'votes') -> None:
     directory = families_dir / 'f'
     directory.mkdir(parents=True)
+    reference = 'reference = "opus-5.5"\n' if scorer == 'votes' else ''
     (directory / 'family.toml').write_text(
         textwrap.dedent(
             f"""\
-            scorer = "votes"
+            scorer = "{scorer}"
             systems = {systems}
             samples = 1
             max_output_tokens = 64
-            reference = "opus-5.5"
             """
         )
+        + reference
     )
     (directory / 'cases.jsonl').write_text('')
 
@@ -183,7 +184,7 @@ class TestRun:
     def test_rejects_a_family_listing_no_systems(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '[]')
+        write_cases_family(families_dir, '[]', scorer='tests')
 
         exit_code, message = invoke('run', 'f')
 

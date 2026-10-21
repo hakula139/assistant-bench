@@ -6,6 +6,7 @@
     "scorer": "votes",
     "reference": "acme-large",
     "votes": 300,
+    "dropped_votes": 0,
     "sessions": 10,
     "standings": [
       {
@@ -13,8 +14,8 @@
         "fingerprint": "fp-acme-large",
         "score": 1000.0,
         "interval": {
-          "lower": 941.3350181089253,
-          "upper": 1060.9893666741527
+          "lower": 941.3654285251919,
+          "upper": 1061.0053296673073
         },
         "rank": 1,
         "best_rank": 1,
@@ -48,10 +49,10 @@
       {
         "system": "acme-pro",
         "fingerprint": "fp-acme-pro",
-        "score": 965.3683646526684,
+        "score": 965.4122039867734,
         "interval": {
-          "lower": 915.1479857183315,
-          "upper": 1017.4564327121464
+          "lower": 915.1528944397153,
+          "upper": 1017.5333062324929
         },
         "rank": 2,
         "best_rank": 1,
@@ -85,10 +86,10 @@
       {
         "system": "acme-small",
         "fingerprint": "fp-acme-small",
-        "score": 929.5385335286403,
+        "score": 929.5487308589721,
         "interval": {
-          "lower": 875.8373858511665,
-          "upper": 985.928723243179
+          "lower": 875.8481729539719,
+          "upper": 985.958940830257
         },
         "rank": 3,
         "best_rank": 1,
@@ -122,10 +123,10 @@
       {
         "system": "acme-flash",
         "fingerprint": "fp-acme-flash",
-        "score": 913.7175860429842,
+        "score": 913.7196300506985,
         "interval": {
-          "lower": 868.0021204010512,
-          "upper": 957.7865750106729
+          "lower": 867.9737501520041,
+          "upper": 957.8206611874901
         },
         "rank": 4,
         "best_rank": 1,
@@ -159,10 +160,10 @@
       {
         "system": "acme-mini",
         "fingerprint": "fp-acme-mini",
-        "score": 883.2030946716974,
+        "score": 883.2006860809593,
         "interval": {
-          "lower": 834.0782042736465,
-          "upper": 933.7042102625094
+          "lower": 834.1107856115334,
+          "upper": 933.6650709915945
         },
         "rank": 5,
         "best_rank": 2,
@@ -194,6 +195,7 @@
         }
       }
     ],
+    "unranked": [],
     "head_to_head": [
       {
         "system": "acme-flash",
@@ -403,10 +405,10 @@
         "standings": [
           {
             "system": "acme-flash",
-            "score": 955.5304890652499,
+            "score": 955.1386591865916,
             "interval": {
-              "lower": 866.5144573226883,
-              "upper": 1056.632240598327
+              "lower": 866.4663452561718,
+              "upper": 1056.0597294021195
             },
             "votes": 42,
             "preliminary": true
@@ -415,43 +417,44 @@
             "system": "acme-large",
             "score": 1000.0,
             "interval": {
-              "lower": 928.8658594255985,
-              "upper": 1076.1973246688895
+              "lower": 928.5636976139749,
+              "upper": 1076.5986039129725
             },
             "votes": 44,
             "preliminary": false
           },
           {
             "system": "acme-mini",
-            "score": 868.2901895520465,
+            "score": 867.159334152249,
             "interval": {
-              "lower": 767.9381954575902,
-              "upper": 962.8263989133751
+              "lower": 765.236271811551,
+              "upper": 962.2641305296565
             },
             "votes": 40,
             "preliminary": true
           },
           {
             "system": "acme-pro",
-            "score": 936.2439120483452,
+            "score": 935.946915262132,
             "interval": {
-              "lower": 842.2130256513318,
-              "upper": 1085.3505121908834
+              "lower": 841.6614405537713,
+              "upper": 1087.0187618711925
             },
             "votes": 42,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 919.9409901795389,
+            "score": 919.6211606410398,
             "interval": {
-              "lower": 780.9756898999296,
-              "upper": 1006.654446494009
+              "lower": 780.4693177849011,
+              "upper": 1006.7899146126499
             },
             "votes": 30,
             "preliminary": true
           }
-        ]
+        ],
+        "unranked": []
       },
       {
         "category": "message",
@@ -459,10 +462,10 @@
         "standings": [
           {
             "system": "acme-flash",
-            "score": 924.5698339722835,
+            "score": 924.1611488084609,
             "interval": {
-              "lower": 863.4607512849111,
-              "upper": 994.5646234563725
+              "lower": 862.8511785532748,
+              "upper": 994.9317492498473
             },
             "votes": 49,
             "preliminary": false
@@ -471,43 +474,44 @@
             "system": "acme-large",
             "score": 1000.0,
             "interval": {
-              "lower": 906.3720560494307,
-              "upper": 1116.8633920327923
+              "lower": 905.955216312676,
+              "upper": 1116.3827373509641
             },
             "votes": 34,
             "preliminary": true
           },
           {
             "system": "acme-mini",
-            "score": 825.4887792160165,
+            "score": 825.1132327529587,
             "interval": {
-              "lower": 726.3284230474205,
-              "upper": 908.8733326172265
+              "lower": 725.7088550656083,
+              "upper": 908.3511349120445
             },
             "votes": 47,
             "preliminary": true
           },
           {
             "system": "acme-pro",
-            "score": 1017.9061519785431,
+            "score": 1017.2084326123057,
             "interval": {
-              "lower": 926.4415149736952,
-              "upper": 1129.3425941262624
+              "lower": 925.552197267869,
+              "upper": 1128.7705222444245
             },
             "votes": 38,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 917.2407480440542,
+            "score": 916.6060537617394,
             "interval": {
-              "lower": 819.2700493725793,
-              "upper": 1020.8740583686664
+              "lower": 818.7936159413505,
+              "upper": 1020.7747587417477
             },
             "votes": 36,
             "preliminary": true
           }
-        ]
+        ],
+        "unranked": []
       },
       {
         "category": "reply",
@@ -515,10 +519,10 @@
         "standings": [
           {
             "system": "acme-flash",
-            "score": 811.9163300394148,
+            "score": 811.8854172474275,
             "interval": {
-              "lower": 741.3371902561294,
-              "upper": 867.390455215007
+              "lower": 740.9654720808484,
+              "upper": 868.0832305183543
             },
             "votes": 34,
             "preliminary": true
@@ -527,46 +531,47 @@
             "system": "acme-large",
             "score": 1000.0,
             "interval": {
-              "lower": 872.4850999659081,
-              "upper": 1167.9695263133112
+              "lower": 872.4029759000643,
+              "upper": 1167.9585080090683
             },
             "votes": 34,
             "preliminary": true
           },
           {
             "system": "acme-mini",
-            "score": 909.3692413881059,
+            "score": 909.4036118559299,
             "interval": {
-              "lower": 827.8753452219873,
-              "upper": 1019.0251643782975
+              "lower": 827.440949425637,
+              "upper": 1019.0179652593442
             },
             "votes": 46,
             "preliminary": false
           },
           {
             "system": "acme-pro",
-            "score": 913.2680549539616,
+            "score": 913.2511425516419,
             "interval": {
-              "lower": 845.0794674641322,
-              "upper": 978.5118594416177
+              "lower": 844.8636193430932,
+              "upper": 978.4996582581671
             },
             "votes": 42,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 915.2085099525909,
+            "score": 915.1668685616188,
             "interval": {
-              "lower": 798.4255310326616,
-              "upper": 1009.7766481844398
+              "lower": 798.4145312259811,
+              "upper": 1009.7431990304641
             },
             "votes": 42,
             "preliminary": true
           }
-        ]
+        ],
+        "unranked": []
       }
     ],
-    "position": 12.60090916923182,
+    "position": 13.116058548071756,
     "length": 7.152208955019986,
     "separability": 0.1,
     "split_half_tau": 0.0,

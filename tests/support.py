@@ -187,7 +187,10 @@ def write_votes_family(
     categories: dict[str, str],
     render: str = 'text',
 ) -> None:
-    """Write a family scored by votes, with one synthetic case per category entry."""
+    """Write a family scored by votes, with one synthetic case per category entry.
+
+    Each case's task holds its instruction, as `bench run` would have rendered it.
+    """
     directory = families_dir / name
     directory.mkdir(parents=True)
     (directory / 'family.toml').write_text(
@@ -197,11 +200,16 @@ def write_votes_family(
             systems = {json.dumps(systems)}
             samples = 2
             max_output_tokens = 64
+            categories = {json.dumps(sorted(set(categories.values())))}
             reference = "{systems[0]}"
             render = "{render}"
             """
         )
     )
+    for case in categories:
+        task = data_dir() / 'tasks' / name / case
+        task.mkdir(parents=True, exist_ok=True)
+        (task / 'instruction.md').write_text(f'Write about {case}.')
     (directory / 'cases.jsonl').write_text(
         ''.join(
             json.dumps(

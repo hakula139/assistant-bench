@@ -6,14 +6,15 @@ import pytest
 
 from assistant_bench.arena import service
 from assistant_bench.arena.service import (
+    Arena,
     HtmlPane,
     NothingToUndo,
     TextPane,
     UnknownItem,
     load_families,
 )
-from assistant_bench.arena.store import VoteStore
-from assistant_bench.outputs import write_outputs
+from assistant_bench.arena.store import Side, VoteStore
+from assistant_bench.outputs import read_outputs, write_outputs
 from support import (
     ARENA_CASES,
     ARENA_SYSTEMS,
@@ -43,7 +44,20 @@ class TestLoadFamilies:
         families = load_families()
 
         assert list(families) == ['f']
-        assert families['f'].cases['c1'].category == 'reply'
+        assert families['f'].checklists == {'c1': ['Stays on topic']}
+
+    def test_shows_the_instruction_the_trials_ran(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        write_votes_family(families_dir, 'f', ARENA_SYSTEMS, ARENA_CASES)
+        (data_dir / 'tasks' / 'f' / 'c1' / 'instruction.md').write_text('As rendered.')
+        write_outputs(
+            'f', [make_output(case='c1', system='large', text='Hi.', gate_failures=[])]
+        )
+
+        families = load_families()
+
+        assert families['f'].instructions == {'c1': 'As rendered.'}
 
 
 class TestArena:
@@ -125,6 +139,24 @@ class TestArena:
         assert (undone.pair.a, undone.pair.b) == (first.pair.a, first.pair.b)
         with pytest.raises(NothingToUndo):
             arena.undo(first.id)
+
+    def test_undo_draws_afresh_once_the_vote_s_output_left(
+        self, families_dir: Path, clock: Clock, store: VoteStore
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        first = arena.start('f')
+        assert first.pair is not None
+        arena.vote(first.pair.token, 'a', frozenset(), None)
+        (vote,) = store.votes('f')
+        write_outputs('f', [o for o in read_outputs('f') if Side.of(o) != vote.a])
+        restarted = Arena(store, load_families(), RENDER_ORIGIN, clock)
+
+        undone = restarted.undo(first.id)
+
+        assert store.votes('f') == []
+        assert undone.votes == 0
+        assert undone.pair is not None
+        assert undone.pair.token != first.pair.token
 
     def test_ends_the_session_at_its_size(
         self,

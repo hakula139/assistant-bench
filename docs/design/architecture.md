@@ -55,9 +55,8 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 1. `bench run <family>` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml` naming a stock image, builds a job config with one agent per system listed in `family.toml`, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent, where `Generate` sends one chat-completions request from the host, writes the reply to `output.txt` in the trial's agent logs, and records tokens, latency, the finish reason, the response model, the request ID, and the nixos-config rev on the trial's `AgentContext`.
 3. `bench ingest <family>` reads the trials of the family's jobs into `outputs/<family>.jsonl`, pricing tokens from the catalog, running the gates when the scorer is `votes`, and taking the reward when it is `tests`.
-
 4. `bench serve` serves the vote page for every family scored by votes that has outputs, and the [arena](arena.md) records each vote in `votes.sqlite` in the data directory.
-5. `bench close <family>` fits the [ranking](ranking.md) over every vote of the family, or aggregates a `tests` family's rewards, and writes the [report](reports.md) to `reports/<family>/<round>.json`.
+5. `bench close <family>` fits the [ranking](ranking.md) over the family's votes on its current outputs, or aggregates a `tests` family's rewards, and writes the [report](reports.md) to `reports/<family>/<round>.json`.
 
 `bench check <family>` validates a family, and for a `tests` family it also runs Harbor's oracle on every task, placing its jobs under `checks/` so that ingest never reads them.
 

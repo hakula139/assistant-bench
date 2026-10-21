@@ -7,12 +7,14 @@ from assistant_bench.scoring.ranking import (
     ELO_PER_LOGIT,
     Comparison,
     Matchups,
+    Ratings,
     bootstrap,
     fit,
     rank_agreement,
     rank_spread,
     rate,
     separability,
+    ties,
 )
 
 
@@ -52,6 +54,25 @@ class TestMatchups:
             assert matchups.score.tolist() == [1.0, 0.5, 0.0]
             assert matchups.cluster.tolist() == [0, 1, 0]
 
+    class TestComponent:
+        def test_keeps_the_systems_and_rows_connected_to_a_system(self) -> None:
+            matchups = Matchups.build(
+                [
+                    Comparison('a', 'b', 1.0, 'x'),
+                    Comparison('c', 'd', 0.0, 'y'),
+                    Comparison('b', 'a', 0.5, 'z', sided=False),
+                ]
+            )
+
+            connected = matchups.component('b')
+
+            assert connected.systems == ('a', 'b')
+            assert connected.left.tolist() == [0, 1]
+            assert connected.right.tolist() == [1, 0]
+            assert connected.score.tolist() == [1.0, 0.5]
+            assert connected.sided.tolist() == [1.0, 0.0]
+            assert connected.cluster.tolist() == [0, 1]
+
 
 class TestFit:
     def test_matches_a_fractional_logit_from_statsmodels(self) -> None:
@@ -71,6 +92,21 @@ class TestFit:
         assert gaps == pytest.approx(reference[: k - 1], abs=2e-3)
         assert result.position == pytest.approx(reference[k - 1], abs=2e-3)
         assert result.covariate == pytest.approx(reference[k], abs=2e-3)
+
+    def test_leaves_settled_rows_out_of_the_position_term(self) -> None:
+        votes = simulate(600)
+        settled = [
+            Comparison(left, right, 0.5, f'settled-{i}', sided=False)
+            for i, (left, right) in enumerate(
+                [('large', 'medium'), ('medium', 'small'), ('small', 'large')] * 80
+            )
+        ]
+
+        alone, beside = (
+            fit(Matchups.build(comparisons)) for comparisons in (votes, votes + settled)
+        )
+
+        assert beside.position == pytest.approx(alone.position, abs=0.02)
 
     def test_keeps_a_system_that_wins_every_vote_finite(self) -> None:
         comparisons = [
@@ -130,6 +166,25 @@ class TestRate:
 
         assert first.lower.tolist() == second.lower.tolist()
         assert first.upper.tolist() == second.upper.tolist()
+
+
+class TestTies:
+    def test_keeps_the_candidates_whose_paired_difference_spans_zero(self) -> None:
+        steps = np.linspace(-1, 1, 201)
+        draws = np.stack(
+            [1100 + 0 * steps, 1060 + 100 * steps, 1000 + 0 * steps, 1300 + 0 * steps],
+            axis=1,
+        )
+        ratings = Ratings(
+            systems=('top', 'close', 'far', 'excluded'),
+            score=np.array([1100.0, 1060.0, 1000.0, 1300.0]),
+            lower=draws.min(axis=0),
+            upper=draws.max(axis=0),
+            draws=draws,
+            position=0.0,
+        )
+
+        assert ties(ratings, [0, 1, 2]) == [0, 1]
 
 
 class TestRankSpread:

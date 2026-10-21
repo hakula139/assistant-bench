@@ -28,6 +28,22 @@ def ballot(session: str, **fields: object) -> Ballot:
     )
 
 
+class TestVote:
+    class TestComparison:
+        @pytest.mark.parametrize(
+            ('choice', 'score'),
+            [('a', 1.0), ('b', 0.0), ('tie', 0.5), ('both_bad', 0.5)],
+        )
+        def test_scores_the_left_side(
+            self, store: VoteStore, choice: Choice, score: float
+        ) -> None:
+            session = store.start_session('f', AT)
+
+            vote = store.record(ballot(session.id, choice=choice), AT)
+
+            assert vote.comparison() == Comparison('large', 'small', score, 'c1')
+
+
 class TestVoteStore:
     def test_keeps_votes_across_a_reopen(
         self, store: VoteStore, data_dir: Path
@@ -52,6 +68,15 @@ class TestVoteStore:
         assert recorded.flags == {'punctuation', 'length'}
         assert recorded.recorded_at == AT + timedelta(seconds=30)
 
+    def test_refuses_a_store_of_another_schema_version(self, data_dir: Path) -> None:
+        path = data_dir / 'votes.sqlite'
+        path.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(path)) as db:
+            db.execute('PRAGMA user_version = 2')
+
+        with pytest.raises(ValueError, match='has schema version 2, while this'):
+            VoteStore(path)
+
     def test_reads_only_the_family_s_votes(self, store: VoteStore) -> None:
         mine = store.start_session('f', AT)
         other = store.start_session('g', AT)
@@ -69,8 +94,20 @@ class TestVoteStore:
 
         assert store.votes('f') == [first]
 
+    def test_refuses_to_undo_a_vote_it_never_recorded(self, store: VoteStore) -> None:
+        with pytest.raises(sqlite3.IntegrityError, match='FOREIGN KEY'):
+            store.undo(999, AT)
+
     @pytest.mark.parametrize(
-        'statement', ["UPDATE votes SET choice = 'b'", 'DELETE FROM votes']
+        'statement',
+        [
+            "UPDATE votes SET choice = 'b'",
+            'DELETE FROM votes',
+            'INSERT OR REPLACE INTO votes SELECT id, session, case_id, a_system, '
+            'a_fingerprint, a_job, a_trial, b_system, b_fingerprint, b_job, b_trial, '
+            "'b', flags, note, duration_sec, repeat_of, recorded_at FROM votes",
+        ],
+        ids=['update', 'delete', 'replace'],
     )
     def test_refuses_to_change_a_recorded_vote(
         self, store: VoteStore, statement: str
@@ -82,25 +119,11 @@ class TestVoteStore:
         with closing(db), pytest.raises(sqlite3.IntegrityError, match='append-only'):
             db.execute(statement)
 
+        assert [vote.choice for vote in store.votes('f')] == ['a']
+
     def test_orders_sessions_by_start(self, store: VoteStore) -> None:
         later = store.start_session('f', AT + timedelta(days=1))
         earlier = store.start_session('f', AT)
 
         assert store.sessions('f') == [earlier, later]
         assert store.session('missing') is None
-
-
-class TestVote:
-    class TestComparison:
-        @pytest.mark.parametrize(
-            ('choice', 'score'),
-            [('a', 1.0), ('b', 0.0), ('tie', 0.5), ('both_bad', 0.5)],
-        )
-        def test_scores_the_left_side(
-            self, store: VoteStore, choice: Choice, score: float
-        ) -> None:
-            session = store.start_session('f', AT)
-
-            vote = store.record(ballot(session.id, choice=choice), AT)
-
-            assert vote.comparison() == Comparison('large', 'small', score, 'c1')

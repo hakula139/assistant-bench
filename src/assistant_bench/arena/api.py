@@ -1,7 +1,7 @@
 """The vote API and the render origin, both served on the loopback interface."""
 
 import asyncio
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 import uvicorn
@@ -10,8 +10,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
+from starlette.types import Scope
 
 from assistant_bench.arena.service import (
     Arena,
@@ -35,7 +35,7 @@ RENDER_POLICY = (
     "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
     f'frame-ancestors {APP_ORIGIN}'
 )
-VOTE_PATH = '/vote'
+VOTE_DIR = 'vote'
 VOTE_POLICY = (
     "default-src 'none'; script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; "
@@ -66,12 +66,27 @@ def same_origin(request: Request) -> None:
         raise HTTPException(status_code=403, detail='cross-origin request')
 
 
+class SiteFiles(StaticFiles):
+    """The built site, where every file under `VOTE_DIR` carries `VOTE_POLICY`.
+
+    `path` arrives normalized, so a doubled or percent-encoded slash still matches.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if PurePath(path).parts[:1] == (VOTE_DIR,):
+            response.headers['Content-Security-Policy'] = VOTE_POLICY
+        return response
+
+
 def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     """Build the vote API under `/api`, serving the built site at `/`.
 
-    Everything under `VOTE_PATH` carries `VOTE_POLICY`.
+    The app serves no API docs, since their page loads scripts from a CDN.
     """
-    app = _app(title='assistant-bench arena')
+    app = _app(
+        title='assistant-bench arena', docs_url=None, redoc_url=None, openapi_url=None
+    )
     app.add_exception_handler(NothingToUndo, _conflict)
     router = APIRouter(prefix='/api')
     writes = APIRouter(dependencies=[Depends(same_origin)])
@@ -104,8 +119,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     router.include_router(writes)
     app.include_router(router)
     if site is not None:
-        app.middleware('http')(_vote_policy)
-        app.mount('/', StaticFiles(directory=site, html=True))
+        app.mount('/', SiteFiles(directory=site, html=True))
     return app
 
 
@@ -143,16 +157,6 @@ def _app(**options: Any) -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST])
     app.add_exception_handler(UnknownItem, _not_found)
     return app
-
-
-async def _vote_policy(
-    request: Request, call_next: RequestResponseEndpoint
-) -> Response:
-    response = await call_next(request)
-    path = request.url.path
-    if path == VOTE_PATH or path.startswith(f'{VOTE_PATH}/'):
-        response.headers['Content-Security-Policy'] = VOTE_POLICY
-    return response
 
 
 async def _not_found(request: Request, error: Exception) -> JSONResponse:

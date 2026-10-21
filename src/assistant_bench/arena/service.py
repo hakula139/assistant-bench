@@ -9,6 +9,7 @@ from typing import Annotated, Literal, assert_never
 import numpy as np
 from pydantic import BaseModel, Field
 
+from assistant_bench.arena.resolution import reconcile
 from assistant_bench.arena.scheduler import Draw, Pool, draw
 from assistant_bench.arena.store import (
     Ballot,
@@ -20,9 +21,9 @@ from assistant_bench.arena.store import (
     VoteStore,
 )
 from assistant_bench.families import (
-    Case,
     TaskTestsSettings,
     VotesSettings,
+    case_task,
     family_names,
     load_cases,
     load_family,
@@ -90,9 +91,15 @@ class SessionView(BaseModel):
 
 @dataclass(frozen=True)
 class ArenaFamily:
+    """A family being voted on, with each voted case's instruction and checklist.
+
+    `instructions` holds the rendered task's instruction, which the trials ran.
+    """
+
     name: str
     render: Literal['text', 'html']
-    cases: dict[str, Case]
+    instructions: dict[str, str]
+    checklists: dict[str, list[str]]
     pool: Pool
 
 
@@ -113,11 +120,21 @@ def load_families() -> dict[str, ArenaFamily]:
             case VotesSettings():
                 outputs = read_outputs(name)
                 if outputs:
+                    cases = {case.id: case for case in load_cases(family)}
+                    pool = Pool.build(family.settings.systems, cases, outputs)
                     families[name] = ArenaFamily(
                         name=name,
                         render=family.settings.render,
-                        cases={case.id: case for case in load_cases(family)},
-                        pool=Pool.build(family.settings.systems, outputs),
+                        instructions={
+                            case: (
+                                case_task(family, case) / 'instruction.md'
+                            ).read_text()
+                            for case in pool.outputs_by_case
+                        },
+                        checklists={
+                            case: cases[case].checklist for case in pool.outputs_by_case
+                        },
+                        pool=pool,
                     )
             case TaskTestsSettings():
                 pass
@@ -182,20 +199,22 @@ class Arena:
         return self._view(self._session(issued.session))
 
     def undo(self, session_id: str) -> SessionView:
-        """Withdraw the session's latest vote and show its pair again."""
+        """Withdraw the session's latest vote and show its pair again.
+
+        A pair whose outputs have left the pool, or that the outputs now settle,
+        cannot return, so the session draws a fresh one.
+        """
         session = self._session(session_id)
         votes = self._votes(session)
         if not votes:
             raise NothingToUndo(session_id)
         last = votes[-1]
+        matched = reconcile([last], self._families[session.family].pool.outputs)
         self._store.undo(last.id, self._clock())
         if session.id in self._current:
             self._retire(self._current[session.id])
-
-        pool = self._families[session.family].pool
-        a, b = pool.find(last.case, last.a), pool.find(last.case, last.b)
-        assert a is not None and b is not None
-        self._serve(session, Draw(case=last.case, a=a, b=b, repeat_of=last.repeat_of))
+        for vote, a, b in matched:
+            self._serve(session, Draw(vote.case, a, b, repeat_of=vote.repeat_of))
         return self._view(session)
 
     def document(self, token: str) -> str:
@@ -239,21 +258,21 @@ class Arena:
             return
         used = {vote.case for vote in mine}
         pool = self._families[session.family].pool
-        picked = draw(pool, votes, used, self._clock(), self._rng)
+        matched = reconcile(votes, pool.outputs)
+        picked = draw(pool, matched, used, self._clock(), self._rng)
         if picked is not None:
             self._serve(session, picked)
 
     def _serve(self, session: Session, picked: Draw) -> None:
         family = self._families[session.family]
-        case = family.cases[picked.case]
         token = secrets.token_urlsafe(16)
         self._pairs[token] = _Issued(
             session=session.id,
             draw=picked,
             view=PairView(
                 token=token,
-                instruction=case.instruction,
-                checklist=case.checklist,
+                instruction=family.instructions[picked.case],
+                checklist=family.checklists[picked.case],
                 a=self._pane(family, picked.a),
                 b=self._pane(family, picked.b),
             ),

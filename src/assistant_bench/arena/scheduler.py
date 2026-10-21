@@ -1,7 +1,7 @@
 """Pair scheduling: a balanced seed, adaptive pairing, and delayed swapped repeats."""
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import permutations
@@ -9,10 +9,15 @@ from itertools import permutations
 import numpy as np
 from scipy import special
 
-from assistant_bench.arena.resolution import settled, settled_score
-from assistant_bench.arena.store import Side, Vote
+from assistant_bench.arena.resolution import MatchedVote, settled, settled_score
 from assistant_bench.outputs import Output
-from assistant_bench.scoring.ranking import ELO_PER_LOGIT, Comparison, Matchups, rate
+from assistant_bench.scoring.ranking import (
+    ELO_PER_LOGIT,
+    Comparison,
+    Matchups,
+    Ratings,
+    rate,
+)
 
 
 SEED_VOTES_PER_SIDE = 2
@@ -22,25 +27,34 @@ REPEAT_DELAY = timedelta(days=1)
 
 @dataclass(frozen=True)
 class Pool:
-    """The outputs of a family's listed systems that can reach the owner.
+    """The current outputs of a family's listed systems on its current cases.
 
-    `settled` holds the results that the family's outputs decide without a vote.
+    `outputs_by_case` keeps the outputs that pass every gate to reach the owner,
+    while `settled` holds the results that `outputs` decide without a vote.
     """
 
     systems: tuple[str, ...]
+    outputs: list[Output]
     outputs_by_case: dict[str, dict[str, list[Output]]]
     settled: list[Comparison]
 
     @classmethod
-    def build(cls, systems: Iterable[str], outputs: Iterable[Output]) -> Pool:
-        """Keep each listed system's outputs that passed every gate."""
-        listed, outputs = tuple(systems), list(outputs)
+    def build(
+        cls, systems: Iterable[str], cases: Collection[str], outputs: Iterable[Output]
+    ) -> Pool:
+        """Keep the outputs of the listed systems on the family's current cases."""
+        listed = tuple(systems)
+        current = [
+            output
+            for output in outputs
+            if output.system in listed and output.case in cases
+        ]
         outputs_by_case: dict[str, dict[str, list[Output]]] = {}
-        for output in outputs:
-            if output.system in listed and output.gate_failures == []:
+        for output in current:
+            if output.gate_failures == []:
                 by_system = outputs_by_case.setdefault(output.case, {})
                 by_system.setdefault(output.system, []).append(output)
-        return cls(listed, outputs_by_case, settled(outputs))
+        return cls(listed, current, outputs_by_case, settled(current))
 
     def pairings(self, case: str, left: str, right: str) -> list[tuple[Output, Output]]:
         """Return the pairings of two systems' samples on a case that need a vote."""
@@ -66,12 +80,6 @@ class Pool:
             if self.pairings(case, left, right)
         }
 
-    def find(self, case: str, side: Side) -> Output | None:
-        for output in self.outputs_by_case.get(case, {}).get(side.system, []):
-            if Side.of(output) == side:
-                return output
-        return None
-
 
 @dataclass(frozen=True)
 class Draw:
@@ -85,18 +93,19 @@ class Draw:
 
 def draw(
     pool: Pool,
-    votes: list[Vote],
+    votes: list[MatchedVote],
     used: set[str],
     now: datetime,
     rng: np.random.Generator,
 ) -> Draw | None:
     """Choose the next pair on a case the session has not used.
 
-    A delayed repeat comes first, at `REPEAT_SHARE` odds while one is due. Then
-    every ordered pair of systems collects `SEED_VOTES_PER_SIDE` votes, and after
-    that the scheduler favors close pairs with few votes.
+    `votes` are the family's votes reconciled with `pool.outputs`. A delayed
+    repeat comes first, at `REPEAT_SHARE` odds while one is due. Then every
+    ordered pair of systems collects `SEED_VOTES_PER_SIDE` votes, and after that
+    the scheduler favors close pairs with few votes.
     """
-    repeats = _due_repeats(pool, votes, used, now)
+    repeats = _due_repeats(votes, used, now)
     if repeats and rng.random() < REPEAT_SHARE:
         return repeats[rng.integers(len(repeats))]
 
@@ -107,9 +116,9 @@ def draw(
     open_cases = {pair: cases for pair, cases in open_cases.items() if cases}
     if not open_cases:
         return None
-    counts = Counter((vote.a.system, vote.b.system) for vote in votes)
+    counts = Counter((m.vote.a.system, m.vote.b.system) for m in votes)
     pair = _seed_pair(open_cases, counts, rng) or _adaptive_pair(
-        open_cases, counts, [vote.comparison() for vote in votes] + pool.settled, rng
+        open_cases, counts, [m.vote.comparison() for m in votes] + pool.settled, rng
     )
     case = open_cases[pair][rng.integers(len(open_cases[pair]))]
     pairings = pool.pairings(case, *pair)
@@ -117,23 +126,45 @@ def draw(
     return Draw(case=case, a=a, b=b)
 
 
-def _due_repeats(
-    pool: Pool, votes: list[Vote], used: set[str], now: datetime
-) -> list[Draw]:
-    repeated = {vote.repeat_of for vote in votes}
-    due = []
-    for vote in votes:
-        if (
-            vote.repeat_of is None
-            and vote.id not in repeated
-            and vote.case not in used
-            and now - vote.recorded_at >= REPEAT_DELAY
-        ):
-            a = pool.find(vote.case, vote.b)
-            b = pool.find(vote.case, vote.a)
-            if a is not None and b is not None and settled_score(a, b) is None:
-                due.append(Draw(case=vote.case, a=a, b=b, repeat_of=vote.id))
-    return due
+def pair_weights(
+    ratings: Ratings,
+    pairs: list[tuple[str, str]],
+    counts: Counter[tuple[str, str]],
+) -> dict[tuple[str, str], float]:
+    """Weight each pair of systems by p(1 - p) / (n + 1), among those that overlap.
+
+    `p` is the fitted preference within the pair and `n` its votes in either
+    order, so the weight favors pairs that are close and have few votes. Pairs
+    whose intervals separate get no weight, unless every pair separates, in which
+    case all of them are weighed.
+    """
+    index = {system: i for i, system in enumerate(ratings.systems)}
+    overlapping = [
+        (x, y)
+        for x, y in pairs
+        if ratings.lower[index[x]] <= ratings.upper[index[y]]
+        and ratings.lower[index[y]] <= ratings.upper[index[x]]
+    ]
+    weighed = overlapping or pairs
+    gap = np.array(
+        [ratings.score[index[x]] - ratings.score[index[y]] for x, y in weighed]
+    )
+    p = special.expit(gap / ELO_PER_LOGIT)
+    n = np.array([counts[(x, y)] + counts[(y, x)] for x, y in weighed])
+    weights = p * (1 - p) / (n + 1)
+    return {pair: float(weight) for pair, weight in zip(weighed, weights, strict=True)}
+
+
+def _due_repeats(votes: list[MatchedVote], used: set[str], now: datetime) -> list[Draw]:
+    repeated = {m.vote.repeat_of for m in votes}
+    return [
+        Draw(case=m.vote.case, a=m.b, b=m.a, repeat_of=m.vote.id)
+        for m in votes
+        if m.vote.repeat_of is None
+        and m.vote.id not in repeated
+        and m.vote.case not in used
+        and now - m.vote.recorded_at >= REPEAT_DELAY
+    ]
 
 
 def _seed_pair(
@@ -155,30 +186,14 @@ def _adaptive_pair(
     comparisons: list[Comparison],
     rng: np.random.Generator,
 ) -> tuple[str, str]:
-    """Weight each pair by p(1 - p) / (n + 1), among pairs whose intervals overlap.
-
-    The weight favors pairs that are close and have few votes. A board whose
-    intervals all separate weighs every pair the same way.
-    """
+    """Draw a pair by `pair_weights`, putting the order shown less often left."""
     matchups = Matchups.build(comparisons)
     ratings = rate(matchups, matchups.systems[0])
-    index = {system: i for i, system in enumerate(ratings.systems)}
-
-    unordered = sorted({tuple(sorted(pair)) for pair in open_cases})
-    overlapping = [
-        (x, y)
-        for x, y in unordered
-        if ratings.lower[index[x]] <= ratings.upper[index[y]]
-        and ratings.lower[index[y]] <= ratings.upper[index[x]]
-    ]
-    pairs = overlapping or unordered
-    gap = np.array(
-        [ratings.score[index[x]] - ratings.score[index[y]] for x, y in pairs]
-    )
-    p = special.expit(gap / ELO_PER_LOGIT)
-    n = np.array([counts[(x, y)] + counts[(y, x)] for x, y in pairs])
-    weights = p * (1 - p) / (n + 1)
-    x, y = pairs[rng.choice(len(pairs), p=weights / weights.sum())]
+    unordered = sorted({(min(pair), max(pair)) for pair in open_cases})
+    weights = pair_weights(ratings, unordered, counts)
+    pairs = list(weights)
+    total = np.array(list(weights.values()))
+    x, y = pairs[rng.choice(len(pairs), p=total / total.sum())]
 
     sides = [pair for pair in ((x, y), (y, x)) if pair in open_cases]
     fewest = min(counts[pair] for pair in sides)

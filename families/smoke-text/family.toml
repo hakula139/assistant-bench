@@ -3,3 +3,4 @@ systems = ["opus-5.5", "gpt-6.1-sol", "gemini-4-argon", "gemini-3.8-flash", "dee
 reference = "gemini-3.8-flash"
 samples = 1
 max_output_tokens = 512
+categories = ["message"]

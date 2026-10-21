@@ -108,7 +108,7 @@ def serve() -> None:
         )
     except subprocess.CalledProcessError as error:
         raise typer.Exit(error.returncode) from error
-    page = SITE_DIR / api.VOTE_PATH.removeprefix('/') / 'index.html'
+    page = SITE_DIR / api.VOTE_DIR / 'index.html'
     if not page.is_file():
         typer.echo(
             f'No vote page at {page}. Build the site with '
@@ -118,7 +118,7 @@ def serve() -> None:
         raise typer.Exit(1)
     with closing(VoteStore(votes_file())) as store:
         typer.echo(
-            f'Voting on {", ".join(families)} at {api.APP_ORIGIN}{api.VOTE_PATH}/'
+            f'Voting on {", ".join(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/'
         )
         api.serve(Arena(store, families, api.RENDER_ORIGIN), SITE_DIR)
 

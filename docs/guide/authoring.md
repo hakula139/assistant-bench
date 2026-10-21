@@ -13,6 +13,7 @@ systems = ["opus-5.5", "gpt-6.1-sol"]
 reference = "gpt-6.1-sol"
 samples = 1
 max_output_tokens = 512
+categories = ["message"]
 ```
 
 | Field               | Meaning                                                                                                                                   |
@@ -21,7 +22,8 @@ max_output_tokens = 512
 | `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                                            |
 | `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
 | `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
-| `reference`         | For `votes`, the system whose score anchors the board at 1000. Required                                                                   |
+| `categories`        | The categories the family's cases may carry, which reports publish. Every case's category must appear here                                |
+| `reference`         | For `votes`, one of `systems`, whose score anchors the board at 1000. Required                                                            |
 | `render`            | For `votes`, how the vote page shows outputs: `text`, the default, or `html` in a sandboxed frame                                         |
 | `language`          | For `votes`, `zh` or `en`, the language the `language` gate requires. Optional                                                            |
 | `[gates]`           | For `votes`, the optional `min_chars`, `max_chars`, and `script = "hans"` gates, which [Prose](../design/families/prose.md#gates) defines |
@@ -41,7 +43,7 @@ Each line of `cases.jsonl` is one case:
 ```
 
 - `id` is unique across the committed and local cases of the family and uses lowercase letters, digits, and hyphens. Once a case has run, an edited instruction needs a new ID, because Harbor aborts a job whose task keeps its version but changes its content. `bench check` and `bench run` compare each rendered task with the digest Harbor recorded for it and name such a case before Harbor starts, so an edit is accepted while no trial has run the case.
-- `category` tags the case for per-category leaderboards. A family's page under [`design/families/`](../design/families/) lists its categories.
+- `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. A family's page under [`design/families/`](../design/families/) describes its categories.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `$XDG_DATA_HOME/assistant-bench/cases/<family>.jsonl`, which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `checklist` is an optional list of judging hints shown beside the outputs.
 

@@ -4,12 +4,15 @@ from itertools import permutations
 
 import numpy as np
 import pytest
+from scipy import special
 
 from assistant_bench.arena import scheduler
-from assistant_bench.arena.scheduler import Draw, Pool, draw
+from assistant_bench.arena.resolution import MatchedVote, reconcile
+from assistant_bench.arena.scheduler import Draw, Pool, draw, pair_weights
 from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
+from assistant_bench.scoring.ranking import ELO_PER_LOGIT, Ratings
 from support import make_output
 
 
@@ -32,7 +35,11 @@ def make_pool(
         for case in range(cases)
         for system in systems
     ]
-    return Pool.build(systems, outputs)
+    return Pool.build(systems, {f'c{case}' for case in range(cases)}, outputs)
+
+
+def matched(pool: Pool, votes: list[Vote]) -> list[MatchedVote]:
+    return reconcile(votes, pool.outputs)
 
 
 def vote_on(
@@ -72,7 +79,9 @@ def votes_between(
 
 class TestPool:
     class TestBuild:
-        def test_keeps_the_passing_outputs_of_listed_systems(self) -> None:
+        def test_keeps_the_passing_outputs_of_listed_systems_on_current_cases(
+            self,
+        ) -> None:
             outputs: list[Output] = [
                 make_output(trial='1', system='large', text='Hi.', gate_failures=[]),
                 make_output(
@@ -80,13 +89,15 @@ class TestPool:
                 ),
                 make_output(trial='3', system='large', error='TimeoutError'),
                 make_output(trial='4', system='retired', gate_failures=[]),
+                make_output(trial='5', case='old', system='large', gate_failures=[]),
             ]
 
-            pool = Pool.build(['large', 'small'], outputs)
+            pool = Pool.build(['large', 'small'], {'c'}, outputs)
 
             (by_system,) = pool.outputs_by_case.values()
             assert list(by_system) == ['large']
             assert [output.trial for output in by_system['large']] == ['1']
+            assert [output.trial for output in pool.outputs] == ['1', '2', '3']
 
     class TestPairings:
         def test_leaves_out_samples_with_identical_text(self) -> None:
@@ -97,7 +108,7 @@ class TestPool:
                 for system in ('large', 'small')
                 for i, text in enumerate(('Same.', f'{system} differs.'))
             ]
-            pool = Pool.build(['large', 'small'], outputs)
+            pool = Pool.build(['large', 'small'], {'c'}, outputs)
 
             pairings = pool.pairings('c', 'large', 'small')
 
@@ -115,7 +126,7 @@ class TestDraw:
         votes: list[Vote] = []
 
         for vote_id in range(1, 13):
-            picked = draw(pool, votes, set(), NOW, rng)
+            picked = draw(pool, matched(pool, votes), set(), NOW, rng)
             assert picked is not None
             votes.append(vote_on(picked, 'a', vote_id))
 
@@ -149,7 +160,7 @@ class TestDraw:
 
         pairs = set()
         for _ in range(10):
-            picked = draw(pool, votes, set(), NOW, rng)
+            picked = draw(pool, matched(pool, votes), set(), NOW, rng)
             assert picked is not None
             pairs.add(frozenset((picked.a.system, picked.b.system)))
 
@@ -162,7 +173,7 @@ class TestDraw:
         )
         rng = np.random.default_rng(0)
 
-        picked = draw(pool, votes, set(), NOW, rng)
+        picked = draw(pool, matched(pool, votes), set(), NOW, rng)
 
         assert picked is not None
         assert (picked.a.system, picked.b.system) == ('small', 'large')
@@ -194,7 +205,7 @@ class TestDraw:
                 )
             )
 
-        picked = draw(pool, votes, set(), NOW, np.random.default_rng(0))
+        picked = draw(pool, matched(pool, votes), set(), NOW, np.random.default_rng(0))
 
         assert picked is not None
         assert (picked.repeat_of == 1) is expected
@@ -205,20 +216,46 @@ class TestDraw:
                 original.a,
             )
 
-    def test_skips_a_repeat_whose_output_left_the_pool(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
-        pool = make_pool(systems=('large', 'small'))
-        (original,) = votes_between(pool, 'large', 'small', ['a'])
-        original = original.model_copy(
-            update={
-                'recorded_at': NOW - timedelta(days=3),
-                'b': original.b.model_copy(update={'system': 'retired'}),
-            }
+
+class TestPairWeights:
+    @staticmethod
+    def ratings(score: list[float], lower: list[float], upper: list[float]) -> Ratings:
+        return Ratings(
+            systems=('a', 'b', 'c', 'd'),
+            score=np.array(score),
+            lower=np.array(lower),
+            upper=np.array(upper),
+            draws=np.empty((0, 4)),
+            position=0.0,
         )
 
-        picked = draw(pool, [original], set(), NOW, np.random.default_rng(0))
+    def test_favors_close_pairs_with_few_votes_among_those_that_overlap(
+        self,
+    ) -> None:
+        ratings = self.ratings(
+            score=[1000, 1000, 1100, 1300],
+            lower=[950, 950, 1000, 1250],
+            upper=[1050, 1050, 1200, 1350],
+        )
+        pairs = [('a', 'b'), ('a', 'c'), ('b', 'c'), ('c', 'd')]
 
-        assert picked is not None
-        assert picked.repeat_of is None
+        weights = pair_weights(ratings, pairs, Counter({('c', 'b'): 3}))
+
+        p = special.expit(100 / ELO_PER_LOGIT)
+        assert weights == pytest.approx(
+            {('a', 'b'): 0.25, ('a', 'c'): p * (1 - p), ('b', 'c'): p * (1 - p) / 4}
+        )
+
+    def test_weighs_every_pair_once_all_separate(self) -> None:
+        ratings = self.ratings(
+            score=[1000, 1200, 1400, 1600],
+            lower=[990, 1190, 1390, 1590],
+            upper=[1010, 1210, 1410, 1610],
+        )
+
+        weights = pair_weights(ratings, [('a', 'b'), ('a', 'c')], Counter())
+
+        p, q = (special.expit(gap / ELO_PER_LOGIT) for gap in (200, 400))
+        assert weights == pytest.approx(
+            {('a', 'b'): p * (1 - p), ('a', 'c'): q * (1 - q)}
+        )

@@ -6,7 +6,7 @@ import uvicorn
 from fastapi.testclient import TestClient
 
 from assistant_bench.arena import api
-from assistant_bench.arena.service import Arena
+from assistant_bench.arena.service import Arena, HtmlPane
 from assistant_bench.arena.store import VoteStore
 from support import Clock, make_arena
 
@@ -100,8 +100,10 @@ class TestCreateApp:
 
         assert client.get('/').text == '<h1>Vote</h1>'
 
+    # cspell:ignore Fvote
+    @pytest.mark.parametrize('path', ['/vote/', '//vote/', '/%2Fvote/'])
     def test_sends_the_vote_policy_on_the_vote_page_alone(
-        self, arena: Arena, tmp_path: Path
+        self, arena: Arena, tmp_path: Path, path: str
     ) -> None:
         site = tmp_path / 'dist'
         (site / 'vote').mkdir(parents=True)
@@ -109,7 +111,7 @@ class TestCreateApp:
         (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
         client = TestClient(api.create_app(arena, site), base_url=api.APP_ORIGIN)
 
-        page = client.get('/vote/')
+        page = client.get(f'{api.APP_ORIGIN}{path}')
         board = client.get('/')
 
         assert page.text == '<h1>Vote</h1>'
@@ -120,6 +122,10 @@ class TestCreateApp:
             "form-action 'none'; frame-ancestors 'none'"
         )
         assert 'content-security-policy' not in board.headers
+
+    @pytest.mark.parametrize('path', ['/docs', '/redoc', '/openapi.json'])
+    def test_serves_no_api_docs(self, client: TestClient, path: str) -> None:
+        assert client.get(path).status_code == 404
 
 
 class TestCreateRenderApp:
@@ -135,10 +141,10 @@ class TestCreateRenderApp:
         )
         view = arena.start('f')
         assert view.pair is not None
-        url = view.pair.a.url  # type: ignore[union-attr]
+        assert isinstance(view.pair.a, HtmlPane)
         client = TestClient(api.create_render_app(arena), base_url=api.RENDER_ORIGIN)
 
-        response = client.get(f'/outputs/{url.rsplit("/", 1)[1]}')
+        response = client.get(f'/outputs/{view.pair.a.url.rsplit("/", 1)[1]}')
 
         assert response.text in {'<p>L</p>', '<p>S</p>'}
         assert response.headers['content-security-policy'] == (

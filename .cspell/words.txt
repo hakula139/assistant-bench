@@ -5,6 +5,7 @@ cafile
 cedict
 chatcmpl
 covariate
+csgraph
 dateutil
 delenv
 direnv
@@ -22,8 +23,8 @@ isort
 katex
 kwarg
 kwargs
-libstdc
 lastrowid
+libstdc
 Logit
 multinomial
 mypy
@@ -42,6 +43,7 @@ pydocstyle
 pypi
 pyproject
 pytest
+redoc
 scipy
 shfmt
 smol
@@ -58,6 +60,7 @@ trustme
 typer
 unbilled
 undos
+unranked
 unrouted
 usize
 uvicorn

@@ -25,6 +25,7 @@ from assistant_bench.families import (
     Settings,
     TaskTestsSettings,
     VotesSettings,
+    case_task,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
@@ -87,11 +88,6 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
             installed.parent.mkdir(parents=True, exist_ok=True)
             paths.append(task.rename(installed))
         return paths
-
-
-def case_task(family: Family, case_id: str) -> Path:
-    """Return the directory that `render_tasks` installs a case's task in."""
-    return data_dir() / 'tasks' / family.name / case_id
 
 
 def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
