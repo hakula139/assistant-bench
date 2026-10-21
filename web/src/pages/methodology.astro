@@ -1,5 +1,7 @@
 ---
 import Base from '@/layouts/Base.astro';
+
+const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/design';
 ---
 
 <Base title="Methodology">
@@ -59,9 +61,8 @@ import Base from '@/layouts/Base.astro';
     </section>
 
     <p class="text-muted-foreground">
-      The design notes in the{' '}
-      <a href="https://github.com/hakula139/assistant-bench/tree/main/docs">repository</a> cover
-      each method in detail.
+      The repository's design notes on <a href={`${design}/ranking.md`}>ranking</a> and on each{' '}
+      <a href={`${design}/families`}>family</a> cover each method in detail.
     </p>
   </article>
 </Base>

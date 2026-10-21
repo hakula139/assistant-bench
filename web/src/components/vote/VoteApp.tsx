@@ -36,7 +36,23 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function StartScreen({ busy, onStart }: { busy: boolean; onStart: (family: string) => void }) {
+function ErrorAlert({ error }: { error: string | null }) {
+  return (
+    error !== null && (
+      <p role="alert" className="text-sm text-destructive">
+        {error}
+      </p>
+    )
+  );
+}
+
+interface StartScreenProps {
+  busy: boolean;
+  error: string | null;
+  onStart: (family: string) => void;
+}
+
+function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   const [families, setFamilies] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +65,7 @@ function StartScreen({ busy, onStart }: { busy: boolean; onStart: (family: strin
   return (
     <div className="mx-auto max-w-xl space-y-4 px-4 py-16">
       <h1 className="text-2xl font-semibold">Start a voting session</h1>
-      {error !== null && <p className="text-destructive">Could not list families: {error}</p>}
+      <ErrorAlert error={error === null ? startError : `Could not list families: ${error}`} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
           No family has outputs to vote on. Run and ingest a family, then reload this page.
@@ -112,9 +128,16 @@ export function VoteApp() {
   const [frameFocused, setFrameFocused] = useState(false);
   const [busy, setBusy] = useState(false);
   const noteField = useRef<HTMLTextAreaElement>(null);
+  const pairView = useRef<HTMLDivElement>(null);
 
   const pair = session?.pair ?? null;
   const hasFrames = pair !== null && (pair.a.render === 'html' || pair.b.render === 'html');
+  const hasText = pair !== null && (pair.a.render === 'text' || pair.b.render === 'text');
+
+  // A new pair takes focus from the control that loaded it, so the next key is a shortcut again.
+  useEffect(() => {
+    pairView.current?.focus({ preventScroll: true });
+  }, [pair]);
 
   const show = (next: SessionView) => {
     sessionStorage.setItem(SESSION_KEY, next.id);
@@ -190,31 +213,22 @@ export function VoteApp() {
   };
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
-    // An Enter that commits an IME composition, as when typing a Chinese note, is not a submit.
-    if (
-      pair === null ||
-      event.isComposing ||
-      event.repeat ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.altKey
-    ) {
+    if (pair === null || event.isComposing || event.repeat) {
       return;
     }
     const target = event.target;
+    // Plain Enter in the note adds a line, since Safari reports the Enter that commits an IME
+    // composition as an ordinary keypress.
     if (target instanceof HTMLTextAreaElement) {
       if (event.key === 'Escape') {
         target.blur();
-      } else if (event.key === 'Enter' && !event.shiftKey) {
+      } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         submit();
       }
       return;
     }
-    // Enter on a focused verdict or flag would toggle it off, so only plain buttons keep it.
-    const isToggle =
-      target instanceof HTMLElement && target.closest('[aria-pressed], [role=radio]');
-    if (event.key === 'Enter' && target instanceof HTMLButtonElement && !isToggle) {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
       return;
     }
     const picked = CHOICES.find(({ key }) => key === event.key);
@@ -250,6 +264,7 @@ export function VoteApp() {
     return (
       <StartScreen
         busy={busy}
+        error={error}
         onStart={(family) => {
           void run(() => startSession(family));
         }}
@@ -264,8 +279,10 @@ export function VoteApp() {
         <p className="text-muted-foreground">
           {session.votes} {session.votes === 1 ? 'vote' : 'votes'} recorded on {session.family}.
         </p>
+        <ErrorAlert error={error} />
         <div className="flex gap-2">
           <Button
+            disabled={busy}
             onClick={() => {
               void run(() => startSession(session.family));
             }}
@@ -281,7 +298,7 @@ export function VoteApp() {
   }
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div ref={pairView} tabIndex={-1} className="flex h-dvh flex-col outline-none">
       <Brief key={pair.token} pair={pair} />
 
       <div className="grid min-h-0 flex-1 grid-rows-2 divide-y md:grid-cols-2 md:grid-rows-1 md:divide-x md:divide-y-0">
@@ -296,31 +313,32 @@ export function VoteApp() {
             keyboard.
           </p>
         )}
-        {error !== null && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
+        <ErrorAlert error={error} />
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <ToggleGroup
             type="single"
             variant="outline"
-            spacing={0}
+            spacing={1}
             value={choice ?? ''}
             onValueChange={(value) => {
               setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
             }}
             aria-label="Verdict"
+            className="flex-wrap"
           >
             {CHOICES.map(({ value, label, key }) => (
               <ToggleGroupItem
                 key={value}
                 value={value}
+                aria-keyshortcuts={key.toUpperCase()}
                 className="gap-2 bg-background px-3 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
               >
                 {label}
-                <Kbd className="in-data-[state=on]:bg-primary-foreground/20 in-data-[state=on]:text-primary-foreground">
+                <Kbd
+                  aria-hidden="true"
+                  className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
+                >
                   {key.toUpperCase()}
                 </Kbd>
               </ToggleGroupItem>
@@ -334,13 +352,14 @@ export function VoteApp() {
                 size="sm"
                 variant="outline"
                 pressed={flags.includes(value)}
+                aria-keyshortcuts={String(index + 1)}
                 onPressedChange={() => {
                   toggleFlag(value);
                 }}
                 className="gap-1.5 bg-background"
               >
                 {flagLabels[value]}
-                <Kbd>{index + 1}</Kbd>
+                <Kbd aria-hidden="true">{index + 1}</Kbd>
               </Toggle>
             ))}
           </div>
@@ -349,11 +368,13 @@ export function VoteApp() {
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
             <span className="inline-flex items-center gap-2 text-muted-foreground">
-              Note <Kbd>N</Kbd>
+              Note <Kbd aria-hidden="true">N</Kbd>
             </span>
             <Textarea
               ref={noteField}
               rows={1}
+              aria-keyshortcuts="N"
+              placeholder="⌘↵ or Ctrl+↵ submits from here"
               maxLength={500}
               value={note}
               onChange={(event) => {
@@ -364,11 +385,19 @@ export function VoteApp() {
           </label>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={undo} disabled={session.votes === 0 || busy}>
-              Undo <Kbd>U</Kbd>
+            <Button
+              variant="outline"
+              onClick={undo}
+              disabled={session.votes === 0 || busy}
+              aria-keyshortcuts="U"
+            >
+              Undo <Kbd aria-hidden="true">U</Kbd>
             </Button>
-            <Button onClick={submit} disabled={choice === null || busy}>
-              Submit vote <Kbd className="bg-primary-foreground/20 text-primary-foreground">↵</Kbd>
+            <Button onClick={submit} disabled={choice === null || busy} aria-keyshortcuts="Enter">
+              Submit vote{' '}
+              <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
+                ↵
+              </Kbd>
             </Button>
           </div>
         </div>
@@ -385,15 +414,17 @@ export function VoteApp() {
             />
           </div>
 
-          <Toggle
-            size="sm"
-            variant="outline"
-            pressed={asMarkdown}
-            onPressedChange={setAsMarkdown}
-            className="bg-background"
-          >
-            Markdown
-          </Toggle>
+          {hasText && (
+            <Toggle
+              size="sm"
+              variant="outline"
+              pressed={asMarkdown}
+              onPressedChange={setAsMarkdown}
+              className="bg-background"
+            >
+              Markdown
+            </Toggle>
+          )}
 
           {hasFrames && (
             <ToggleGroup

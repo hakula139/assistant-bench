@@ -10,9 +10,9 @@ async function render(): Promise<string> {
   if (report.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
   }
-  return renderToString(
-    <VotesBoard family="arena" rounds={[{ round: report.round, results: report.results }]} />,
-  );
+  // The fixture lists standings by score, so reversing them leaves the board to sort.
+  const results = { ...report.results, standings: report.results.standings.toReversed() };
+  return renderToString(<VotesBoard family="arena" rounds={[{ round: report.round, results }]} />);
 }
 
 describe('VotesBoard', () => {

@@ -61,7 +61,7 @@ export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps
       ) : asMarkdown ? (
         <div
           className="prose min-h-0 max-w-none flex-1 overflow-y-auto px-4 py-3 text-foreground dark:prose-invert prose-code:before:content-none prose-code:after:content-none"
-          // With `html` off markdown-it escapes raw HTML, and the disabled image rule leaves images as text.
+          // With `html` off markdown-it escapes raw HTML, and with the image rule off it never loads an image.
           dangerouslySetInnerHTML={{ __html: markdown.render(pane.text) }}
         />
       ) : (

@@ -1,11 +1,13 @@
 ---
 import { Moon, Sun } from 'lucide-react';
+
+import { buttonVariants } from '@/components/ui/button';
 ---
 
 <button
   type="button"
   data-theme-toggle
-  class="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+  class={buttonVariants({ variant: 'ghost', size: 'icon-lg', className: 'text-muted-foreground' })}
   aria-label="Switch to dark theme"
 >
   <Sun className="hidden size-4 dark:block" aria-hidden="true" />

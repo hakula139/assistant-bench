@@ -1,13 +1,15 @@
 import * as Plot from '@observablehq/plot';
 import { useCallback, useMemo } from 'react';
 
-import { PlotFigure } from '@/components/charts/PlotFigure';
+import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { formatInterval, formatScore } from '@/lib/format';
 import type { CategoryBoard } from '@/lib/report';
 
 const STEPS = 5;
 const HATCH = 'bench-hatch';
 const ROW_HEIGHT = 40;
+/** Room between a row label and the cells, in CSS pixels. */
+const LABEL_GAP = 12;
 
 interface Cell {
   system: string;
@@ -49,6 +51,12 @@ function scoreScale(cells: Cell[]) {
       range: Array.from({ length: STEPS }, (_, i) => `var(--chart-seq-${i + 1})`),
     },
   });
+}
+
+/** Returns the 1-based ramp step of a score under the scale's thresholds. */
+function step(scale: Plot.Scale, score: number): number {
+  const thresholds = (scale.domain ?? []) as number[];
+  return 1 + thresholds.filter((threshold) => score >= threshold).length;
 }
 
 function Legend({ scale }: { scale: Plot.Scale }) {
@@ -106,57 +114,74 @@ export function CategoryHeatmap({ categories, systems }: CategoryHeatmapProps) {
   const scale = useMemo(() => scoreScale(cells), [cells]);
   const height = systems.length * ROW_HEIGHT + 40;
 
-  const plot = useCallback((): Plot.PlotOptions => {
-    const fill = (cell: Cell) => scale.apply(cell.score) as string;
-    const ink = (cell: Cell) => fill(cell).replace('seq-', 'seq-ink-');
-    return {
-      height,
-      marginLeft: 120,
-      marginTop: 28,
-      marginBottom: 12,
-      x: { axis: 'top', label: null, tickSize: 0, padding: 0 },
-      y: { domain: systems, label: null, tickSize: 0, padding: 0 },
-      color: { type: 'identity' },
-      marks: [
-        Plot.cell(cells, { x: 'category', y: 'system', fill, inset: 1, rx: 4 }),
-        Plot.cell(
-          cells.filter((cell) => cell.preliminary),
-          { x: 'category', y: 'system', fill: `url(#${HATCH})`, inset: 1, rx: 4 },
-        ),
-        Plot.text(cells, {
-          x: 'category',
-          y: 'system',
-          text: (cell: Cell) => formatScore(cell.score),
-          fill: ink,
-          fontWeight: 600,
-          dy: -6,
-        }),
-        Plot.text(cells, {
-          x: 'category',
-          y: 'system',
-          text: (cell: Cell) => `${cell.votes} votes`,
-          fill: ink,
-          fontSize: 10,
-          dy: 8,
-        }),
-        Plot.tip(
-          cells,
-          Plot.pointer({
+  const plot = useCallback(
+    ({ measure }: PlotFrame): Plot.PlotOptions => {
+      const fill = (cell: Cell) => `var(--chart-seq-${step(scale, cell.score)})`;
+      const ink = (cell: Cell) => `var(--chart-seq-ink-${step(scale, cell.score)})`;
+      return {
+        height,
+        marginLeft: Math.max(...systems.map(measure)) + LABEL_GAP,
+        marginTop: 28,
+        marginBottom: 12,
+        x: { axis: 'top', label: null, tickSize: 0, padding: 0 },
+        y: { domain: systems, label: null, tickSize: 0, padding: 0 },
+        color: { type: 'identity' },
+        marks: [
+          Plot.cell(cells, { x: 'category', y: 'system', fill, inset: 1, rx: 4 }),
+          Plot.cell(
+            cells.filter((cell) => cell.preliminary),
+            { x: 'category', y: 'system', fill: `url(#${HATCH})`, inset: 1, rx: 4 },
+          ),
+          // A solid patch keeps the hatch to a frame around the labels, which keep their contrast.
+          Plot.cell(
+            cells.filter((cell) => cell.preliminary),
+            {
+              x: 'category',
+              y: 'system',
+              fill,
+              insetTop: 5,
+              insetBottom: 5,
+              insetLeft: 10,
+              insetRight: 10,
+              rx: 3,
+            },
+          ),
+          Plot.text(cells, {
             x: 'category',
             y: 'system',
-            channels: {
-              Score: (cell: Cell) => formatScore(cell.score),
-              Interval: (cell: Cell) => formatInterval(cell),
-              Votes: 'votes',
-              Status: (cell: Cell) => (cell.preliminary ? 'Preliminary' : 'Settled'),
-            },
-            format: { x: true, y: true },
-            fontFamily: 'inherit',
+            text: (cell: Cell) => formatScore(cell.score),
+            fill: ink,
+            fontWeight: 600,
+            dy: -6,
           }),
-        ),
-      ],
-    };
-  }, [cells, scale, systems, height]);
+          Plot.text(cells, {
+            x: 'category',
+            y: 'system',
+            text: (cell: Cell) => `${cell.votes} votes`,
+            fill: ink,
+            fontSize: 10,
+            dy: 8,
+          }),
+          Plot.tip(
+            cells,
+            Plot.pointer({
+              x: 'category',
+              y: 'system',
+              channels: {
+                Score: (cell: Cell) => formatScore(cell.score),
+                Interval: (cell: Cell) => formatInterval(cell),
+                Votes: 'votes',
+                Status: (cell: Cell) => (cell.preliminary ? 'Preliminary' : 'Settled'),
+              },
+              format: { x: true, y: true },
+              fontFamily: 'inherit',
+            }),
+          ),
+        ],
+      };
+    },
+    [cells, scale, systems, height],
+  );
 
   return (
     <div className="space-y-3">

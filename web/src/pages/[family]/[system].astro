@@ -36,12 +36,12 @@ interface Props {
 }
 
 const { family, system, rounds } = Astro.props;
-const appearances = rounds.filter(({ results }) =>
-  results.standings.some((standing) => standing.system === system),
-);
-const { round, results } = appearances[appearances.length - 1];
+const appearances = rounds.flatMap(({ round, results }) => {
+  const standing = results.standings.find((item) => item.system === system);
+  return standing ? [{ round, results, standing }] : [];
+});
+const { round, results, standing } = appearances[appearances.length - 1];
 const standings = results.standings;
-const standing = standings.find((item) => item.system === system) as Standing;
 const reference = standings.find((item) => item.system === results.reference)?.score;
 
 const headToHead = results.head_to_head
@@ -185,12 +185,7 @@ const length = results.length;
 
     <section class="space-y-3 border-t pt-6">
       <h2 class="text-lg font-semibold">Rounds</h2>
-      <RoundsTable
-        appearances={appearances.map((item) => ({
-          round: item.round,
-          standing: item.results.standings.find((entry) => entry.system === system) as Standing,
-        }))}
-      />
+      <RoundsTable appearances={appearances} />
     </section>
   </div>
 </Base>

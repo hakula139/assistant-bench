@@ -9,11 +9,13 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/react-table';
+import { cn } from 'cn';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import { PlotFigure } from '@/components/charts/PlotFigure';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -138,6 +140,7 @@ function ForestRow({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
+          role="img"
           tabIndex={0}
           aria-label={`${row.standing.system}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
           className="focus-visible:outline-offset-[-2px]"
@@ -199,6 +202,12 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
             </span>
           ),
         }),
+        helper.display({
+          id: 'interval',
+          header: () => <ForestAxis domain={domain} />,
+          cell: ({ row }) => <ForestRow row={row.original} domain={domain} reference={reference} />,
+          meta: { forest: true },
+        }),
         helper.accessor('score', {
           header: 'Score',
           sortDescFirst: true,
@@ -211,12 +220,6 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
             </span>
           ),
           meta: { numeric: true },
-        }),
-        helper.display({
-          id: 'interval',
-          header: () => <ForestAxis domain={domain} />,
-          cell: ({ row }) => <ForestRow row={row.original} domain={domain} reference={reference} />,
-          meta: { forest: true },
         }),
         helper.accessor('votes', {
           header: 'Votes',
@@ -292,14 +295,15 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
                     sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
                   }
                 >
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={header.column.getToggleSortingHandler()}
-                    className={`inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground ${numeric ? 'flex-row-reverse' : ''}`}
+                    className={cn('-mx-2.5 text-muted-foreground', numeric && 'flex-row-reverse')}
                   >
                     <table.FlexRender header={header} />
                     <SortIcon direction={sorted} />
-                  </button>
+                  </Button>
                 </TableHead>
               );
             })}
