@@ -2,7 +2,9 @@ import re
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from assistant_bench.cli import app
 from assistant_bench.families import Case
 from assistant_bench.paths import REPO_ROOT
 
@@ -23,6 +25,16 @@ def test_committed_cases_hold_only_synthetic_or_public_sources(path: Path) -> No
     cases = [Case.model_validate_json(line) for line in path.read_text().splitlines()]
 
     assert {case.source for case in cases} <= COMMITTED_SOURCES
+
+
+@pytest.mark.parametrize(
+    'name',
+    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/cases.jsonl')),
+)
+def test_committed_case_families_pass_check(name: str) -> None:
+    result = CliRunner().invoke(app, ['check', name])
+
+    assert result.exit_code == 0, result.output
 
 
 def test_uv_lock_names_only_pypi() -> None:

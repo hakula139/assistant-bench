@@ -19,6 +19,7 @@ from harbor.models.verifier.result import VerifierResult
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.jobs import TASK_VERSION
+from assistant_bench.paths import data_dir
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -46,10 +47,18 @@ def write_trial(
     reward: float | None = None,
     error: str | None = None,
     output: str | None = None,
+    instruction: str | None = 'Hi.',
     digest: str = f'sha256:{"0" * 64}',
     version: str = TASK_VERSION,
 ) -> None:
-    """Write a trial's result and lock, plus the job files Harbor writes on start."""
+    """Write a trial's result and lock, its job's files, and its task's instruction.
+
+    An `instruction` of `None` leaves a task that `render_tasks` wrote untouched.
+    """
+    if instruction is not None:
+        task_dir = data_dir() / 'tasks' / task
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / 'instruction.md').write_text(instruction)
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:

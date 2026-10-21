@@ -104,6 +104,53 @@ class TestLoadFamily:
         with pytest.raises(ValueError, match='case families need max_output_tokens'):
             load_family('f')
 
+    def test_rejects_inverted_length_bounds(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "votes"
+            samples = 1
+            max_output_tokens = 300
+
+            [gates]
+            min_chars = 500
+            max_chars = 400
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        with pytest.raises(
+            ValidationError, match='min_chars 500 exceeds max_chars 400'
+        ):
+            load_family('f')
+
+    def test_accepts_equal_length_bounds(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "votes"
+            samples = 1
+            max_output_tokens = 300
+
+            [gates]
+            min_chars = 400
+            max_chars = 400
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        family = load_family('f')
+
+        assert isinstance(family.settings, VotesSettings)
+        assert (family.settings.gates.min_chars, family.settings.gates.max_chars) == (
+            400,
+            400,
+        )
+
     def test_rejects_an_unknown_scorer(self, families_dir: Path) -> None:
         write_family(
             families_dir,

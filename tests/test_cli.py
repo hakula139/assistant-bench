@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from assistant_bench import jobs, revisions
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
-from assistant_bench.families import load_cases, load_family
+from assistant_bench.families import Gate, load_cases, load_family
 from support import write_trial
 
 
@@ -234,6 +234,29 @@ class TestFingerprints:
 
 
 class TestIngest:
+    def test_summarizes_gate_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            jobs,
+            'ingest',
+            lambda family, systems: [
+                output(gate_failures=[]),
+                output(gate_failures=[Gate.TRUNCATED, Gate.LENGTH]),
+                output(gate_failures=[Gate.TRUNCATED]),
+            ],
+        )
+
+        result = runner.invoke(app, ['ingest', 'smoke-text'])
+
+        assert result.exit_code == 0, result.output
+        assert result.output == textwrap.dedent(
+            """\
+            3 outputs, 0 errored
+            2 failed a gate
+              truncated: 2
+              length: 1
+            """
+        )
+
     def test_summarizes_errors_and_rewards(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

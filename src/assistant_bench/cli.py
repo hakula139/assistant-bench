@@ -69,6 +69,14 @@ def ingest(family: str) -> None:
     typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
     for error, count in errors.most_common():
         typer.echo(f'  {error}: {count}')
+    gated = [output for output in outputs if output.gate_failures]
+    if gated:
+        typer.echo(f'{len(gated)} failed a gate')
+        failures = Counter(
+            gate for output in gated for gate in output.gate_failures or []
+        )
+        for gate, count in failures.most_common():
+            typer.echo(f'  {gate}: {count}')
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
@@ -100,19 +108,9 @@ def _load_family(name: str) -> Family:
 
 def _render_tasks(family: Family) -> list[Path]:
     try:
-        cases = load_cases(family)
+        return jobs.render_tasks(family, load_cases(family))
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
-    tasks = jobs.render_tasks(family, cases)
-    match jobs.changed_tasks(family, tasks):
-        case []:
-            return tasks
-        case [case_id]:
-            message = f'case {case_id!r} changed, give it a new ID'
-        case changed:
-            ids = ', '.join(repr(case_id) for case_id in changed)
-            message = f'cases {ids} changed, give each a new ID'
-    raise typer.BadParameter(f'family {family.name!r}: {message}', param_hint='FAMILY')
 
 
 def _family_systems(family: Family) -> list[System]:

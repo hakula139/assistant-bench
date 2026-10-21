@@ -1,6 +1,7 @@
 """Harbor task rendering, job configs, runs, and ingest of trials."""
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from assistant_bench.catalog import System
 from assistant_bench.families import (
     Case,
     Family,
+    Gate,
     Settings,
     TaskTestsSettings,
     VotesSettings,
@@ -28,6 +30,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.scoring.gates import failed_gates
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
@@ -50,25 +53,62 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
 
     Each task names a stock image that idles while the agent calls the endpoint from
     the host. It has no tests, which Harbor accepts while the verifier is disabled.
+    The tasks render into a staging directory and replace the installed ones only
+    when none differs from what an earlier trial ran, so a rejected edit leaves each
+    task as its trials ran it.
+
+    Raises
+    ------
+    ValueError
+        A case's task differs from the one an earlier trial ran.
     """
-    paths = []
-    for case in cases:
-        task_dir = data_dir() / 'tasks' / family.name / case.id
-        task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / 'instruction.md').write_text(case.instruction)
-        config = task_config.TaskConfig(
-            task=task_config.PackageInfo(
-                name=f'{family.name}/{case.id}', version=TASK_VERSION
-            ),
-            agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
-            environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
-        )
-        (task_dir / 'task.toml').write_text(config.model_dump_toml())
-        paths.append(task_dir)
-    return paths
+    data_dir().mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=data_dir()) as staging:
+        staged = [_render_task(family, case, Path(staging) / case.id) for case in cases]
+        match _changed_tasks(family, staged):
+            case []:
+                pass
+            case [case_id]:
+                raise ValueError(
+                    f'family {family.name!r}: case {case_id!r} changed, '
+                    'give it a new ID'
+                )
+            case changed:
+                ids = ', '.join(repr(case_id) for case_id in changed)
+                raise ValueError(
+                    f'family {family.name!r}: cases {ids} changed, give each a new ID'
+                )
+
+        paths = []
+        for task in staged:
+            installed = case_task(family, task.name)
+            if installed.exists():
+                shutil.rmtree(installed)
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            paths.append(task.rename(installed))
+        return paths
 
 
-def changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
+def case_task(family: Family, case_id: str) -> Path:
+    """Return the directory that `render_tasks` installs a case's task in."""
+    return data_dir() / 'tasks' / family.name / case_id
+
+
+def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
+    task_dir.mkdir(parents=True)
+    (task_dir / 'instruction.md').write_text(case.instruction)
+    config = task_config.TaskConfig(
+        task=task_config.PackageInfo(
+            name=f'{family.name}/{case.id}', version=TASK_VERSION
+        ),
+        agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
+        environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
+    )
+    (task_dir / 'task.toml').write_text(config.model_dump_toml())
+    return task_dir
+
+
+def _changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
     """Return the IDs of rendered tasks whose content differs from what a trial ran.
 
     Harbor records each trial's task digest, and aborts a job whose task keeps its
@@ -202,7 +242,12 @@ def run_job(config: JobConfig) -> Path:
 
 
 class Output(BaseModel):
-    """One trial of a family, as the arena and the reports read it."""
+    """One trial of a family, as the arena and the reports read it.
+
+    `gate_failures` lists the gates a voted output fails, so an empty list admits
+    it to votes and any failure resolves its pairs automatically. It is `None` for
+    an errored trial and for a family whose scorer has no gates.
+    """
 
     trial: str
     job: str
@@ -213,6 +258,7 @@ class Output(BaseModel):
     error: str | None
     text: str | None
     reward: float | None
+    gate_failures: list[Gate] | None
     finish_reason: str | None
     input_tokens: int | None
     cached_tokens: int | None
@@ -277,18 +323,24 @@ def _output(family: Family, trial_dir: Path, systems: dict[str, System]) -> Outp
     metadata = context.metadata or {}
     exception = result.exception_info
     output_file = trial_dir / 'agent' / OUTPUT_FILE
+    text = output_file.read_text() if output_file.exists() else None
+    case = result.task_name.removeprefix(f'{family.name}/')
+    finish_reason = metadata.get('finish_reason')
 
     return Output(
         trial=result.trial_name,
         job=trial_dir.parent.name,
-        case=result.task_name.removeprefix(f'{family.name}/'),
+        case=case,
         system=system,
         fingerprint=kwargs.get('fingerprint'),
         nixos_config_rev=metadata.get('nixos_config_rev'),
         error=exception.exception_type if exception else None,
-        text=output_file.read_text() if output_file.exists() else None,
+        text=text,
         reward=_reward(family.settings, result),
-        finish_reason=metadata.get('finish_reason'),
+        gate_failures=None
+        if exception
+        else _gate_failures(family, case, text or '', finish_reason),
+        finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
         output_tokens=context.n_output_tokens,
@@ -309,6 +361,23 @@ def _reward(settings: Settings, result: TrialResult) -> float | None:
             return rewards.get('reward') if rewards else None
         case _:
             assert_never(settings)
+
+
+def _gate_failures(
+    family: Family, case: str, text: str, finish_reason: str | None
+) -> list[Gate] | None:
+    match family.settings:
+        case VotesSettings(gates=gates):
+            instruction = (
+                (case_task(family, case) / 'instruction.md').read_text()
+                if gates.script
+                else ''
+            )
+            return failed_gates(family.settings, text, finish_reason, instruction)
+        case TaskTestsSettings():
+            return None
+        case _:
+            assert_never(family.settings)
 
 
 def _cost(system: System | None, context: AgentContext) -> float | None:

@@ -1,9 +1,10 @@
 """Family settings, cases, and the merge of committed and local cases."""
 
 import tomllib
-from typing import Annotated, Literal
+from enum import StrEnum
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 
@@ -16,10 +17,59 @@ class _Settings(BaseModel):
     max_output_tokens: int | None = Field(default=None, ge=1)
 
 
+type Language = Literal['en', 'zh']
+
+
+class Gate(StrEnum):
+    """A check whose failure makes a voted output an automatic loss in its pairs."""
+
+    EMPTY = 'empty'
+    """The output is blank."""
+    TRUNCATED = 'truncated'
+    """The endpoint reported a finish reason other than `stop`, or none."""
+    LENGTH = 'length'
+    """The stripped output falls outside the family's `min_chars` and `max_chars`."""
+    LANGUAGE = 'language'
+    """The output's prose and code comments are mostly in another language."""
+    SCRIPT = 'script'
+    """The output holds Traditional-only characters that the instruction lacks."""
+
+
+class Gates(BaseModel):
+    """Eligibility bounds for voted outputs, in characters of the stripped text.
+
+    `script = "hans"` rejects Traditional-only characters the instruction lacks.
+    """
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    min_chars: int | None = Field(default=None, ge=1)
+    max_chars: int | None = Field(default=None, ge=1)
+    script: Literal['hans'] | None = None
+
+    @model_validator(mode='after')
+    def _check_bounds(self) -> Self:
+        if (
+            self.min_chars is not None
+            and self.max_chars is not None
+            and self.min_chars > self.max_chars
+        ):
+            raise ValueError(
+                f'min_chars {self.min_chars} exceeds max_chars {self.max_chars}'
+            )
+        return self
+
+
 class VotesSettings(_Settings):
-    """A family ranked by the owner's blind pairwise votes."""
+    """A family ranked by the owner's blind pairwise votes.
+
+    `language` is the language every output must be written in, which the gates
+    check when it is set.
+    """
 
     scorer: Literal['votes']
+    language: Language | None = None
+    gates: Gates = Gates()
 
 
 class TaskTestsSettings(_Settings):

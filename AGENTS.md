@@ -28,15 +28,15 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Read Before You Edit
 
-| When the change touches                              | Read                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map) |
-| Tests                                                | [Testing](docs/conventions/testing.md)                                                            |
-| A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md)                                                              |
-| Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                  |
-| Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                 |
-| PRs or issues                                        | [GitHub](docs/conventions/github.md)                                                              |
-| The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                    |
+| When the change touches                              | Read                                                                                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
+| Tests                                                | [Testing](docs/conventions/testing.md)                                                                     |
+| A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
+| Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                           |
+| Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                          |
+| PRs or issues                                        | [GitHub](docs/conventions/github.md)                                                                       |
+| The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                             |
 
 ## Rules for Every Change
 
