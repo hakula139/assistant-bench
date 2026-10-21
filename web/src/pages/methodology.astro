@@ -34,12 +34,12 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
       </p>
       <p>
         The 95% intervals come from 1,000 bootstrap resamples drawn by case. A resample whose cases
-        leave a system unconnected to the reference gives it no score, so a system detached in more
-        than 2.5% of resamples has an unbounded interval. Such a system, like one that no comparison
-        connects to the reference at all, is listed as unranked, without a score. A system's rank
-        spans from 1 plus the systems whose interval lies entirely above its own, to 1 plus the
-        systems whose interval reaches above its lower bound. A system with fewer than 40 decisive
-        votes, the votes won by either side, is marked preliminary.
+        leave a system unconnected to the reference gives it no score, so a system detached in at
+        least 2.5% of resamples has an unbounded interval. Such a system, like one that no
+        comparison connects to the reference at all, is listed as unranked, without a score. A
+        system's rank spans from 1 plus the systems whose interval lies entirely above its own, to 1
+        plus the systems whose interval reaches above its lower bound. A system with fewer than 40
+        decisive votes, the votes won by either side, is marked preliminary.
       </p>
       <p>
         A ranked system ties with the top-scoring one when the 95% interval of the difference
