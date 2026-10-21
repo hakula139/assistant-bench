@@ -6,12 +6,19 @@ from pathlib import Path
 from typing import Any
 
 from harbor.models.agent.context import AgentContext
+from harbor.models.job.lock import TaskLock, TrialLock, VerifierLock
 from harbor.models.task.id import LocalTaskId
-from harbor.models.trial.config import AgentConfig, TaskConfig, TrialConfig
+from harbor.models.trial.config import (
+    AgentConfig,
+    EnvironmentConfig,
+    TaskConfig,
+    TrialConfig,
+)
 from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
 
 from assistant_bench.catalog import Price, System
+from assistant_bench.jobs import TASK_VERSION
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -39,8 +46,10 @@ def write_trial(
     reward: float | None = None,
     error: str | None = None,
     output: str | None = None,
+    digest: str = f'sha256:{"0" * 64}',
+    version: str = TASK_VERSION,
 ) -> None:
-    """Writes a trial's `result.json` into a job, as Harbor would."""
+    """Write a trial's result and lock, plus the job files Harbor writes on start."""
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:
@@ -65,7 +74,15 @@ def write_trial(
         else VerifierResult(rewards={'reward': reward}),
         exception_info=exception if error else None,
     )
+    lock = TrialLock(
+        task=TaskLock(name=name, version=version, type='local', digest=digest),
+        agent=agent,
+        environment=EnvironmentConfig(),
+        verifier=VerifierLock(),
+    )
     (trial_dir / 'result.json').write_text(result.model_dump_json())
+    (trial_dir / 'lock.json').write_text(lock.model_dump_json())
+    (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
 
 

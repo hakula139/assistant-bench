@@ -26,7 +26,7 @@ class Price(BaseModel):
     cache_read: float
 
     def cost(self, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
-        """Returns the USD cost of one call. `input_tokens` includes the cached ones."""
+        """Return the USD cost of one call. `input_tokens` includes the cached ones."""
         return (
             (input_tokens - cached_tokens) * self.input
             + cached_tokens * self.cache_read
@@ -75,10 +75,12 @@ class NixosConfigExport(BaseModel):
 
 
 def load_export() -> NixosConfigExport:
-    """Reads the export that the dev shell names in `BENCH_NIXOS_CONFIG`.
+    """Read the export that the dev shell names in `BENCH_NIXOS_CONFIG`.
 
-    Raises:
-        RuntimeError: The variable is unset outside the dev shell.
+    Raises
+    ------
+    RuntimeError
+        The variable is unset outside the dev shell.
     """
     path = os.environ.get(EXPORT_VAR)
     if not path:
@@ -127,7 +129,7 @@ class System(BaseModel):
 
     @property
     def fingerprint(self) -> str:
-        """Hashes what shapes the outputs. Votes pool only within one fingerprint."""
+        """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
             'route': self.route,
@@ -145,22 +147,25 @@ class System(BaseModel):
 def load_systems(
     export: NixosConfigExport, path: Path = REPO_ROOT / 'systems.toml'
 ) -> dict[str, System]:
-    with path.open('rb') as file:
-        tables = tomllib.load(file)
+    return parse_systems(export, path.read_text())
+
+
+def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]:
     return {
         name: resolve_system(name, SystemConfig.model_validate(table), export)
-        for name, table in tables.items()
+        for name, table in tomllib.loads(document).items()
     }
 
 
 def resolve_system(
     name: str, config: SystemConfig, export: NixosConfigExport
 ) -> System:
-    """Resolves a system, defaulting effort from the catalog where it is required.
+    """Resolve a system, defaulting effort from the catalog where it is required.
 
-    Raises:
-        ValueError: The model, its channel, the effort, or the prompt is unknown or
-            ambiguous.
+    Raises
+    ------
+    ValueError
+        The model, its channel, the effort, or the prompt is unknown or ambiguous.
     """
     prompt = _prompt(name, config.prompt, export)
     if config.route is not None:

@@ -65,6 +65,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          # The fingerprint check builds the base revision's nixos-config export.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Nix
@@ -92,6 +94,12 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
+
+      - name: Check fingerprints
+        if: github.event_name == 'pull_request'
+        run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
   harbor-smoke:
     name: Harbor Smoke

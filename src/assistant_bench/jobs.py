@@ -8,11 +8,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import assert_never
 
+from harbor.job_diff import load_source_trials
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
+from harbor.publisher.packager import Packager
 from pydantic import BaseModel
 
 from assistant_bench.catalog import System
@@ -44,15 +46,15 @@ ROUTE_CONCURRENCY = 4
 
 
 def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
-    """Writes one Harbor task per case under the data directory and returns their paths.
+    """Write one Harbor task per case under the data directory and returns their paths.
 
     Each task names a stock image that idles while the agent calls the endpoint from
     the host. It has no tests, which Harbor accepts while the verifier is disabled.
     """
     paths = []
     for case in cases:
-        task_dir = _task_dir(family, case)
-        (task_dir / 'environment').mkdir(parents=True, exist_ok=True)
+        task_dir = data_dir() / 'tasks' / family.name / case.id
+        task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / 'instruction.md').write_text(case.instruction)
         config = task_config.TaskConfig(
             task=task_config.PackageInfo(
@@ -66,31 +68,27 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     return paths
 
 
-def changed_cases(family: Family, cases: list[Case]) -> list[str]:
-    """Returns the IDs of cases whose instruction differs from the task a trial ran.
+def changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
+    """Return the IDs of rendered tasks whose content differs from what a trial ran.
 
-    A case without a rendered task is left to Harbor's own digest check.
+    Harbor records each trial's task digest, and aborts a job whose task keeps its
+    version but no longer matches that digest.
     """
-    ran = {
-        output.case
-        for job_dir in _family_jobs(family)
-        for output in read_trials(family, job_dir, {})
-    }
-    return [
-        case.id
-        for case in cases
-        if case.id in ran
-        and (instruction := _task_dir(family, case) / 'instruction.md').exists()
-        and instruction.read_text(newline='') != case.instruction
-    ]
-
-
-def _task_dir(family: Family, case: Case) -> Path:
-    return data_dir() / 'tasks' / family.name / case.id
+    recorded: defaultdict[str, set[str]] = defaultdict(set)
+    for trial in load_source_trials(_sources(family)):
+        if trial.lock.task.version == TASK_VERSION:
+            recorded[trial.task_name].add(trial.lock.task.digest)
+    changed = []
+    for task in tasks:
+        digests = recorded.get(f'{family.name}/{task.name}', set())
+        content_hash, _ = Packager.compute_content_hash(task)
+        if digests - {f'sha256:{content_hash}'}:
+            changed.append(task.name)
+    return changed
 
 
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
-    """Builds a job that runs every system on every case task.
+    """Build a job that runs every system on every case task.
 
     The job diffs against the family's earlier jobs, so Harbor runs only the trials
     that none of them completed with the same task version and agent config.
@@ -113,15 +111,12 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
         )
         for system in systems
     ]
-    sources = [
-        SourceJobConfig(action='diff', type='local', path=job_dir)
-        for job_dir in _family_jobs(family)
-    ]
+    sources = [source for source, _ in _sources(family)]
     return _job(family, data_dir() / 'jobs' / family.name, agents, tasks, sources)
 
 
 def oracle_job(family: Family) -> JobConfig:
-    """Builds a job that runs Harbor's oracle on every task directory of the family.
+    """Build a job that runs Harbor's oracle on every task directory of the family.
 
     Its trials go under `checks/`, apart from the jobs that ingest reads.
     """
@@ -142,6 +137,13 @@ def oracle_job(family: Family) -> JobConfig:
 def _family_jobs(family: Family) -> list[Path]:
     jobs_dir = data_dir() / 'jobs' / family.name
     return sorted(result.parent for result in jobs_dir.glob('*/result.json'))
+
+
+def _sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
+    return [
+        (SourceJobConfig(action='diff', type='local', path=job_dir), job_dir)
+        for job_dir in _family_jobs(family)
+    ]
 
 
 def _job(
@@ -175,10 +177,12 @@ def _runs_tests(settings: Settings) -> bool:
 
 
 def run_job(config: JobConfig) -> Path:
-    """Runs the job with the Harbor CLI and returns the job directory.
+    """Run the job with the Harbor CLI and returns the job directory.
 
-    Raises:
-        subprocess.CalledProcessError: Harbor exited with an error.
+    Raises
+    ------
+    subprocess.CalledProcessError
+        Harbor exited with an error.
     """
     harbor = Path(sys.executable).with_name('harbor')
     with tempfile.NamedTemporaryFile(
@@ -221,7 +225,7 @@ class Output(BaseModel):
 
 
 def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
-    """Reads the family's trials into `outputs/<family>.jsonl`.
+    """Read the family's trials into `outputs/<family>.jsonl`.
 
     Each case, system, and fingerprint keeps at most `samples` outputs, preferring
     successful trials, so an errored trial drops out once a rerun replaces it. Costs
@@ -258,7 +262,7 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
 def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
-    """Returns one output per finished trial of a job."""
+    """Return one output per finished trial of a job."""
     return [
         _output(family, result.parent, systems)
         for result in sorted(job_dir.glob('*/result.json'))

@@ -1,4 +1,3 @@
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.config import AgentConfig
+from harbor.publisher.packager import Packager
 
 from assistant_bench import jobs
 from assistant_bench.families import (
@@ -32,17 +32,13 @@ TESTS = Family(
 
 
 class TestRenderTasks:
-    def test_writes_a_versioned_task_that_harbor_loads_without_verification(
-        self, data_dir: Path
-    ) -> None:
+    def test_writes_a_versioned_task_on_the_stock_image(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
 
         (path,) = jobs.render_tasks(family, [case])
 
         assert path == data_dir / 'tasks' / 'smoke-text' / 'en-greeting'
-        assert Task.is_valid_dir(path, disable_verification=True)
-        assert not Task.is_valid_dir(path)
         task = Task(path, disable_verification=True)
         assert task.config.task is not None
         assert (task.config.task.name, task.config.task.version) == (
@@ -53,48 +49,57 @@ class TestRenderTasks:
         assert task.instruction == case.instruction
 
 
-class TestChangedCases:
+class TestChangedTasks:
     @staticmethod
-    def record_trials(data_dir: Path, family: str, *case_ids: str) -> None:
-        job_dir = data_dir / 'jobs' / family / 'job-1'
-        for case_id in case_ids:
-            agent = AgentConfig(name='oracle')
-            write_trial(job_dir, f'{case_id}__1', agent, task=f'{family}/{case_id}')
+    def record(data_dir: Path, task: Path, version: str = jobs.TASK_VERSION) -> None:
+        content_hash, _ = Packager.compute_content_hash(task)
+        write_trial(
+            data_dir / 'jobs' / 'smoke-text' / 'job-1',
+            f'{task.name}__1',
+            AgentConfig(name='oracle'),
+            task=f'smoke-text/{task.name}',
+            digest=f'sha256:{content_hash}',
+            version=version,
+        )
 
     def test_names_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
-        jobs.render_tasks(family, cases)
-        self.record_trials(data_dir, 'smoke-text', 'en-greeting')
+        for task in jobs.render_tasks(family, cases):
+            self.record(data_dir, task)
         edited = [
-            case.model_copy(update={'instruction': 'Reworded.'}) for case in cases
+            cases[0].model_copy(update={'instruction': 'Reworded.'}),
+            cases[1],
+            cases[1].model_copy(update={'id': 'zh-greeting-2', 'instruction': 'New.'}),
         ]
-        new = edited[0].model_copy(update={'id': 'en-greeting-2'})
 
-        changed = jobs.changed_cases(family, [*edited, new])
+        changed = jobs.changed_tasks(family, jobs.render_tasks(family, edited))
 
         assert changed == ['en-greeting']
 
-    def test_leaves_a_case_without_a_rendered_task_to_harbor(
-        self, data_dir: Path
+    def test_names_every_task_when_the_stock_image_changes(
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = load_family('smoke-text')
-        (case, _) = load_cases(family)
-        jobs.render_tasks(family, [case])
-        self.record_trials(data_dir, 'smoke-text', case.id)
-        shutil.rmtree(data_dir / 'tasks' / 'smoke-text')
-        edited = case.model_copy(update={'instruction': 'Reworded.'})
+        cases = load_cases(family)
+        for task in jobs.render_tasks(family, cases):
+            self.record(data_dir, task)
+        monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
 
-        assert jobs.changed_cases(family, [edited]) == []
+        changed = jobs.changed_tasks(family, jobs.render_tasks(family, cases))
 
-    def test_keeps_carriage_returns_when_comparing(self, data_dir: Path) -> None:
+        assert changed == ['en-greeting', 'zh-greeting']
+
+    def test_ignores_trials_of_another_task_version(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
-        crlf = case.model_copy(update={'instruction': 'Line one.\r\nLine two.'})
-        jobs.render_tasks(family, [crlf])
-        self.record_trials(data_dir, 'smoke-text', case.id)
+        (task,) = jobs.render_tasks(family, [case])
+        self.record(data_dir, task, version='0.9.0')
+        edited = case.model_copy(update={'instruction': 'Reworded.'})
 
-        assert jobs.changed_cases(family, [crlf]) == []
+        changed = jobs.changed_tasks(family, jobs.render_tasks(family, [edited]))
+
+        assert changed == []
 
 
 class TestCaseJob:

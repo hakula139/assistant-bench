@@ -158,6 +158,22 @@ class TestRun:
         assert context.metadata is not None
         assert context.metadata['reasoning_tokens'] is None
 
+    def test_leaves_tokens_unknown_when_the_endpoint_reports_no_usage(
+        self, endpoint: StubEndpoint, tmp_path: Path
+    ) -> None:
+        del endpoint.response['usage']
+
+        context, output = run_agent(endpoint, tmp_path)
+
+        assert output.read_text() == 'Hello there.'
+        assert (
+            context.n_input_tokens,
+            context.n_cache_tokens,
+            context.n_output_tokens,
+        ) == (None, None, None)
+        assert context.metadata is not None
+        assert context.metadata['reasoning_tokens'] is None
+
     def test_writes_an_empty_output_for_a_reply_without_content(
         self, endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
@@ -178,6 +194,19 @@ class TestRun:
 
         assert len(endpoint.requests) == 1
         assert not (tmp_path / 'output.txt').exists()
+
+    def test_binds_connections_to_the_local_address_the_env_names(
+        self, endpoint: StubEndpoint, tmp_path: Path
+    ) -> None:
+        # 192.0.2.1 is reserved for documentation, so no host owns it.
+        with pytest.raises(openai.APIConnectionError):
+            run_agent(endpoint, tmp_path, env={'BENCH_API_LOCAL_ADDRESS': '192.0.2.1'})
+        _, output = run_agent(
+            endpoint, tmp_path, env={'BENCH_API_LOCAL_ADDRESS': '127.0.0.1'}
+        )
+
+        assert output.read_text() == 'Hello there.'
+        assert len(endpoint.requests) == 1
 
     def test_trusts_the_ca_bundle_the_env_names(
         self, tls_endpoint: StubEndpoint, tmp_path: Path

@@ -16,7 +16,7 @@ from support import EXPORT_FILE, Request, StubEndpoint
 
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Points the data directory at a scratch path and leaves any `.env` unread."""
+    """Point the data directory at a scratch path and leaves any `.env` unread."""
     home = tmp_path / 'xdg-data'
     monkeypatch.setenv('XDG_DATA_HOME', str(home))
     monkeypatch.chdir(tmp_path)
@@ -25,7 +25,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Points family discovery at a scratch `families/` directory."""
+    """Point family discovery at a scratch `families/` directory."""
     directory = tmp_path / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
@@ -44,7 +44,7 @@ def endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
 
 @pytest.fixture
 def tls_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
-    """The stub endpoint over TLS, with a certificate for 127.0.0.1 from a test CA."""
+    """Serve the stub endpoint over TLS with a test CA's certificate for 127.0.0.1."""
     ca = trustme.CA()
     ca_file = tmp_path / 'ca.pem'
     ca.cert_pem.write_to_path(str(ca_file))

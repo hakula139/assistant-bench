@@ -9,6 +9,6 @@ FAMILIES_DIR = REPO_ROOT / 'families'
 
 
 def data_dir() -> Path:
-    """Returns `$XDG_DATA_HOME/assistant-bench`, the home of data kept out of Git."""
+    """Return `$XDG_DATA_HOME/assistant-bench`, the home of data kept out of Git."""
     base = os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share'
     return Path(base) / 'assistant-bench'

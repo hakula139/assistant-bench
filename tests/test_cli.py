@@ -8,7 +8,8 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
 
-from assistant_bench import jobs
+from assistant_bench import jobs, revisions
+from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import load_cases, load_family
 from support import write_trial
@@ -47,7 +48,7 @@ def output(**fields: Any) -> jobs.Output:
 
 @pytest.fixture
 def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig]:
-    """Records each job `bench` submits in place of running Harbor."""
+    """Record each job `bench` submits in place of running Harbor."""
     configs: list[JobConfig] = []
 
     def run_job(job: JobConfig) -> Path:
@@ -115,14 +116,11 @@ class TestCheck:
             ),
         ],
     )
-    def test_rejects_cases_edited_after_a_trial_ran_them(
+    def test_rejects_cases_whose_task_differs_from_a_recorded_trial(
         self, data_dir: Path, edited: list[str], expected: str
     ) -> None:
         job_dir = data_dir / 'jobs' / 'smoke-text' / 'job-1'
         for case_id in edited:
-            task_dir = data_dir / 'tasks' / 'smoke-text' / case_id
-            task_dir.mkdir(parents=True)
-            (task_dir / 'instruction.md').write_text('An earlier wording.')
             agent = AgentConfig(name='oracle')
             write_trial(job_dir, f'{case_id}__1', agent, task=f'smoke-text/{case_id}')
 
@@ -202,6 +200,37 @@ class TestRun:
         exit_code, _ = invoke('run', 'smoke-text')
 
         assert exit_code == 3
+
+
+class TestFingerprints:
+    @pytest.mark.parametrize(
+        ('changed', 'exit_code', 'message'),
+        [
+            (False, 0, 'Every system keeps its fingerprint since origin/main'),
+            (
+                True,
+                1,
+                "system 'opus-5.5' changed its fingerprint since origin/main, "
+                'so give the changed system a new name',
+            ),
+        ],
+    )
+    def test_compares_each_system_with_the_base_revision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        changed: bool,
+        exit_code: int,
+        message: str,
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(update={'route': f'{opus.route}-old'})
+        base = head | {'opus-5.5': old} if changed else head
+        monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert (result.exit_code, result.output) == (exit_code, f'{message}\n')
 
 
 class TestIngest:

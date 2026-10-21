@@ -58,11 +58,13 @@ class Case(BaseModel):
 
 
 def load_family(name: str) -> Family:
-    """Reads `family.toml` and infers where the family's tasks come from.
+    """Read `family.toml` and infers where the family's tasks come from.
 
-    Raises:
-        ValueError: No family has the name, the family holds both or neither of
-            `cases.jsonl` and `tasks/`, or a case family sets no `max_output_tokens`.
+    Raises
+    ------
+    ValueError
+        No family has the name, the family holds both or neither of
+        `cases.jsonl` and `tasks/`, or a case family sets no `max_output_tokens`.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -83,10 +85,12 @@ def load_family(name: str) -> Family:
 
 
 def load_cases(family: Family) -> list[Case]:
-    """Returns the committed cases followed by the local ones, if the family has any.
+    """Return the committed cases followed by the local ones, if the family has any.
 
-    Raises:
-        ValueError: Two cases share an ID, within one file or across both.
+    Raises
+    ------
+    ValueError
+        Two cases share an ID, within one file or across both.
     """
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',

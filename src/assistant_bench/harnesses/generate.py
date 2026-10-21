@@ -26,6 +26,7 @@ BASE_URL_VAR = 'BENCH_API_BASE_URL'
 KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
 CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
+LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
 
 _HEADERS = TypeAdapter(dict[str, str])
 
@@ -41,7 +42,7 @@ class GenerateOptions(AgentOptions):
 
 
 class Generate(BaseAgent):
-    """Sends the instruction as one user message and writes the reply to `output.txt`.
+    """Agent that answers with one chat-completions request, writing `output.txt`.
 
     The model name is the endpoint's model ID. HTTP errors raise, so the job's retry
     policy reruns the trial, while a reply cut off by the token limit is a valid output.
@@ -111,12 +112,14 @@ class Generate(BaseAgent):
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
         usage = completion.usage
-        assert usage is not None
-        prompt_details = usage.prompt_tokens_details
-        completion_details = usage.completion_tokens_details
-        context.n_input_tokens = usage.prompt_tokens
-        context.n_cache_tokens = (prompt_details and prompt_details.cached_tokens) or 0
-        context.n_output_tokens = usage.completion_tokens
+        completion_details = usage and usage.completion_tokens_details
+        if usage is not None:
+            prompt_details = usage.prompt_tokens_details
+            context.n_input_tokens = usage.prompt_tokens
+            context.n_cache_tokens = (
+                prompt_details and prompt_details.cached_tokens
+            ) or 0
+            context.n_output_tokens = usage.completion_tokens
         context.metadata = {
             'reasoning_tokens': completion_details
             and completion_details.reasoning_tokens,
@@ -139,9 +142,12 @@ class Generate(BaseAgent):
         key_file = self._get_env(KEY_FILE_VAR)
         assert base_url and key_file
         verify = _verify(self._get_env(CA_FILE_VAR))
-
-        # Some endpoints advertise IPv6 addresses that close during the TLS handshake.
-        transport = httpx.AsyncHTTPTransport(local_address='0.0.0.0', verify=verify)
+        local_address = self._get_env(LOCAL_ADDRESS_VAR)
+        transport = (
+            httpx.AsyncHTTPTransport(local_address=local_address, verify=verify)
+            if local_address
+            else None
+        )
         return AsyncOpenAI(
             base_url=base_url,
             api_key=_api_key(key_file),

@@ -8,9 +8,9 @@ import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 
-from assistant_bench import jobs
+from assistant_bench import jobs, revisions
 from assistant_bench.catalog import System, load_export, load_systems
-from assistant_bench.families import Case, Family, load_cases, load_family
+from assistant_bench.families import Family, load_cases, load_family
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -28,7 +28,7 @@ def check(family: str) -> None:
     selected = _load_family(family)
     _family_systems(selected)
     if selected.source == 'cases':
-        typer.echo(f'{family}: {len(_load_cases(selected))} valid cases')
+        typer.echo(f'{family}: {len(_render_tasks(selected))} valid cases')
         return
 
     job_dir = _run(jobs.oracle_job(selected))
@@ -57,7 +57,7 @@ def run(family: str) -> None:
     if not systems:
         raise typer.BadParameter(f'{family} lists no systems', param_hint='FAMILY')
 
-    tasks = jobs.render_tasks(selected, _load_cases(selected))
+    tasks = _render_tasks(selected)
     typer.echo(f'Job written to {_run(jobs.case_job(selected, systems, tasks))}')
 
 
@@ -74,6 +74,23 @@ def ingest(family: str) -> None:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
 
 
+@app.command()
+def fingerprints(base: str) -> None:
+    """Fail when a system keeps its name but its fingerprint differs from BASE."""
+    changed = revisions.changed_fingerprints(
+        revisions.systems_at(base), load_systems(load_export())
+    )
+    for name in changed:
+        typer.echo(
+            f'system {name!r} changed its fingerprint since {base}, '
+            'so give the changed system a new name',
+            err=True,
+        )
+    if changed:
+        raise typer.Exit(1)
+    typer.echo(f'Every system keeps its fingerprint since {base}')
+
+
 def _load_family(name: str) -> Family:
     try:
         return load_family(name)
@@ -81,14 +98,15 @@ def _load_family(name: str) -> Family:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
 
 
-def _load_cases(family: Family) -> list[Case]:
+def _render_tasks(family: Family) -> list[Path]:
     try:
         cases = load_cases(family)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
-    match jobs.changed_cases(family, cases):
+    tasks = jobs.render_tasks(family, cases)
+    match jobs.changed_tasks(family, tasks):
         case []:
-            return cases
+            return tasks
         case [case_id]:
             message = f'case {case_id!r} changed, give it a new ID'
         case changed:
