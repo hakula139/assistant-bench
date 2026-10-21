@@ -15,16 +15,17 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 web/src/
 ├── components/boards/                      # One board per scorer, plus the tables its pages share
 ├── components/charts/                      # Observable Plot charts and their table twins
-├── components/site/                        # Header, theme toggle, and other page chrome
+├── components/site/                        # Header, theme toggle, and the home page's family table
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The reports collection
+├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
 ├── lib/                                    # The report schema, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # Helpers shared by the Vitest tests
+├── test/                                   # The fixture helper and the page tests
 └── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it
 ```
 
@@ -32,22 +33,24 @@ web/src/
 
 - The site reads only `reports/*/*.json`, through the `reports` collection's `glob()` loader. Nothing under the data directory reaches a build.
 - `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so a report that gains, loses, or retypes a field fails the build. Change both schemas in one PR. `pnpm test` parses `tests/fixtures/report.json`, which the pydantic models write, and fails when the Zod schema stops accepting it.
-- A new scorer adds a results variant to the schema, a board under `components/boards/`, and an entry in the family page's per-scorer summaries, whose `Record` type fails the type check until the entry exists.
+- A new scorer adds a results variant to the schema, a board under `components/boards/`, an entry in the family page's per-scorer summaries, and an arm in the scorer switches of the home and family pages. Each of these fails the type check until it handles the new variant.
 
 ## Components
 
-- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state.
+- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state and `progress.tsx` for its value and track.
 - Hydrate a component only where the page is interactive. Tables render as static React components, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
 - Pass filter state through `useSearchParam` so each filter lands in the URL.
 
 ## Charts
 
-- Render every chart through `PlotFigure`, which sizes it to its container.
-- Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series, emphasis, and sequential steps were checked as a set for lightness, chroma, color-vision separation, and contrast in both themes, so recheck the whole set before changing any of them.
+- Render every chart through `PlotFigure`, which sizes it to its container and measures labels in the chart's font. Size label margins from those measurements, never from a fixed width.
+- Pick log-axis ticks with `logTicks` and label them through the axis mark's `text` option, because Plot's log tick format blanks labels on spans under a decade.
+- Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series, emphasis, and sequential steps were checked as a set for lightness, chroma, color-vision separation, and contrast against the surface in both themes, and each step's `--chart-seq-ink-*` token for at least 4.5:1 text contrast on that step, so recheck the whole set before changing any of them.
 - Give every chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows.
 
 ## The Vote Page
 
 - The page exists only in builds with `BENCH_LOCAL=1`, so the public site never routes it. Keep it out of `src/pages/`.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
+- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives, which loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin. Keep the page within it, and keep Markdown images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
 - HTML outputs load by URL in `<iframe sandbox="allow-scripts">` from the separate render origin. Never use `srcdoc`, which inherits the vote page's policy.

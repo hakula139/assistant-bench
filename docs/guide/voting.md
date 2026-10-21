@@ -10,15 +10,15 @@ Learn how to vote on pairs by keyboard, read outputs as Markdown, and keep HTML 
 
 Each pair shows the case's brief and checklist above two outputs, A on the left and B on the right, which never name their systems. Nothing is selected until you choose:
 
-| Key        | Action                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| `a` / `b`  | A or B is better                                                                                  |
-| `t`        | Tie                                                                                               |
-| `x`        | Both bad                                                                                          |
-| `1` to `5` | Toggle a flag: meaning changed, punctuation, register, wrong script, too long                     |
-| `n`        | Write a note, then `Escape` to leave the field                                                    |
-| `Enter`    | Submit the vote and load the next pair, also from the note, where `Shift+Enter` starts a new line |
-| `u`        | Undo the last vote and show its pair again                                                        |
+| Key        | Action                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `a` / `b`  | A or B is better                                                                                       |
+| `t`        | Tie                                                                                                    |
+| `x`        | Both bad                                                                                               |
+| `1` to `5` | Toggle a flag: meaning changed, punctuation, register, wrong script, too long                          |
+| `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field |
+| `Enter`    | Submit the vote and load the next pair, even with a button focused, which `Space` still presses        |
+| `u`        | Undo the last vote and show its pair again                                                             |
 
 Flags count against the side you did not prefer, or against both sides of a tie or a both-bad vote. Outputs appear exactly as written, and the Markdown toggle renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
 

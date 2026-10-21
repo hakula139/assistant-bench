@@ -35,7 +35,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | When the change touches                              | Read                                                                                                       |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
-| The site under `web/`                                | [TypeScript](docs/conventions/typescript.md)                                                               |
+| The site under `web/`                                | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                               |
 | Tests                                                | [Testing](docs/conventions/testing.md)                                                                     |
 | A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
 | Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                           |
@@ -74,7 +74,7 @@ pnpm format                                 # Check formatting of the site, JSON
 pnpm lint                                   # Lint Markdown and the site
 pnpm spellcheck                             # Spell check
 pnpm typecheck                              # Type check the site
-pnpm test                                   # Check the site's report schema against the report fixture
+pnpm test                                   # Test the site: schema, charts, pages, and the vote page
 pnpm build                                  # Build the site from reports/
 nix flake check                             # After a flake change, run the hooks in the Nix sandbox
 ```
