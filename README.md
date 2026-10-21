@@ -30,7 +30,7 @@ cp .env.example .env                        # Then fill in the endpoint variable
 uv run bench check smoke                    # Run Harbor's oracle on the smoke task
 uv run bench run smoke-text                 # Send each smoke case to every listed system
 uv run bench ingest smoke-text              # Collect the replies into the data directory
-uv run bench serve                          # Vote on blind pairs at http://127.0.0.1:8790
+uv run bench serve                          # Vote on blind pairs at http://127.0.0.1:8790/vote/
 uv run bench close smoke-text               # Write the family's report under reports/
 ```
 

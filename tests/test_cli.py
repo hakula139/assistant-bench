@@ -8,14 +8,13 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
 
-from assistant_bench import jobs, report, revisions
+from assistant_bench import cli, jobs, report, revisions
 from assistant_bench.arena import api
 from assistant_bench.arena.store import VoteStore
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
 from assistant_bench.outputs import write_outputs
-from assistant_bench.paths import REPO_ROOT
 from support import (
     make_output,
     write_synthetic_round,
@@ -287,16 +286,20 @@ class TestIngest:
 
 class TestServe:
     def test_builds_the_local_site_and_serves_the_families_with_outputs(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
         write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
+        site = tmp_path / 'dist'
         builds: list[tuple[list[str], str | None]] = []
         served: list[tuple[list[str], Path]] = []
 
         def build(args: list[str], **options: Any) -> None:
             builds.append((args, options['env'].get('BENCH_LOCAL')))
+            (site / 'vote').mkdir(parents=True)
+            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
 
+        monkeypatch.setattr(cli, 'SITE_DIR', site)
         monkeypatch.setattr(subprocess, 'run', build)
         monkeypatch.setattr(
             api, 'serve', lambda arena, site: served.append((arena.families(), site))
@@ -306,8 +309,23 @@ class TestServe:
 
         assert exit_code == 0, message
         assert builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
-        assert served == [(['f'], REPO_ROOT / 'web' / 'dist')]
-        assert message == 'Voting on f at http://127.0.0.1:8790\n'
+        assert served == [(['f'], site)]
+        assert message == 'Voting on f at http://127.0.0.1:8790/vote/\n'
+
+    def test_stops_when_the_build_leaves_no_vote_page(
+        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
+        monkeypatch.setattr(cli, 'SITE_DIR', tmp_path / 'dist')
+        monkeypatch.setattr(subprocess, 'run', lambda args, **options: None)
+        monkeypatch.setattr(api, 'serve', lambda arena, site: pytest.fail('served'))
+
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 1
+        assert f'No vote page at {tmp_path / "dist" / "vote" / "index.html"}' in message
+        assert '`BENCH_LOCAL=1 pnpm --filter web build`' in message
 
     def test_exits_with_the_code_of_a_failed_site_build(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch

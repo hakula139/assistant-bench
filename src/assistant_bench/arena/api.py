@@ -10,6 +10,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from assistant_bench.arena.service import (
     Arena,
@@ -32,6 +34,13 @@ RENDER_POLICY = (
     "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
     "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
     f'frame-ancestors {APP_ORIGIN}'
+)
+VOTE_PATH = '/vote'
+VOTE_POLICY = (
+    "default-src 'none'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; "
+    f"connect-src 'self'; frame-src {RENDER_ORIGIN}; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
 )
 
 
@@ -58,7 +67,10 @@ def same_origin(request: Request) -> None:
 
 
 def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
-    """Build the vote API under `/api`, serving the built vote page at `/`."""
+    """Build the vote API under `/api`, serving the built site at `/`.
+
+    Everything under `VOTE_PATH` carries `VOTE_POLICY`.
+    """
     app = _app(title='assistant-bench arena')
     app.add_exception_handler(NothingToUndo, _conflict)
     router = APIRouter(prefix='/api')
@@ -92,6 +104,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     router.include_router(writes)
     app.include_router(router)
     if site is not None:
+        app.middleware('http')(_vote_policy)
         app.mount('/', StaticFiles(directory=site, html=True))
     return app
 
@@ -130,6 +143,16 @@ def _app(**options: Any) -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST])
     app.add_exception_handler(UnknownItem, _not_found)
     return app
+
+
+async def _vote_policy(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    response = await call_next(request)
+    path = request.url.path
+    if path == VOTE_PATH or path.startswith(f'{VOTE_PATH}/'):
+        response.headers['Content-Security-Policy'] = VOTE_POLICY
+    return response
 
 
 async def _not_found(request: Request, error: Exception) -> JSONResponse:

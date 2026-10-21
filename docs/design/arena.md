@@ -34,6 +34,14 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 
 `TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. Flags are `meaning`, `punctuation`, `register`, `script`, and `length`, and a note holds at most 500 characters.
 
+The vote page is `web/dist/vote/index.html`, and `bench serve` stops when the build leaves none. Everything under `/vote/` carries the vote page's policy, which loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin:
+
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+  font-src 'self'; img-src 'self'; connect-src 'self'; frame-src http://127.0.0.1:8791; base-uri 'none';
+  form-action 'none'; frame-ancestors 'none'
+```
+
 ## Render Origin
 
 A family with `render = "html"` sends each output as a URL on a second origin, `http://127.0.0.1:8791`, which the vote page loads in `<iframe sandbox="allow-scripts">`. The origin answers with the output under this policy:

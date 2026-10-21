@@ -19,7 +19,6 @@ def arena(families_dir: Path, clock: Clock, store: VoteStore) -> Arena:
     return make_arena(
         families_dir, clock, store, texts={'large': '<p>L</p>', 'small': '<p>S</p>'}
     )
-    return arena
 
 
 @pytest.fixture
@@ -100,6 +99,27 @@ class TestCreateApp:
         client = TestClient(api.create_app(arena, site), base_url=api.APP_ORIGIN)
 
         assert client.get('/').text == '<h1>Vote</h1>'
+
+    def test_sends_the_vote_policy_on_the_vote_page_alone(
+        self, arena: Arena, tmp_path: Path
+    ) -> None:
+        site = tmp_path / 'dist'
+        (site / 'vote').mkdir(parents=True)
+        (site / 'index.html').write_text('<h1>Boards</h1>')
+        (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+        client = TestClient(api.create_app(arena, site), base_url=api.APP_ORIGIN)
+
+        page = client.get('/vote/')
+        board = client.get('/')
+
+        assert page.text == '<h1>Vote</h1>'
+        assert page.headers['content-security-policy'] == (
+            "default-src 'none'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; "
+            "connect-src 'self'; frame-src http://127.0.0.1:8791; base-uri 'none'; "
+            "form-action 'none'; frame-ancestors 'none'"
+        )
+        assert 'content-security-policy' not in board.headers
 
 
 class TestCreateRenderApp:
