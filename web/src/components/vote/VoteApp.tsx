@@ -298,7 +298,13 @@ export function VoteApp() {
   }
 
   return (
-    <div ref={pairView} tabIndex={-1} className="flex h-dvh flex-col outline-none">
+    <div
+      ref={pairView}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Pair ${session.votes + 1} of ${session.size}`}
+      className="flex h-dvh flex-col outline-none"
+    >
       <Brief key={pair.token} pair={pair} />
 
       <div className="grid min-h-0 flex-1 grid-rows-2 divide-y md:grid-cols-2 md:grid-rows-1 md:divide-x md:divide-y-0">

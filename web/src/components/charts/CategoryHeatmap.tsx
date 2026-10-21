@@ -1,4 +1,5 @@
 import * as Plot from '@observablehq/plot';
+import { bisectRight } from 'd3-array';
 import { useCallback, useMemo } from 'react';
 
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
@@ -55,8 +56,7 @@ function scoreScale(cells: Cell[]) {
 
 /** Returns the 1-based ramp step of a score under the scale's thresholds. */
 function step(scale: Plot.Scale, score: number): number {
-  const thresholds = (scale.domain ?? []) as number[];
-  return 1 + thresholds.filter((threshold) => score >= threshold).length;
+  return bisectRight((scale.domain ?? []) as number[], score) + 1;
 }
 
 function Legend({ scale }: { scale: Plot.Scale }) {

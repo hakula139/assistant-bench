@@ -61,7 +61,7 @@ const ROW_HEIGHT = 44;
 const FOREST_MARGIN = 22;
 
 const features = tableFeatures({
-  columnMeta: metaHelper<{ numeric?: boolean; forest?: boolean }>(),
+  columnMeta: metaHelper<{ numeric?: boolean; forest?: boolean; wraps?: boolean }>(),
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   sortFns: { alphanumeric: sortFn_alphanumeric, basic: sortFn_basic },
@@ -190,8 +190,11 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
           header: 'System',
           sortFn: 'alphanumeric',
           cell: ({ row }) => (
-            <span className="inline-flex items-center gap-2">
-              <a href={href(row.original.standing.system)} className="font-medium">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <a
+                href={href(row.original.standing.system)}
+                className="font-medium whitespace-nowrap"
+              >
                 {row.original.standing.system}
               </a>
               {row.original.preliminary && (
@@ -201,6 +204,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
               )}
             </span>
           ),
+          meta: { wraps: true },
         }),
         helper.display({
           id: 'interval',
@@ -314,11 +318,15 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
         {table.getRowModel().rows.map((row) => (
           <TableRow key={row.id} className="group/row h-11">
             {row.getAllCells().map((cell) => {
-              const { numeric, forest } = cell.column.columnDef.meta ?? {};
+              const { numeric, forest, wraps } = cell.column.columnDef.meta ?? {};
               return (
                 <TableCell
                   key={cell.id}
-                  className={forest ? 'p-0' : numeric ? 'text-right tabular-nums' : undefined}
+                  className={cn(
+                    forest && 'p-0',
+                    numeric && 'text-right tabular-nums',
+                    wraps && 'whitespace-normal',
+                  )}
                 >
                   <table.FlexRender cell={cell} />
                 </TableCell>

@@ -15,6 +15,12 @@ describe('logTicks', () => {
     expect(values).toEqual([1, 10, 100]);
   });
 
+  test('keeps every few powers of ten when one per decade is too many', () => {
+    const values = logTicks([0.0002, 20], 4);
+
+    expect(values).toEqual([0.01, 1]);
+  });
+
   test('falls back to linear ticks within one short span', () => {
     const values = logTicks([20.1, 48.2], 4);
 

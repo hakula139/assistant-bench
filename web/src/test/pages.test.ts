@@ -9,8 +9,19 @@ import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
 import { readFixture } from '@/test/fixture';
 
+/** The fixture's round, after an earlier one in which every system scored 900. */
 async function family(): Promise<Family> {
-  return { name: 'arena', rounds: [reportSchema.parse(await readFixture())] };
+  const latest = reportSchema.parse(await readFixture());
+  const earlier = structuredClone(latest);
+  earlier.round = '2026-10-07';
+  earlier.closed_at = '2026-10-07T18:00:00Z';
+  if (earlier.results.scorer !== 'votes') {
+    throw new Error('the fixture is a votes report');
+  }
+  for (const standing of earlier.results.standings) {
+    standing.score = 900;
+  }
+  return { name: 'arena', rounds: [earlier, latest] };
 }
 
 async function render(

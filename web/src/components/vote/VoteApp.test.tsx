@@ -92,6 +92,7 @@ describe('VoteApp', () => {
       'true',
     );
     expect(screen.getByRole('textbox')).toHaveProperty('value', '');
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: 'Pair 2 of 30' }));
   });
 
   test('submits on Enter after a click on Undo instead of undoing again', async () => {
@@ -99,14 +100,16 @@ describe('VoteApp', () => {
     const user = await startSession();
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
+    await user.keyboard('t{Enter}');
+    await screen.findByText('Output A3');
 
     await user.click(screen.getByRole('button', { name: 'Undo' }));
-    await screen.findByText('Output A3');
-    await user.keyboard('b{Enter}');
     await screen.findByText('Output A4');
+    await user.keyboard('b{Enter}');
+    await screen.findByText('Output A5');
 
     expect(api.undos()).toBe(1);
-    expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'b']);
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'tie', 'b']);
   });
 
   test('shows an error from starting a session on the start screen', async () => {
