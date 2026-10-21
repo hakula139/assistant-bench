@@ -1,0 +1,245 @@
+# ==================================================================================================
+# assistant-bench Development Flake
+# ==================================================================================================
+
+{
+  description = "assistant-bench development environment";
+
+  nixConfig = {
+    extra-substituters = [ "https://hakula.cachix.org" ];
+    extra-trusted-public-keys = [
+      "hakula.cachix.org-1:7zwB3fhMfReHdOjh6DmnaLXgqbPDBcojvN9F+osZw0k="
+    ];
+  };
+
+  # ------------------------------------------------------------------------------------------------
+  # Inputs
+  # ------------------------------------------------------------------------------------------------
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+
+    flake-utils.url = "github:numtide/flake-utils";
+
+    git-hooks-nix = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Only pure data and prompt files are imported, so the input skips nixos-config's own inputs.
+    nixos-config = {
+      url = "github:hakula139/nixos-config";
+      flake = false;
+    };
+  };
+
+  # ------------------------------------------------------------------------------------------------
+  # Outputs
+  # ------------------------------------------------------------------------------------------------
+  outputs =
+    {
+      nixpkgs,
+      flake-utils,
+      git-hooks-nix,
+      nixos-config,
+      ...
+    }:
+    let
+      # git-hooks.nix has dropped x86_64-darwin, which Nixpkgs supports only through 26.05.
+      systems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+    in
+    flake-utils.lib.eachSystem systems (
+      system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        # The model catalog and assistant instructions that systems reference, with the revision
+        # every output records.
+        promptFragments = "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
+        nixosConfigExport = pkgs.writeText "nixos-config.json" (
+          builtins.toJSON {
+            inherit (nixos-config) rev;
+            catalog = import "${nixos-config}/data/llm-models.nix";
+            instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
+              inherit (import promptFragments) readPrompt;
+            };
+
+            proseTics = builtins.readFile "${promptFragments}/prose-tics.md";
+          }
+        );
+
+        # ------------------------------------------------------------------------------------------
+        # Python Environment
+        # ------------------------------------------------------------------------------------------
+        pythonEnvironment = {
+          packages = with pkgs; [
+            python314
+            uv
+          ];
+
+          env = {
+            BENCH_NIXOS_CONFIG = nixosConfigExport;
+            UV_PYTHON = pkgs.lib.getExe pkgs.python314;
+          };
+        };
+
+        # ------------------------------------------------------------------------------------------
+        # Pre-commit Hooks
+        # ------------------------------------------------------------------------------------------
+        hooks = {
+          end-of-file-fixer.enable = true;
+          trim-trailing-whitespace.enable = true;
+          check-added-large-files.enable = true;
+          check-yaml.enable = true;
+          taplo.enable = true;
+
+          nixfmt.enable = true;
+          deadnix.enable = true;
+          statix.enable = true;
+
+          # `shfmt` reads `.editorconfig` only when the entry passes no formatting flag. Any flag
+          # reverts it to tabs and ignores the `binary_next_line` and `switch_case_indent` keys.
+          shfmt = {
+            enable = true;
+            settings = {
+              language-dialect = null;
+              simplify = false;
+              indent = null;
+              binary-next-line = false;
+              case-indent = false;
+            };
+          };
+        };
+
+        # These hooks run the tools pinned in node_modules and uv.lock, which the Nix sandbox lacks.
+        # The flake check leaves them to CI's Node Check and Python Check jobs.
+        nodeHook =
+          name: cmd:
+          pkgs.lib.getExe (
+            pkgs.writeShellApplication {
+              inherit name;
+              runtimeInputs = with pkgs; [
+                nodejs_24
+                pnpm
+              ];
+
+              text = ''
+                if [ ! -d node_modules ]; then
+                  echo "node_modules is missing. Run pnpm install, then commit again." >&2
+                  exit 1
+                fi
+                pnpm exec ${cmd} "$@"
+              '';
+            }
+          );
+
+        nodeHooks = {
+          prettier-write = {
+            enable = true;
+            name = "prettier";
+            entry = nodeHook "prettier-write" "prettier --write --ignore-unknown";
+            files = "\\.(json|jsonc|md|ya?ml)$";
+          };
+
+          cspell = {
+            enable = true;
+            package = null;
+            entry = nodeHook "cspell" "cspell --no-must-find-files --no-progress";
+            types = [ "text" ];
+          };
+
+          markdownlint = {
+            enable = true;
+            name = "markdownlint-cli2";
+            package = null;
+            entry = nodeHook "markdownlint" "markdownlint-cli2 --fix";
+            files = "\\.md$";
+          };
+        };
+
+        uvExe = pkgs.lib.getExe pkgs.uv;
+
+        uvHooks = {
+          ruff = {
+            enable = true;
+            package = null;
+            entry = "${uvExe} run --locked ruff check --fix";
+          };
+
+          ruff-format = {
+            enable = true;
+            package = null;
+            entry = "${uvExe} run --locked ruff format";
+          };
+        };
+
+        preCommit = git-hooks-nix.lib.${system}.run {
+          src = ./.;
+          hooks = hooks // nodeHooks // uvHooks;
+        };
+
+        preCommitCheck = git-hooks-nix.lib.${system}.run {
+          inherit hooks;
+          src = ./.;
+        };
+
+        flock = pkgs.lib.getExe pkgs.flock;
+        git = pkgs.lib.getExe pkgs.git;
+      in
+      {
+        # ------------------------------------------------------------------------------------------
+        # Dev Shells
+        # ------------------------------------------------------------------------------------------
+        devShells.python = pkgs.mkShell (pythonEnvironment // { name = "assistant-bench-python"; });
+
+        devShells.default = pkgs.mkShell {
+          name = "assistant-bench-dev";
+          inherit (pythonEnvironment) env;
+
+          # The hook packages put an older Python on PATH, so the project's Python must come first.
+          packages =
+            pythonEnvironment.packages
+            ++ preCommit.enabledPackages
+            ++ [ preCommit.config.package ]
+            ++ (with pkgs; [
+              nodejs_24
+              pnpm
+            ]);
+
+          # git-hooks.nix stores a hooks path relative to the main checkout, which linked worktrees
+          # can't resolve (cachix/git-hooks.nix#688), so unset it to fall back to the shared hooks
+          # directory. The lock keeps a concurrent load from setting it while `pre-commit install`
+          # runs, since pre-commit refuses to install with the path set. The hooks' Python packages
+          # also fill PYTHONPATH, which would shadow the project's virtualenv, so unset it.
+          shellHook = ''
+            unset PYTHONPATH
+            if common=$(${git} rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+              (
+                ${flock} 9
+                ${preCommit.config.installationScript}
+                ${git} config --local --unset-all core.hooksPath || true
+              ) 9>"$common/git-hooks.lock"
+            fi
+          '';
+        };
+
+        # ------------------------------------------------------------------------------------------
+        # Packages
+        # ------------------------------------------------------------------------------------------
+        packages.nixos-config = nixosConfigExport;
+
+        # ------------------------------------------------------------------------------------------
+        # Checks
+        # ------------------------------------------------------------------------------------------
+        checks.pre-commit = preCommitCheck;
+
+        # ------------------------------------------------------------------------------------------
+        # Formatter
+        # ------------------------------------------------------------------------------------------
+        formatter = pkgs.nixfmt-tree;
+      }
+    );
+}
