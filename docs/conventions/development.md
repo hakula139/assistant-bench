@@ -42,7 +42,8 @@ Environment variables carry only secrets and per-environment values: the `BENCH_
 
 ## Toolchain and Pins
 
-- The flake pins Nixpkgs, which supplies Python, uv, and Node.js, while `[tool.uv]` prefers that Python and never downloads another. Renovate opens PRs for flake input and lock file updates without automerging them, so a nixos-config bump always gets a human review.
+- The flake pins Nixpkgs, which supplies Python, uv, and Node.js. Both shells set `UV_PYTHON` to that Python, and `[tool.uv]` never downloads another.
+- Renovate opens lock file maintenance PRs, including the flake lock update that moves the nixos-config input, without automerging them, so every pin bump gets a human review.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 - `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.
 
