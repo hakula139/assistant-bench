@@ -6,13 +6,15 @@ Learn how to point the bench at a model endpoint, check and run a family, and co
 
 Single-call systems send OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
 
-| Variable                  | Value                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `BENCH_API_BASE_URL`      | The endpoint's base URL, including `/v1`                                                          |
-| `BENCH_API_KEY_FILE`      | A file holding the API key, so the key is never copied into the checkout                          |
-| `BENCH_API_CA_FILE`       | Optional. A CA bundle for an endpoint whose certificate the system store does not trust           |
-| `BENCH_API_HEADERS`       | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                |
-| `BENCH_API_LOCAL_ADDRESS` | Optional. A local address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4 |
+| Variable                  | Value                                                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BENCH_API_BASE_URL`      | The endpoint's base URL, including `/v1`                                                                                                                            |
+| `BENCH_API_KEY_FILE`      | A file holding the API key, so the key is never copied into the checkout                                                                                            |
+| `BENCH_API_CA_FILE`       | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                             |
+| `BENCH_API_HEADERS`       | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                                                                                  |
+| `BENCH_API_LOCAL_ADDRESS` | Optional. A local address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
+
+Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 
 Each system's route is the model ID the endpoint expects, and every trial sends one request with the case instruction as the user message, the system's prompt as the system message when it has one, the family's `max_output_tokens` as `max_completion_tokens`, and the system's effort as `reasoning_effort`.
 

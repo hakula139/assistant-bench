@@ -35,6 +35,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md)                                                              |
 | Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                  |
 | Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                 |
+| PRs or issues                                        | [GitHub](docs/conventions/github.md)                                                              |
 | The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                    |
 
 ## Rules for Every Change
