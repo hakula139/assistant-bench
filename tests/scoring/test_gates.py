@@ -14,11 +14,17 @@ ZH = VotesSettings(
     scorer='votes',
     samples=1,
     max_output_tokens=300,
+    reference='acme-large',
     language='zh',
     gates=Gates(min_chars=10, max_chars=60, script='hans'),
 )
 EN = VotesSettings(
-    scorer='votes', samples=1, max_output_tokens=300, language='en', gates=Gates()
+    scorer='votes',
+    samples=1,
+    max_output_tokens=300,
+    reference='acme-large',
+    language='en',
+    gates=Gates(),
 )
 ZH_REPLY = '我把 `widget` 升到了 2.0.1，并更新了锁文件。Windows 版本还没有测试。'
 

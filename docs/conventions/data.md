@@ -17,13 +17,14 @@ Each case declares its `source`, which determines where the case and everything 
 
 ## The Data Directory
 
-Everything a run produces lives under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, and ingested outputs stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs, and the endpoint's replies. [Running](../guide/running.md#the-data-directory) lists its layout.
+Everything a run produces lives under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, ingested outputs, and votes stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs, and the endpoint's replies, and votes name the cases and trials they compare. [Running](../guide/running.md#the-data-directory) lists its layout.
 
 uv also finds its managed interpreters under `XDG_DATA_HOME`, so `XDG_DATA_HOME=<dir> uv run ...` installs a new CPython in `<dir>` and relinks `.venv` to it, which breaks once `<dir>` is removed. To point a single run at a scratch data directory, set the variable in-process or call `.venv/bin/bench` directly.
 
 ## Committed and Published Text
 
 - Commit only synthetic or public cases, along with fixtures built from generic names such as `acme/large` and `example.com`.
+- Commit reports only as `bench close` writes them, holding the aggregates that [Reports](../design/reports.md#what-is-published) lists.
 - Keep the endpoint's hostname, its operator's name, headers specific to it, internal registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Committed text calls it an OpenAI-compatible endpoint configured in `.env`.
 - `pyproject.toml` and `.npmrc` name the public registries, and `test_repository.py` fails when `uv.lock` or `pnpm-lock.yaml` names any other host.
 

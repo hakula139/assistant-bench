@@ -10,6 +10,7 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 # families/smoke-text/family.toml
 scorer = "votes"
 systems = ["opus-5.5", "gpt-6.1-sol"]
+reference = "gpt-6.1-sol"
 samples = 1
 max_output_tokens = 512
 ```
@@ -20,6 +21,8 @@ max_output_tokens = 512
 | `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                                            |
 | `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
 | `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
+| `reference`         | For `votes`, the system whose score anchors the board at 1000. Required                                                                   |
+| `render`            | For `votes`, how the vote page shows outputs: `text`, the default, or `html` in a sandboxed frame                                         |
 | `language`          | For `votes`, `zh` or `en`, the language the `language` gate requires. Optional                                                            |
 | `[gates]`           | For `votes`, the optional `min_chars`, `max_chars`, and `script = "hans"` gates, which [Prose](../design/families/prose.md#gates) defines |
 

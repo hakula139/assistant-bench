@@ -1,0 +1,41 @@
+# Ranking
+
+`scoring/ranking.py` turns a family's votes into scores, intervals, and rank spreads, and `report.py` adds the diagnostics and the decision a closed round reports. Every vote of the family enters one cumulative fit, since the pooling rule in [Systems](systems.md#fingerprints) keeps each system name on one fingerprint.
+
+## The Fit
+
+Each vote compares the left system A with the right system B, and its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. Votes the arena resolved without the owner enter the same way: a gate failure as a loss for the failing side or as both bad, and identical outputs as a tie. Each system's both-bad rate is reported beside its score, as the floor that a relative score cannot show.
+
+The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
+
+- Each row's design holds +1 for A's system and −1 for B's, plus a left-side intercept that absorbs position bias and is reported as `position`.
+- An L2 penalty of 0.01 on the system strengths keeps a system that wins every vote finite, without penalizing the intercept.
+- Strengths are centered at mean zero, and a fit that fails to converge raises instead of returning a partial result.
+- A test fits 3,000 simulated votes with fractional outcomes and a covariate, and checks the strength gaps, the intercept, and the coefficient against statsmodels' `Logit` within 0.002.
+
+## Scores and Intervals
+
+Scores sit on an Elo-like scale, 400 / ln 10 points per logit, with the family's `reference` system at 1000.
+
+Intervals come from 1,000 bootstrap resamples clustered by case, because votes on one case are correlated: each resample draws cases with replacement and takes all of a drawn case's votes. Votes of each ordered pair collapse into one weighted row, so a refit stays cheap, and a fixed seed makes closing the same votes twice write the same intervals. Each resample's strengths keep mean zero and take the point fit's offset, so the reference has an interval like every other system. The interval is the 2.5th to 97.5th percentile.
+
+## Rank Spread
+
+Following LMArena, each system's best rank is 1 plus the number of systems whose lower bound exceeds its upper bound, and its worst rank is 1 plus the number of other systems whose upper bound exceeds its lower bound. `rank` itself orders the point scores. A system with fewer than 40 decisive votes, which are the votes won by either side, is `preliminary`.
+
+## Decision
+
+The leader is the one system whose best rank is 1. When several share it, none is separated from the others, and the tie goes to the lower mean cost per output, then to the lower p50 latency, where a known value beats a missing one, and finally to the higher score. The report records which criterion decided.
+
+## Diagnostics
+
+| Field             | Meaning                                                                                                                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `position`        | The left pane's advantage in score points                                                                                                                                          |
+| `length`          | The score change per standard deviation of (A − B) / (A + B) over output lengths, from one refit with that covariate. It only describes the board, which the raw score still ranks |
+| `separability`    | The share of system pairs whose intervals do not overlap                                                                                                                           |
+| `split_half_tau`  | Kendall's τ between the orders fit to odd and even sessions                                                                                                                        |
+| `rater_agreement` | How often a side-swapped repeat matched its original, where a tie matches a tie. `below_floor` marks agreement under 70%, when separations are weaker than the intervals suggest   |
+| `categories`      | A refit and bootstrap per case category, anchored at the reference. A category whose votes never include the reference has no board                                                |
+
+Lengths count each Han character and each other whitespace-separated run as one unit, which measures Chinese in characters and English in words, including text that mixes both.

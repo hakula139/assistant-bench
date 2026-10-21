@@ -8,11 +8,20 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
 
-from assistant_bench import jobs, revisions
+from assistant_bench import jobs, report, revisions
+from assistant_bench.arena import api
+from assistant_bench.arena.store import VoteStore
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
-from support import write_trial
+from assistant_bench.outputs import write_outputs
+from assistant_bench.paths import REPO_ROOT
+from support import (
+    make_output,
+    write_synthetic_round,
+    write_trial,
+    write_votes_family,
+)
 
 
 runner = CliRunner()
@@ -33,17 +42,11 @@ def write_cases_family(families_dir: Path, systems: str) -> None:
             systems = {systems}
             samples = 1
             max_output_tokens = 64
+            reference = "opus-5.5"
             """
         )
     )
     (directory / 'cases.jsonl').write_text('')
-
-
-def output(**fields: Any) -> jobs.Output:
-    empty = dict.fromkeys(jobs.Output.model_fields)
-    return jobs.Output.model_validate(
-        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
-    )
 
 
 @pytest.fixture
@@ -87,7 +90,7 @@ class TestCheck:
         monkeypatch.setattr(
             jobs,
             'read_trials',
-            lambda family, job_dir, systems: [output(case='echo', reward=reward)],
+            lambda family, job_dir, systems: [make_output(case='echo', reward=reward)],
         )
 
         result = runner.invoke(app, ['check', 'smoke'])
@@ -239,9 +242,9 @@ class TestIngest:
             jobs,
             'ingest',
             lambda family, systems: [
-                output(gate_failures=[]),
-                output(gate_failures=[Gate.TRUNCATED, Gate.LENGTH]),
-                output(gate_failures=[Gate.TRUNCATED]),
+                make_output(gate_failures=[]),
+                make_output(gate_failures=[Gate.TRUNCATED, Gate.LENGTH]),
+                make_output(gate_failures=[Gate.TRUNCATED]),
             ],
         )
 
@@ -264,9 +267,9 @@ class TestIngest:
             jobs,
             'ingest',
             lambda family, systems: [
-                output(reward=1.0),
-                output(reward=0.0),
-                output(error='TimeoutError'),
+                make_output(reward=1.0),
+                make_output(reward=0.0),
+                make_output(error='TimeoutError'),
             ],
         )
 
@@ -280,3 +283,76 @@ class TestIngest:
             Mean reward 0.500
             """
         )
+
+
+class TestServe:
+    def test_builds_the_local_site_and_serves_the_families_with_outputs(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
+        builds: list[tuple[list[str], str | None]] = []
+        served: list[tuple[list[str], Path]] = []
+
+        def build(args: list[str], **options: Any) -> None:
+            builds.append((args, options['env'].get('BENCH_LOCAL')))
+
+        monkeypatch.setattr(subprocess, 'run', build)
+        monkeypatch.setattr(
+            api, 'serve', lambda arena, site: served.append((arena.families(), site))
+        )
+
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 0, message
+        assert builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
+        assert served == [(['f'], REPO_ROOT / 'web' / 'dist')]
+        assert message == 'Voting on f at http://127.0.0.1:8790\n'
+
+    def test_exits_with_the_code_of_a_failed_site_build(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
+
+        def build(args: list[str], **options: Any) -> None:
+            raise subprocess.CalledProcessError(4, args)
+
+        monkeypatch.setattr(subprocess, 'run', build)
+
+        exit_code, _ = invoke('serve')
+
+        assert exit_code == 4
+
+    def test_stops_when_no_family_has_outputs(self, families_dir: Path) -> None:
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 1
+        assert 'No family scored by votes has outputs yet' in message
+
+
+class TestClose:
+    def test_writes_the_family_report(
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_synthetic_round(families_dir, store)
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+
+        exit_code, message = invoke('close', 'arena')
+
+        assert exit_code == 0, message
+        (path,) = (tmp_path / 'reports' / 'arena').iterdir()
+        assert message == f'Report written to {path}\n'
+        assert report.Report.model_validate_json(path.read_text()).family == 'arena'
+
+    def test_rejects_a_family_without_votes(self, families_dir: Path) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+
+        exit_code, message = invoke('close', 'f')
+
+        assert exit_code == 2
+        assert "family 'f' has no votes" in message

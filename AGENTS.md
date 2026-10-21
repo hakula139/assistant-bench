@@ -8,6 +8,8 @@ This file specifies the rules for every change and points to the conventions for
 uv run bench check smoke                    # Validate a family, running Harbor's oracle on a task family
 uv run bench run smoke-text                 # Generate a family's missing trials for every system it lists
 uv run bench ingest smoke-text              # Collect a family's trials into outputs/<family>.jsonl
+uv run bench serve                          # Serve the vote page for every family with outputs
+uv run bench close prose-zh                 # Write a family's report to reports/<family>/<round>.json
 ```
 
 ## Project Layout
@@ -21,6 +23,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── docs/                                   # Guides, conventions, design, and research
 ├── families/                               # One directory per family and leaderboard, described in docs/guide/authoring.md
 ├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
+├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
 └── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/
@@ -35,6 +38,8 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
 | Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                           |
 | Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                          |
+| The scheduler, the vote store, or the vote API       | [Arena](docs/design/arena.md)                                                                              |
+| Ranking or the report schema                         | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                    |
 | PRs or issues                                        | [GitHub](docs/conventions/github.md)                                                                       |
 | The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                             |
 
@@ -48,6 +53,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Keep the lockfiles on public registries, as a test fails if `uv.lock` or `pnpm-lock.yaml` names a host other than PyPI or npm.
 - Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config, since Harbor writes each agent's `kwargs` and `env` into the job's `config.json`.
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix for a variant. Routes and channel IDs stay in `systems.toml` and the data directory.
+- Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` reads `systems.toml` and `family.toml` while taking at most a family name, and environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
@@ -76,4 +82,6 @@ Beyond the general review, check in particular:
 
 - Layering: imports follow the [import layers](docs/design/architecture.md#import-layers).
 - Data hygiene: nothing private reaches a committed file, a fixture, or a log line.
+- Blinding: nothing the vote page receives identifies a system, including timing and error text, as [Arena](docs/design/arena.md#blinding) describes.
+- Scorer coverage: a new scorer covers ingest, close, its report variant, and its board on the site.
 - Reruns: a change to rendered tasks, agent configs, or `systems.toml` keeps Harbor's reuse and the fingerprint rule intact, as [Architecture](docs/design/architecture.md#reruns) and [Systems](docs/design/systems.md#fingerprints) describe.

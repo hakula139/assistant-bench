@@ -42,6 +42,8 @@ class TestLoadFamily:
             systems = ["large", "small"]
             samples = 2
             max_output_tokens = 300
+            reference = "large"
+            render = "html"
             """,
             cases=True,
             tasks=False,
@@ -57,6 +59,8 @@ class TestLoadFamily:
                 systems=['large', 'small'],
                 samples=2,
                 max_output_tokens=300,
+                reference='large',
+                render='html',
             ),
         )
 
@@ -96,6 +100,7 @@ class TestLoadFamily:
             """\
             scorer = "votes"
             samples = 1
+            reference = "large"
             """,
             cases=True,
             tasks=False,
@@ -134,6 +139,7 @@ class TestLoadFamily:
             scorer = "votes"
             samples = 1
             max_output_tokens = 300
+            reference = "large"
 
             [gates]
             min_chars = 400
@@ -202,6 +208,7 @@ class TestLoadCases:
             scorer = "votes"
             samples = 1
             max_output_tokens = 300
+            reference = "large"
             """,
             cases=True,
             tasks=False,

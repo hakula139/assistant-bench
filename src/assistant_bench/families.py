@@ -63,11 +63,15 @@ class Gates(BaseModel):
 class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes.
 
+    `reference` names the system whose score anchors the board at 1000, `render`
+    says whether the vote page shows outputs as text or as sandboxed HTML, and
     `language` is the language every output must be written in, which the gates
     check when it is set.
     """
 
     scorer: Literal['votes']
+    reference: str
+    render: Literal['text', 'html'] = 'text'
     language: Language | None = None
     gates: Gates = Gates()
 
@@ -105,6 +109,11 @@ class Case(BaseModel):
     source: Literal['synthetic', 'public', 'transcript', 'held-out']
     instruction: str
     checklist: list[str] = []
+
+
+def family_names() -> list[str]:
+    """Return the name of every directory under `families/` holding a `family.toml`."""
+    return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
 
 
 def load_family(name: str) -> Family:

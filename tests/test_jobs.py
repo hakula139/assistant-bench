@@ -20,6 +20,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.outputs import Output
 from assistant_bench.paths import REPO_ROOT
 from support import make_system, write_trial
 
@@ -27,7 +28,9 @@ from support import make_system, write_trial
 VOTES = Family(
     name='f',
     source='cases',
-    settings=VotesSettings(scorer='votes', samples=2, max_output_tokens=300),
+    settings=VotesSettings(
+        scorer='votes', samples=2, max_output_tokens=300, reference='acme-large'
+    ),
 )
 TESTS = Family(
     name='g', source='tasks', settings=TaskTestsSettings(scorer='tests', samples=1)
@@ -259,7 +262,7 @@ class TestIngest:
             'request_id': 'req-1',
         }
         written = (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
-        assert [jobs.Output.model_validate_json(line) for line in written] == outputs
+        assert [Output.model_validate_json(line) for line in written] == outputs
 
     def test_keeps_a_rerun_success_over_the_error_it_replaced(
         self, data_dir: Path
@@ -272,7 +275,12 @@ class TestIngest:
         family = Family(
             name='f',
             source='cases',
-            settings=VotesSettings(scorer='votes', samples=1, max_output_tokens=300),
+            settings=VotesSettings(
+                scorer='votes',
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+            ),
         )
         jobs_dir = data_dir / 'jobs' / 'f'
         write_trial(
@@ -291,7 +299,12 @@ class TestIngest:
         family = Family(
             name='f',
             source='cases',
-            settings=VotesSettings(scorer='votes', samples=1, max_output_tokens=300),
+            settings=VotesSettings(
+                scorer='votes',
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+            ),
         )
         jobs_dir = data_dir / 'jobs' / 'f'
         for job, name in (('job-1', 'old-name'), ('job-2', 'new-name')):
@@ -318,6 +331,7 @@ class TestIngest:
                 scorer='votes',
                 samples=1,
                 max_output_tokens=300,
+                reference='acme-large',
                 language='zh',
                 gates=Gates(script='hans'),
             ),
@@ -352,6 +366,7 @@ class TestIngest:
                 scorer='votes',
                 samples=1,
                 max_output_tokens=300,
+                reference='acme-large',
                 gates=Gates(script='hans'),
             ),
         )
