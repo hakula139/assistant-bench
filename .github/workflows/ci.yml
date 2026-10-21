@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CACHIX_NAME: hakula
+
+jobs:
+  flake-check:
+    name: Nix Flake Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Run flake check
+        run: nix flake check --print-build-logs
+
+  node-check:
+    name: Node Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install
+
+      - name: Format
+        run: nix develop -c pnpm format
+
+      - name: Lint
+        run: nix develop -c pnpm lint
+
+      - name: Spell check
+        run: nix develop -c pnpm spellcheck
+
+  python-check:
+    name: Python Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Install dependencies
+        run: nix develop .#python -c uv sync --locked
+
+      - name: Lint
+        run: nix develop .#python -c uv run ruff check
+
+      - name: Format
+        run: nix develop .#python -c uv run ruff format --check
+
+      - name: Type check
+        run: nix develop .#python -c uv run mypy
+
+      - name: Test
+        run: nix develop .#python -c uv run pytest
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+
+  harbor-smoke:
+    name: Harbor Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Install dependencies
+        run: nix develop .#python -c uv sync --locked
+
+      - name: Check smoke tasks
+        run: nix develop .#python -c uv run bench check smoke
+
+      - name: Run trials under Docker
+        run: nix develop .#python -c uv run pytest -m docker
+
+  result:
+    name: CI Result
+    # A skipped job counts as a passing required check, so the gate must run after failures too.
+    if: ${{ !cancelled() }}
+    needs:
+      - flake-check
+      - node-check
+      - python-check
+      - harbor-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
