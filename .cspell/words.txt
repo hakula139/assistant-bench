@@ -17,6 +17,7 @@ isort
 katex
 kwarg
 kwargs
+libstdc
 mypy
 NFKC
 nixfmt
@@ -38,6 +39,7 @@ smol
 srcdoc
 SSIM
 statix
+stdenv
 strconv
 substituters
 taplo
