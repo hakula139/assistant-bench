@@ -1,7 +1,7 @@
 ---
 import Base from '@/layouts/Base.astro';
 
-const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/design';
+const repo = 'https://github.com/hakula139/assistant-bench';
 ---
 
 <Base title="Methodology">
@@ -27,10 +27,10 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
     <section class="space-y-2">
       <h2 class="text-lg font-semibold">Scores</h2>
       <p>
-        A Bradley-Terry model fits every vote in the family, counting ties and both-bad votes as
-        half a win and absorbing any preference for the left pane in a separate term. Scores sit on
-        an Elo-like scale with the family's reference system at 1,000. Scores compare only among
-        systems that comparisons connect to the reference.
+        A Bradley-Terry model fits every remaining vote in the family, counting ties and both-bad
+        votes as half a win and absorbing any preference for the left pane in a separate term.
+        Scores sit on an Elo-like scale with the family's reference system at 1,000. Scores compare
+        only among systems that comparisons connect to the reference.
       </p>
       <p>
         The 95% intervals come from 1,000 bootstrap resamples drawn by case. A resample whose cases
@@ -72,8 +72,9 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
     </section>
 
     <p class="text-muted-foreground">
-      The repository's design notes on <a href={`${design}/ranking.md`}>ranking</a> and on each{' '}
-      <a href={`${design}/families`}>family</a> cover each method in detail.
+      The repository's design notes on{' '}
+      <a href={`${repo}/blob/main/docs/design/ranking.md`}>ranking</a> and on each{' '}
+      <a href={`${repo}/tree/main/docs/design/families`}>family</a> cover each method in detail.
     </p>
   </article>
 </Base>
