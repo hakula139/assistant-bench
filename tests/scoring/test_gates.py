@@ -177,7 +177,7 @@ class TestDetectLanguage:
 
         assert detect_language(text) == 'zh'
 
-    @pytest.mark.parametrize('tag', ['text', 'MARKDOWN'])
+    @pytest.mark.parametrize('tag', ['text', 'MARKDOWN', 'text title=commit'])
     def test_reads_a_prose_fence_whole(self, tag: str) -> None:
         text = textwrap.dedent(
             f"""\
