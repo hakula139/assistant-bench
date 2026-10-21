@@ -4,10 +4,10 @@ Learn how to set up the development environment, what the pre-commit hooks check
 
 ## Dev Shell
 
-The Nix flake provides two shells: the default shell holds Python 3.14, uv, Node.js, pnpm, and the pre-commit hooks, while `.#python` holds only Python and uv, which the Python CI jobs use:
+The Nix flake provides two shells: the default shell holds uv, Node.js, pnpm, and the pre-commit hooks, while `.#python` holds only uv, which the Python CI jobs use:
 
 ```bash
-nix develop                                 # Dev shell with Python, uv, Node.js, and the hooks
+nix develop                                 # Dev shell with uv, Node.js, and the hooks
 uv sync                                     # Virtualenv with Harbor and the dev tools
 pnpm install                                # Node-based formatters, linters, and spell checker
 nix flake check                             # Run the pre-commit hooks that need neither node_modules nor the virtualenv
@@ -15,7 +15,7 @@ nix flake check                             # Run the pre-commit hooks that need
 
 If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loads the dev shell whenever you enter the repository.
 
-Both shells set `UV_PYTHON` to the flake's Python and export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
+Both shells export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
 
 ## Pre-Commit Hooks
 
@@ -38,11 +38,11 @@ Commands stay minimal, and settings live in config files:
 | The model endpoint                                                            | The ignored `.env`                                  |
 | Prettier, markdownlint, cspell, Taplo, and shfmt                              | Their own files at the repository root              |
 
-Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, and the Nix store paths `BENCH_NIXOS_CONFIG` and `UV_PYTHON` from the dev shell. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
+Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, and the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
 
 ## Toolchain and Pins
 
-- The flake pins Nixpkgs, which supplies Python, uv, and Node.js. Both shells set `UV_PYTHON` to that Python, and `[tool.uv]` never downloads another.
+- The flake pins Nixpkgs, which supplies uv and Node.js. uv installs the CPython that `.python-version` names from its python-build-standalone builds, taking the newest patch release the pinned uv knows, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](#ci) fails such a PR when the bump changes a system's fingerprint.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 - `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.

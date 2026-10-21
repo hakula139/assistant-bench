@@ -76,15 +76,8 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = with pkgs; [
-            python314
-            uv
-          ];
-
-          env = {
-            BENCH_NIXOS_CONFIG = nixosConfigExport;
-            UV_PYTHON = pkgs.lib.getExe pkgs.python314;
-          };
+          packages = [ pkgs.uv ];
+          env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
         # ------------------------------------------------------------------------------------------
@@ -200,7 +193,6 @@
           name = "assistant-bench-dev";
           inherit (pythonEnvironment) env;
 
-          # The hook packages put an older Python on PATH, so the project's Python must come first.
           packages =
             pythonEnvironment.packages
             ++ preCommit.enabledPackages
