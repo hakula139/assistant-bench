@@ -16,9 +16,6 @@ from assistant_bench.scoring.ranking import Comparison
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
 type Flag = Literal['meaning', 'punctuation', 'register', 'script', 'length']
-# `gates` resolves a pair in which an output fails the family's gates, and
-# `identical` a pair of identical outputs, neither reaching the owner.
-type Resolution = Literal['gates', 'identical']
 
 # Ties and both-bad votes count as half a win for each side.
 _LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
@@ -42,10 +39,9 @@ CREATE TABLE IF NOT EXISTS votes (
   b_job TEXT NOT NULL,
   b_trial TEXT NOT NULL,
   choice TEXT NOT NULL CHECK (choice IN ('a', 'b', 'tie', 'both_bad')),
-  auto TEXT CHECK (auto IN ('gates', 'identical')),
   flags TEXT NOT NULL,
   note TEXT,
-  duration_sec REAL,
+  duration_sec REAL NOT NULL,
   repeat_of INTEGER REFERENCES votes (id),
   recorded_at TEXT NOT NULL
 );
@@ -90,11 +86,10 @@ class Side(BaseModel):
 
 
 class Ballot(BaseModel):
-    """A vote to record, with side A shown on the left.
+    """An owner's vote to record, with side A shown on the left.
 
-    `duration_sec` runs from serving the pair to receiving the vote, and is
-    unset for a resolved pair. `repeat_of` names the vote that a side-swapped
-    repeat repeats.
+    `duration_sec` runs from serving the pair to receiving the vote, and
+    `repeat_of` names the vote that a side-swapped repeat repeats.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -104,10 +99,9 @@ class Ballot(BaseModel):
     a: Side
     b: Side
     choice: Choice
-    auto: Resolution | None = None
     flags: frozenset[Flag] = frozenset()
     note: str | None = None
-    duration_sec: float | None = None
+    duration_sec: float
     repeat_of: int | None = None
 
 
@@ -163,14 +157,13 @@ class VoteStore:
     def record(self, ballot: Ballot, at: datetime) -> Vote:
         cursor = self._db.execute(
             'INSERT INTO votes VALUES '
-            '(NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            '(NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 ballot.session,
                 ballot.case,
                 *(getattr(ballot.a, key) for key in Side.model_fields),
                 *(getattr(ballot.b, key) for key in Side.model_fields),
                 ballot.choice,
-                ballot.auto,
                 json.dumps(sorted(ballot.flags)),
                 ballot.note,
                 ballot.duration_sec,
@@ -216,7 +209,6 @@ def _vote(row: sqlite3.Row) -> Vote:
         session=row['session'],
         case=row['case_id'],
         choice=row['choice'],
-        auto=row['auto'],
         flags=frozenset(json.loads(row['flags'])),
         note=row['note'],
         duration_sec=row['duration_sec'],

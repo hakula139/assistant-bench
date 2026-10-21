@@ -12,8 +12,9 @@ src/assistant_bench/
 ├── report.py                               # The report schema, one results variant per scorer, and closing a round
 ├── arena/
 │   ├── api.py                              # The FastAPI vote API and the render origin
-│   ├── service.py                          # Sessions and blinded pairs, with resolved pairs recorded on the way
+│   ├── service.py                          # Sessions and blinded pairs
 │   ├── scheduler.py                        # Pair choice: swapped repeats, the balanced seed, adaptive pairing
+│   ├── resolution.py                       # Results the outputs settle: gate failures and identical text
 │   └── store.py                            # The append-only SQLite vote store
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
@@ -34,10 +35,9 @@ Imports point downward through these layers, so a module never imports one above
 1. `cli`
 2. `jobs`, `revisions`, and `report`
 3. `arena`
-4. `outputs` and `harnesses`
-5. `scoring`
-6. `families` and `catalog`
-7. `paths`
+4. `scoring`, `harnesses`, and `outputs`
+5. `families` and `catalog`
+6. `paths`
 
 `families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and `scoring/` does for the ways outputs are scored.
 

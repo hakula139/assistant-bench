@@ -274,11 +274,12 @@ SYNTHETIC_CLOSE = datetime(2026, 10, 21, 18, tzinfo=UTC)
 
 
 def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
-    """Write family `arena` with outputs and 300 simulated votes over ten sessions.
+    """Write family `arena` with outputs and about 300 votes over ten sessions.
 
     A seeded rater follows Bradley-Terry with the strengths above and a small
     left-side bias, ties 15% and calls both bad 5% of the time, and swaps sides
-    on about one vote in ten from an earlier session.
+    on about one vote in ten from an earlier session. About 3% of the outputs
+    fail a gate, so their pairs are settled without a vote.
     """
     rng = np.random.default_rng(7)
     systems = list(SYNTHETIC_SYSTEMS)
@@ -309,7 +310,8 @@ def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
 
     by_slot: dict[tuple[str, str], list[Output]] = {}
     for output in outputs:
-        by_slot.setdefault((output.case, output.system), []).append(output)
+        if not output.gate_failures:
+            by_slot.setdefault((output.case, output.system), []).append(output)
     recorded: list[tuple[int, Vote]] = []
     for day in range(10):
         session = store.start_session('arena', SYNTHETIC_START + timedelta(days=day))
@@ -319,7 +321,7 @@ def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
             earlier = [
                 vote
                 for vote_day, vote in recorded
-                if vote_day < day and vote.auto is None and vote.repeat_of is None
+                if vote_day < day and vote.repeat_of is None
             ]
             if earlier and rng.random() < 0.1:
                 original = earlier[rng.integers(len(earlier))]
@@ -335,8 +337,12 @@ def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
                 )
             else:
                 left, right = rng.choice(systems, size=2, replace=False)
-                a = by_slot[(str(case), str(left))][rng.integers(2)]
-                b = by_slot[(str(case), str(right))][rng.integers(2)]
+                lefts = by_slot.get((str(case), str(left)), [])
+                rights = by_slot.get((str(case), str(right)), [])
+                if not (lefts and rights):
+                    continue
+                a = lefts[rng.integers(len(lefts))]
+                b = rights[rng.integers(len(rights))]
                 ballot = _simulated_vote(rng, session.id, a, b)
             recorded.append((day, store.record(ballot, at)))
 
@@ -353,22 +359,6 @@ _FLAGS: list[Flag] = ['meaning', 'punctuation', 'register', 'script', 'length']
 def _simulated_vote(
     rng: np.random.Generator, session: str, a: Output, b: Output
 ) -> Ballot:
-    passed = not a.gate_failures, not b.gate_failures
-    if passed != (True, True):
-        choices: dict[tuple[bool, bool], Choice] = {
-            (False, False): 'both_bad',
-            (False, True): 'b',
-            (True, False): 'a',
-        }
-        return Ballot(
-            session=session,
-            case=a.case,
-            a=Side.of(a),
-            b=Side.of(b),
-            choice=choices[passed],
-            auto='gates',
-        )
-
     gap = SYNTHETIC_SYSTEMS[a.system] - SYNTHETIC_SYSTEMS[b.system] + 0.1
     draw = rng.random()
     choice: Choice

@@ -4,11 +4,11 @@
 
 ## The Fit
 
-Each vote compares the left system A with the right system B, and its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. Votes the arena resolved without the owner enter the same way: a gate failure as a loss for the failing side or as both bad, and identical outputs as a tie. Each system's both-bad rate is reported beside its score, as the floor that a relative score cannot show.
+Each vote compares the left system A with the right system B, and its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. The results the outputs settle without a vote, which [Arena](arena.md#sessions-and-pairs) defines, enter beside the votes with their fractional weights, among the systems the owner has voted on. Each system's both-bad rate over the owner's votes is reported beside its score, as the floor that a relative score cannot show, and its gate-failure rate beside that.
 
 The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
 
-- Each row's design holds +1 for A's system and −1 for B's, plus a left-side intercept that absorbs position bias and is reported as `position`.
+- Each row is weighted by the share of a vote it counts, and its design holds +1 for A's system and −1 for B's, plus a left-side intercept that absorbs position bias and is reported as `position`.
 - An L2 penalty of 0.01 on the system strengths keeps a system that wins every vote finite, without penalizing the intercept.
 - Strengths are centered at mean zero, and a fit that fails to converge raises instead of returning a partial result.
 - A test fits 3,000 simulated votes with fractional outcomes and a covariate, and checks the strength gaps, the intercept, and the coefficient against statsmodels' `Logit` within 0.002.
@@ -29,13 +29,13 @@ The leader is the one system whose best rank is 1. When several share it, none i
 
 ## Diagnostics
 
-| Field             | Meaning                                                                                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `position`        | The left pane's advantage in score points                                                                                                                                          |
-| `length`          | The score change per standard deviation of (A − B) / (A + B) over output lengths, from one refit with that covariate. It only describes the board, which the raw score still ranks |
-| `separability`    | The share of system pairs whose intervals do not overlap                                                                                                                           |
-| `split_half_tau`  | Kendall's τ between the orders fit to odd and even sessions                                                                                                                        |
-| `rater_agreement` | How often a side-swapped repeat matched its original, where a tie matches a tie. `below_floor` marks agreement under 70%, when separations are weaker than the intervals suggest   |
-| `categories`      | A refit and bootstrap per case category, anchored at the reference. A category whose votes never include the reference has no board                                                |
+| Field             | Meaning                                                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `position`        | The left pane's advantage in score points                                                                                                                                                               |
+| `length`          | The score change per standard deviation of (A − B) / (A + B) over output lengths, from one refit of the owner's votes with that covariate. It only describes the board, which the raw score still ranks |
+| `separability`    | The share of system pairs whose intervals do not overlap                                                                                                                                                |
+| `split_half_tau`  | Kendall's τ between the orders fit to the votes of odd and even sessions                                                                                                                                |
+| `rater_agreement` | How often a side-swapped repeat matched its original, where a tie matches a tie. `below_floor` marks agreement under 70%, when separations are weaker than the intervals suggest                        |
+| `categories`      | A refit and bootstrap per case category, anchored at the reference. A category whose votes never include the reference has no board                                                                     |
 
 Lengths count each Han character and each other whitespace-separated run as one unit, which measures Chinese in characters and English in words, including text that mixes both.

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -86,47 +87,27 @@ class TestArena:
             arena.vote(first.pair.token, 'a', frozenset(), None)
 
     @pytest.mark.parametrize(
-        ('cut_off', 'choices'),
+        ('options'),
         [
-            (('small',), {'a', 'b'}),
-            (('large', 'small'), {'both_bad'}),
+            {'cut_off': ('small',)},
+            {'cut_off': ('large', 'small')},
+            {'texts': dict.fromkeys(ARENA_SYSTEMS, 'Same.')},
         ],
+        ids=['one-fails', 'both-fail', 'identical'],
     )
-    def test_resolves_pairs_that_fail_the_gates(
+    def test_never_shows_a_pair_the_outputs_settle(
         self,
         families_dir: Path,
         clock: Clock,
         store: VoteStore,
-        cut_off: tuple[str, ...],
-        choices: set[str],
+        options: dict[str, Any],
     ) -> None:
-        arena = make_arena(families_dir, clock, store, cut_off=cut_off)
+        arena = make_arena(families_dir, clock, store, **options)
 
         view = arena.start('f')
 
-        assert view.pair is None
-        votes = store.votes('f')
-        assert len(votes) == len(ARENA_CASES)
-        assert {vote.choice for vote in votes} == choices
-        assert {vote.auto for vote in votes} == {'gates'}
-        for vote in votes:
-            winner = {'a': vote.a, 'b': vote.b}.get(vote.choice)
-            assert winner is None or winner.system == 'large'
-
-    def test_records_identical_outputs_as_a_tie(
-        self, families_dir: Path, clock: Clock, store: VoteStore
-    ) -> None:
-        arena = make_arena(
-            families_dir, clock, store, texts=dict.fromkeys(ARENA_SYSTEMS, 'Same.')
-        )
-
-        view = arena.start('f')
-
-        assert view.pair is None
-        assert (view.votes, view.size) == (0, 0)
-        assert {(vote.choice, vote.auto) for vote in store.votes('f')} == {
-            ('tie', 'identical')
-        }
+        assert (view.votes, view.size, view.pair) == (0, 0, None)
+        assert store.votes('f') == []
 
     def test_undo_withdraws_the_vote_and_shows_its_pair_again(
         self, families_dir: Path, clock: Clock, store: VoteStore

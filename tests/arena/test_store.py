@@ -16,7 +16,14 @@ SMALL = Side(system='small', fingerprint=None, job='job-1', trial='c1__small')
 
 def ballot(session: str, **fields: object) -> Ballot:
     return Ballot.model_validate(
-        {'session': session, 'case': 'c1', 'a': LARGE, 'b': SMALL, 'choice': 'a'}
+        {
+            'session': session,
+            'case': 'c1',
+            'a': LARGE,
+            'b': SMALL,
+            'choice': 'a',
+            'duration_sec': 5.0,
+        }
         | fields
     )
 

@@ -23,12 +23,16 @@ SEED = 0
 
 
 class Comparison(NamedTuple):
-    """One vote, with `score` the left side's result: 1, 0, or 0.5 for a tie."""
+    """One vote or a share of one, with `score` the left side's result.
+
+    `score` is 1, 0, or 0.5 for a tie, and `weight` the share of a vote it counts.
+    """
 
     left: str
     right: str
     score: float
     case: str
+    weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class Matchups:
     left: Indices
     right: Indices
     score: Floats
+    weight: Floats
     cluster: Indices
 
     @classmethod
@@ -54,6 +59,7 @@ class Matchups:
             left=np.array([index[c.left] for c in comparisons], dtype=np.intp),
             right=np.array([index[c.right] for c in comparisons], dtype=np.intp),
             score=np.array([c.score for c in comparisons], dtype=np.float64),
+            weight=np.array([c.weight for c in comparisons], dtype=np.float64),
             cluster=np.array(
                 [cases.setdefault(c.case, len(cases)) for c in comparisons],
                 dtype=np.intp,
@@ -88,8 +94,7 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     """
     columns = [] if covariate is None else [covariate]
     x = _design(matchups.left, matchups.right, len(matchups.systems), columns)
-    weights = np.ones_like(matchups.score)
-    theta = _minimize(x, matchups.score, weights, len(matchups.systems))
+    theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
     return _fit(theta, len(matchups.systems))
 
 
@@ -110,7 +115,7 @@ def bootstrap(matchups: Matchups, resamples: int = RESAMPLES) -> Floats:
     rng = np.random.default_rng(SEED)
     n_cases = int(matchups.cluster.max()) + 1
     draws = rng.multinomial(n_cases, np.full(n_cases, 1 / n_cases), size=resamples)
-    vote_weights = draws[:, matchups.cluster].astype(np.float64)
+    vote_weights = draws[:, matchups.cluster] * matchups.weight
     pair_weights = vote_weights @ membership
     pair_wins = (vote_weights * matchups.score) @ membership
 

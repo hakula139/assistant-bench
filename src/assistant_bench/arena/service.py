@@ -14,7 +14,6 @@ from assistant_bench.arena.store import (
     Ballot,
     Choice,
     Flag,
-    Resolution,
     Session,
     Side,
     Vote,
@@ -130,9 +129,8 @@ def load_families() -> dict[str, ArenaFamily]:
 class Arena:
     """Sessions, pairs, and votes for the families being voted on.
 
-    A pair resolves without reaching the owner when an output fails its gates,
-    as a loss for the failing side or as both bad, or when both outputs are
-    identical, as a tie.
+    Pairs that the outputs decide, by a gate failure or identical text, never
+    reach the owner, and their results enter the fit from `Pool.settled`.
     """
 
     def __init__(
@@ -186,10 +184,10 @@ class Arena:
     def undo(self, session_id: str) -> SessionView:
         """Withdraw the session's latest vote and show its pair again."""
         session = self._session(session_id)
-        owned = [vote for vote in self._votes(session) if vote.auto is None]
-        if not owned:
+        votes = self._votes(session)
+        if not votes:
             raise NothingToUndo(session_id)
-        last = owned[-1]
+        last = votes[-1]
         self._store.undo(last.id, self._clock())
         if session.id in self._current:
             self._retire(self._current[session.id])
@@ -223,48 +221,27 @@ class Arena:
         if session.id not in self._current:
             self._next(session)
         votes = self._votes(session)
-        owned = sum(vote.auto is None for vote in votes)
         used = {vote.case for vote in votes}
-        open_cases = self._families[session.family].pool.paired_cases() - used
+        open_cases = self._families[session.family].pool.votable_cases() - used
         token = self._current.get(session.id)
         return SessionView(
             id=session.id,
             family=session.family,
-            votes=owned,
-            size=min(SESSION_VOTES, owned + len(open_cases)),
+            votes=len(votes),
+            size=min(SESSION_VOTES, len(votes) + len(open_cases)),
             pair=None if token is None else self._pairs[token].view,
         )
 
     def _next(self, session: Session) -> None:
-        """Serve the next pair, recording the pairs that resolve on the way."""
+        votes = self._store.votes(session.family)
+        mine = [vote for vote in votes if vote.session == session.id]
+        if len(mine) >= SESSION_VOTES:
+            return
+        used = {vote.case for vote in mine}
         pool = self._families[session.family].pool
-        while True:
-            votes = self._store.votes(session.family)
-            mine = [vote for vote in votes if vote.session == session.id]
-            if sum(vote.auto is None for vote in mine) >= SESSION_VOTES:
-                return
-            picked = draw(
-                pool, votes, {vote.case for vote in mine}, self._clock(), self._rng
-            )
-            if picked is None:
-                return
-            resolution = _resolve(picked)
-            if resolution is None:
-                self._serve(session, picked)
-                return
-            choice, auto = resolution
-            self._store.record(
-                Ballot(
-                    session=session.id,
-                    case=picked.case,
-                    a=Side.of(picked.a),
-                    b=Side.of(picked.b),
-                    choice=choice,
-                    auto=auto,
-                    repeat_of=picked.repeat_of,
-                ),
-                self._clock(),
-            )
+        picked = draw(pool, votes, used, self._clock(), self._rng)
+        if picked is not None:
+            self._serve(session, picked)
 
     def _serve(self, session: Session, picked: Draw) -> None:
         family = self._families[session.family]
@@ -306,16 +283,3 @@ class Arena:
             if isinstance(pane, HtmlPane):
                 del self._documents[pane.url.rsplit('/', 1)[1]]
         return issued
-
-
-def _resolve(picked: Draw) -> tuple[Choice, Resolution] | None:
-    match not picked.a.gate_failures, not picked.b.gate_failures:
-        case False, False:
-            return 'both_bad', 'gates'
-        case False, True:
-            return 'b', 'gates'
-        case True, False:
-            return 'a', 'gates'
-    if picked.a.text == picked.b.text:
-        return 'tie', 'identical'
-    return None

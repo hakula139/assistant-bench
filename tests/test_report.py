@@ -8,8 +8,8 @@ import pytest
 
 from assistant_bench import report
 from assistant_bench.arena.store import Ballot, Choice, Flag, Side, Vote, VoteStore
-from assistant_bench.families import Family, load_family
-from assistant_bench.outputs import write_outputs
+from assistant_bench.families import Family, Gate, load_family
+from assistant_bench.outputs import read_outputs, write_outputs
 from assistant_bench.report import (
     Decision,
     Interval,
@@ -90,6 +90,7 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
                 b=by_trial[f'{case}__{right}'],
                 choice=choice,
                 flags=flags,
+                duration_sec=10.0,
             ),
             AT,
         )
@@ -147,6 +148,33 @@ class TestClose:
         assert small.output_tokens is None
         assert small.mean_cost_usd is None
 
+    def test_fits_the_results_that_gate_failures_settle(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        family = small_family(families_dir, store)
+        before = close(family, store, AT).results
+        outputs = read_outputs('f')
+        write_outputs(
+            'f',
+            [
+                output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
+                if output.system == 'small'
+                else output
+                for output in outputs
+            ],
+        )
+
+        after = close(family, store, AT).results
+
+        assert before.scorer == after.scorer == 'votes'
+        small_before, small_after = (
+            next(s for s in results.standings if s.system == 'small')
+            for results in (before, after)
+        )
+        assert small_after.score < small_before.score - 100
+        assert small_after.votes == small_before.votes == 4
+        assert small_after.gate_failure_rate == 1.0
+
     def test_measures_rater_agreement_on_swapped_repeats(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -162,6 +190,7 @@ class TestClose:
                     a=original.b,
                     b=original.a,
                     choice=choice,
+                    duration_sec=10.0,
                     repeat_of=original.id,
                 ),
                 AT,
@@ -210,7 +239,15 @@ class TestClose:
         (vote, *_) = store.votes('f')
         old = vote.a.model_copy(update={'fingerprint': 'fp-old'})
         store.record(
-            Ballot(session=vote.session, case='c1', a=old, b=vote.b, choice='a'), AT
+            Ballot(
+                session=vote.session,
+                case='c1',
+                a=old,
+                b=vote.b,
+                choice='a',
+                duration_sec=10.0,
+            ),
+            AT,
         )
 
         with pytest.raises(ValueError, match="'large' has votes under several"):

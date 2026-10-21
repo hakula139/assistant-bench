@@ -47,6 +47,7 @@ def vote_on(
             'a': Side.of(picked.a),
             'b': Side.of(picked.b),
             'choice': choice,
+            'duration_sec': 5.0,
         }
         | fields
     )
@@ -71,7 +72,7 @@ def votes_between(
 
 class TestPool:
     class TestBuild:
-        def test_keeps_the_gated_outputs_of_listed_systems(self) -> None:
+        def test_keeps_the_passing_outputs_of_listed_systems(self) -> None:
             outputs: list[Output] = [
                 make_output(trial='1', system='large', text='Hi.', gate_failures=[]),
                 make_output(
@@ -85,7 +86,26 @@ class TestPool:
 
             (by_system,) = pool.outputs_by_case.values()
             assert list(by_system) == ['large']
-            assert [output.trial for output in by_system['large']] == ['1', '2']
+            assert [output.trial for output in by_system['large']] == ['1']
+
+    class TestPairings:
+        def test_leaves_out_samples_with_identical_text(self) -> None:
+            outputs = [
+                make_output(
+                    trial=f'{system}{i}', system=system, text=text, gate_failures=[]
+                )
+                for system in ('large', 'small')
+                for i, text in enumerate(('Same.', f'{system} differs.'))
+            ]
+            pool = Pool.build(['large', 'small'], outputs)
+
+            pairings = pool.pairings('c', 'large', 'small')
+
+            assert sorted((a.trial, b.trial) for a, b in pairings) == [
+                ('large0', 'small1'),
+                ('large1', 'small0'),
+                ('large1', 'small1'),
+            ]
 
 
 class TestDraw:
@@ -199,21 +219,6 @@ class TestDraw:
         )
 
         picked = draw(pool, [original], set(), NOW, np.random.default_rng(0))
-
-        assert picked is not None
-        assert picked.repeat_of is None
-
-    def test_never_repeats_a_resolved_pair(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
-        pool = make_pool(systems=('large', 'small'))
-        (resolved,) = votes_between(pool, 'large', 'small', ['tie'])
-        resolved = resolved.model_copy(
-            update={'recorded_at': NOW - timedelta(days=3), 'auto': 'identical'}
-        )
-
-        picked = draw(pool, [resolved], set(), NOW, np.random.default_rng(0))
 
         assert picked is not None
         assert picked.repeat_of is None

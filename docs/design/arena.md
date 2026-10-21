@@ -10,15 +10,15 @@ The vote page receives an opaque pair token, the case instruction and checklist,
 
 A session belongs to one family and ends after 30 owner votes or once no case remains, and it shows each case at most once. Its `size` is the number of votes it can still reach. Each draw picks two systems from the family's `systems` list and one case both have outputs for, then draws one sample of each at random, so every sample collects votes over time:
 
-1. **Repeats:** once an owner vote is a day old, it may return with its sides swapped, at 10% odds per draw, until it has been repeated once. Agreement on repeats is the rater-consistency figure in [Ranking](ranking.md#diagnostics).
+1. **Repeats:** once a vote is a day old, it may return with its sides swapped, at 10% odds per draw, until it has been repeated once. Agreement on repeats is the rater-consistency figure in [Ranking](ranking.md#diagnostics).
 2. **Seed:** every ordered pair of systems first collects 2 votes, so each pair reaches 4 with both sides counterbalanced, taking the pair with the fewest votes first.
 3. **Adaptive:** after the seed, the scheduler refits the board with 1,000 resamples and weighs each pair of systems whose intervals overlap by p(1 − p) / (n + 1), where p is the fitted preference and n the pair's votes, which favors close pairs with few votes. A board whose intervals all separate weighs every pair. The order shown less often goes on the left.
 
-A pair whose output failed the family's gates resolves before it reaches the owner, as a loss for the failing side or as both bad when both fail, and a pair of identical outputs resolves as a tie. These votes are marked `auto` with `gates` or `identical`, count toward the seed and the fit, and use up their case for the session. The [gate verdicts](families/prose.md#gate-verdicts) come from each output's `gate_failures`, and outputs without a verdict, such as errored trials, never enter a pair.
+Only outputs that passed every gate reach the owner, and two samples with identical text are never paired, since the outputs already decide those results. `arena/resolution.py` derives them afresh from the current outputs whenever the scheduler or `bench close` fits the board, so a re-ingest that changes a [gate verdict](families/prose.md#gate-verdicts) changes the results with it, and the vote store holds the owner's votes alone. A failing output loses, two failing outputs count as both bad, and identical outputs tie. Each pairing of two systems' samples on a case counts 1 / (samples × samples) of a vote, so a case weighs at most one vote per pair of systems, split evenly across both sides to stay out of the position term. Outputs without a verdict, such as errored trials, take no part.
 
 ## Vote Store
 
-`votes.sqlite` in the data directory holds three append-only tables, whose triggers abort any update or delete: `sessions`, `votes` with one row per vote, and `undos`, where an undo names the vote it withdraws. Each vote records its session, case, both sides' system, fingerprint, job, and trial, the choice (`a`, `b`, `tie`, or `both_bad`), the flags and note, the duration, `auto`, `repeat_of`, and the time. Reading the votes leaves out every undone one.
+`votes.sqlite` in the data directory holds three append-only tables, whose triggers abort any update or delete: `sessions`, `votes` with one row per vote, and `undos`, where an undo names the vote it withdraws. Each vote records its session, case, both sides' system, fingerprint, job, and trial, the choice (`a`, `b`, `tie`, or `both_bad`), the flags and note, the duration, `repeat_of`, and the time. Reading the votes leaves out every undone one.
 
 ## Vote API
 

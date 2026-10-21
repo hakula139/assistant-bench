@@ -15,6 +15,7 @@ from typing import Annotated, Literal, assert_never, get_args
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from assistant_bench.arena.resolution import settled
 from assistant_bench.arena.store import Choice, Flag, Vote, VoteStore
 from assistant_bench.families import (
     Family,
@@ -143,7 +144,7 @@ class Decision(_Model):
 
 
 class VotesResults(_Model):
-    """A board fit to every vote of the family.
+    """A board fit to every vote of the family and the results its outputs settle.
 
     `position` is the left pane's advantage, and `length` the score change per
     standard deviation of the relative length difference, both in score points.
@@ -245,16 +246,22 @@ def _votes_results(
     votes = store.votes(family.name)
     if not votes:
         raise ValueError(f'family {family.name!r} has no votes')
-    matchups = ranking.Matchups.build([vote.comparison() for vote in votes])
-    if settings.reference not in matchups.systems:
+    voted = {vote.a.system for vote in votes} | {vote.b.system for vote in votes}
+    if settings.reference not in voted:
         raise ValueError(
             f'family {family.name!r}: reference {settings.reference!r} has no votes'
         )
+    comparisons = [vote.comparison() for vote in votes] + [
+        comparison
+        for comparison in settled(outputs)
+        if {comparison.left, comparison.right} <= voted
+    ]
 
-    ratings = ranking.rate(matchups, settings.reference)
+    ratings = ranking.rate(ranking.Matchups.build(comparisons), settings.reference)
     best, worst = ranking.rank_spread(ratings.lower, ratings.upper)
     texts = {(output.job, output.trial): output.text or '' for output in outputs}
-    length = ranking.fit(matchups, _length_feature(votes, texts)).covariate
+    by_vote = ranking.Matchups.build([vote.comparison() for vote in votes])
+    length = ranking.fit(by_vote, _length_feature(votes, texts)).covariate
     sessions = store.sessions(family.name)
 
     standings = [
@@ -277,7 +284,7 @@ def _votes_results(
         sessions=len({vote.session for vote in votes}),
         standings=standings,
         head_to_head=_head_to_head(votes, ratings.systems),
-        categories=_categories(family, settings.reference, votes),
+        categories=_categories(family, settings.reference, votes, comparisons),
         position=ratings.position,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
         separability=ranking.separability(ratings.lower, ratings.upper),
@@ -375,7 +382,10 @@ def _head_to_head(votes: list[Vote], systems: Iterable[str]) -> list[HeadToHead]
 
 
 def _categories(
-    family: Family, reference: str, votes: list[Vote]
+    family: Family,
+    reference: str,
+    votes: list[Vote],
+    comparisons: list[ranking.Comparison],
 ) -> list[CategoryBoard]:
     """Refit each category whose votes include the reference system."""
     category = {case.id: case.category for case in load_cases(family)}
@@ -386,9 +396,9 @@ def _categories(
     boards = []
     for name, category_votes in sorted(by_category.items()):
         matchups = ranking.Matchups.build(
-            [vote.comparison() for vote in category_votes]
+            [c for c in comparisons if category[c.case] == name]
         )
-        if reference not in matchups.systems:
+        if not any(reference in (v.a.system, v.b.system) for v in category_votes):
             continue
         ratings = ranking.rate(matchups, reference)
         standings = []

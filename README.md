@@ -16,7 +16,7 @@ Early development. What works today:
 - **Families:** `prose-zh` and `prose-en`, with 30 committed writing cases each and gates that reject empty, truncated, wrong-language, or Traditional-script outputs, plus the `smoke` and `smoke-text` families that check the setup
 - **Runs:** one chat-completions call per trial through any OpenAI-compatible endpoint, with reruns that generate only missing trials
 - **Outputs:** one record per trial with the text or reward, token counts, cost at catalog prices, latency, and provenance
-- **Arena:** a local vote page serving blind pairs, with a balanced seed, adaptive pairing, swapped repeats, and automatic losses for gated outputs
+- **Arena:** a local vote page serving blind pairs, with a balanced seed, adaptive pairing, swapped repeats, and automatic losses for outputs that fail a gate
 - **Reports:** Bradley-Terry scores with case-clustered bootstrap intervals and rank spreads, written as aggregate JSON under `reports/`
 
 ## Usage
