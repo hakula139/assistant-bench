@@ -42,5 +42,5 @@ Conventions for commits, branches, pull requests, and issues.
 - Use open issues to track planned work. For a theme spanning several issues, create an `epic` parent with native sub-issues.
 - If an issue depends on another landing first, record that order with a native blocked-by dependency.
 - Label open design questions `design`, and close them once the decision is documented in `docs/design/`.
-- Close out-of-scope requests as not planned, pointing to the Scope section of `README.md`.
+- Close out-of-scope requests as not planned, with the reason.
 - Close an issue as completed when its PR merges, and tick each acceptance criterion the merged work satisfies. Leave an unmet criterion unchecked, and track it in a follow-up issue.

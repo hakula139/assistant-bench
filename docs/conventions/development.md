@@ -42,7 +42,7 @@ Environment variables carry only secrets and per-environment values: the `BENCH_
 
 ## Toolchain and Pins
 
-- The flake pins Nixpkgs, which supplies Python, uv, and Node.js, while `[tool.uv]` prefers that Python and never downloads another. Renovate bumps the flake inputs.
+- The flake pins Nixpkgs, which supplies Python, uv, and Node.js, while `[tool.uv]` prefers that Python and never downloads another. Renovate opens PRs for flake input and lock file updates without automerging them, so a nixos-config bump always gets a human review.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 - `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.
 
@@ -64,7 +64,7 @@ Bump the input through an ordinary PR, and check which systems' fingerprints it 
 - Keep code and comments within 100 columns, counting the indent. Because `nixfmt` does not reflow comments, wrap them by hand.
 - Mark the file header with `=` banners at column 0, and mark each section with `-` banners indented to match the surrounding code. Every banner line ends at column 100.
 - Group related bindings and attributes, and order a `let` block so that each binding follows what it depends on.
-- Follow a multiline binding or attribute with a blank line before its next sibling. Keep single-line siblings together and separate their groups with a blank line.
+- Set off a multiline statement, field, or entry with a blank line where it makes the boundaries easier to see, and omit these separators in a short record that reads as one unit.
 - Write multiline text, such as a shell hook, as an indented string with literal line breaks.
 
 ## Config Style
@@ -80,10 +80,12 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                           |
 | Node Check      | `pnpm format`, `pnpm lint`, and `pnpm spellcheck`                                                           |
 | Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, and pytest with coverage uploaded to Codecov |
-| Harbor Smoke    | `bench check smoke` and `pytest -m docker` under Docker                                                     |
+| Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                       |
 | CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone             |
 
 No job sends a paid request, and no job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
+
+Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
 
 ## Failing Checks
 

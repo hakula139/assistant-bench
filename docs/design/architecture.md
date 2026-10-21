@@ -47,4 +47,6 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 
 ## Reruns
 
-Each `bench run` job lists the family's finished jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Because a rendered task carries the fixed version `1.0.0`, an edited case needs a new ID to rerun. Ingest reads every job directory of the family because reused trials stay in their original job.
+Each `bench run` job lists the family's finished jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Every rendered task carries the version in `jobs.TASK_VERSION`. Harbor aborts a job when a task keeps its version but changes its content, so an edited case needs a new ID, and `bench check` and `bench run` compare each case with its rendered `instruction.md` to report one before Harbor starts. A change that alters every rendered task, such as a new stock image or agent timeout, bumps the patch version, which Harbor treats as compatible and keeps reusing the earlier trials.
+
+Reused trials stay in their original job, so ingest reads every job directory of the family. It keeps at most `samples` outputs per case and fingerprint, preferring successful trials, so an errored trial drops out once a rerun replaces it.

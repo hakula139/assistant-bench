@@ -5,37 +5,22 @@ assistant-bench is a public benchmark in which every AI assistant system receive
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 
 ```bash
-bench check smoke                           # Validate a family, running Harbor's oracle on a task family
-bench run smoke-text                        # Generate a family's missing trials for every system it lists
-bench ingest smoke-text                     # Collect a family's trials into outputs/<family>.jsonl
+uv run bench check smoke                    # Validate a family, running Harbor's oracle on a task family
+uv run bench run smoke-text                 # Generate a family's missing trials for every system it lists
+uv run bench ingest smoke-text              # Collect a family's trials into outputs/<family>.jsonl
 ```
 
 ## Project Layout
 
+The tree lists only the top-level entries whose names leave their purpose unclear.
+
 ```text
 .
-├── .cspell/                                # Project spelling dictionary
-├── .editorconfig                           # Shell layout that shfmt reads
 ├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
-├── .envrc                                  # Loads the dev shell through direnv
-├── .github/                                # CI workflow, the shared Nix setup action, PR template, and Renovate and Dependabot configs
-├── .gitignore                              # Build output and local tool state kept out of Git
-├── .markdownlint-cli2.jsonc                # Markdown lint rules
-├── .npmrc                                  # Pins the public npm registry
-├── .prettierignore                         # The pnpm lockfile, which Prettier skips
-├── .prettierrc                             # Prettier settings for JSON, Markdown, and YAML
-├── .python-version                         # The Python version uv targets
-├── .taplo.toml                             # TOML formatter settings
-├── .vscode/                                # Shared VS Code settings
 ├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
-├── codecov.yml                             # Codecov coverage targets
-├── cspell.json                             # Spell checker settings
 ├── docs/                                   # Guides, conventions, design, and research
 ├── families/                               # One directory per family and leaderboard, described in docs/guide/authoring.md
-├── flake.nix                               # Nix flake for the dev shells, pre-commit hooks, checks, and the nixos-config export
-├── package.json                            # Node formatters, linters, and spell checker run through pnpm
-├── pnpm-workspace.yaml                     # Dependency overrides for pnpm
-├── pyproject.toml                          # Python package, dependencies, and Ruff, pytest, coverage, mypy, and uv settings
+├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
 └── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/

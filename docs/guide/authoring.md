@@ -1,6 +1,6 @@
 # Authoring
 
-Learn how to add a family, write its cases or tasks, and declare a system under test, running `bench check <family>` after each change.
+Learn how to add a family, write its cases or tasks, and declare a system under test, running `uv run bench check <family>` after each change.
 
 ## Families
 
@@ -35,7 +35,7 @@ Each line of `cases.jsonl` is one case:
 }
 ```
 
-- `id` is unique within the family and uses lowercase letters, digits, and hyphens. Because a rerun reuses every trial whose ID it already ran, an edited instruction needs a new ID.
+- `id` is unique across the committed and local cases of the family and uses lowercase letters, digits, and hyphens. Once a case has run, an edited instruction needs a new ID, because Harbor aborts a job whose task keeps its version but changes its content. `bench check` and `bench run` report such a case before Harbor starts.
 - `category` tags the case for per-category leaderboards.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `$XDG_DATA_HOME/assistant-bench/cases/<family>.jsonl`, which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `checklist` is an optional list of judging hints shown beside the outputs.
@@ -63,6 +63,6 @@ prompt = "nixos-config:claudeCode"
 | `route`  | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
 | `price`  | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
 | `effort` | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
-| `prompt` | The system message: `nixos-config:<client>` for a rendered instruction file, or a repo-relative path          |
+| `prompt` | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
 
-Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results.
+Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.

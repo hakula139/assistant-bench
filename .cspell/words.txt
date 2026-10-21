@@ -10,6 +10,7 @@ hakula
 httpx
 isort
 katex
+kwarg
 kwargs
 mypy
 nixfmt

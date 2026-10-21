@@ -4,5 +4,5 @@ Architecture decisions for assistant-bench. Each page covers the current design 
 
 | Document                        | Description                                                                   |
 | ------------------------------- | ----------------------------------------------------------------------------- |
-| [Architecture](architecture.md) | Module map, import layers, data flow, the data directory                      |
+| [Architecture](architecture.md) | Module map, import layers, families and scorers, data flow, reruns            |
 | [Systems](systems.md)           | `systems.toml`, fingerprints, harnesses, the nixos-config export, concurrency |

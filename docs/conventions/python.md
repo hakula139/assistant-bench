@@ -12,13 +12,13 @@ This page outlines conventions for Python code under `src/` and `tests/`. Becaus
 
 - The [module map](../design/architecture.md#module-map) describes each module's responsibility. Put functions and types in the module that owns their concept, and keep imports within the [import layers](../design/architecture.md#import-layers).
 - For anything Harbor reads or writes, build on Harbor's own models, such as `JobConfig`, `TaskConfig`, `TrialResult`, and `AgentContext`, so schema changes surface as validation errors. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory, which are the parts of Harbor's API least likely to churn.
-- Model each input file with a pydantic model that sets `extra='forbid'`, so misspelled keys fail at load time.
+- Model each input file the bench owns, such as `systems.toml`, `family.toml`, and `cases.jsonl`, with a pydantic model that sets `extra='forbid'`, so misspelled keys fail at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
 - Branch on a family's scorer with a `match` over its settings model, ending with `case _: assert_never(...)`, so mypy reports any new scorer a `match` misses.
 - Read the data directory only through `paths.data_dir()`, and keep every path under it.
 
 ## Errors
 
-- Raise `ValueError` for input the author can fix. Name the item and accepted values in the message, as in `system 'x': effort 'medium' is not one of low, high`. The CLI turns an invalid family into `typer.BadParameter`.
+- Raise `ValueError` for input the author can fix. Name the item and accepted values in the message, as in `system 'x': effort 'medium' is not one of low, high`. The CLI turns the `ValueError` of an invalid family or case into `typer.BadParameter`.
 - Use `assert` only to narrow a type the code already guarantees, such as `self.options` after Harbor validates it.
 - Let HTTP and Harbor errors propagate. Harbor records them on the trial, and its retry policy decides what to rerun.
 
@@ -31,7 +31,7 @@ This page outlines conventions for Python code under `src/` and `tests/`. Becaus
 ## Layout
 
 - Separate distinct groups of items with `# ── Section Name ──` banners using U+2500, as `catalog.py` and `jobs.py` do. Tests group by class instead, as [Testing](testing.md#grouping-and-naming) describes.
-- In function bodies, use blank lines to separate logical phases such as setup, validation, execution, and result.
+- In function bodies, separate logical phases such as setup, validation, execution, and result with blank lines where that makes the boundaries easier to see, and keep a short function that reads as one unit together.
 
 ## Strings
 

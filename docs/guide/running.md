@@ -18,8 +18,8 @@ Each system's route is the model ID the endpoint expects, and every trial sends 
 ## Checking a Family
 
 ```bash
-bench check smoke-text
-bench check smoke
+uv run bench check smoke-text
+uv run bench check smoke
 ```
 
 `bench check` validates `family.toml`, its systems, and its cases. For a family scored by `tests`, it also runs Harbor's oracle on every task and fails unless each reference solution earns reward 1. The check requires Docker, but no endpoint.
@@ -27,7 +27,7 @@ bench check smoke
 ## Running a Family
 
 ```bash
-bench run smoke-text
+uv run bench run smoke-text
 ```
 
 `bench run` renders each case into a Harbor task, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI. Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial.
@@ -37,7 +37,7 @@ Because a rerun generates only the trials that no earlier job of the family fini
 ## Collecting Outputs
 
 ```bash
-bench ingest smoke-text
+uv run bench ingest smoke-text
 ```
 
 `bench ingest` reads every trial of the family into `outputs/<family>.jsonl` and prints the count, the errors by type, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.

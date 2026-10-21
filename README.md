@@ -25,9 +25,9 @@ Requires Nix with flakes and a running Docker daemon:
 nix develop                                 # Dev shell with every tool
 uv sync                                     # Virtualenv with Harbor and the bench
 cp .env.example .env                        # Then fill in the endpoint variables
-bench check smoke                           # Run Harbor's oracle on the smoke task
-bench run smoke-text                        # Send each smoke case to every listed system
-bench ingest smoke-text                     # Collect the replies into the data directory
+uv run bench check smoke                    # Run Harbor's oracle on the smoke task
+uv run bench run smoke-text                 # Send each smoke case to every listed system
+uv run bench ingest smoke-text              # Collect the replies into the data directory
 ```
 
 The [quickstart](docs/guide/quickstart.md) walks through the setup, and [Running](docs/guide/running.md) covers the endpoint, reruns, and the data directory.
