@@ -1,0 +1,193 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import {
+  CategoryTable,
+  DistributionTable,
+  FlagsTable,
+  HeadToHeadTable,
+  RoundsTable,
+} from '@/components/boards/SystemTables';
+import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
+import { TableTwin } from '@/components/charts/TableTwin';
+import Base from '@/layouts/Base.astro';
+import { formatInterval, formatRank, formatScore } from '@/lib/format';
+import type { Distribution, Standing } from '@/lib/report';
+import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
+
+export const getStaticPaths = (async () => {
+  const families = await getFamilies();
+  return families.flatMap((family) => {
+    const rounds = votesRounds(family);
+    const systems = new Set(
+      rounds.flatMap(({ results }) => results.standings.map((s) => s.system)),
+    );
+    return [...systems].map((system) => ({
+      params: { family: family.name, system },
+      props: { family: family.name, system, rounds },
+    }));
+  });
+}) satisfies GetStaticPaths;
+
+interface Props {
+  family: string;
+  system: string;
+  rounds: VotesRound[];
+}
+
+const { family, system, rounds } = Astro.props;
+const appearances = rounds.flatMap(({ round, results }) => {
+  const standing = results.standings.find((item) => item.system === system);
+  return standing ? [{ round, results, standing }] : [];
+});
+const { round, results, standing } = appearances[appearances.length - 1];
+const standings = results.standings;
+const reference = standings.find((item) => item.system === results.reference)?.score;
+
+const headToHead = results.head_to_head
+  .filter((pair) => pair.system === system)
+  .toSorted((a, b) => b.win_rate - a.win_rate);
+const categoryRows = results.categories.flatMap(({ category, standings: refits }): DotRange[] => {
+  const refit = refits.find((item) => item.system === system);
+  return refit ? [{ label: category, value: refit.score, range: refit.interval }] : [];
+});
+const distributionRows = (pick: (item: Standing) => Distribution | null) =>
+  standings.flatMap((item): DotRange[] => {
+    const distribution = pick(item);
+    return distribution
+      ? [
+          {
+            label: item.system,
+            value: distribution.p50,
+            range: { lower: distribution.p10, upper: distribution.p90 },
+            emphasis: item.system === system,
+          },
+        ]
+      : [];
+  });
+const tokenRows = distributionRows((item) => item.output_tokens);
+const latencyRows = distributionRows((item) => item.latency_sec);
+const length = results.length;
+---
+
+<Base title={`${system} on ${family}`}>
+  <header class="mb-8 space-y-3">
+    <p class="text-sm">
+      <a href={`/${family}/`}>{family}</a>
+    </p>
+    <h1 class="text-[1.75rem] leading-tight font-semibold">{system}</h1>
+    <dl class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+      <div>
+        <dt class="text-muted-foreground">Score</dt>
+        <dd class="font-medium">
+          {formatScore(standing.score)}{' '}
+          <span class="font-normal text-muted-foreground">
+            ({formatInterval(standing.interval)})
+          </span>
+        </dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Rank</dt>
+        <dd class="font-medium">{formatRank(standing.best_rank, standing.worst_rank)}</dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Votes</dt>
+        <dd class="font-medium">
+          {standing.votes}{' '}
+          <span class="font-normal text-muted-foreground">
+            ({standing.decisive_votes} decisive)
+          </span>
+        </dd>
+      </div>
+      <div>
+        <dt class="text-muted-foreground">Round</dt>
+        <dd class="font-medium">{round}</dd>
+      </div>
+      {standing.fingerprint !== null && (
+        <div>
+          <dt class="text-muted-foreground">Fingerprint</dt>
+          <dd class="font-mono text-xs leading-5">{standing.fingerprint}</dd>
+        </div>
+      )}
+    </dl>
+    {standing.preliminary && (
+      <p class="max-w-prose text-sm text-muted-foreground">
+        Preliminary: fewer than 40 decisive votes, so the score may still move.
+      </p>
+    )}
+  </header>
+
+  <div class="space-y-10">
+    {headToHead.length > 0 && (
+      <section class="space-y-3 border-t pt-6">
+        <h2 class="text-lg font-semibold">Head to head</h2>
+        <p class="max-w-prose text-sm text-muted-foreground">
+          Win rate against each opponent, where ties and both-bad votes count half.
+        </p>
+        <DotRangePlot
+          client:visible
+          rows={headToHead.map((pair) => ({ label: pair.opponent, value: pair.win_rate }))}
+          label="Win rate"
+          format="percent"
+          baseline={0.5}
+        />
+        <TableTwin>
+          <HeadToHeadTable headToHead={headToHead} />
+        </TableTwin>
+      </section>
+    )}
+
+    {categoryRows.length > 0 && (
+      <section class="space-y-3 border-t pt-6">
+        <h2 class="text-lg font-semibold">Categories</h2>
+        <p class="max-w-prose text-sm text-muted-foreground">
+          Scores refit on each category's votes, with 95% intervals.
+        </p>
+        <DotRangePlot
+          client:visible
+          rows={categoryRows}
+          label="Score"
+          format="score"
+          baseline={reference}
+        />
+        <TableTwin>
+          <CategoryTable categories={categoryRows} />
+        </TableTwin>
+      </section>
+    )}
+
+    <section class="space-y-3 border-t pt-6">
+      <h2 class="text-lg font-semibold">Output length and latency</h2>
+      <p class="max-w-prose text-sm text-muted-foreground">
+        Medians with the 10th to 90th percentile range, beside the other systems in the round.
+        {length !== null &&
+          ` Across the family, one standard deviation of relative length moves a score by ${length.toFixed(1)} points.`}
+      </p>
+      <div class="grid gap-6 lg:grid-cols-2">
+        {tokenRows.length > 0 && (
+          <DotRangePlot client:visible rows={tokenRows} label="Output tokens" format="tokens" />
+        )}
+        {latencyRows.length > 0 && (
+          <DotRangePlot client:visible rows={latencyRows} label="Latency" format="seconds" />
+        )}
+      </div>
+      <TableTwin>
+        <DistributionTable standings={standings} system={system} />
+      </TableTwin>
+    </section>
+
+    <section class="space-y-3 border-t pt-6">
+      <h2 class="text-lg font-semibold">Flags</h2>
+      <p class="max-w-prose text-sm text-muted-foreground">
+        How many votes flagged this system's output. A flag counts against the side a vote did not
+        prefer, and against both sides of a tie or a both-bad vote.
+      </p>
+      <FlagsTable standing={standing} />
+    </section>
+
+    <section class="space-y-3 border-t pt-6">
+      <h2 class="text-lg font-semibold">Rounds</h2>
+      <RoundsTable appearances={appearances} />
+    </section>
+  </div>
+</Base>

@@ -58,6 +58,15 @@ jobs:
       - name: Spell check
         run: nix develop -c pnpm spellcheck
 
+      - name: Type check
+        run: nix develop -c pnpm typecheck
+
+      - name: Test
+        run: nix develop -c pnpm test
+
+  build:
+    uses: ./.github/workflows/build.yml
+
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
@@ -131,6 +140,7 @@ jobs:
     needs:
       - flake-check
       - node-check
+      - build
       - python-check
       - harbor-smoke
     runs-on: ubuntu-latest

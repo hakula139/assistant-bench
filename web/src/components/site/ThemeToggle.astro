@@ -1,0 +1,37 @@
+---
+import { Moon, Sun } from 'lucide-react';
+
+import { buttonVariants } from '@/components/ui/button';
+---
+
+<button
+  type="button"
+  data-theme-toggle
+  class={buttonVariants({ variant: 'ghost', size: 'icon-lg', className: 'text-muted-foreground' })}
+  aria-label="Switch to dark theme"
+>
+  <Sun className="hidden size-4 dark:block" aria-hidden="true" />
+  <Moon className="size-4 dark:hidden" aria-hidden="true" />
+</button>
+
+<script>
+  const root = document.documentElement;
+  const toggles = document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]');
+
+  const label = () => {
+    const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    for (const toggle of toggles) {
+      toggle.setAttribute('aria-label', `Switch to ${next} theme`);
+    }
+  };
+
+  for (const toggle of toggles) {
+    toggle.addEventListener('click', () => {
+      const theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = theme;
+      localStorage.setItem('theme', theme);
+      label();
+    });
+  }
+  label();
+</script>

@@ -1,0 +1,649 @@
+{
+  "$defs": {
+    "CategoryBoard": {
+      "additionalProperties": false,
+      "description": "A refit on one category's votes, anchored at the same reference.\n\n`unranked` lists the systems voted on in the category that have no score, for\nthe same reasons as on the board.",
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "votes": {
+          "title": "Votes",
+          "type": "integer"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/CategoryStanding"
+          },
+          "title": "Standings",
+          "type": "array"
+        },
+        "unranked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unranked",
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "votes",
+        "standings",
+        "unranked"
+      ],
+      "title": "CategoryBoard",
+      "type": "object"
+    },
+    "CategoryStanding": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "interval": {
+          "$ref": "#/$defs/Interval"
+        },
+        "votes": {
+          "title": "Votes",
+          "type": "integer"
+        },
+        "preliminary": {
+          "title": "Preliminary",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "system",
+        "score",
+        "interval",
+        "votes",
+        "preliminary"
+      ],
+      "title": "CategoryStanding",
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "The leader among the systems tied with the top-scoring one, and what chose it.\n\n`separated` means no other ranked system ties with the top-scoring one, and\n`tie_break` is then `score`. Otherwise `cost` or `latency` broke the tie by\nthe lower mean cost or p50 latency, where a known value beats a missing one,\nand `score` remains the last resort.",
+      "properties": {
+        "leader": {
+          "title": "Leader",
+          "type": "string"
+        },
+        "separated": {
+          "title": "Separated",
+          "type": "boolean"
+        },
+        "tie_break": {
+          "enum": [
+            "score",
+            "cost",
+            "latency"
+          ],
+          "title": "Tie Break",
+          "type": "string"
+        }
+      },
+      "required": [
+        "leader",
+        "separated",
+        "tie_break"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "Distribution": {
+      "additionalProperties": false,
+      "properties": {
+        "p10": {
+          "title": "P10",
+          "type": "number"
+        },
+        "p50": {
+          "title": "P50",
+          "type": "number"
+        },
+        "p90": {
+          "title": "P90",
+          "type": "number"
+        }
+      },
+      "required": [
+        "p10",
+        "p50",
+        "p90"
+      ],
+      "title": "Distribution",
+      "type": "object"
+    },
+    "Flag": {
+      "enum": [
+        "meaning",
+        "punctuation",
+        "register",
+        "script",
+        "length"
+      ],
+      "type": "string"
+    },
+    "HeadToHead": {
+      "additionalProperties": false,
+      "description": "Votes between two systems, where ties and both-bad votes count half.",
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "opponent": {
+          "title": "Opponent",
+          "type": "string"
+        },
+        "votes": {
+          "title": "Votes",
+          "type": "integer"
+        },
+        "wins": {
+          "title": "Wins",
+          "type": "integer"
+        },
+        "losses": {
+          "title": "Losses",
+          "type": "integer"
+        },
+        "ties": {
+          "title": "Ties",
+          "type": "integer"
+        },
+        "both_bad": {
+          "title": "Both Bad",
+          "type": "integer"
+        },
+        "win_rate": {
+          "title": "Win Rate",
+          "type": "number"
+        }
+      },
+      "required": [
+        "system",
+        "opponent",
+        "votes",
+        "wins",
+        "losses",
+        "ties",
+        "both_bad",
+        "win_rate"
+      ],
+      "title": "HeadToHead",
+      "type": "object"
+    },
+    "Interval": {
+      "additionalProperties": false,
+      "description": "A 95% bootstrap interval on the score scale.",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "title": "Interval",
+      "type": "object"
+    },
+    "RaterAgreement": {
+      "additionalProperties": false,
+      "description": "How often a side-swapped repeat matched the original vote.",
+      "properties": {
+        "repeats": {
+          "title": "Repeats",
+          "type": "integer"
+        },
+        "agreement": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agreement"
+        },
+        "below_floor": {
+          "title": "Below Floor",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "repeats",
+        "agreement",
+        "below_floor"
+      ],
+      "title": "RaterAgreement",
+      "type": "object"
+    },
+    "Results": {
+      "discriminator": {
+        "mapping": {
+          "tests": "#/$defs/TestsResults",
+          "votes": "#/$defs/VotesResults"
+        },
+        "propertyName": "scorer"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/VotesResults"
+        },
+        {
+          "$ref": "#/$defs/TestsResults"
+        }
+      ]
+    },
+    "Standing": {
+      "additionalProperties": false,
+      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than 40 decisive votes. Flags\ncount against the side a vote did not prefer, so a tie or both-bad vote\ncounts them against both.",
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fingerprint"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "interval": {
+          "$ref": "#/$defs/Interval"
+        },
+        "rank": {
+          "title": "Rank",
+          "type": "integer"
+        },
+        "best_rank": {
+          "title": "Best Rank",
+          "type": "integer"
+        },
+        "worst_rank": {
+          "title": "Worst Rank",
+          "type": "integer"
+        },
+        "preliminary": {
+          "title": "Preliminary",
+          "type": "boolean"
+        },
+        "votes": {
+          "title": "Votes",
+          "type": "integer"
+        },
+        "decisive_votes": {
+          "title": "Decisive Votes",
+          "type": "integer"
+        },
+        "both_bad_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Both Bad Rate"
+        },
+        "outputs": {
+          "title": "Outputs",
+          "type": "integer"
+        },
+        "gate_failure_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gate Failure Rate"
+        },
+        "mean_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mean Cost Usd"
+        },
+        "p50_latency_sec": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "P50 Latency Sec"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latency_sec": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "flags": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Flag"
+          },
+          "title": "Flags",
+          "type": "object"
+        }
+      },
+      "required": [
+        "system",
+        "fingerprint",
+        "score",
+        "interval",
+        "rank",
+        "best_rank",
+        "worst_rank",
+        "preliminary",
+        "votes",
+        "decisive_votes",
+        "both_bad_rate",
+        "outputs",
+        "gate_failure_rate",
+        "mean_cost_usd",
+        "p50_latency_sec",
+        "output_tokens",
+        "latency_sec",
+        "flags"
+      ],
+      "title": "Standing",
+      "type": "object"
+    },
+    "TestsResults": {
+      "additionalProperties": false,
+      "description": "Pass rates on Harbor task tests, where an errored trial fails.",
+      "properties": {
+        "scorer": {
+          "const": "tests",
+          "title": "Scorer",
+          "type": "string"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/TestsStanding"
+          },
+          "title": "Standings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scorer",
+        "standings"
+      ],
+      "title": "TestsResults",
+      "type": "object"
+    },
+    "TestsStanding": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fingerprint"
+        },
+        "trials": {
+          "title": "Trials",
+          "type": "integer"
+        },
+        "errored": {
+          "title": "Errored",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "title": "Pass Rate",
+          "type": "number"
+        },
+        "mean_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mean Cost Usd"
+        },
+        "p50_latency_sec": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "P50 Latency Sec"
+        }
+      },
+      "required": [
+        "system",
+        "fingerprint",
+        "trials",
+        "errored",
+        "pass_rate",
+        "mean_cost_usd",
+        "p50_latency_sec"
+      ],
+      "title": "TestsStanding",
+      "type": "object"
+    },
+    "VotesResults": {
+      "additionalProperties": false,
+      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `unranked` lists\nthe voted systems that no comparison connects to the reference, or that so\nmany resamples leave unconnected that their interval is unbounded. `position` is\nthe left pane's advantage, and `length` the score change per standard\ndeviation of the relative length difference, both in score points.\n`split_half_tau` compares the orders fit to odd and even sessions, and\n`decision` is absent while a system tied with the top one is preliminary.",
+      "properties": {
+        "scorer": {
+          "const": "votes",
+          "title": "Scorer",
+          "type": "string"
+        },
+        "reference": {
+          "title": "Reference",
+          "type": "string"
+        },
+        "votes": {
+          "title": "Votes",
+          "type": "integer"
+        },
+        "dropped_votes": {
+          "title": "Dropped Votes",
+          "type": "integer"
+        },
+        "sessions": {
+          "title": "Sessions",
+          "type": "integer"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/Standing"
+          },
+          "title": "Standings",
+          "type": "array"
+        },
+        "unranked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unranked",
+          "type": "array"
+        },
+        "head_to_head": {
+          "items": {
+            "$ref": "#/$defs/HeadToHead"
+          },
+          "title": "Head To Head",
+          "type": "array"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/CategoryBoard"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "position": {
+          "title": "Position",
+          "type": "number"
+        },
+        "length": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Length"
+        },
+        "separability": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Separability"
+        },
+        "split_half_tau": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Split Half Tau"
+        },
+        "rater_agreement": {
+          "$ref": "#/$defs/RaterAgreement"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scorer",
+        "reference",
+        "votes",
+        "dropped_votes",
+        "sessions",
+        "standings",
+        "unranked",
+        "head_to_head",
+        "categories",
+        "position",
+        "length",
+        "separability",
+        "split_half_tau",
+        "rater_agreement",
+        "decision"
+      ],
+      "title": "VotesResults",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A closed round of one family, written to `reports/<family>/<round>.json`.",
+  "properties": {
+    "family": {
+      "title": "Family",
+      "type": "string"
+    },
+    "round": {
+      "title": "Round",
+      "type": "string"
+    },
+    "closed_at": {
+      "format": "date-time",
+      "title": "Closed At",
+      "type": "string"
+    },
+    "results": {
+      "$ref": "#/$defs/Results"
+    }
+  },
+  "required": [
+    "family",
+    "round",
+    "closed_at",
+    "results"
+  ],
+  "title": "Report",
+  "type": "object"
+}

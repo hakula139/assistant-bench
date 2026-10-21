@@ -1,0 +1,43 @@
+name: Build Site
+
+on:
+  workflow_call:
+    inputs:
+      upload-artifact:
+        description: Upload web/dist as the site-dist artifact for a deploy job
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CACHIX_NAME: hakula
+
+jobs:
+  build:
+    name: Build Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install
+
+      - name: Build site
+        run: nix develop -c pnpm build
+
+      - name: Upload artifact
+        if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-dist
+          path: web/dist/
+          retention-days: 7
+          if-no-files-found: error

@@ -1,0 +1,45 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import { TestsBoard } from '@/components/boards/TestsBoard';
+import { VotesBoard } from '@/components/boards/VotesBoard';
+import Base from '@/layouts/Base.astro';
+import { getFamilies, latest, testsRounds, votesRounds, type Family } from '@/lib/reports';
+
+export const getStaticPaths = (async () => {
+  const families = await getFamilies();
+  return families.map((family) => ({ params: { family: family.name }, props: { family } }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  family: Family;
+}
+
+const { family } = Astro.props;
+const { scorer } = latest(family).results;
+const summaries = {
+  votes: 'Ranked by blind pairwise votes, on a Bradley-Terry scale with 95% intervals.',
+  tests: 'Ranked by the share of trials that pass the task tests.',
+} satisfies Record<typeof scorer, string>;
+const summary = summaries[scorer];
+const board = (() => {
+  switch (scorer) {
+    case 'votes':
+      return { scorer, rounds: votesRounds(family) };
+    case 'tests':
+      return { scorer, rounds: testsRounds(family) };
+  }
+})();
+---
+
+<Base title={family.name} description={`${family.name}: ${summary}`}>
+  <header class="mb-8 space-y-2">
+    <h1 class="text-[1.75rem] leading-tight font-semibold">{family.name}</h1>
+    <p class="max-w-prose text-muted-foreground">{summary}</p>
+  </header>
+  {board.scorer === 'votes' ? (
+    <VotesBoard client:load family={family.name} rounds={board.rounds} />
+  ) : (
+    <TestsBoard rounds={board.rounds} />
+  )}
+</Base>

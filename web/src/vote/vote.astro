@@ -1,0 +1,15 @@
+---
+import Head from '@/components/site/Head.astro';
+import { VoteApp } from '@/components/vote/VoteApp';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <Head title="Vote | assistant-bench" description="Blind pairwise voting on local outputs." />
+    <meta name="robots" content="noindex" />
+  </head>
+  <body>
+    <VoteApp client:only="react" />
+  </body>
+</html>

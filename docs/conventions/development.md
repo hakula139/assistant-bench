@@ -9,7 +9,7 @@ The Nix flake provides two shells: the default shell holds uv, Node.js, pnpm, an
 ```bash
 nix develop                                 # Dev shell with uv, Node.js, and the hooks
 uv sync                                     # Virtualenv with Harbor and the dev tools
-pnpm install                                # Node-based formatters, linters, and spell checker
+pnpm install                                # Node-based formatters, linters, spell checker, and the site
 nix flake check                             # Run the pre-commit hooks that need neither node_modules nor the virtualenv
 ```
 
@@ -29,17 +29,19 @@ Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run
 
 Commands stay minimal, and settings live in config files:
 
-| Setting                                                                       | Lives in                                            |
-| ----------------------------------------------------------------------------- | --------------------------------------------------- |
-| Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv | `pyproject.toml`'s `[tool.*]` tables                |
-| Systems under test                                                            | `systems.toml`                                      |
-| A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                     |
-| Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time |
-| Session size, repeat share, and seed votes                                    | `arena/service.py` and `arena/scheduler.py`         |
-| The arena's loopback ports and render policy                                  | `arena/api.py`                                      |
-| Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                |
-| The model endpoint                                                            | The ignored `.env`                                  |
-| Prettier, markdownlint, cspell, Taplo, and shfmt                              | Their own files at the repository root              |
+| Setting                                                                       | Lives in                                                                                                              |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
+| Systems under test                                                            | `systems.toml`                                                                                                        |
+| A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                                                                                       |
+| Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
+| Session size, repeat share, and seed votes                                    | `arena/service.py` and `arena/scheduler.py`                                                                           |
+| The arena's loopback ports and render policy                                  | `arena/api.py`                                                                                                        |
+| Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                                                                                  |
+| The model endpoint                                                            | The ignored `.env`                                                                                                    |
+| Prettier, markdownlint, cspell, Taplo, and shfmt                              | Their own files at the repository root                                                                                |
+| The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
+| The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
 
 Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and `BENCH_LOCAL`, which `bench serve` sets for its own build of the vote page. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
 
@@ -79,13 +81,16 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Job             | Checks                                                                                                                             |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                  |
-| Node Check      | `pnpm format`, `pnpm lint`, and `pnpm spellcheck`                                                                                  |
+| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test`                                                   |
+| Build Site      | `pnpm build`, from the reusable `build.yml` that the deploy workflows also call                                                    |
 | Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check |
 | Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                                              |
 | CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone                                    |
 
 The fingerprint check runs `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. It resolves every `systems.toml` table at both commits, each against its own nixos-config export, and fails when a table keeps its name but its fingerprint changes, so a changed system takes a new name and the old one keeps its results.
 
-No job sends a paid request, and no job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
+No job sends a paid request, and no CI job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
+
+Two more workflows publish the site to Cloudflare Workers, each deploying the `web/dist` artifact that its own `build.yml` run uploads. Deploy runs on each push to `main` and deploys to `bench.hakula.xyz`, while Preview Deploy uploads each PR's build as a preview version and comments its URLs on the PR. Both read the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, so a missing secret fails the deploy. Previews skip PRs from forks and Dependabot, which receive no secrets.
 
 Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.

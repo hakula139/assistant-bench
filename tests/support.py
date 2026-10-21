@@ -40,6 +40,7 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 EXPORT_FILE = FIXTURES / 'nixos-config.json'
 REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
+REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
 
 def make_system(**overrides: Any) -> System:

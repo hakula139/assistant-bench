@@ -3,5 +3,14 @@
   "printWidth": 100,
   "quoteProps": "consistent",
   "singleQuote": true,
-  "trailingComma": "all"
+  "trailingComma": "all",
+  "plugins": ["prettier-plugin-astro", "prettier-plugin-tailwindcss"],
+  "tailwindFunctions": ["cn", "cva"],
+  "tailwindStylesheet": "./web/src/styles/global.css",
+  "overrides": [
+    {
+      "files": "web/**",
+      "options": { "embeddedLanguageFormatting": "auto" }
+    }
+  ]
 }

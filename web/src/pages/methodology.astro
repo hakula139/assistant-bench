@@ -1,0 +1,80 @@
+---
+import Base from '@/layouts/Base.astro';
+
+const repo = 'https://github.com/hakula139/assistant-bench';
+---
+
+<Base title="Methodology">
+  <article class="max-w-prose space-y-6 leading-relaxed">
+    <h1 class="text-[1.75rem] leading-tight font-semibold">Methodology</h1>
+
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Votes</h2>
+      <p>
+        Every system in a family answers the same cases. One rater sees two outputs side by side
+        without knowing which systems wrote them, and picks the better side, a tie, or both bad.
+        Sides are counterbalanced, and some pairs return later with the sides swapped to measure how
+        consistent the rater is.
+      </p>
+      <p>
+        An output that fails a family's gates, for example by being truncated or written in the
+        wrong script, loses its pair without a vote. Two identical outputs tie without a vote. A
+        vote on a retired case, on an output that has since left or now fails a gate, or on a pair
+        the outputs now settle stays recorded but is left out of the fit.
+      </p>
+    </section>
+
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Scores</h2>
+      <p>
+        A Bradley-Terry model fits every remaining vote in the family, counting ties and both-bad
+        votes as half a win and absorbing any preference for the left pane in a separate term.
+        Scores sit on an Elo-like scale with the family's reference system at 1,000. Scores compare
+        only among systems that comparisons connect to the reference.
+      </p>
+      <p>
+        The 95% intervals come from 1,000 bootstrap resamples drawn by case. A resample whose cases
+        leave a system unconnected to the reference gives it no score, so a system detached in at
+        least 2.5% of resamples has an unbounded interval. Such a system, like one that no
+        comparison connects to the reference at all, is listed as unranked, without a score. A
+        system's rank spans from 1 plus the systems whose interval lies entirely above its own, to 1
+        plus the systems whose interval reaches above its lower bound. A system with fewer than 40
+        decisive votes, the votes won by either side, is marked preliminary.
+      </p>
+      <p>
+        A ranked system ties with the top-scoring one when the 95% interval of the difference
+        between their scores, paired within each bootstrap resample, contains 0 or is unbounded.
+        While any system in that tie set is preliminary, the round has no leader, so a system with
+        few votes neither takes the lead nor loses a tie-break before its interval narrows. A tie
+        goes to the lower mean cost per output, then to the lower median latency, where a known
+        value beats a missing one, and finally to the higher score.
+      </p>
+    </section>
+
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Diagnostics</h2>
+      <p>
+        Each round reports how far its order can be trusted. Rater agreement is how often a
+        side-swapped repeat matched its original vote, and below 70% the separations are weaker than
+        the intervals suggest. Separated pairs is the share of system pairs whose intervals do not
+        overlap, and split-half τ compares the orders fit to odd and even sessions over the systems
+        both halves connect to the reference.
+      </p>
+    </section>
+
+    <section class="space-y-2">
+      <h2 class="text-lg font-semibold">Categories, cost, and latency</h2>
+      <p>
+        Each case carries a category, and each category refits the scores on its own votes, so
+        category intervals are wider. Cost per output comes from token counts and list prices, and
+        latency is the time from request to complete response.
+      </p>
+    </section>
+
+    <p class="text-muted-foreground">
+      The repository's design notes on{' '}
+      <a href={`${repo}/blob/main/docs/design/ranking.md`}>ranking</a> and on each{' '}
+      <a href={`${repo}/tree/main/docs/design/families`}>family</a> cover each method in detail.
+    </p>
+  </article>
+</Base>

@@ -13,6 +13,7 @@ dists
 dotenv
 envrc
 esbenp
+esbuild
 exog
 expit
 hakula
@@ -20,12 +21,15 @@ hanzi
 httpx
 intp
 isort
+jitless
 katex
 kwarg
 kwargs
 lastrowid
 libstdc
+linkify
 Logit
+lucide
 multinomial
 mypy
 NFKC
@@ -44,7 +48,9 @@ pypi
 pyproject
 pytest
 redoc
+Sarasa
 scipy
+shadcn
 shfmt
 smol
 srcdoc
@@ -62,9 +68,11 @@ unbilled
 undos
 unranked
 unrouted
+unstub
 usize
 uvicorn
 venv
 virtualenv
+workerd
 zhon
 zstd

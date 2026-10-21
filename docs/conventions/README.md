@@ -5,6 +5,7 @@ Conventions specific to assistant-bench's code, data, tests, and tooling, with [
 | Document                      | Description                                                                                             |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
 | [Python](python.md)           | Enforced by tooling, architecture, errors, modules, dependencies                                        |
+| [TypeScript](typescript.md)   | Enforced by tooling, layout, reports, components, charts, the vote page                                 |
 | [Data](data.md)               | Data classes, the data directory, what may be committed or published, public names, secrets             |
 | [Testing](testing.md)         | Placement, models and Harbor, Docker trials, coverage                                                   |
 | [GitHub](github.md)           | Pull requests, issues                                                                                   |

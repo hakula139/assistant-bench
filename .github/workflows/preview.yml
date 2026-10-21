@@ -1,0 +1,95 @@
+name: Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CACHIX_NAME: hakula
+
+jobs:
+  build:
+    # Pull requests from forks and Dependabot receive no deploy secrets.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    uses: ./.github/workflows/build.yml
+    with:
+      upload-artifact: true
+
+  preview:
+    name: Deploy Preview
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install
+
+      - name: Download site artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: web/dist/
+
+      - name: Upload preview version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Wrangler appends one JSON record per command to this file, including the upload's URLs.
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
+        run: >-
+          nix develop -c pnpm --filter web exec wrangler versions upload
+          --preview-alias "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
+
+      - name: Extract preview metadata
+        id: meta
+        env:
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
+        run: |
+          upload=$(jq -c 'select(.type == "version-upload")' "$WRANGLER_OUTPUT_FILE_PATH")
+          version_url=$(jq -er '.preview_url' <<<"$upload")
+          alias_url=$(jq -er '.preview_alias_url' <<<"$upload")
+          deploy_time=$(date -u +'%Y-%m-%d %H:%M UTC')
+          cat >> "$GITHUB_OUTPUT" <<OUTPUT
+          short_sha=${PR_SHA:0:7}
+          version_url=$version_url
+          alias_url=$alias_url
+          deploy_time=$deploy_time
+          OUTPUT
+
+      - name: Comment preview
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview-url
+          message: |
+            ## Cloudflare Workers preview
+
+            | | |
+            | --- | --- |
+            | Preview | ${{ steps.meta.outputs.version_url }} |
+            | Branch preview | ${{ steps.meta.outputs.alias_url }} |
+            | Commit | `${{ steps.meta.outputs.short_sha }}` |
+            | Updated | ${{ steps.meta.outputs.deploy_time }} |
+
+            [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
