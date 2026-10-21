@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
+  MISSING,
   formatCost,
   formatInterval,
   formatPercent,
@@ -40,7 +41,12 @@ import type { Interval, Standing } from '@/lib/report';
  * refit, which carries no rank spread.
  */
 export interface LeaderboardRow {
-  standing: Standing;
+  system: string;
+  /**
+   * The system's standing on the family board, which also holds its family-wide rates, cost, and
+   * latency. A category can rank a system that the family board leaves unranked.
+   */
+  standing: Standing | undefined;
   score: number;
   interval: Interval;
   votes: number;
@@ -49,11 +55,11 @@ export interface LeaderboardRow {
 
 interface LeaderboardProps {
   rows: LeaderboardRow[];
-  /** Whether the rows carry the family board's ranks, which category refits lack. */
+  /** Whether the rows are the family board's, with its ranks, or a category's refits. */
   ranked: boolean;
   /** The reference system's score, drawn as the axis baseline when the board holds it. */
   reference: number | undefined;
-  /** Links each system name to its page. */
+  /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
 }
 
@@ -142,7 +148,7 @@ function ForestRow({
         <div
           role="img"
           tabIndex={0}
-          aria-label={`${row.standing.system}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
+          aria-label={`${row.system}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
           className="focus-visible:outline-offset-[-2px]"
         >
           <PlotFigure plot={plot} height={ROW_HEIGHT} />
@@ -170,101 +176,110 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
 export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps) {
   const domain = useMemo(() => scoreDomain(rows), [rows]);
 
-  const columns = useMemo(
-    () =>
-      helper.columns([
-        ...(ranked
-          ? [
-              helper.accessor((row) => row.standing.best_rank, {
-                id: 'rank',
-                header: 'Rank',
-                sortDescFirst: false,
-                cell: ({ row }) =>
-                  formatRank(row.original.standing.best_rank, row.original.standing.worst_rank),
-                meta: { numeric: true },
-              }),
-            ]
-          : []),
-        helper.accessor((row) => row.standing.system, {
-          id: 'system',
-          header: 'System',
-          sortFn: 'alphanumeric',
-          cell: ({ row }) => (
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <a
-                href={href(row.original.standing.system)}
-                className="font-medium whitespace-nowrap"
-              >
-                {row.original.standing.system}
+  const columns = useMemo(() => {
+    const familyWide = (label: string) =>
+      ranked
+        ? label
+        : () => (
+            <span className="flex flex-col items-end leading-tight">
+              {label}
+              <span className="text-xs font-normal">all categories</span>
+            </span>
+          );
+    return helper.columns([
+      ...(ranked
+        ? [
+            helper.accessor((row) => row.standing?.best_rank, {
+              id: 'rank',
+              header: 'Rank',
+              sortDescFirst: false,
+              cell: ({ row: { original } }) =>
+                original.standing
+                  ? formatRank(original.standing.best_rank, original.standing.worst_rank)
+                  : MISSING,
+              meta: { numeric: true },
+            }),
+          ]
+        : []),
+      helper.accessor('system', {
+        header: 'System',
+        sortFn: 'alphanumeric',
+        cell: ({ row: { original } }) => (
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {original.standing ? (
+              <a href={href(original.system)} className="font-medium whitespace-nowrap">
+                {original.system}
               </a>
-              {row.original.preliminary && (
-                <Badge variant="outline" className="font-normal text-muted-foreground">
-                  Preliminary
-                </Badge>
-              )}
+            ) : (
+              <span className="font-medium whitespace-nowrap">{original.system}</span>
+            )}
+            {original.preliminary && (
+              <Badge variant="outline" className="font-normal text-muted-foreground">
+                Preliminary
+              </Badge>
+            )}
+          </span>
+        ),
+        meta: { wraps: true },
+      }),
+      helper.display({
+        id: 'interval',
+        header: () => <ForestAxis domain={domain} />,
+        cell: ({ row }) => <ForestRow row={row.original} domain={domain} reference={reference} />,
+        meta: { forest: true },
+      }),
+      helper.accessor('score', {
+        header: 'Score',
+        sortDescFirst: true,
+        cell: ({ row }) => (
+          <span className="flex flex-col leading-tight">
+            <span className="font-medium">{formatScore(row.original.score)}</span>
+            <span className="text-xs text-muted-foreground">
+              {formatInterval(row.original.interval)}
             </span>
-          ),
-          meta: { wraps: true },
-        }),
-        helper.display({
-          id: 'interval',
-          header: () => <ForestAxis domain={domain} />,
-          cell: ({ row }) => <ForestRow row={row.original} domain={domain} reference={reference} />,
-          meta: { forest: true },
-        }),
-        helper.accessor('score', {
-          header: 'Score',
-          sortDescFirst: true,
-          cell: ({ row }) => (
-            <span className="flex flex-col leading-tight">
-              <span className="font-medium">{formatScore(row.original.score)}</span>
-              <span className="text-xs text-muted-foreground">
-                {formatInterval(row.original.interval)}
-              </span>
-            </span>
-          ),
-          meta: { numeric: true },
-        }),
-        helper.accessor('votes', {
-          header: 'Votes',
-          sortDescFirst: true,
-          meta: { numeric: true },
-        }),
-        helper.accessor((row) => row.standing.both_bad_rate ?? undefined, {
-          id: 'both-bad',
-          header: 'Both bad',
-          sortDescFirst: false,
-          sortUndefined: 'last',
-          cell: ({ getValue }) => formatPercent(getValue() ?? null),
-          meta: { numeric: true },
-        }),
-        helper.accessor((row) => row.standing.gate_failure_rate ?? undefined, {
-          id: 'gate-failures',
-          header: 'Gate failures',
-          sortDescFirst: false,
-          sortUndefined: 'last',
-          cell: ({ getValue }) => formatPercent(getValue() ?? null),
-          meta: { numeric: true },
-        }),
-        helper.accessor((row) => row.standing.mean_cost_usd ?? undefined, {
-          id: 'cost',
-          header: 'Cost / output',
-          sortDescFirst: false,
-          sortUndefined: 'last',
-          cell: ({ getValue }) => formatCost(getValue() ?? null),
-          meta: { numeric: true },
-        }),
-        helper.accessor((row) => row.standing.p50_latency_sec ?? undefined, {
-          id: 'latency',
-          header: 'p50 latency',
-          sortDescFirst: false,
-          sortUndefined: 'last',
-          cell: ({ getValue }) => formatSeconds(getValue() ?? null),
-          meta: { numeric: true },
-        }),
-      ]),
-    [ranked, domain, reference, href],
-  );
+          </span>
+        ),
+        meta: { numeric: true },
+      }),
+      helper.accessor('votes', {
+        header: 'Votes',
+        sortDescFirst: true,
+        meta: { numeric: true },
+      }),
+      helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
+        id: 'both-bad',
+        header: familyWide('Both bad'),
+        sortDescFirst: false,
+        sortUndefined: 'last',
+        cell: ({ getValue }) => formatPercent(getValue() ?? null),
+        meta: { numeric: true },
+      }),
+      helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
+        id: 'gate-failures',
+        header: familyWide('Gate failures'),
+        sortDescFirst: false,
+        sortUndefined: 'last',
+        cell: ({ getValue }) => formatPercent(getValue() ?? null),
+        meta: { numeric: true },
+      }),
+      helper.accessor((row) => row.standing?.mean_cost_usd ?? undefined, {
+        id: 'cost',
+        header: familyWide('Cost / output'),
+        sortDescFirst: false,
+        sortUndefined: 'last',
+        cell: ({ getValue }) => formatCost(getValue() ?? null),
+        meta: { numeric: true },
+      }),
+      helper.accessor((row) => row.standing?.p50_latency_sec ?? undefined, {
+        id: 'latency',
+        header: familyWide('p50 latency'),
+        sortDescFirst: false,
+        sortUndefined: 'last',
+        cell: ({ getValue }) => formatSeconds(getValue() ?? null),
+        meta: { numeric: true },
+      }),
+    ]);
+  }, [ranked, domain, reference, href]);
 
   const table = useTable({
     features,
