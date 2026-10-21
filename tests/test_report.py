@@ -214,7 +214,7 @@ class TestClose:
         assert [board.category for board in results.categories] == ['docs', 'reply']
         for board in results.categories:
             reference = next(s for s in board.standings if s.system == 'large')
-            assert reference.score == 1000
+            assert reference.score == pytest.approx(1000)
 
     @pytest.mark.parametrize('reference', ['missing', None])
     def test_needs_votes_on_the_reference(

@@ -135,16 +135,16 @@ def bootstrap(matchups: Matchups, resamples: int = RESAMPLES) -> Floats:
 def rate(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Ratings:
     """Place the reference system's score at `ANCHOR` with percentile intervals.
 
-    Each resample's strengths keep mean zero and take the point fit's offset, so
-    the reference has an interval like every other system.
+    Each resample's strengths keep mean zero and shift by the point fit's
+    reference strength, so the reference has an interval like every other system.
     """
     point = fit(matchups)
-    offset = ANCHOR - ELO_PER_LOGIT * point.strength[matchups.systems.index(reference)]
-    draws = offset + ELO_PER_LOGIT * bootstrap(matchups, resamples)
+    shift = point.strength[matchups.systems.index(reference)]
+    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, resamples) - shift)
     tail = (1 - CONFIDENCE) / 2 * 100
     return Ratings(
         systems=matchups.systems,
-        score=offset + ELO_PER_LOGIT * point.strength,
+        score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),
         lower=np.percentile(draws, tail, axis=0),
         upper=np.percentile(draws, 100 - tail, axis=0),
         position=ELO_PER_LOGIT * point.position,

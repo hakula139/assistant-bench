@@ -17,7 +17,7 @@ The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
 
 Scores sit on an Elo-like scale, 400 / ln 10 points per logit, with the family's `reference` system at 1000.
 
-Intervals come from 1,000 bootstrap resamples clustered by case, because votes on one case are correlated: each resample draws cases with replacement and takes all of a drawn case's votes. Votes of each ordered pair collapse into one weighted row, so a refit stays cheap, and a fixed seed makes closing the same votes twice write the same intervals. Each resample's strengths keep mean zero and take the point fit's offset, so the reference has an interval like every other system. The interval is the 2.5th to 97.5th percentile.
+Intervals come from 1,000 bootstrap resamples clustered by case, because votes on one case are correlated: each resample draws cases with replacement and takes all of a drawn case's votes. Votes of each ordered pair collapse into one weighted row, so a refit stays cheap, and a fixed seed makes closing the same votes twice write the same intervals. Each resample's strengths keep mean zero and shift by the point fit's reference strength, so the reference has an interval like every other system. The interval is the 2.5th to 97.5th percentile.
 
 ## Rank Spread
 

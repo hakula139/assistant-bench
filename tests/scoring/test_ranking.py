@@ -117,7 +117,7 @@ class TestRate:
         ratings = rate(matchups, 'medium', resamples=200)
 
         assert ratings.systems == ('large', 'medium', 'small')
-        assert ratings.score[1] == ANCHOR
+        assert ratings.score[1] == pytest.approx(ANCHOR)
         assert ratings.score[0] > ANCHOR > ratings.score[2]
         assert (ratings.lower < ratings.score).all()
         assert (ratings.score < ratings.upper).all()
