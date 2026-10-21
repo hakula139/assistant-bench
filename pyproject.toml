@@ -8,6 +8,7 @@ requires-python = ">=3.14"
 dependencies = [
   "harbor==0.24.0",
   "httpx>=0.28.1",
+  "markdown-it-py>=4.2.0",
   "openai>=2.54.0",
   "pydantic>=2.14.1",
   "python-dotenv>=1.2.4",
@@ -83,7 +84,7 @@ files = ["src", "tests"]
 exclude_gitignore = true
 strict = true
 
-# Harbor and zhon ship type annotations without a `py.typed` marker.
+# Harbor and zhon lack a `py.typed` marker, so mypy follows their imports by override.
 [[tool.mypy.overrides]]
 module = ["harbor.*", "zhon.*"]
 follow_untyped_imports = true

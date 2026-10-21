@@ -140,29 +140,50 @@ class TestDetectLanguage:
     def test_skips_hashes_that_open_no_comment(self, code: str) -> None:
         assert detect_language(f'```\n{code}\n```\n') == 'zh'
 
-    def test_reads_block_comments_and_docstrings(self) -> None:
-        text = textwrap.dedent(
-            """\
-            ```rust
-            /* 缓冲区按页对齐 */
-            fn main() { let buffer_length_in_bytes = 4096; }
-            ```
+    @pytest.mark.parametrize(
+        'code',
+        [
+            'fn main() { let page = 4096; } /* 缓冲区按页对齐 */',
+            'def parse(raw):\n    """解析原始字节。"""',
+            "def parse(raw):\n    '''解析原始字节。'''",
+        ],
+        ids=['block-comment', 'double-quoted-docstring', 'single-quoted-docstring'],
+    )
+    def test_reads_block_comments_and_docstrings(self, code: str) -> None:
+        assert detect_language(f'```\n{code}\n```\n') == 'zh'
 
-            ```python
-            def parse(raw_input_bytes):
-                '''解析原始字节。'''
-            ```
-            """
+    def test_reads_an_indented_code_block_as_code(self) -> None:
+        code = '    # 先清理构建缓存\n    make clean --jobs 8 --keep-going\n'
+        text = f'Run this first:\n\n{code}'
+
+        assert detect_language(text) == 'zh'
+
+    @pytest.mark.parametrize(
+        ('fence', 'nested'), [('````', '```'), ('```', '```')], ids=['valid', 'broken']
+    )
+    def test_reads_a_markdown_fence_as_markdown(self, fence: str, nested: str) -> None:
+        commands = (
+            'pnpm run lint --fix --cache --max-warnings 0 src tests scripts\n' * 4
+        )
+        text = (
+            f'{fence}markdown\n'
+            '## 本地开发\n\n'
+            '需要 Node.js 24、pnpm 11 和本机运行的 Docker。\n\n'
+            f'{nested}bash\npnpm install\ndocker compose up -d\n{commands}{nested}\n\n'
+            '开发服务器在 `http://localhost:5173`，接口代理到 `http://localhost:8080`。'
+            '端口冲突时在 `.env.local` 里改 `PORT` 和 `API_PORT`。\n'
+            f'{fence}\n'
         )
 
         assert detect_language(text) == 'zh'
 
-    def test_reads_a_prose_fence_whole(self) -> None:
+    @pytest.mark.parametrize('tag', ['text', 'MARKDOWN'])
+    def test_reads_a_prose_fence_whole(self, tag: str) -> None:
         text = textwrap.dedent(
-            """\
+            f"""\
             提交信息如下：
 
-            ```text
+            ```{tag}
             fix: reject a directory passed to the output flag
 
             The export now checks the path before it starts writing.
@@ -172,8 +193,14 @@ class TestDetectLanguage:
 
         assert detect_language(text) == 'en'
 
-    def test_returns_none_without_natural_language(self) -> None:
-        assert detect_language('```\nx = 1\n```\n`y` 42') is None
+    def test_ignores_urls_inside_a_prose_fence(self) -> None:
+        url = 'https://example.com/docs/release/notes/install/upgrade/guide'
+
+        assert detect_language(f'```text\n构建通过，详见 {url}\n```\n') == 'zh'
+
+    @pytest.mark.parametrize('text', ['```\nx = 1\n```\n`y` 42', '你好 hello there'])
+    def test_returns_none_without_a_majority(self, text: str) -> None:
+        assert detect_language(text) is None
 
 
 class TestTraditionalCharacters:

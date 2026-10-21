@@ -38,8 +38,7 @@ class Gate(StrEnum):
 class Gates(BaseModel):
     """Eligibility bounds for voted outputs, in characters of the stripped text.
 
-    `script = "hans"` rejects Traditional-only characters absent from the
-    instruction.
+    `script = "hans"` rejects Traditional-only characters the instruction lacks.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)

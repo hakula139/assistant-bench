@@ -165,6 +165,7 @@ source = { editable = "." }
 dependencies = [
     { name = "harbor" },
     { name = "httpx" },
+    { name = "markdown-it-py" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -185,6 +186,7 @@ dev = [
 requires-dist = [
     { name = "harbor", specifier = "==0.24.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "openai", specifier = ">=2.54.0" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "python-dotenv", specifier = ">=1.2.4" },

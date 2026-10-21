@@ -1,7 +1,9 @@
 """Eligibility gates, which decide whether a voted output reaches the owner."""
 
 import re
+from collections.abc import Iterator
 
+from markdown_it import MarkdownIt
 from zhon import hanzi
 from zhon.cedict.simplified import CHARACTERS as SIMPLIFIED
 from zhon.cedict.traditional import CHARACTERS as TRADITIONAL
@@ -13,13 +15,9 @@ from assistant_bench.families import Gate, Language, VotesSettings
 # in both scripts, such as 乾 or 於, never fails the script gate.
 _TRADITIONAL_ONLY = frozenset(TRADITIONAL) - frozenset(SIMPLIFIED)
 
-# Fence info strings whose block holds prose, such as a commit message.
+_MARKDOWN = MarkdownIt('commonmark')
+# Fence info strings whose block holds Markdown or prose, such as a commit message.
 _PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
-# A fenced code block, capturing its fence, its info string, and its body.
-_FENCED = re.compile(
-    r'^(`{3,}|~{3,})[ \t]*(\S*)[^\n]*\n(.*?)^\1[ \t]*$', re.MULTILINE | re.DOTALL
-)
-_INLINE_CODE = re.compile(r'(`+).+?\1')
 # A URL, which ends at whitespace, Han characters, or Chinese punctuation.
 _URL = re.compile(f'https?://[^\\s{hanzi.characters}{re.escape(hanzi.punctuation)}]+')
 # A line comment opened by `#` and a space or by `//`, leaving out `#include`, CSS
@@ -71,30 +69,43 @@ def failed_gates(
 def detect_language(text: str) -> Language | None:
     """Return `zh` or `en`, whichever dominates the text's natural language.
 
-    Natural language is the prose outside code, without inline code or URLs, and
-    the body of each fence tagged `markdown`, `md`, `text`, or `txt`. Every other
-    fenced block contributes only its comments: lines opened by `# ` or `//`,
-    `/* */` blocks, and triple-quoted docstrings, so code-only outputs are judged by
-    their comments. Han characters count against Latin words, and text with neither
-    returns `None`.
+    The text is parsed as CommonMark. Natural language is its inline text without
+    inline code or URLs, with each fence tagged `markdown`, `md`, `text`, or `txt`
+    parsed the same way. Every other fenced or indented code block contributes only
+    its comments: lines opened by `# ` or `//`, `/* */` blocks, and triple-quoted
+    strings, so code-only outputs are judged by their comments. Han characters count
+    against Latin words, and a tie, including text with neither, returns `None`.
     """
-    parts = [_URL.sub('', _INLINE_CODE.sub('', _FENCED.sub('', text)))]
-    for block in _FENCED.finditer(text):
-        info, body = block.group(2).lower(), block.group(3)
-        if info in _PROSE_FENCES:
-            parts.append(_URL.sub('', body))
-            continue
-        parts.extend(match.group(1) for match in _LINE_COMMENT.finditer(body))
-        parts.extend(
-            ''.join(match.groups('')) for match in _BLOCK_COMMENT.finditer(body)
-        )
-    natural = '\n'.join(parts)
+    natural = '\n'.join(_natural_language(text))
 
     han = len(_HAN.findall(natural))
     words = len(_LATIN_WORD.findall(natural))
-    if han == words == 0:
+    if han == words:
         return None
     return 'zh' if han > words else 'en'
+
+
+def _natural_language(markdown: str) -> Iterator[str]:
+    for token in _MARKDOWN.parse(markdown):
+        if token.type == 'inline':
+            yield from (
+                _URL.sub('', child.content)
+                for child in token.children or []
+                if child.type == 'text'
+            )
+        elif (
+            token.type == 'fence'
+            and (token.info.split() or [''])[0].lower() in _PROSE_FENCES
+        ):
+            yield from _natural_language(token.content)
+        elif token.type in ('fence', 'code_block'):
+            yield from (
+                match.group(1) for match in _LINE_COMMENT.finditer(token.content)
+            )
+            yield from (
+                ''.join(match.groups(''))
+                for match in _BLOCK_COMMENT.finditer(token.content)
+            )
 
 
 def traditional_characters(text: str, source: str) -> list[str]:
@@ -102,7 +113,7 @@ def traditional_characters(text: str, source: str) -> list[str]:
 
     A character counts when CC-CEDICT lists it as Traditional and never as
     Simplified, so the check misses a dual-use character in a Traditional word,
-    such as the 於 of 於是, and never flags correct Simplified text.
+    such as the 於 of 於是, and never flags a character it also lists as Simplified.
     """
     allowed = set(source)
     return list(

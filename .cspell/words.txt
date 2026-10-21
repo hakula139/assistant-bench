@@ -36,6 +36,7 @@ pytest
 shfmt
 smol
 srcdoc
+SSIM
 statix
 strconv
 substituters
