@@ -1,0 +1,29 @@
+---
+import Head from '@/components/site/Head.astro';
+import Header from '@/components/site/Header.astro';
+
+interface Props {
+  /** The page's own title, which the site name follows. */
+  title?: string;
+  description?: string;
+}
+
+const { title, description = 'Blind pairwise comparisons of AI assistants by one rater.' } =
+  Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <Head
+      title={title === undefined ? 'assistant-bench' : `${title} | assistant-bench`}
+      description={description}
+    />
+  </head>
+  <body class="min-h-dvh">
+    <Header />
+    <main class="mx-auto w-full max-w-6xl px-4 pt-8 pb-16 sm:px-6">
+      <slot />
+    </main>
+  </body>
+</html>

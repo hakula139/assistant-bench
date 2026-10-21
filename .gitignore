@@ -1,6 +1,8 @@
 # Build output
 /.coverage
 /coverage.xml
+/web/.astro/
+/web/dist/
 __pycache__/
 *.egg-info/
 
@@ -21,6 +23,7 @@ result-*
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.wrangler/
 
 # OS files
 .DS_Store

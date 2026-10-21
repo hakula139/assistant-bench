@@ -138,7 +138,7 @@
             enable = true;
             name = "prettier";
             entry = nodeHook "prettier-write" "prettier --write --ignore-unknown";
-            files = "\\.(json|jsonc|md|ya?ml)$";
+            files = "\\.(astro|css|js|json|jsonc|md|ts|tsx|ya?ml)$";
           };
 
           cspell = {
