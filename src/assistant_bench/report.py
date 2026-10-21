@@ -117,8 +117,8 @@ class CategoryStanding(_Model):
 class CategoryBoard(_Model):
     """A refit on one category's votes, anchored at the same reference.
 
-    `unranked` lists the systems voted on in the category whose comparisons do not
-    connect them to the reference, so they have no score.
+    `unranked` lists the systems voted on in the category that have no score, for
+    the same reasons as on the board.
     """
 
     category: str
@@ -136,9 +136,9 @@ class RaterAgreement(_Model):
 
 
 class Decision(_Model):
-    """The leader among the systems that are not preliminary, and what chose it.
+    """The leader among the systems tied with the top-scoring one, and what chose it.
 
-    `separated` means no other such system ties with the top-scoring one, and
+    `separated` means no other ranked system ties with the top-scoring one, and
     `tie_break` is then `score`. Otherwise `cost` or `latency` broke the tie by
     the lower mean cost or p50 latency, where a known value beats a missing one,
     and `score` remains the last resort.
@@ -155,11 +155,12 @@ class VotesResults(_Model):
     `votes` counts the votes that compare current outputs needing a vote, while
     `dropped_votes` counts the rest: votes on retired cases, on outputs that left
     or now fail a gate, and on pairs that the outputs now settle. `unranked` lists
-    the voted systems that no comparison connects to the reference. `position` is
+    the voted systems that no comparison connects to the reference, or that so
+    many resamples leave unconnected that their interval is unbounded. `position` is
     the left pane's advantage, and `length` the score change per standard
     deviation of the relative length difference, both in score points.
     `split_half_tau` compares the orders fit to odd and even sessions, and
-    `decision` is absent while every system is preliminary.
+    `decision` is absent while a system tied with the top one is preliminary.
     """
 
     scorer: Literal['votes']
@@ -278,11 +279,18 @@ def _votes_results(
     ]
     everything = ranking.Matchups.build(comparisons)
     if settings.reference not in everything.systems:
+        dropped = sum(
+            settings.reference in (vote.a.system, vote.b.system) for vote in recorded
+        )
+        reason = f'on its current outputs ({dropped} dropped)' if dropped else ''
         raise ValueError(
-            f'family {family.name!r}: reference {settings.reference!r} has no votes'
+            f'family {family.name!r}: reference {settings.reference!r} '
+            f'has no votes {reason}'.rstrip()
         )
 
-    ratings = ranking.rate(everything.component(settings.reference), settings.reference)
+    ratings = ranking.rate(
+        everything.component(settings.reference), settings.reference
+    ).bounded()
     ranked = set(ratings.systems)
     best, worst = ranking.rank_spread(ratings.lower, ratings.upper)
     connected = [m for m in votes if _systems([m]) <= ranked]
@@ -433,7 +441,7 @@ def _categories(
         matchups = ranking.Matchups.build(
             [c for c in comparisons if category[c.case] == name]
         ).component(reference)
-        ratings = ranking.rate(matchups, reference)
+        ratings = ranking.rate(matchups, reference).bounded()
         standings = []
         for i, system in enumerate(ratings.systems):
             mine = [m.vote for m in category_votes if system in _systems([m])]
@@ -520,18 +528,18 @@ def _rater_agreement(votes: list[Vote]) -> RaterAgreement:
 
 
 def decide(standings: list[Standing], ratings: ranking.Ratings) -> Decision | None:
-    """Choose the leader among the standings that are not preliminary.
+    """Choose the leader among the systems that tie with the top-scoring one.
 
-    The systems whose paired bootstrap difference from the top-scoring one has an
-    interval containing 0 tie with it, and the lower mean cost, then the lower p50
-    latency, then the higher score break the tie.
+    A system ties when its paired bootstrap difference from the top has an
+    interval containing 0. While a tied system is preliminary there is no
+    decision, and otherwise the lower mean cost, then the lower p50 latency,
+    then the higher score break the tie.
     """
-    eligible = [standing for standing in standings if not standing.preliminary]
-    if not eligible:
-        return None
     index = {system: i for i, system in enumerate(ratings.systems)}
-    tied_with_top = set(ranking.ties(ratings, [index[s.system] for s in eligible]))
-    tied = [s for s in eligible if index[s.system] in tied_with_top]
+    tied_with_top = set(ranking.ties(ratings, [index[s.system] for s in standings]))
+    tied = [s for s in standings if index[s.system] in tied_with_top]
+    if any(standing.preliminary for standing in tied):
+        return None
     if len(tied) == 1:
         return Decision(leader=tied[0].system, separated=True, tie_break='score')
     cheapest = _lowest(tied, lambda standing: standing.mean_cost_usd)

@@ -24,9 +24,11 @@ from assistant_bench.report import (
 )
 from assistant_bench.scoring.ranking import Ratings
 from support import (
+    EARLY_REPORT_FIXTURE,
     RENDER_ORIGIN,
     REPORT_FIXTURE,
     SYNTHETIC_CLOSE,
+    SYNTHETIC_EARLY_CLOSE,
     Clock,
     make_arena,
     make_output,
@@ -36,6 +38,14 @@ from support import (
 
 
 AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
+ROUNDS = pytest.mark.parametrize(
+    ('fixture', 'sessions', 'closed_at'),
+    [
+        (REPORT_FIXTURE, 10, SYNTHETIC_CLOSE),
+        (EARLY_REPORT_FIXTURE, 1, SYNTHETIC_EARLY_CLOSE),
+    ],
+    ids=['full', 'early'],
+)
 
 
 def approx(value: Any) -> Any:
@@ -93,13 +103,14 @@ def passing_outputs(
 
 
 def small_family(families_dir: Path, store: VoteStore) -> Family:
-    """Write family `f` with three systems and a few hand-placed votes."""
-    write_votes_family(
-        families_dir,
-        'f',
-        ['large', 'medium', 'small'],
-        {'c1': 'reply', 'c2': 'docs', 'c3': 'misc'},
-    )
+    """Write family `f` with three systems and a few hand-placed votes.
+
+    Tied votes on five more cases keep every system connected to `large` in
+    nearly every bootstrap resample, so all three are ranked.
+    """
+    ties = [f't{i}' for i in range(5)]
+    cases = {'c1': 'reply', 'c2': 'docs', 'c3': 'misc'} | dict.fromkeys(ties, 'reply')
+    write_votes_family(families_dir, 'f', ['large', 'medium', 'small'], cases)
     texts = {'large': 'one two three', 'medium': '一二三四五六', 'small': 'four five'}
     outputs = [
         make_output(
@@ -114,7 +125,7 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
             latency_sec=latency,
             output_tokens=None if system == 'small' else 10,
         )
-        for case in ('c1', 'c2', 'c3')
+        for case in cases
         for system, cost, latency in (
             ('large', 0.02, 5.0),
             ('medium', 0.01, 4.0),
@@ -131,6 +142,11 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
         ('c2', 'large', 'small', 'b', frozenset()),
         ('c3', 'medium', 'small', 'a', frozenset()),
     ]
+    for case in ties:
+        votes += [
+            (case, 'large', 'medium', 'tie', frozenset()),
+            (case, 'small', 'large', 'tie', frozenset()),
+        ]
     for case, left, right, choice, flags in votes:
         record(
             store,
@@ -144,27 +160,35 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
 
 
 class TestReport:
-    def test_committed_fixture_validates_against_the_json_schema(self) -> None:
+    @pytest.mark.parametrize(
+        'fixture', [REPORT_FIXTURE, EARLY_REPORT_FIXTURE], ids=['full', 'early']
+    )
+    def test_committed_fixture_validates_against_the_json_schema(
+        self, fixture: Path
+    ) -> None:
         schema = Report.model_json_schema(mode='serialization')
 
-        jsonschema.validate(json.loads(REPORT_FIXTURE.read_text()), schema)
+        jsonschema.validate(json.loads(fixture.read_text()), schema)
 
 
 class TestClose:
+    @ROUNDS
     def test_matches_the_committed_fixture(
-        self, families_dir: Path, store: VoteStore
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        fixture: Path,
+        sessions: int,
+        closed_at: datetime,
     ) -> None:
-        write_synthetic_round(families_dir, store)
+        write_synthetic_round(families_dir, store, sessions)
 
-        closed = close(load_family('arena'), store, SYNTHETIC_CLOSE)
+        closed = close(load_family('arena'), store, closed_at)
 
         written = json.loads(closed.model_dump_json())
-        committed = json.loads(REPORT_FIXTURE.read_text())
-        if committed != approx(written):
-            REPORT_FIXTURE.write_text(f'{closed.model_dump_json(indent=2)}\n')
-            pytest.fail(
-                f'{REPORT_FIXTURE.name} was stale and is rewritten, so review it'
-            )
+        if json.loads(fixture.read_text()) != approx(written):
+            fixture.write_text(f'{closed.model_dump_json(indent=2)}\n')
+            pytest.fail(f'{fixture.name} was stale and is rewritten, so review it')
 
     def test_reports_aggregates_under_public_names_only(
         self, families_dir: Path, store: VoteStore
@@ -189,14 +213,14 @@ class TestClose:
         assert flags['medium']['length'] == 1
         assert flags['medium']['register'] == flags['small']['register'] == 1
         both_bad = {s.system: s.both_bad_rate for s in results.standings}
-        assert both_bad == {'large': 1 / 3, 'medium': 0.0, 'small': 1 / 4}
+        assert both_bad == {'large': 1 / 13, 'medium': 0.0, 'small': 1 / 9}
         large_small = next(
             row
             for row in results.head_to_head
             if (row.system, row.opponent) == ('large', 'small')
         )
         assert (large_small.wins, large_small.losses, large_small.both_bad) == (0, 1, 1)
-        assert large_small.win_rate == 0.25
+        assert large_small.win_rate == pytest.approx(3 / 7)
         small = next(s for s in results.standings if s.system == 'small')
         assert small.output_tokens is None
         assert small.mean_cost_usd is None
@@ -225,10 +249,10 @@ class TestClose:
             for results in (before, after)
         )
         assert small_after.score < small_before.score - 100
-        assert (small_before.votes, small_after.votes) == (4, 0)
+        assert (small_before.votes, small_after.votes) == (9, 0)
         assert small_after.both_bad_rate is None
         assert small_after.gate_failure_rate == 1.0
-        assert (after.votes, after.dropped_votes) == (1, 4)
+        assert (after.votes, after.dropped_votes) == (6, 9)
         assert all('small' not in (r.system, r.opponent) for r in after.head_to_head)
 
     def test_drops_the_votes_whose_outputs_left(
@@ -240,7 +264,7 @@ class TestClose:
         results = close(family, store, AT).results
 
         assert results.scorer == 'votes'
-        assert (results.votes, results.dropped_votes) == (3, 2)
+        assert (results.votes, results.dropped_votes) == (13, 2)
         assert [board.category for board in results.categories] == ['reply']
 
     def test_serves_and_closes_after_a_case_moves_to_a_new_id(
@@ -343,6 +367,23 @@ class TestClose:
         assert results.scorer == 'votes'
         assert results.split_half_tau == pytest.approx(1.0)
 
+    def test_leaves_split_half_agreement_out_when_a_half_misses_the_reference(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
+        outputs = passing_outputs({'c1': 'reply'}, {'c1': {s: s for s in 'abc'}})
+        for day, pairs in enumerate(([('a', 'b'), ('a', 'c')], [('b', 'c')] * 2)):
+            session = store.start_session('f', AT + timedelta(days=day))
+            for winner, loser in pairs:
+                record(
+                    store, session.id, outputs['c1', winner], outputs['c1', loser], 'a'
+                )
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert results.split_half_tau is None
+
     def test_measures_rater_agreement_on_swapped_repeats(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -397,6 +438,16 @@ class TestClose:
             family = family.model_copy(update={'settings': settings})
             message = "reference 'missing' has no votes"
 
+        with pytest.raises(ValueError, match=message):
+            close(family, store, AT)
+
+    def test_counts_the_reference_votes_it_dropped(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        family = small_family(families_dir, store)
+        write_outputs('f', [o for o in read_outputs('f') if o.system != 'large'])
+
+        message = r"reference 'large' has no votes on its current outputs \(13 dropped"
         with pytest.raises(ValueError, match=message):
             close(family, store, AT)
 
@@ -550,24 +601,33 @@ class TestDecide:
                 Decision(leader='y', separated=False, tie_break='latency'),
             ),
             (
-                [
-                    ('x', 1800, 0, 0.001, 1.0, True),
-                    ('y', 1100, 0, 0.02, 9.0, False),
-                    ('z', 1000, 0, 0.01, 9.0, False),
-                ],
-                Decision(leader='y', separated=True, tie_break='score'),
+                [('x', 1100, 0, 0.02, 9.0, False), ('y', 900, 0, 0.01, 1.0, True)],
+                Decision(leader='x', separated=True, tie_break='score'),
             ),
         ],
-        ids=['separated', 'cost', 'latency', 'score', 'unknown-cost', 'preliminary'],
+        ids=[
+            'separated',
+            'cost',
+            'latency',
+            'score',
+            'unknown-cost',
+            'preliminary-outside-the-tie',
+        ],
     )
     def test_breaks_a_tie_with_the_top_on_cost_then_latency(
         self, rows: list[Row], expected: Decision
     ) -> None:
         assert decide(*self.board(rows)) == expected
 
-    def test_decides_nothing_while_every_system_is_preliminary(self) -> None:
-        board = self.board(
-            [('x', 1100, 0, 0.01, 1.0, True), ('y', 1000, 0, 0.01, 1.0, True)]
-        )
-
-        assert decide(*board) is None
+    @pytest.mark.parametrize(
+        'rows',
+        [
+            [('x', 1800, 0, 0.001, 1.0, True), ('y', 1100, 0, 0.02, 9.0, False)],
+            [('x', 1100, 0, 0.02, 9.0, False), ('y', 1050, 100, 0.01, 1.0, True)],
+        ],
+        ids=['preliminary-top', 'preliminary-tied'],
+    )
+    def test_decides_nothing_while_a_tied_system_is_preliminary(
+        self, rows: list[Row]
+    ) -> None:
+        assert decide(*self.board(rows)) is None

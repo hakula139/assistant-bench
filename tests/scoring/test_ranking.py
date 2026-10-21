@@ -140,10 +140,25 @@ class TestBootstrap:
             for score in (1.0, 1.0, 0.0, 0.5, 1.0, 0.0)
         ]
 
-        strengths = bootstrap(Matchups.build(comparisons), resamples=20)
+        strengths = bootstrap(Matchups.build(comparisons), 'large', resamples=20)
 
         assert strengths.shape == (20, 2)
         assert np.ptp(strengths, axis=0) == pytest.approx([0, 0], abs=1e-6)
+
+    def test_marks_a_system_a_resample_leaves_unconnected(self) -> None:
+        comparisons = [
+            Comparison('large', 'small', 1.0, 'shared'),
+            Comparison('small', 'large', 0.0, 'shared'),
+            Comparison('new', 'large', 1.0, 'own'),
+        ]
+
+        strengths = bootstrap(Matchups.build(comparisons), 'large', resamples=50)
+
+        large, new, small = np.isnan(strengths).T
+        assert not large.any()
+        assert 0 < new.sum() < 50
+        assert 0 < small.sum() < 50
+        assert not (new & small).any()
 
 
 class TestRate:
@@ -167,6 +182,18 @@ class TestRate:
         assert first.lower.tolist() == second.lower.tolist()
         assert first.upper.tolist() == second.upper.tolist()
 
+    def test_leaves_a_record_on_few_cases_unbounded(self) -> None:
+        challenger = [
+            Comparison('new', opponent, 1.0, f'challenger-{i % 2}')
+            for i, opponent in enumerate(['large', 'medium', 'small'] * 3)
+        ][:8]
+
+        ratings = rate(Matchups.build(simulate(600) + challenger), 'medium')
+
+        new = ratings.systems.index('new')
+        assert np.isinf(ratings.lower[new]) or np.isinf(ratings.upper[new])
+        assert ratings.bounded().systems == ('large', 'medium', 'small')
+
 
 class TestTies:
     def test_keeps_the_candidates_whose_paired_difference_spans_zero(self) -> None:
@@ -185,6 +212,19 @@ class TestTies:
         )
 
         assert ties(ratings, [0, 1, 2]) == [0, 1]
+
+    def test_counts_an_unbounded_difference_as_a_tie(self) -> None:
+        draws = np.array([[1100.0, 900.0]] * 10 + [[1100.0, np.nan]] * 2)
+        ratings = Ratings(
+            systems=('top', 'detached'),
+            score=np.array([1100.0, 900.0]),
+            lower=np.array([1100.0, -np.inf]),
+            upper=np.array([1100.0, np.inf]),
+            draws=draws,
+            position=0.0,
+        )
+
+        assert ties(ratings, [0, 1]) == [0, 1]
 
 
 class TestRankSpread:

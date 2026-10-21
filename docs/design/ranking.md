@@ -17,9 +17,9 @@ The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
 
 Scores sit on an Elo-like scale, 400 / ln 10 points per logit, with the family's `reference` system at 1000.
 
-Strengths compare only within one connected component of the comparison graph, because the penalty centers each component on its own. The board, each category board, and each half of the split-half fit therefore keep the systems that comparisons connect to the reference, found with SciPy's `connected_components`, and the report lists the other voted systems as `unranked`, without a score.
+Strengths compare only within one connected component of the comparison graph, because the penalty centers each component on its own. The board, each category board, and each half of the split-half fit therefore keep the systems that comparisons connect to the reference, found with SciPy's `connected_components`, and the report lists the other voted systems as `unranked`, without a score, together with the systems whose interval is unbounded.
 
-Intervals come from 1,000 bootstrap resamples clustered by case, because votes on one case are correlated: each resample draws cases with replacement and takes all of a drawn case's votes. Votes of each ordered pair and sidedness collapse into one weighted row, so a refit stays cheap, and a fixed seed makes closing the same votes twice write the same intervals. Each resample's strengths keep mean zero and shift by the point fit's reference strength, so the reference has an interval like every other system. The interval is the 2.5th to 97.5th percentile.
+Intervals come from 1,000 bootstrap resamples clustered by case, because votes on one case are correlated: each resample draws cases with replacement and takes all of a drawn case's votes. Votes of each ordered pair and sidedness collapse into one weighted row, so a refit stays cheap, and a fixed seed makes closing the same votes twice write the same intervals. Each resample's strengths keep mean zero and shift by the point fit's reference strength, so the reference has an interval like every other system. The interval is the 2.5th to 97.5th percentile, with each bound rounded outward to the nearest resample. A resample whose drawn cases leave a system unconnected to the reference gives it no score, which counts as −∞ for the lower bound and +∞ for the upper, so a system detached in more than 2.5% of resamples has an unbounded interval. A perfect record on a few cases is one such system.
 
 ## Rank Spread
 
@@ -27,9 +27,7 @@ Following LMArena, each system's best rank is 1 plus the number of systems whose
 
 ## Decision
 
-Only systems that are not preliminary are eligible, and while none is, the report has no decision. Among the eligible systems, one ties with the top-scoring one when the 95% interval of its score's difference from the top's contains 0, where the difference pairs the two scores within each bootstrap resample. A lone top system is `separated`. Otherwise the tie goes to the lower mean cost per output, then to the lower p50 latency, where a known value beats a missing one, and finally to the higher score. The report records which criterion decided.
-
-The rule keeps a preliminary system off the lead, since a perfect record of a few votes has an interval that the percentile bootstrap cannot widen.
+A ranked system ties with the top-scoring one when the 95% interval of its score's difference from the top's contains 0, where the difference pairs the two scores within each bootstrap resample, and an unbounded difference counts as a tie. While any system in that tie set is preliminary, the report has no decision, so a system with few votes neither takes the lead nor loses a tie-break before its interval narrows. A tie set of one is `separated`. Otherwise the tie goes to the lower mean cost per output, then to the lower p50 latency, where a known value beats a missing one, and finally to the higher score. The report records which criterion decided.
 
 ## Diagnostics
 

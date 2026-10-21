@@ -79,12 +79,9 @@ class Matchups:
         Strengths are comparable only within one connected component, since the
         penalty centers each component on its own.
         """
-        k = len(self.systems)
-        graph = sparse.coo_array(
-            (np.ones(len(self.left)), (self.left, self.right)), shape=(k, k)
+        kept = _connected(
+            self.left, self.right, len(self.systems), self.systems.index(system)
         )
-        _, labels = sparse.csgraph.connected_components(graph, directed=False)
-        kept = labels == labels[self.systems.index(system)]
         rows = kept[self.left]
         index = np.cumsum(kept) - 1
         _, cluster = np.unique(self.cluster[rows], return_inverse=True)
@@ -114,7 +111,9 @@ class Fit:
 class Ratings:
     """Scores on the Elo-like scale with their bootstrap intervals.
 
-    `draws` holds each resample's scores, one row per resample.
+    `draws` holds each resample's scores, one row per resample, with NaN where
+    the resample leaves a system unconnected to the reference. Such a draw counts
+    as unbounded, so a bound that falls on one is infinite.
     """
 
     systems: tuple[str, ...]
@@ -123,6 +122,20 @@ class Ratings:
     upper: Floats
     draws: Floats
     position: float
+
+    def bounded(self) -> Ratings:
+        """Keep the systems whose interval is finite."""
+        kept = np.isfinite(self.lower) & np.isfinite(self.upper)
+        return Ratings(
+            systems=tuple(
+                s for s, keep in zip(self.systems, kept, strict=True) if keep
+            ),
+            score=self.score[kept],
+            lower=self.lower[kept],
+            upper=self.upper[kept],
+            draws=self.draws[:, kept],
+            position=self.position,
+        )
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
@@ -138,14 +151,17 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     return _fit(theta, len(matchups.systems))
 
 
-def bootstrap(matchups: Matchups, resamples: int = RESAMPLES) -> Floats:
+def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Floats:
     """Refit on cases drawn with replacement, returning one row of strengths each.
 
     Votes on one case are correlated, so each draw takes all of a case's votes.
     The votes of each ordered pair and sidedness collapse into one weighted row,
-    which keeps a refit cheap.
+    which keeps a refit cheap. A system that a resample's drawn rows leave
+    unconnected to `reference` gets NaN there, since the penalty would place it
+    at its own component's center.
     """
     k = len(matchups.systems)
+    anchor = matchups.systems.index(reference)
     keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
     pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
     x = _design(
@@ -164,13 +180,17 @@ def bootstrap(matchups: Matchups, resamples: int = RESAMPLES) -> Floats:
     start = _minimize(
         x, pair_wins.sum(axis=0) / pair_weights.sum(axis=0), pair_weights.sum(axis=0), k
     )
+    left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
     strengths = np.empty((resamples, k))
     for r in range(resamples):
         weights = pair_weights[r]
+        drawn = weights > 0
         score = np.divide(
-            pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=weights > 0
+            pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
         )
         strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
+        connected = _connected(left[drawn], right[drawn], k, anchor)
+        strengths[r, ~connected] = np.nan
     return strengths
 
 
@@ -182,7 +202,7 @@ def rate(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Rati
     """
     point = fit(matchups)
     shift = point.strength[matchups.systems.index(reference)]
-    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, resamples) - shift)
+    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, reference, resamples) - shift)
     lower, upper = _interval(draws)
     return Ratings(
         systems=matchups.systems,
@@ -198,7 +218,7 @@ def ties(ratings: Ratings, candidates: Sequence[int]) -> list[int]:
     """Return the candidates tied with the top-scoring one, itself included.
 
     A candidate ties when the interval of its score's difference from the top's,
-    paired within each resample, contains 0.
+    paired within each resample, contains 0, as an unbounded interval does.
     """
     top = max(candidates, key=lambda i: ratings.score[i])
     lower, upper = _interval(ratings.draws[:, candidates] - ratings.draws[:, [top]])
@@ -240,8 +260,29 @@ def rank_agreement(first: Floats, second: Floats) -> float | None:
 
 
 def _interval(draws: Floats) -> tuple[Floats, Floats]:
+    """Return the percentile bounds, rounded outward to the nearest resample.
+
+    Rounding to a resample keeps an unbounded draw from entering interpolation,
+    so a bound that reaches one is infinite.
+    """
     tail = (1 - CONFIDENCE) / 2 * 100
-    return np.percentile(draws, tail, axis=0), np.percentile(draws, 100 - tail, axis=0)
+    lower = np.percentile(
+        np.nan_to_num(draws, nan=-np.inf), tail, axis=0, method='lower'
+    )
+    upper = np.percentile(
+        np.nan_to_num(draws, nan=np.inf), 100 - tail, axis=0, method='higher'
+    )
+    return lower, upper
+
+
+def _connected(
+    left: Indices, right: Indices, k: int, system: int
+) -> npt.NDArray[np.bool_]:
+    """Mark the systems that the rows connect to `system`."""
+    graph = sparse.coo_array((np.ones(len(left)), (left, right)), shape=(k, k))
+    _, labels = sparse.csgraph.connected_components(graph, directed=False)
+    connected: npt.NDArray[np.bool_] = labels == labels[system]
+    return connected
 
 
 def _design(

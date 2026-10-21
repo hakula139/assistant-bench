@@ -39,6 +39,7 @@ from assistant_bench.paths import data_dir
 FIXTURES = Path(__file__).parent / 'fixtures'
 EXPORT_FILE = FIXTURES / 'nixos-config.json'
 REPORT_FIXTURE = FIXTURES / 'report.json'
+EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
 
 
 def make_system(**overrides: Any) -> System:
@@ -277,51 +278,87 @@ SYNTHETIC_SYSTEMS = {
     'acme-flash': -0.1,
     'acme-mini': -0.4,
 }
+SYNTHETIC_STRAYS = {'acme-edge': 0.3, 'acme-nano': -0.2, 'acme-tiny': -1.0}
 SYNTHETIC_START = datetime(2026, 10, 1, 9, tzinfo=UTC)
 SYNTHETIC_CLOSE = datetime(2026, 10, 21, 18, tzinfo=UTC)
+SYNTHETIC_EARLY_CLOSE = datetime(2026, 10, 1, 18, tzinfo=UTC)
 
 
-def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
-    """Write family `arena` with outputs and about 300 votes over ten sessions.
+def write_synthetic_round(
+    families_dir: Path, store: VoteStore, sessions: int = 10
+) -> None:
+    """Write family `arena` with outputs and about 30 votes per daily session.
 
     A seeded rater follows Bradley-Terry with the strengths above and a small
     left-side bias, ties 15% and calls both bad 5% of the time, and swaps sides
     on about one vote in ten from an earlier session. About 3% of the outputs
     fail a gate, so their pairs are settled without a vote.
+
+    Each session also pits `acme-edge` against `acme-nano` on the two cases
+    where every other output passes, which leaves them unranked, and casts two
+    votes for `acme-tiny` on `case-retired`, which has outputs but is no longer
+    a case. Those votes are dropped, so `acme-tiny` ranks only through settled
+    results, where it fails a gate on most cases.
     """
     rng = np.random.default_rng(7)
     systems = list(SYNTHETIC_SYSTEMS)
     categories = ['docs', 'message', 'reply']
     cases = {f'case-{i:02}': categories[i % 3] for i in range(30)}
-    write_votes_family(families_dir, 'arena', systems, cases)
+    everyone = [*systems, *SYNTHETIC_STRAYS]
+    write_votes_family(families_dir, 'arena', everyone, cases)
 
-    outputs = []
-    for case in cases:
-        for system in systems:
-            for sample in range(2):
-                words = int(rng.integers(40, 400))
-                outputs.append(
-                    make_output(
-                        trial=f'{case}__{system}__{sample}',
-                        job='job-1',
-                        case=case,
-                        system=system,
-                        fingerprint=f'fp-{system}',
-                        text=' '.join(['word'] * words),
-                        gate_failures=[Gate.TRUNCATED] if rng.random() < 0.03 else [],
-                        output_tokens=words * 2,
-                        cost_usd=words * 2e-5 * (1 + systems.index(system)),
-                        latency_sec=float(rng.uniform(2, 40)),
-                    )
-                )
+    def output(case: str, system: str, sample: int, failing: float) -> Output:
+        words = int(rng.integers(40, 400))
+        return make_output(
+            trial=f'{case}__{system}__{sample}',
+            job='job-1',
+            case=case,
+            system=system,
+            fingerprint=f'fp-{system}',
+            text=' '.join([system if system in SYNTHETIC_STRAYS else 'word'] * words),
+            gate_failures=[Gate.TRUNCATED] if rng.random() < failing else [],
+            output_tokens=words * 2,
+            cost_usd=words * 2e-5 * (1 + everyone.index(system)),
+            latency_sec=float(rng.uniform(2, 40)),
+        )
+
+    outputs = [
+        output(case, system, sample, 0.03)
+        for case in cases
+        for system in systems
+        for sample in range(2)
+    ]
+    failing = {o.case for o in outputs if o.gate_failures}
+    clean = [case for case in cases if case not in failing][:2]
+    outputs += [
+        output(case, system, sample, 0.0)
+        for case in clean
+        for system in ('acme-edge', 'acme-nano')
+        for sample in range(2)
+    ]
+    failable = set(cases) - set(clean)
+    outputs += [
+        output(case, 'acme-tiny', sample, 0.7 if case in failable else 0.0)
+        for case in [*cases, 'case-retired']
+        for sample in range(2)
+    ]
+    outputs += [output('case-retired', 'acme-large', 0, 0.0)]
     write_outputs('arena', outputs)
 
     by_slot: dict[tuple[str, str], list[Output]] = {}
-    for output in outputs:
-        if not output.gate_failures:
-            by_slot.setdefault((output.case, output.system), []).append(output)
+    for o in outputs:
+        if not o.gate_failures:
+            by_slot.setdefault((o.case, o.system), []).append(o)
+    strays = [
+        (case, pair)
+        for case in clean
+        for pair in (('acme-edge', 'acme-nano'), ('acme-nano', 'acme-edge'))
+    ] + [
+        ('case-retired', pair)
+        for pair in (('acme-tiny', 'acme-large'), ('acme-large', 'acme-tiny'))
+    ]
     recorded: list[tuple[int, Vote]] = []
-    for day in range(10):
+    for day in range(sessions):
         session = store.start_session('arena', SYNTHETIC_START + timedelta(days=day))
         at = session.started_at
         for case in rng.permutation(list(cases)):
@@ -353,6 +390,10 @@ def write_synthetic_round(families_dir: Path, store: VoteStore) -> None:
                 b = rights[rng.integers(len(rights))]
                 ballot = _simulated_vote(rng, session.id, a, b)
             recorded.append((day, store.record(ballot, at)))
+        for case, (left, right) in strays:
+            at += timedelta(seconds=float(rng.uniform(20, 90)))
+            a, b = by_slot[case, left][0], by_slot[case, right][-1]
+            store.record(_simulated_vote(rng, session.id, a, b), at)
 
 
 _SWAPPED: dict[Choice, Choice] = {
@@ -367,7 +408,8 @@ _FLAGS: list[Flag] = ['meaning', 'punctuation', 'register', 'script', 'length']
 def _simulated_vote(
     rng: np.random.Generator, session: str, a: Output, b: Output
 ) -> Ballot:
-    gap = SYNTHETIC_SYSTEMS[a.system] - SYNTHETIC_SYSTEMS[b.system] + 0.1
+    strengths = SYNTHETIC_SYSTEMS | SYNTHETIC_STRAYS
+    gap = strengths[a.system] - strengths[b.system] + 0.1
     draw = rng.random()
     choice: Choice
     if draw < 0.15:

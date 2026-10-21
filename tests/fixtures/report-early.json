@@ -1,0 +1,681 @@
+{
+  "family": "arena",
+  "round": "2026-10-01",
+  "closed_at": "2026-10-01T18:00:00Z",
+  "results": {
+    "scorer": "votes",
+    "reference": "acme-large",
+    "votes": 34,
+    "dropped_votes": 2,
+    "sessions": 1,
+    "standings": [
+      {
+        "system": "acme-large",
+        "fingerprint": "fp-acme-large",
+        "score": 1000.0,
+        "interval": {
+          "lower": 861.2164675230583,
+          "upper": 1285.2174377709005
+        },
+        "rank": 1,
+        "best_rank": 1,
+        "worst_rank": 4,
+        "preliminary": true,
+        "votes": 7,
+        "decisive_votes": 5,
+        "both_bad_rate": 0.0,
+        "outputs": 60,
+        "gate_failure_rate": 0.0,
+        "mean_cost_usd": 0.0047673333333333335,
+        "p50_latency_sec": 22.40162145803312,
+        "output_tokens": {
+          "p10": 202.6,
+          "p50": 525.0,
+          "p90": 720.4000000000001
+        },
+        "latency_sec": {
+          "p10": 6.6580130800975725,
+          "p50": 22.40162145803312,
+          "p90": 35.284958728059806
+        },
+        "flags": {
+          "meaning": 0,
+          "punctuation": 0,
+          "register": 1,
+          "script": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "acme-pro",
+        "fingerprint": "fp-acme-pro",
+        "score": 976.5235157289804,
+        "interval": {
+          "lower": 851.1319036183909,
+          "upper": 1219.9200808921455
+        },
+        "rank": 2,
+        "best_rank": 1,
+        "worst_rank": 4,
+        "preliminary": true,
+        "votes": 17,
+        "decisive_votes": 13,
+        "both_bad_rate": 0.058823529411764705,
+        "outputs": 60,
+        "gate_failure_rate": 0.016666666666666666,
+        "mean_cost_usd": 0.013335000000000001,
+        "p50_latency_sec": 20.195052809392244,
+        "output_tokens": {
+          "p10": 214.20000000000002,
+          "p50": 416.0,
+          "p90": 696.0
+        },
+        "latency_sec": {
+          "p10": 4.527531478494842,
+          "p50": 20.195052809392244,
+          "p90": 35.81314695529415
+        },
+        "flags": {
+          "meaning": 0,
+          "punctuation": 0,
+          "register": 1,
+          "script": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "acme-small",
+        "fingerprint": "fp-acme-small",
+        "score": 907.5338351500827,
+        "interval": {
+          "lower": 695.9274930308495,
+          "upper": 1288.1832084419332
+        },
+        "rank": 3,
+        "best_rank": 1,
+        "worst_rank": 5,
+        "preliminary": true,
+        "votes": 11,
+        "decisive_votes": 10,
+        "both_bad_rate": 0.09090909090909091,
+        "outputs": 60,
+        "gate_failure_rate": 0.016666666666666666,
+        "mean_cost_usd": 0.008402666666666668,
+        "p50_latency_sec": 20.091376708075387,
+        "output_tokens": {
+          "p10": 184.60000000000002,
+          "p50": 388.0,
+          "p90": 742.8
+        },
+        "latency_sec": {
+          "p10": 4.748095291629594,
+          "p50": 20.091376708075387,
+          "p90": 35.70957127544697
+        },
+        "flags": {
+          "meaning": 0,
+          "punctuation": 0,
+          "register": 0,
+          "script": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "acme-flash",
+        "fingerprint": "fp-acme-flash",
+        "score": 792.9801778550425,
+        "interval": {
+          "lower": 644.8212720766492,
+          "upper": 956.5232527962994
+        },
+        "rank": 4,
+        "best_rank": 1,
+        "worst_rank": 5,
+        "preliminary": true,
+        "votes": 14,
+        "decisive_votes": 14,
+        "both_bad_rate": 0.0,
+        "outputs": 60,
+        "gate_failure_rate": 0.0,
+        "mean_cost_usd": 0.01848,
+        "p50_latency_sec": 24.59816535306449,
+        "output_tokens": {
+          "p10": 168.8,
+          "p50": 472.0,
+          "p90": 713.2
+        },
+        "latency_sec": {
+          "p10": 7.392526432939552,
+          "p50": 24.59816535306449,
+          "p90": 33.04638308543842
+        },
+        "flags": {
+          "meaning": 1,
+          "punctuation": 0,
+          "register": 0,
+          "script": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "acme-mini",
+        "fingerprint": "fp-acme-mini",
+        "score": 665.8538126173473,
+        "interval": {
+          "lower": 440.97339519397826,
+          "upper": 795.9900869883514
+        },
+        "rank": 5,
+        "best_rank": 3,
+        "worst_rank": 5,
+        "preliminary": true,
+        "votes": 11,
+        "decisive_votes": 10,
+        "both_bad_rate": 0.0,
+        "outputs": 60,
+        "gate_failure_rate": 0.06666666666666667,
+        "mean_cost_usd": 0.021256666666666667,
+        "p50_latency_sec": 22.198351259322916,
+        "output_tokens": {
+          "p10": 128.8,
+          "p50": 416.0,
+          "p90": 744.2
+        },
+        "latency_sec": {
+          "p10": 6.737693865481592,
+          "p50": 22.198351259322916,
+          "p90": 36.99403937433945
+        },
+        "flags": {
+          "meaning": 1,
+          "punctuation": 1,
+          "register": 0,
+          "script": 0,
+          "length": 1
+        }
+      },
+      {
+        "system": "acme-tiny",
+        "fingerprint": "fp-acme-tiny",
+        "score": 135.01992233828094,
+        "interval": {
+          "lower": -107.95777703015165,
+          "upper": 222.47998276083115
+        },
+        "rank": 6,
+        "best_rank": 6,
+        "worst_rank": 6,
+        "preliminary": true,
+        "votes": 0,
+        "decisive_votes": 0,
+        "both_bad_rate": null,
+        "outputs": 60,
+        "gate_failure_rate": 0.7166666666666667,
+        "mean_cost_usd": 0.037322666666666664,
+        "p50_latency_sec": 15.736639016733221,
+        "output_tokens": {
+          "p10": 179.2,
+          "p50": 499.0,
+          "p90": 734.0
+        },
+        "latency_sec": {
+          "p10": 5.263761135634278,
+          "p50": 15.736639016733221,
+          "p90": 37.73772458290453
+        },
+        "flags": {
+          "meaning": 0,
+          "punctuation": 0,
+          "register": 0,
+          "script": 0,
+          "length": 0
+        }
+      }
+    ],
+    "unranked": [
+      "acme-edge",
+      "acme-nano"
+    ],
+    "head_to_head": [
+      {
+        "system": "acme-edge",
+        "opponent": "acme-nano",
+        "votes": 4,
+        "wins": 1,
+        "losses": 2,
+        "ties": 1,
+        "both_bad": 0,
+        "win_rate": 0.375
+      },
+      {
+        "system": "acme-flash",
+        "opponent": "acme-large",
+        "votes": 2,
+        "wins": 0,
+        "losses": 2,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "acme-flash",
+        "opponent": "acme-mini",
+        "votes": 3,
+        "wins": 1,
+        "losses": 2,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.3333333333333333
+      },
+      {
+        "system": "acme-flash",
+        "opponent": "acme-pro",
+        "votes": 8,
+        "wins": 2,
+        "losses": 6,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.25
+      },
+      {
+        "system": "acme-flash",
+        "opponent": "acme-small",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "acme-large",
+        "opponent": "acme-flash",
+        "votes": 2,
+        "wins": 2,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "acme-large",
+        "opponent": "acme-mini",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "acme-large",
+        "opponent": "acme-pro",
+        "votes": 3,
+        "wins": 0,
+        "losses": 1,
+        "ties": 2,
+        "both_bad": 0,
+        "win_rate": 0.3333333333333333
+      },
+      {
+        "system": "acme-large",
+        "opponent": "acme-small",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "acme-mini",
+        "opponent": "acme-flash",
+        "votes": 3,
+        "wins": 2,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.6666666666666666
+      },
+      {
+        "system": "acme-mini",
+        "opponent": "acme-large",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "acme-mini",
+        "opponent": "acme-pro",
+        "votes": 2,
+        "wins": 1,
+        "losses": 0,
+        "ties": 1,
+        "both_bad": 0,
+        "win_rate": 0.75
+      },
+      {
+        "system": "acme-mini",
+        "opponent": "acme-small",
+        "votes": 5,
+        "wins": 0,
+        "losses": 5,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "acme-nano",
+        "opponent": "acme-edge",
+        "votes": 4,
+        "wins": 2,
+        "losses": 1,
+        "ties": 1,
+        "both_bad": 0,
+        "win_rate": 0.625
+      },
+      {
+        "system": "acme-pro",
+        "opponent": "acme-flash",
+        "votes": 8,
+        "wins": 6,
+        "losses": 2,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.75
+      },
+      {
+        "system": "acme-pro",
+        "opponent": "acme-large",
+        "votes": 3,
+        "wins": 1,
+        "losses": 0,
+        "ties": 2,
+        "both_bad": 0,
+        "win_rate": 0.6666666666666666
+      },
+      {
+        "system": "acme-pro",
+        "opponent": "acme-mini",
+        "votes": 2,
+        "wins": 0,
+        "losses": 1,
+        "ties": 1,
+        "both_bad": 0,
+        "win_rate": 0.25
+      },
+      {
+        "system": "acme-pro",
+        "opponent": "acme-small",
+        "votes": 4,
+        "wins": 3,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 1,
+        "win_rate": 0.875
+      },
+      {
+        "system": "acme-small",
+        "opponent": "acme-flash",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "acme-small",
+        "opponent": "acme-large",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "acme-small",
+        "opponent": "acme-mini",
+        "votes": 5,
+        "wins": 5,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "acme-small",
+        "opponent": "acme-pro",
+        "votes": 4,
+        "wins": 0,
+        "losses": 3,
+        "ties": 0,
+        "both_bad": 1,
+        "win_rate": 0.125
+      }
+    ],
+    "categories": [
+      {
+        "category": "docs",
+        "votes": 10,
+        "standings": [
+          {
+            "system": "acme-flash",
+            "score": 822.0061623420172,
+            "interval": {
+              "lower": 394.1969950471977,
+              "upper": 1147.0912141173812
+            },
+            "votes": 3,
+            "preliminary": true
+          },
+          {
+            "system": "acme-large",
+            "score": 1000.0,
+            "interval": {
+              "lower": 706.341094024358,
+              "upper": 1583.9790317417783
+            },
+            "votes": 3,
+            "preliminary": true
+          },
+          {
+            "system": "acme-mini",
+            "score": 738.3077249456964,
+            "interval": {
+              "lower": 15.802291769938051,
+              "upper": 1027.5581821785427
+            },
+            "votes": 4,
+            "preliminary": true
+          },
+          {
+            "system": "acme-pro",
+            "score": 1291.2965729184875,
+            "interval": {
+              "lower": 1012.6863744140552,
+              "upper": 2422.1255867665523
+            },
+            "votes": 5,
+            "preliminary": true
+          },
+          {
+            "system": "acme-small",
+            "score": 930.7057973862356,
+            "interval": {
+              "lower": 263.7833322203692,
+              "upper": 1822.856521451945
+            },
+            "votes": 5,
+            "preliminary": true
+          },
+          {
+            "system": "acme-tiny",
+            "score": 248.26114098903463,
+            "interval": {
+              "lower": -357.25372470006255,
+              "upper": 381.54531388382077
+            },
+            "votes": 0,
+            "preliminary": true
+          }
+        ],
+        "unranked": []
+      },
+      {
+        "category": "message",
+        "votes": 12,
+        "standings": [
+          {
+            "system": "acme-flash",
+            "score": 114.79056436874714,
+            "interval": {
+              "lower": -185.43595502148082,
+              "upper": 313.26544221944414
+            },
+            "votes": 6,
+            "preliminary": true
+          },
+          {
+            "system": "acme-large",
+            "score": 1000.0,
+            "interval": {
+              "lower": 647.7687213280187,
+              "upper": 1749.6421537505837
+            },
+            "votes": 3,
+            "preliminary": true
+          },
+          {
+            "system": "acme-mini",
+            "score": 72.80564918341884,
+            "interval": {
+              "lower": -537.7197693060434,
+              "upper": 1293.377139087134
+            },
+            "votes": 4,
+            "preliminary": true
+          },
+          {
+            "system": "acme-pro",
+            "score": 281.2692252343468,
+            "interval": {
+              "lower": -369.33841189869554,
+              "upper": 1238.7744981705107
+            },
+            "votes": 5,
+            "preliminary": true
+          },
+          {
+            "system": "acme-small",
+            "score": 274.3703976913738,
+            "interval": {
+              "lower": 67.886071969623,
+              "upper": 644.4403336300201
+            },
+            "votes": 2,
+            "preliminary": true
+          },
+          {
+            "system": "acme-tiny",
+            "score": -452.601466032959,
+            "interval": {
+              "lower": -970.7412830670485,
+              "upper": -362.33613699491434
+            },
+            "votes": 0,
+            "preliminary": true
+          }
+        ],
+        "unranked": [
+          "acme-edge",
+          "acme-nano"
+        ]
+      },
+      {
+        "category": "reply",
+        "votes": 12,
+        "standings": [
+          {
+            "system": "acme-flash",
+            "score": 1119.2652833608677,
+            "interval": {
+              "lower": 728.4699451432875,
+              "upper": 1881.9623214122198
+            },
+            "votes": 5,
+            "preliminary": true
+          },
+          {
+            "system": "acme-large",
+            "score": 1000.0,
+            "interval": {
+              "lower": 547.3002566167673,
+              "upper": 1408.126586063896
+            },
+            "votes": 1,
+            "preliminary": true
+          },
+          {
+            "system": "acme-mini",
+            "score": 645.7457908578876,
+            "interval": {
+              "lower": -30.43642516627824,
+              "upper": 968.4044309836382
+            },
+            "votes": 3,
+            "preliminary": true
+          },
+          {
+            "system": "acme-pro",
+            "score": 1189.0234250977762,
+            "interval": {
+              "lower": 630.7433292144469,
+              "upper": 1683.4891853249387
+            },
+            "votes": 7,
+            "preliminary": true
+          },
+          {
+            "system": "acme-small",
+            "score": 1267.699354805279,
+            "interval": {
+              "lower": 718.3749802714258,
+              "upper": 2375.422786362963
+            },
+            "votes": 4,
+            "preliminary": true
+          },
+          {
+            "system": "acme-tiny",
+            "score": 73.37282132361804,
+            "interval": {
+              "lower": -520.6412398271543,
+              "upper": 143.943595878147
+            },
+            "votes": 0,
+            "preliminary": true
+          }
+        ],
+        "unranked": [
+          "acme-edge",
+          "acme-nano"
+        ]
+      }
+    ],
+    "position": 131.8445893907143,
+    "length": -9.821726667872861,
+    "separability": 0.4666666666666667,
+    "split_half_tau": null,
+    "rater_agreement": {
+      "repeats": 0,
+      "agreement": null,
+      "below_floor": false
+    },
+    "decision": null
+  }
+}
