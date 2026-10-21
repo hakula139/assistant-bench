@@ -30,7 +30,8 @@ build-backend = "hatchling.build"
 packages = ["src/assistant_bench"]
 
 [tool.uv]
-python-downloads = "never"
+# Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
+python-preference = "only-managed"
 
 # This index overrides any registry set in the user's uv config, so the lockfile names only PyPI.
 [[tool.uv.index]]

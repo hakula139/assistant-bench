@@ -17,6 +17,7 @@
   # ------------------------------------------------------------------------------------------------
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -38,6 +39,7 @@
   outputs =
     {
       nixpkgs,
+      nixpkgs-unstable,
       flake-utils,
       git-hooks-nix,
       nixos-config,
@@ -55,6 +57,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        uv = nixpkgs-unstable.legacyPackages.${system}.uv;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -76,15 +79,8 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = with pkgs; [
-            python314
-            uv
-          ];
-
-          env = {
-            BENCH_NIXOS_CONFIG = nixosConfigExport;
-            UV_PYTHON = pkgs.lib.getExe pkgs.python314;
-          };
+          packages = [ uv ];
+          env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
         # ------------------------------------------------------------------------------------------
@@ -161,7 +157,7 @@
           };
         };
 
-        uvExe = pkgs.lib.getExe pkgs.uv;
+        uvExe = pkgs.lib.getExe uv;
 
         uvHooks = {
           ruff = {
@@ -201,7 +197,6 @@
           name = "assistant-bench-dev";
           inherit (pythonEnvironment) env;
 
-          # The hook packages put an older Python on PATH, so the project's Python must come first.
           packages =
             pythonEnvironment.packages
             ++ preCommit.enabledPackages

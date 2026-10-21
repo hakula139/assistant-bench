@@ -19,6 +19,8 @@ Each case declares its `source`, which determines where the case and everything 
 
 Everything a run produces lives under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, and ingested outputs stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs, and the endpoint's replies. [Running](../guide/running.md#the-data-directory) lists its layout.
 
+uv also finds its managed interpreters under `XDG_DATA_HOME`, so `XDG_DATA_HOME=<dir> uv run ...` installs a new CPython in `<dir>` and relinks `.venv` to it, which breaks once `<dir>` is removed. To point a single run at a scratch data directory, set the variable in-process or call `.venv/bin/bench` directly.
+
 ## Committed and Published Text
 
 - Commit only synthetic or public cases, along with fixtures built from generic names such as `acme/large` and `example.com`.

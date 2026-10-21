@@ -19,7 +19,7 @@ Early development. What works today:
 
 ## Usage
 
-Requires Nix with flakes and a running Docker daemon:
+Requires Nix with flakes, a running Docker daemon, and on NixOS [nix-ld](https://github.com/nix-community/nix-ld), as the [quickstart](docs/guide/quickstart.md#requirements) lists:
 
 ```bash
 nix develop                                 # Dev shell with every tool
