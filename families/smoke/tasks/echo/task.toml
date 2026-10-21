@@ -1,0 +1,15 @@
+schema_version = "1.4"
+
+[task]
+name = "smoke/echo"
+description = "Write a fixed word to a file, which the oracle solution does and the test checks"
+version = "1.0.0"
+
+[agent]
+timeout_sec = 120.0
+
+[verifier]
+timeout_sec = 120.0
+
+[environment]
+build_timeout_sec = 300.0

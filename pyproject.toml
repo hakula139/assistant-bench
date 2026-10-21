@@ -1,0 +1,88 @@
+[project]
+name = "assistant-bench"
+version = "0.1.0"
+description = "Blind pairwise benchmark of AI assistant outputs"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
+dependencies = [
+  "harbor==0.24.0",
+  "httpx>=0.28.1",
+  "openai>=2.54.0",
+  "pydantic>=2.14.1",
+  "python-dotenv>=1.2.4",
+  "typer>=0.27.3",
+]
+
+[project.scripts]
+bench = "assistant_bench.cli:app"
+
+[dependency-groups]
+dev = ["mypy>=2.4.0", "pytest>=9.1.1", "pytest-cov>=7.1.0", "ruff>=0.17.1", "trustme>=1.2.1"]
+
+[build-system]
+requires = ["hatchling>=1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/assistant_bench"]
+
+[tool.uv]
+python-downloads = "never"
+
+# This index overrides any registry set in the user's uv config, so the lockfile names only PyPI.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[tool.ruff]
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.format]
+quote-style = "single"
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = ["B", "C4", "D", "E", "F", "I", "SIM", "UP", "W"]
+ignore = ["D101", "D102", "D103", "D105", "D106", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D100", "D104"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+split-on-trailing-comma = true
+combine-as-imports = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+  "--import-mode=importlib",
+  "--quiet",
+  "-m",
+  "not docker",
+  "--cov",
+  "--cov-report=term-missing",
+  "--cov-report=xml",
+]
+strict_markers = true
+pythonpath = ["tests"]
+markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
+
+[tool.coverage.run]
+source = ["assistant_bench"]
+
+[tool.mypy]
+files = ["src", "tests"]
+exclude_gitignore = true
+strict = true
+
+# Harbor ships type annotations without a `py.typed` marker.
+[[tool.mypy.overrides]]
+module = ["harbor.*"]
+follow_untyped_imports = true
