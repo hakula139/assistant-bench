@@ -179,7 +179,7 @@ class TestRun:
         assert len(endpoint.requests) == 1
         assert not (tmp_path / 'output.txt').exists()
 
-    def test_trusts_only_the_ca_bundle_the_env_names(
+    def test_trusts_the_ca_bundle_the_env_names(
         self, tls_endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
         assert tls_endpoint.ca_file is not None

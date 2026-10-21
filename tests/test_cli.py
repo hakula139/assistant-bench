@@ -125,7 +125,6 @@ class TestCheck:
             (task_dir / 'instruction.md').write_text('An earlier wording.')
             agent = AgentConfig(name='oracle')
             write_trial(job_dir, f'{case_id}__1', agent, task=f'smoke-text/{case_id}')
-        (job_dir / 'result.json').write_text('{}')
 
         exit_code, message = invoke('check', 'smoke-text')
 

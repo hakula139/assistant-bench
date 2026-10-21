@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -59,7 +60,6 @@ class TestChangedCases:
         for case_id in case_ids:
             agent = AgentConfig(name='oracle')
             write_trial(job_dir, f'{case_id}__1', agent, task=f'{family}/{case_id}')
-        (job_dir / 'result.json').write_text('{}')
 
     def test_names_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
@@ -74,6 +74,18 @@ class TestChangedCases:
         changed = jobs.changed_cases(family, [*edited, new])
 
         assert changed == ['en-greeting']
+
+    def test_leaves_a_case_without_a_rendered_task_to_harbor(
+        self, data_dir: Path
+    ) -> None:
+        family = load_family('smoke-text')
+        (case, _) = load_cases(family)
+        jobs.render_tasks(family, [case])
+        self.record_trials(data_dir, 'smoke-text', case.id)
+        shutil.rmtree(data_dir / 'tasks' / 'smoke-text')
+        edited = case.model_copy(update={'instruction': 'Reworded.'})
+
+        assert jobs.changed_cases(family, [edited]) == []
 
     def test_keeps_carriage_returns_when_comparing(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
@@ -115,9 +127,7 @@ class TestCaseJob:
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
-    def test_diffs_against_the_finished_jobs_of_the_family(
-        self, data_dir: Path
-    ) -> None:
+    def test_diffs_against_the_earlier_jobs_of_the_family(self, data_dir: Path) -> None:
         jobs_dir = data_dir / 'jobs' / 'f'
         for name in ('job-1', 'job-2', 'job-3'):
             (jobs_dir / name).mkdir(parents=True)

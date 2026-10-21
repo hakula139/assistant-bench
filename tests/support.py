@@ -40,6 +40,7 @@ def write_trial(
     error: str | None = None,
     output: str | None = None,
 ) -> None:
+    """Writes a trial's `result.json` into a job, as Harbor would."""
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:
@@ -65,6 +66,7 @@ def write_trial(
         exception_info=exception if error else None,
     )
     (trial_dir / 'result.json').write_text(result.model_dump_json())
+    (job_dir / 'result.json').touch()
 
 
 # ── Stub Endpoint ──

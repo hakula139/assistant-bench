@@ -67,18 +67,21 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
 
 
 def changed_cases(family: Family, cases: list[Case]) -> list[str]:
-    """Returns the IDs of cases whose instruction differs from the task a trial ran."""
+    """Returns the IDs of cases whose instruction differs from the task a trial ran.
+
+    A case without a rendered task is left to Harbor's own digest check.
+    """
     ran = {
         output.case
-        for job_dir in _finished_jobs(family)
+        for job_dir in _family_jobs(family)
         for output in read_trials(family, job_dir, {})
     }
     return [
         case.id
         for case in cases
         if case.id in ran
-        and (_task_dir(family, case) / 'instruction.md').read_text(newline='')
-        != case.instruction
+        and (instruction := _task_dir(family, case) / 'instruction.md').exists()
+        and instruction.read_text(newline='') != case.instruction
     ]
 
 
@@ -89,8 +92,8 @@ def _task_dir(family: Family, case: Case) -> Path:
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     """Builds a job that runs every system on every case task.
 
-    The job diffs against the family's finished jobs, so Harbor runs only the trials
-    that no earlier job completed with the same task version and agent config.
+    The job diffs against the family's earlier jobs, so Harbor runs only the trials
+    that none of them completed with the same task version and agent config.
     """
     assert family.settings.max_output_tokens is not None
     agents = [
@@ -112,7 +115,7 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     ]
     sources = [
         SourceJobConfig(action='diff', type='local', path=job_dir)
-        for job_dir in _finished_jobs(family)
+        for job_dir in _family_jobs(family)
     ]
     return _job(family, data_dir() / 'jobs' / family.name, agents, tasks, sources)
 
@@ -136,7 +139,7 @@ def oracle_job(family: Family) -> JobConfig:
     )
 
 
-def _finished_jobs(family: Family) -> list[Path]:
+def _family_jobs(family: Family) -> list[Path]:
     jobs_dir = data_dir() / 'jobs' / family.name
     return sorted(result.parent for result in jobs_dir.glob('*/result.json'))
 
@@ -229,7 +232,7 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     for output in sorted(
         (
             output
-            for job_dir in (data_dir() / 'jobs' / family.name).glob('*')
+            for job_dir in _family_jobs(family)
             for output in read_trials(family, job_dir, systems)
         ),
         key=lambda output: (output.error is not None, output.job, output.trial),
