@@ -152,13 +152,12 @@ class TestBootstrap:
             Comparison('new', 'large', 1.0, 'own'),
         ]
 
-        strengths = bootstrap(Matchups.build(comparisons), 'large', resamples=50)
+        strengths = bootstrap(Matchups.build(comparisons), 'small', resamples=50)
 
         large, new, small = np.isnan(strengths).T
-        assert not large.any()
-        assert 0 < new.sum() < 50
-        assert 0 < small.sum() < 50
-        assert not (new & small).any()
+        assert not small.any()
+        assert 0 < large.sum() < new.sum() < 50
+        assert not (large & ~new).any()
 
 
 class TestRate:
@@ -188,11 +187,15 @@ class TestRate:
             for i, opponent in enumerate(['large', 'medium', 'small'] * 3)
         ][:8]
 
+        alone = rate(Matchups.build(simulate(600)), 'medium')
         ratings = rate(Matchups.build(simulate(600) + challenger), 'medium')
 
         new = ratings.systems.index('new')
-        assert np.isinf(ratings.lower[new]) or np.isinf(ratings.upper[new])
-        assert ratings.bounded().systems == ('large', 'medium', 'small')
+        assert (ratings.lower[new], ratings.upper[new]) == (-np.inf, np.inf)
+        bounded = ratings.bounded()
+        assert bounded.systems == alone.systems
+        assert bounded.lower == pytest.approx(alone.lower, abs=50)
+        assert bounded.upper == pytest.approx(alone.upper, abs=50)
 
 
 class TestTies:

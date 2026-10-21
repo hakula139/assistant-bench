@@ -197,16 +197,19 @@ def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) ->
 def rate(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Ratings:
     """Place the reference system's score at `ANCHOR` with percentile intervals.
 
-    Each resample's strengths keep mean zero and shift by the point fit's
-    reference strength, so the reference has an interval like every other system.
+    Each resample's scores shift so that the systems it connects keep the mean of
+    their point scores, which gives the reference an interval like every other
+    system and keeps a detached system's displacement out of the others' draws.
     """
     point = fit(matchups)
     shift = point.strength[matchups.systems.index(reference)]
+    score = ANCHOR + ELO_PER_LOGIT * (point.strength - shift)
     draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, reference, resamples) - shift)
+    draws += np.nanmean(score - draws, axis=1, keepdims=True)
     lower, upper = _interval(draws)
     return Ratings(
         systems=matchups.systems,
-        score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),
+        score=score,
         lower=lower,
         upper=upper,
         draws=draws,

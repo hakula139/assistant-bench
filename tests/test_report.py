@@ -319,23 +319,24 @@ class TestClose:
         assert {standing.system for standing in board.standings} == {'a', 'b'}
         assert board.unranked == ['c', 'd']
 
-    def test_leaves_the_systems_a_category_cannot_bound_unranked_there(
+    def test_leaves_the_systems_a_board_cannot_bound_unranked_there(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         cases = {f'r{i}': 'reply' for i in range(5)} | {'d0': 'docs', 'd1': 'docs'}
-        write_votes_family(families_dir, 'f', ['a', 'b', 'c'], cases)
+        write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
         outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in 'abc'} for case in cases}
+            cases, {case: {s: f'{s} on {case}' for s in 'abcd'} for case in cases}
         )
         session = store.start_session('f', AT)
         pairs = [(f'r{i}', opponent) for i in range(5) for opponent in 'bc']
-        for case, opponent in [*pairs, ('d0', 'b'), ('d1', 'c')]:
+        for case, opponent in [*pairs, ('r0', 'd'), ('d0', 'b'), ('d1', 'c')]:
             record(store, session.id, outputs[case, 'a'], outputs[case, opponent], 'a')
 
         results = close(load_family('f'), store, AT).results
 
         assert results.scorer == 'votes'
         assert {standing.system for standing in results.standings} == {'a', 'b', 'c'}
+        assert results.unranked == ['d']
         docs = next(board for board in results.categories if board.category == 'docs')
         assert [standing.system for standing in docs.standings] == ['a']
         assert docs.unranked == ['b', 'c']
