@@ -52,5 +52,5 @@ web/src/
 
 - The page exists only in builds with `BENCH_LOCAL=1`, so the public site never routes it. Keep it out of `src/pages/`.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives, which loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin. Keep the page within it, and keep Markdown images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
+- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, and keep Markdown images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
 - HTML outputs load by URL in `<iframe sandbox="allow-scripts">` from the separate render origin. Never use `srcdoc`, which inherits the vote page's policy.

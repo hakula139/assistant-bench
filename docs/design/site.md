@@ -25,4 +25,4 @@ The tokens and fonts match hakula.xyz: Inter Variable, with Sarasa Gothic SC or 
 
 ## Deploy
 
-The public build deploys to Cloudflare Workers static assets at `bench.hakula.xyz`, which `web/wrangler.toml` configures, and each same-repository PR gets a preview version aliased `pr-<number>`. [Development](../conventions/development.md#ci) lists the workflows.
+The public build deploys to Cloudflare Workers static assets at `bench.hakula.xyz`, which `web/wrangler.toml` configures, and each PR from this repository gets a preview version aliased `pr-<number>`, except Dependabot's, which receive no secrets. [Development](../conventions/development.md#ci) lists the workflows.
