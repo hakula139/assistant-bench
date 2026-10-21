@@ -11,11 +11,10 @@
 
 ## Quirks of the Pinned Release
 
-- A task directory without an `environment/` subdirectory loads as a dataset, so each rendered task gets an empty one.
 - A task without tests loads only while the verifier is disabled.
 - Harbor runs task scripts in the main container through bash, so every image needs it: Alpine fails with exit code 127, and the bench's stock image is Debian slim.
 - A diff source reuses a trial only when the task declares a semantic version and every other input is equal. Those inputs include the whole agent config, so changing a system's concurrency limit or its `system` kwarg, which a table rename does, reruns its trials. Because a per-run value in `kwargs` would rerun every trial, `Generate` reads the nixos-config rev at run time and records it in `metadata`.
-- A source and target task with the same version but different content abort the whole job with a digest error. A patch-level version bump reuses the earlier trials, a minor bump regrades them, and a major bump reruns them.
+- Each trial's `lock.json` records its task's digest, the `sha256:` of `Packager.compute_content_hash` over the task's files. A source and target task with the same version but different digests abort the whole job. A patch-level version bump reuses the earlier trials, a minor bump regrades them, and a major bump reruns them.
 - A source trial that errored is rerun into the new job, while the failed trial stays in its source job.
 - `harbor job resume` reuses the job's `config.json` but runs the current code, so a resumed `Generate` trial records the rev of the current export against the system prompt the job was created with.
 - A reused trial is skipped and stays in its source job, without a copy in the new one.

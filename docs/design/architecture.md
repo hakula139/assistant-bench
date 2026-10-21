@@ -8,6 +8,7 @@ assistant-bench limits its code to the parts Harbor lacks: resolving systems, re
 src/assistant_bench/
 ├── cli.py                                  # The Typer `bench` command
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and ingest
+├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
 ├── harnesses/
 │   ├── __init__.py                         # Harness name to a Harbor agent name or import path
 │   └── generate.py                         # The single-call agent
@@ -21,7 +22,7 @@ src/assistant_bench/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
-2. `jobs`
+2. `jobs` and `revisions`
 3. `harnesses`
 4. `families` and `catalog`
 5. `paths`
@@ -47,6 +48,6 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 
 ## Reruns
 
-Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Every rendered task carries the version in `jobs.TASK_VERSION`. Harbor aborts a job when a task keeps its version but changes its content, so an edited case needs a new ID, and `bench check` and `bench run` report one before Harbor starts by comparing each case that a recorded trial ran with its rendered `instruction.md`. A change that alters every rendered task, such as a new stock image or agent timeout, bumps the patch version, which Harbor treats as compatible and keeps reusing the earlier trials.
+Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Every rendered task carries the version in `jobs.TASK_VERSION`. Harbor aborts a job when a task keeps its version but changes its content, so an edited case needs a new ID. `bench check` and `bench run` render the tasks first and compare each one's content hash with the task digest Harbor recorded in the lock of every earlier trial of that task and version, so they name the changed cases before Harbor starts. A change that alters every rendered task, such as a new stock image or agent timeout, bumps the patch version, which Harbor treats as compatible and keeps reusing the earlier trials.
 
 Reused trials stay in their original job, so ingest reads every job directory of the family. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns, preferring successful trials, so an errored trial drops out once a rerun replaces it.

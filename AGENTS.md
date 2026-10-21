@@ -35,8 +35,6 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md)                                                              |
 | Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                  |
 | Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                 |
-| Comments, docs, or text that users or models read    | [Writing](docs/conventions/writing.md)                                                            |
-| Commits, branches, PRs, or issues                    | [GitHub](docs/conventions/github.md)                                                              |
 | The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                    |
 
 ## Rules for Every Change
@@ -52,7 +50,6 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` reads `systems.toml` and `family.toml` while taking at most a family name, and environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
-- Update whatever the change makes stale: `README.md`, the guides, the module map, and open issues it resolves.
 
 ## Verification
 
@@ -74,10 +71,8 @@ nix flake check                             # After a flake change, run the hook
 
 ## Code Review
 
-Review the complete change, its affected callers, and the adjacent code it touches against the convention docs. Check in particular:
+Beyond the general review, check in particular:
 
-- Cross-file consistency: parallel models use the same structure, naming, and field order.
-- Comment hygiene: one-line docstrings where one line suffices, and a comment wherever a constraint is non-obvious.
-- Harbor and pydantic primitives: use them where they exist, in place of hand-written equivalents.
 - Layering: imports follow the [import layers](docs/design/architecture.md#import-layers).
 - Data hygiene: nothing private reaches a committed file, a fixture, or a log line.
+- Reruns: a change to rendered tasks, agent configs, or `systems.toml` keeps Harbor's reuse and the fingerprint rule intact, as [Architecture](docs/design/architecture.md#reruns) and [Systems](docs/design/systems.md#fingerprints) describe.

@@ -35,7 +35,7 @@ Each line of `cases.jsonl` is one case:
 }
 ```
 
-- `id` is unique across the committed and local cases of the family and uses lowercase letters, digits, and hyphens. Once a case has run, an edited instruction needs a new ID, because Harbor aborts a job whose task keeps its version but changes its content. `bench check` and `bench run` report such a case before Harbor starts, and accept an edit while no recorded trial has run the case.
+- `id` is unique across the committed and local cases of the family and uses lowercase letters, digits, and hyphens. Once a case has run, an edited instruction needs a new ID, because Harbor aborts a job whose task keeps its version but changes its content. `bench check` and `bench run` compare each rendered task with the digest Harbor recorded for it and name such a case before Harbor starts, so an edit is accepted while no trial has run the case.
 - `category` tags the case for per-category leaderboards.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `$XDG_DATA_HOME/assistant-bench/cases/<family>.jsonl`, which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `checklist` is an optional list of judging hints shown beside the outputs.

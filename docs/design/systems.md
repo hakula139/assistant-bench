@@ -12,7 +12,7 @@ A system specifies either a catalog model with `model` or a bare `route`. A cata
 
 A system's fingerprint hashes its resolved route, effort, harness, and the SHA-256 of its prompt text. Because the table name is excluded, renaming a table preserves the fingerprint, whereas modifying what the system sends changes it.
 
-Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool. Every output also records the nixos-config rev it ran under.
+Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool. On every PR, `bench fingerprints` resolves each table at the PR's base and head and fails when a table keeps its name but not its fingerprint, which stops a dependency bump from changing a system under its old name. Every output also records the nixos-config rev it ran under.
 
 ## Harnesses
 

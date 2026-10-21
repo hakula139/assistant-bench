@@ -6,12 +6,13 @@ Learn how to point the bench at a model endpoint, check and run a family, and co
 
 Single-call systems send OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
 
-| Variable             | Value                                                                                   |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `BENCH_API_BASE_URL` | The endpoint's base URL, including `/v1`                                                |
-| `BENCH_API_KEY_FILE` | A file holding the API key, so the key is never copied into the checkout                |
-| `BENCH_API_CA_FILE`  | Optional. A CA bundle for an endpoint whose certificate the system store does not trust |
-| `BENCH_API_HEADERS`  | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`      |
+| Variable                  | Value                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `BENCH_API_BASE_URL`      | The endpoint's base URL, including `/v1`                                                          |
+| `BENCH_API_KEY_FILE`      | A file holding the API key, so the key is never copied into the checkout                          |
+| `BENCH_API_CA_FILE`       | Optional. A CA bundle for an endpoint whose certificate the system store does not trust           |
+| `BENCH_API_HEADERS`       | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                |
+| `BENCH_API_LOCAL_ADDRESS` | Optional. A local address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4 |
 
 Each system's route is the model ID the endpoint expects, and every trial sends one request with the case instruction as the user message, the system's prompt as the system message when it has one, the family's `max_output_tokens` as `max_completion_tokens`, and the system's effort as `reasoning_effort`.
 
@@ -22,7 +23,7 @@ uv run bench check smoke-text
 uv run bench check smoke
 ```
 
-`bench check` validates `family.toml`, its systems, and its cases. For a family scored by `tests`, it also runs Harbor's oracle on every task and fails unless each reference solution earns reward 1. The check requires Docker, but no endpoint.
+`bench check` validates `family.toml`, its systems, and its cases, and renders the cases into Harbor tasks to name any that changed since a trial ran them. For a family scored by `tests`, it also runs Harbor's oracle on every task and fails unless each reference solution earns reward 1. The check requires Docker, but no endpoint.
 
 ## Running a Family
 

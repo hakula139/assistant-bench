@@ -1,6 +1,6 @@
 # Development
 
-Learn how to set up the development environment, what the pre-commit hooks check, where each setting lives, how the toolchain and the nixos-config input are pinned, how Nix and config files are styled, what CI runs, and how to handle a failing check.
+Learn how to set up the development environment, what the pre-commit hooks check, where each setting lives, how the toolchain and the nixos-config input are pinned, how Nix and config files are styled, and what CI runs.
 
 ## Dev Shell
 
@@ -43,7 +43,7 @@ Environment variables carry only secrets and per-environment values: the `BENCH_
 ## Toolchain and Pins
 
 - The flake pins Nixpkgs, which supplies Python, uv, and Node.js. Both shells set `UV_PYTHON` to that Python, and `[tool.uv]` never downloads another.
-- Renovate opens lock file maintenance PRs, including the flake lock update that moves the nixos-config input, without automerging them, so every pin bump gets a human review.
+- Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](#ci) fails such a PR when the bump changes a system's fingerprint.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 - `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.
 
@@ -56,7 +56,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-Bump the input through an ordinary PR, and check which systems' fingerprints it changes.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and the fingerprint check fails until the changed system takes a new name in `systems.toml`.
 
 ## Nix Style
 
@@ -64,9 +64,6 @@ Bump the input through an ordinary PR, and check which systems' fingerprints it 
 
 - Keep code and comments within 100 columns, counting the indent. Because `nixfmt` does not reflow comments, wrap them by hand.
 - Mark the file header with `=` banners at column 0, and mark each section with `-` banners indented to match the surrounding code. Every banner line ends at column 100.
-- Group related bindings and attributes, and order a `let` block so that each binding follows what it depends on.
-- Set off a multiline statement, field, or entry with a blank line where it makes the boundaries easier to see, and omit these separators in a short record that reads as one unit.
-- Write multiline text, such as a shell hook, as an indented string with literal line breaks.
 
 ## Config Style
 
@@ -76,18 +73,16 @@ Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wra
 
 CI runs on pushes to `main`, pull requests, and manual dispatch:
 
-| Job             | Checks                                                                                                      |
-| --------------- | ----------------------------------------------------------------------------------------------------------- |
-| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                           |
-| Node Check      | `pnpm format`, `pnpm lint`, and `pnpm spellcheck`                                                           |
-| Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, and pytest with coverage uploaded to Codecov |
-| Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                       |
-| CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone             |
+| Job             | Checks                                                                                                                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                         |
+| Node Check      | `pnpm format`, `pnpm lint`, and `pnpm spellcheck`                                                                                         |
+| Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and on PRs the fingerprint check |
+| Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                                                     |
+| CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone                                           |
+
+The fingerprint check runs `uv run bench fingerprints <base>` against the PR's base commit. It resolves every `systems.toml` table at both commits, each against its own nixos-config export, and fails when a table keeps its name but its fingerprint changes, so a changed system takes a new name and the old one keeps its results.
 
 No job sends a paid request, and no job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
 
 Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
-
-## Failing Checks
-
-Fix the cause of a failing hook, lint, test, or CI job, because skipped tests, ignore and allowlist entries, `continue-on-error`, `|| true`, retries, and special cases for one path or commit only hide the failure. Keep an ignore entry only when it is the design, such as a generated file that a formatter must skip, and give the reason in the PR that adds it.
