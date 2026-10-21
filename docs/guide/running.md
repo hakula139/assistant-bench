@@ -51,7 +51,7 @@ uv run bench ingest smoke-text
 uv run bench serve
 ```
 
-`bench serve` builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every family scored by votes that has outputs, and it runs until interrupted. Open that address exactly, since the API admits no other host. A session holds up to 30 votes, each recorded as soon as it is cast, and [Arena](../design/arena.md) covers how pairs are chosen.
+`bench serve` builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every family scored by votes that has outputs, and it runs until interrupted. Open that address exactly, since the API admits no other host. A session holds up to 30 votes, each recorded as soon as it is cast. [Voting](voting.md) covers the keys and flags, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ## Closing a Round
 

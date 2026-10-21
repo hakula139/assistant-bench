@@ -18,6 +18,7 @@ Early development. What works today:
 - **Outputs:** one record per trial with the text or reward, token counts, cost at catalog prices, latency, and provenance
 - **Arena:** a local vote page serving blind pairs, with a balanced seed, adaptive pairing, swapped repeats, and automatic losses for outputs that fail a gate
 - **Reports:** Bradley-Terry scores with case-clustered bootstrap intervals and rank spreads, written as aggregate JSON under `reports/`
+- **Site:** static leaderboards, category breakdowns, and cost and latency charts built from the committed reports
 
 ## Usage
 
@@ -38,7 +39,7 @@ The [quickstart](docs/guide/quickstart.md) walks through the setup, and [Running
 
 ## Documentation
 
-- [User guide](docs/guide/): quickstart, running a family, authoring cases, families, and systems
+- [User guide](docs/guide/): quickstart, running a family, voting, and authoring cases, families, and systems
 - [Design](docs/design/): architecture, systems, the arena, ranking, reports, and the prose families
 - [Conventions](docs/conventions/) and [`AGENTS.md`](AGENTS.md): how changes are written and checked
 

@@ -26,7 +26,8 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
-└── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/
+├── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/
+└── web/                                    # The results site and the local vote page, a pnpm workspace package
 ```
 
 ## Read Before You Edit
@@ -34,6 +35,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | When the change touches                              | Read                                                                                                       |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
+| The site under `web/`                                | [TypeScript](docs/conventions/typescript.md)                                                               |
 | Tests                                                | [Testing](docs/conventions/testing.md)                                                                     |
 | A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
 | Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                           |
@@ -68,9 +70,12 @@ uv run ruff format --check                  # Check formatting
 uv run mypy                                 # Type check (strict)
 uv run pytest                               # Run the tests that need no Docker, with coverage
 uv run pytest -m docker                     # Run the Harbor trials under Docker, which need no secrets
-pnpm format                                 # Check JSON, Markdown, and YAML formatting
-pnpm lint                                   # Lint Markdown
+pnpm format                                 # Check formatting of the site, JSON, Markdown, and YAML
+pnpm lint                                   # Lint Markdown and the site
 pnpm spellcheck                             # Spell check
+pnpm typecheck                              # Type check the site
+pnpm test                                   # Check the site's report schema against the report fixture
+pnpm build                                  # Build the site from reports/
 nix flake check                             # After a flake change, run the hooks in the Nix sandbox
 ```
 
