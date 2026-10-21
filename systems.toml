@@ -1,9 +1,6 @@
-# Each table is one system under test. `model` names a key in nixos-config's model catalog, which
-# supplies the route, the default effort, and prices. A system outside the catalog sets `route` and,
-# optionally, `price` in USD per million tokens. `prompt` takes `nixos-config:<client>` for a
-# rendered instruction file, such as `nixos-config:claudeCode`, or a repo-relative path, and becomes
-# the system message. Changing a system's route, effort, or prompt changes its fingerprint, so give
-# it a new table name and let the old name keep its frozen scores.
+# Each table is one system under test, with its keys described in docs/guide/authoring.md. Changing
+# a system's route, effort, or prompt changes its fingerprint, so give it a new table name and let
+# the old name keep its frozen scores.
 
 ["opus-5.5"]
 model = "claude-opus-5-5"

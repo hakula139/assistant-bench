@@ -5,15 +5,15 @@ __pycache__/
 *.egg-info/
 
 # Dependencies
-.venv/
+/.venv/
 node_modules/
 
 # Environment
 .env
 
 # Nix
-.direnv/
-.pre-commit-config.yaml
+/.direnv/
+/.pre-commit-config.yaml
 result
 result-*
 

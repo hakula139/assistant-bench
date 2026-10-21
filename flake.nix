@@ -56,8 +56,9 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # The model catalog and assistant instructions that systems reference, with the revision
-        # every output records.
+        # ------------------------------------------------------------------------------------------
+        # nixos-config Export
+        # ------------------------------------------------------------------------------------------
         promptFragments = "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
         nixosConfigExport = pkgs.writeText "nixos-config.json" (
           builtins.toJSON {
