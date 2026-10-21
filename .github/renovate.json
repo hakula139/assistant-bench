@@ -7,7 +7,7 @@
   "packageRules": [
     {
       "matchManagers": ["nix"],
-      "matchDepNames": ["nixos-config"],
+      "matchUpdateTypes": ["lockFileMaintenance"],
       "automerge": false
     }
   ]
