@@ -1,0 +1,98 @@
+# AGENTS.md: assistant-bench
+
+assistant-bench is a public benchmark in which every AI assistant system receives the same instruction and the owner compares outputs blind and in pairs. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
+
+This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
+
+```bash
+bench check smoke                           # Validate a family, running Harbor's oracle on a task family
+bench run smoke-text                        # Generate a family's missing trials for every system it lists
+bench ingest smoke-text                     # Collect a family's trials into outputs/<family>.jsonl
+```
+
+## Project Layout
+
+```text
+.
+├── .cspell/                                # Project spelling dictionary
+├── .editorconfig                           # Shell layout that shfmt reads
+├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
+├── .envrc                                  # Loads the dev shell through direnv
+├── .github/                                # CI workflow, the shared Nix setup action, PR template, and Renovate and Dependabot configs
+├── .gitignore                              # Build output and local tool state kept out of Git
+├── .markdownlint-cli2.jsonc                # Markdown lint rules
+├── .npmrc                                  # Pins the public npm registry
+├── .prettierignore                         # The pnpm lockfile, which Prettier skips
+├── .prettierrc                             # Prettier settings for JSON, Markdown, and YAML
+├── .python-version                         # The Python version uv targets
+├── .taplo.toml                             # TOML formatter settings
+├── .vscode/                                # Shared VS Code settings
+├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
+├── codecov.yml                             # Codecov coverage targets
+├── cspell.json                             # Spell checker settings
+├── docs/                                   # Guides, conventions, design, and research
+├── families/                               # One directory per family and leaderboard, described in docs/guide/authoring.md
+├── flake.nix                               # Nix flake for the dev shells, pre-commit hooks, checks, and the nixos-config export
+├── package.json                            # Node formatters, linters, and spell checker run through pnpm
+├── pnpm-workspace.yaml                     # Dependency overrides for pnpm
+├── pyproject.toml                          # Python package, dependencies, and Ruff, pytest, coverage, mypy, and uv settings
+├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
+├── systems.toml                            # Systems under test, one table each
+└── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/
+```
+
+## Read Before You Edit
+
+| When the change touches                              | Read                                                                                              |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map) |
+| Tests                                                | [Testing](docs/conventions/testing.md)                                                            |
+| A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md)                                                              |
+| Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                  |
+| Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                 |
+| Comments, docs, or text that users or models read    | [Writing](docs/conventions/writing.md)                                                            |
+| Commits, branches, PRs, or issues                    | [GitHub](docs/conventions/github.md)                                                              |
+| The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                    |
+
+## Rules for Every Change
+
+- Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv.
+- Run the [verification](#verification) block before review.
+- Add new words to `.cspell/words.txt` in alphabetical order, as `cspell` scans Python sources too.
+- Commit only synthetic or public cases. As [Data](docs/conventions/data.md) describes, transcript-derived and held-out cases, their outputs, and Harbor jobs live in the data directory, and a test fails if a committed case file holds a private source.
+- Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of the repository, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
+- Keep the lockfiles on public registries, as a test fails if `uv.lock` or `pnpm-lock.yaml` names a host other than PyPI or npm.
+- Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config, since Harbor writes each agent's `kwargs` and `env` into the job's `config.json`.
+- In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix for a variant. Routes and channel IDs stay in `systems.toml` and the data directory.
+- Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
+- Keep commands minimal and settings in config files: `bench` reads `systems.toml` and `family.toml` while taking at most a family name, and environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
+- In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
+- Update whatever the change makes stale: `README.md`, the guides, the module map, and open issues it resolves.
+
+## Verification
+
+Run after implementation and before review:
+
+```bash
+uv run ruff check                           # Lint
+uv run ruff format --check                  # Check formatting
+uv run mypy                                 # Type check (strict)
+uv run pytest                               # Run the tests that need no Docker, with coverage
+uv run pytest -m docker                     # Run the Harbor trials under Docker, which need no secrets
+pnpm format                                 # Check JSON, Markdown, and YAML formatting
+pnpm lint                                   # Lint Markdown
+pnpm spellcheck                             # Spell check
+nix flake check                             # After a flake change, run the hooks in the Nix sandbox
+```
+
+[Development](docs/conventions/development.md#ci) lists which CI job runs each check.
+
+## Code Review
+
+Review the complete change, its affected callers, and the adjacent code it touches against the convention docs. Check in particular:
+
+- Cross-file consistency: parallel models use the same structure, naming, and field order.
+- Comment hygiene: one-line docstrings where one line suffices, and a comment wherever a constraint is non-obvious.
+- Harbor and pydantic primitives: use them where they exist, in place of hand-written equivalents.
+- Layering: imports follow the [import layers](docs/design/architecture.md#import-layers).
+- Data hygiene: nothing private reaches a committed file, a fixture, or a log line.
