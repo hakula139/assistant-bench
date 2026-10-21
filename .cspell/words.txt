@@ -39,7 +39,6 @@ smol
 srcdoc
 SSIM
 statix
-stdenv
 strconv
 substituters
 taplo

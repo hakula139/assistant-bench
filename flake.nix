@@ -17,7 +17,7 @@
   # ------------------------------------------------------------------------------------------------
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -56,16 +56,8 @@
     flake-utils.lib.eachSystem systems (
       system:
       let
-        pkgs = import nixpkgs {
-          localSystem = system;
-          overlays = [
-            (final: _: {
-              unstable = import nixpkgs-unstable {
-                localSystem = final.stdenv.hostPlatform.system;
-              };
-            })
-          ];
-        };
+        pkgs = nixpkgs.legacyPackages.${system};
+        uv = nixpkgs-unstable.legacyPackages.${system}.uv;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -87,7 +79,7 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = [ pkgs.unstable.uv ];
+          packages = [ uv ];
           env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
@@ -165,7 +157,7 @@
           };
         };
 
-        uvExe = pkgs.lib.getExe pkgs.unstable.uv;
+        uvExe = pkgs.lib.getExe uv;
 
         uvHooks = {
           ruff = {
