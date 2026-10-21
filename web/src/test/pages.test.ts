@@ -53,7 +53,7 @@ describe('system page', () => {
     const html = await render(SystemPage, { family: 'arena', system: 'acme-pro', rounds });
 
     expect(text(html)).toContain(
-      'acme-pro Score 965 (915–1,018) Rank 1–5 Votes 122 (96 decisive) Round 2026-10-21',
+      'acme-pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
     );
   });
 });

@@ -39,11 +39,11 @@ const tieBreaks: Record<Decision['tie_break'], string> = {
 
 /**
  * Qualifies a round's leader: why the round has none, how a tie with the top score was broken, or
- * null when the leader is separated from every other eligible system.
+ * null when no other ranked system ties with the leader.
  */
 export const formatLeaderNote = (decision: Decision | null) =>
   decision === null
-    ? 'none while every system is preliminary'
+    ? 'none while a preliminary system ties with the top score'
     : decision.separated
       ? null
       : `tied with the top score, chosen by ${tieBreaks[decision.tie_break]}`;

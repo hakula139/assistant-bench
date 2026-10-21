@@ -97,8 +97,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
           <dd className="font-medium tabular-nums">
             {results.votes}{' '}
             <span className="font-normal text-muted-foreground">
-              over {results.sessions} sessions
-              {results.dropped_votes > 0 && `, ${results.dropped_votes} more left out`}
+              {`over ${results.sessions} sessions${results.dropped_votes > 0 ? `, ${results.dropped_votes} more left out` : ''}`}
             </span>
           </dd>
         </div>
@@ -208,9 +207,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
-            {unranked.length === 1
-              ? `Unranked: ${unranked[0]}. No comparison connects it to the reference system, so it has no score yet.`
-              : `Unranked: ${unranked.join(', ')}. No comparison connects them to the reference system, so they have no score yet.`}
+            {`Unranked: ${unranked.join(', ')}. Too few comparisons connect ${unranked.length === 1 ? 'it' : 'them'} to the reference system to bound a score yet.`}
           </p>
         )}
 

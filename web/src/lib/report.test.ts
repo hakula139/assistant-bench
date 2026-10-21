@@ -4,13 +4,16 @@ import { reportSchema } from '@/lib/report';
 import { readFixture } from '@/test/fixture';
 
 describe('reportSchema', () => {
-  test('parses the report the pydantic models write', async () => {
-    const report = await readFixture();
+  test.each(['report', 'report-early'] as const)(
+    'parses the %s fixture the pydantic models write',
+    async (name) => {
+      const report = await readFixture(name);
 
-    const result = reportSchema.safeParse(report);
+      const result = reportSchema.safeParse(report);
 
-    expect(result.error?.issues ?? []).toEqual([]);
-  });
+      expect(result.error?.issues ?? []).toEqual([]);
+    },
+  );
 
   test('rejects a field the pydantic models do not write', async () => {
     const report = await readFixture();

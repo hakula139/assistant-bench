@@ -30,21 +30,24 @@ const design = 'https://github.com/hakula139/assistant-bench/tree/main/docs/desi
         A Bradley-Terry model fits every vote in the family, counting ties and both-bad votes as
         half a win and absorbing any preference for the left pane in a separate term. Scores sit on
         an Elo-like scale with the family's reference system at 1,000. Scores compare only among
-        systems that comparisons connect to the reference, so any other voted system is listed as
-        unranked, without a score.
+        systems that comparisons connect to the reference.
       </p>
       <p>
-        The 95% intervals come from 1,000 bootstrap resamples drawn by case. A system's rank spans
-        from 1 plus the systems whose interval lies entirely above its own, to 1 plus the systems
-        whose interval reaches above its lower bound. A system with fewer than 40 decisive votes,
-        the votes won by either side, is marked preliminary.
+        The 95% intervals come from 1,000 bootstrap resamples drawn by case. A resample whose cases
+        leave a system unconnected to the reference gives it no score, so a system detached in more
+        than 2.5% of resamples has an unbounded interval. Such a system, like one that no comparison
+        connects to the reference at all, is listed as unranked, without a score. A system's rank
+        spans from 1 plus the systems whose interval lies entirely above its own, to 1 plus the
+        systems whose interval reaches above its lower bound. A system with fewer than 40 decisive
+        votes, the votes won by either side, is marked preliminary.
       </p>
       <p>
-        Only systems that are not preliminary can lead, so a round in which every system is
-        preliminary has no leader. Among them, a system ties with the top-scoring one when the 95%
-        interval of the difference between their scores, paired within each bootstrap resample,
-        contains 0. A tie goes to the lower mean cost per output, then to the lower median latency,
-        where a known value beats a missing one, and finally to the higher score.
+        A ranked system ties with the top-scoring one when the 95% interval of the difference
+        between their scores, paired within each bootstrap resample, contains 0 or is unbounded.
+        While any system in that tie set is preliminary, the round has no leader, so a system with
+        few votes neither takes the lead nor loses a tie-break before its interval narrows. A tie
+        goes to the lower mean cost per output, then to the lower median latency, where a known
+        value beats a missing one, and finally to the higher score.
       </p>
     </section>
 
