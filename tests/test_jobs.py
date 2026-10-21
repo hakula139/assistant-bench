@@ -20,10 +20,10 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.paths import REPO_ROOT
 from support import make_system
 
 
-REPO_ROOT = Path(__file__).parents[1]
 VOTES = Family(
     name='f',
     source='cases',
@@ -54,6 +54,21 @@ class TestRenderTasks:
         )
         assert task.config.environment.docker_image == jobs.STOCK_IMAGE
         assert task.instruction == case.instruction
+
+
+class TestChangedCases:
+    def test_names_cases_whose_instruction_differs_from_the_rendered_task(
+        self,
+    ) -> None:
+        family = load_family('smoke-text')
+        cases = load_cases(family)
+        jobs.render_tasks(family, cases)
+        edited = [cases[0].model_copy(update={'instruction': 'Reworded.'}), cases[1]]
+        new = edited[0].model_copy(update={'id': 'en-greeting-2'})
+
+        changed = jobs.changed_cases(family, [*edited, new])
+
+        assert changed == ['en-greeting']
 
 
 class TestCaseJob:
@@ -239,6 +254,31 @@ class TestIngest:
         }
         written = (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
         assert [jobs.Output.model_validate_json(line) for line in written] == outputs
+
+    def test_keeps_a_rerun_success_over_the_error_it_replaced(
+        self, data_dir: Path
+    ) -> None:
+        system = make_system()
+        generate = AgentConfig(
+            import_path='assistant_bench.harnesses.generate:Generate',
+            kwargs={'system': system.name, 'fingerprint': system.fingerprint},
+        )
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(scorer='votes', samples=1, max_output_tokens=300),
+        )
+        jobs_dir = data_dir / 'jobs' / 'f'
+        self.write_trial(
+            jobs_dir / 'job-1', 'a__1', generate, task='f/a', error='TimeoutError'
+        )
+        self.write_trial(jobs_dir / 'job-2', 'a__2', generate, task='f/a', output='Hi.')
+
+        outputs = jobs.ingest(family, {system.name: system})
+
+        assert [(o.job, o.case, o.error, o.text) for o in outputs] == [
+            ('job-2', 'a', None, 'Hi.')
+        ]
 
     def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
         oracle = AgentConfig(name='oracle')

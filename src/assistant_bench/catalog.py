@@ -92,8 +92,8 @@ def load_export() -> NixosConfigExport:
 class SystemConfig(BaseModel):
     """One table of `systems.toml`, naming either a catalog model or a bare route.
 
-    `prompt` is `nixos-config:<client>` for a rendered instruction file, or a path
-    relative to the repository root, and becomes the system message.
+    `prompt` is `nixos-config:<client>`, a rendered instruction file that becomes
+    the system message.
     """
 
     model_config = ConfigDict(extra='forbid')
@@ -159,7 +159,8 @@ def resolve_system(
     """Resolves a system, defaulting effort from the catalog where it is required.
 
     Raises:
-        ValueError: The model, effort, or nixos-config prompt is unknown.
+        ValueError: The model, its channel, the effort, or the prompt is unknown or
+            ambiguous.
     """
     prompt = _prompt(name, config.prompt, export)
     if config.route is not None:
@@ -176,6 +177,12 @@ def resolve_system(
     if entry is None:
         raise ValueError(f'system {name!r}: unknown catalog model {config.model!r}')
 
+    if len(entry.channel_id) != 1:
+        channels = ', '.join(entry.channel_id)
+        raise ValueError(
+            f'system {name!r}: catalog model {config.model!r} has channels '
+            f'{channels}, so set its `route` and `price` instead'
+        )
     ((channel, route),) = entry.channel_id.items()
     return System(
         name=name,
@@ -191,7 +198,9 @@ def _prompt(name: str, reference: str | None, export: NixosConfigExport) -> str 
         return None
     client = reference.removeprefix(NIXOS_CONFIG_PROMPT)
     if client == reference:
-        return (REPO_ROOT / reference).read_text()
+        raise ValueError(
+            f'system {name!r}: prompt {reference!r} is not nixos-config:<client>'
+        )
     if client not in export.instructions:
         accepted = ', '.join(export.instructions)
         raise ValueError(

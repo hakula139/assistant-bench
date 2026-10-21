@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from assistant_bench import families
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from support import EXPORT_FILE, Request, StubEndpoint
 
@@ -18,6 +19,14 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv('XDG_DATA_HOME', str(home))
     monkeypatch.chdir(tmp_path)
     return home / 'assistant-bench'
+
+
+@pytest.fixture
+def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Points family discovery at a scratch `families/` directory."""
+    directory = tmp_path / 'families'
+    monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
+    return directory
 
 
 @pytest.fixture

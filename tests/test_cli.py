@@ -1,3 +1,5 @@
+import subprocess
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -7,9 +9,31 @@ from typer.testing import CliRunner
 
 from assistant_bench import jobs
 from assistant_bench.cli import app
+from assistant_bench.families import load_cases, load_family
 
 
 runner = CliRunner()
+
+
+def invoke(*args: str) -> tuple[int, str]:
+    result = runner.invoke(app, list(args), env={'COLUMNS': '200'})
+    return result.exit_code, result.output
+
+
+def write_cases_family(families_dir: Path, systems: str) -> None:
+    directory = families_dir / 'f'
+    directory.mkdir(parents=True)
+    (directory / 'family.toml').write_text(
+        textwrap.dedent(
+            f"""\
+            scorer = "votes"
+            systems = {systems}
+            samples = 1
+            max_output_tokens = 64
+            """
+        )
+    )
+    (directory / 'cases.jsonl').write_text('')
 
 
 def output(**fields: Any) -> jobs.Output:
@@ -69,6 +93,60 @@ class TestCheck:
         (job,) = submitted
         assert [agent.name for agent in job.agents] == ['oracle']
 
+    def test_rejects_a_missing_family(self) -> None:
+        exit_code, message = invoke('check', 'nope')
+
+        assert exit_code == 2
+        assert "Invalid value for FAMILY: no family named 'nope'" in message
+
+    @pytest.mark.parametrize(
+        ('edited', 'expected'),
+        [
+            (['en-greeting'], 'case en-greeting changed, give it a new ID'),
+            (
+                ['en-greeting', 'zh-greeting'],
+                'cases en-greeting, zh-greeting changed, give each a new ID',
+            ),
+        ],
+    )
+    def test_rejects_cases_changed_under_their_rendered_ids(
+        self, data_dir: Path, edited: list[str], expected: str
+    ) -> None:
+        for case_id in edited:
+            task_dir = data_dir / 'tasks' / 'smoke-text' / case_id
+            task_dir.mkdir(parents=True)
+            (task_dir / 'instruction.md').write_text('An earlier wording.')
+
+        exit_code, message = invoke('check', 'smoke-text')
+
+        assert exit_code == 2
+        assert expected in message
+
+    def test_rejects_a_local_case_that_reuses_a_committed_id(
+        self, data_dir: Path
+    ) -> None:
+        local = data_dir / 'cases' / 'smoke-text.jsonl'
+        local.parent.mkdir(parents=True)
+        local.write_text(
+            '{"id": "en-greeting", "category": "reply", "source": "held-out", '
+            '"instruction": "Hi."}\n'
+        )
+
+        exit_code, message = invoke('check', 'smoke-text')
+
+        assert exit_code == 2
+        assert "case 'en-greeting' appears at" in message
+
+    def test_rejects_a_family_listing_an_unknown_system(
+        self, families_dir: Path
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5", "ghost"]')
+
+        exit_code, message = invoke('check', 'f')
+
+        assert exit_code == 2
+        assert 'f lists unknown systems: ghost' in message
+
 
 class TestRun:
     def test_generates_the_listed_systems_on_every_case(
@@ -77,25 +155,44 @@ class TestRun:
         result = runner.invoke(app, ['run', 'smoke-text'])
 
         assert result.exit_code == 0, result.output
+        family = load_family('smoke-text')
         (job,) = submitted
-        assert [agent.kwargs['system'] for agent in job.agents] == [
-            'opus-5.5',
-            'gpt-6.1-sol',
-            'gemini-4-argon',
-            'gemini-3.8-flash',
-            'deepseek-v4.1-flash',
-        ]
+        assert [agent.kwargs['system'] for agent in job.agents] == (
+            family.settings.systems
+        )
         assert [task.path.name for task in job.tasks if task.path] == [
-            'en-greeting',
-            'zh-greeting',
+            case.id for case in load_cases(family)
         ]
 
     def test_rejects_a_task_family(self, submitted: list[JobConfig]) -> None:
-        result = runner.invoke(app, ['run', 'smoke'], terminal_width=200)
+        exit_code, message = invoke('run', 'smoke')
 
-        assert result.exit_code == 2
-        assert 'single-call systems run only case families' in result.output
+        assert exit_code == 2
+        assert 'single-call systems run only case families' in message
         assert submitted == []
+
+    def test_rejects_a_family_listing_no_systems(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '[]')
+
+        exit_code, message = invoke('run', 'f')
+
+        assert exit_code == 2
+        assert 'f lists no systems' in message
+        assert submitted == []
+
+    def test_exits_with_the_code_of_a_failed_harbor_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def run_job(job: JobConfig) -> Path:
+            raise subprocess.CalledProcessError(3, 'harbor')
+
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        exit_code, _ = invoke('run', 'smoke-text')
+
+        assert exit_code == 3
 
 
 class TestIngest:
@@ -115,6 +212,10 @@ class TestIngest:
         result = runner.invoke(app, ['ingest', 'smoke'])
 
         assert result.exit_code == 0, result.output
-        assert result.output == (
-            '3 outputs, 1 errored\n  TimeoutError: 1\nMean reward 0.500\n'
+        assert result.output == textwrap.dedent(
+            """\
+            3 outputs, 1 errored
+              TimeoutError: 1
+            Mean reward 0.500
+            """
         )

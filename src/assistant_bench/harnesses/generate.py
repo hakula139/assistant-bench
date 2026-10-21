@@ -31,7 +31,7 @@ _HEADERS = TypeAdapter(dict[str, str])
 
 
 class GenerateOptions(AgentOptions):
-    """The agent's `kwargs`, of which the first two label the trial for ingest."""
+    """The agent's `kwargs`. `system` and `fingerprint` label the trial for ingest."""
 
     system: str
     fingerprint: str
@@ -74,6 +74,9 @@ class Generate(BaseAgent):
                 f'{", ".join(missing)} unset. '
                 'Copy .env.example to .env, and run inside `nix develop`.'
             )
+        _api_key(merged[KEY_FILE_VAR])
+        _headers(merged.get(HEADERS_VAR))
+        _verify(merged.get(CA_FILE_VAR))
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -135,18 +138,26 @@ class Generate(BaseAgent):
         base_url = self._get_env(BASE_URL_VAR)
         key_file = self._get_env(KEY_FILE_VAR)
         assert base_url and key_file
-        ca_file = self._get_env(CA_FILE_VAR)
-        headers = self._get_env(HEADERS_VAR)
-        verify: ssl.SSLContext | bool = (
-            ssl.create_default_context(cafile=ca_file) if ca_file else True
-        )
+        verify = _verify(self._get_env(CA_FILE_VAR))
 
         # Some endpoints advertise IPv6 addresses that close during the TLS handshake.
         transport = httpx.AsyncHTTPTransport(local_address='0.0.0.0', verify=verify)
         return AsyncOpenAI(
             base_url=base_url,
-            api_key=Path(key_file).read_text().strip(),
-            default_headers=_HEADERS.validate_json(headers) if headers else None,
+            api_key=_api_key(key_file),
+            default_headers=_headers(self._get_env(HEADERS_VAR)),
             max_retries=0,
             http_client=httpx.AsyncClient(transport=transport, verify=verify),
         )
+
+
+def _api_key(key_file: str) -> str:
+    return Path(key_file).read_text().strip()
+
+
+def _headers(headers: str | None) -> dict[str, str] | None:
+    return _HEADERS.validate_json(headers) if headers else None
+
+
+def _verify(ca_file: str | None) -> ssl.SSLContext | bool:
+    return ssl.create_default_context(cafile=ca_file) if ca_file else True

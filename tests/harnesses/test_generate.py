@@ -3,17 +3,23 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import certifi
 import openai
 import pytest
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+from pydantic import ValidationError
 
 from assistant_bench.harnesses.generate import Generate
 from support import StubEndpoint, completion
 
 
 def run_agent(
-    endpoint: StubEndpoint, logs_dir: Path, **options: Any
+    endpoint: StubEndpoint,
+    logs_dir: Path,
+    *,
+    env: dict[str, str] | None = None,
+    **options: Any,
 ) -> tuple[AgentContext, Path]:
     defaults: dict[str, Any] = {
         'system': 'acme-large',
@@ -23,7 +29,7 @@ def run_agent(
     agent = Generate(
         logs_dir=logs_dir,
         model_name='acme/large',
-        extra_env=endpoint.env,
+        extra_env=endpoint.env | (env or {}),
         **(defaults | options),
     )
     context = AgentContext()
@@ -32,6 +38,55 @@ def run_agent(
 
 
 pytestmark = pytest.mark.usefixtures('export')
+
+
+class TestPreflight:
+    OPTIONS = {
+        'system': 's',
+        'fingerprint': 'f',
+        'max_output_tokens': 1,
+    }
+
+    def test_accepts_endpoint_variables_from_the_agent_env(
+        self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv('BENCH_API_BASE_URL', raising=False)
+        monkeypatch.delenv('BENCH_API_KEY_FILE', raising=False)
+
+        Generate.preflight(self.OPTIONS, endpoint.env)
+
+    def test_names_each_missing_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in ('BENCH_API_BASE_URL', 'BENCH_API_KEY_FILE', 'BENCH_NIXOS_CONFIG'):
+            monkeypatch.delenv(name, raising=False)
+
+        with pytest.raises(ValueError) as error:
+            Generate.preflight(self.OPTIONS, {})
+
+        assert str(error.value) == (
+            'BENCH_API_BASE_URL, BENCH_API_KEY_FILE, BENCH_NIXOS_CONFIG unset. '
+            'Copy .env.example to .env, and run inside `nix develop`.'
+        )
+
+    def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:
+        with pytest.raises(ValueError, match="Unknown option 'temperature'"):
+            Generate.preflight(
+                self.OPTIONS | {'temperature': 0},
+                endpoint.env,
+            )
+
+    @pytest.mark.parametrize(
+        ('setting', 'error'),
+        [
+            ({'BENCH_API_KEY_FILE': 'missing-key'}, FileNotFoundError),
+            ({'BENCH_API_HEADERS': '{"x-trace": 1}'}, ValidationError),
+            ({'BENCH_API_CA_FILE': 'missing-ca.pem'}, FileNotFoundError),
+        ],
+    )
+    def test_rejects_an_unusable_endpoint_setting(
+        self, endpoint: StubEndpoint, setting: dict[str, str], error: type[Exception]
+    ) -> None:
+        with pytest.raises(error):
+            Generate.preflight(self.OPTIONS, endpoint.env | setting)
 
 
 class TestRun:
@@ -125,37 +180,11 @@ class TestRun:
         assert len(endpoint.requests) == 1
         assert not (tmp_path / 'output.txt').exists()
 
-
-class TestPreflight:
-    OPTIONS = {
-        'system': 's',
-        'fingerprint': 'f',
-        'max_output_tokens': 1,
-    }
-
-    def test_accepts_endpoint_variables_from_the_agent_env(
-        self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+    def test_loads_the_ca_bundle_the_env_names(
+        self, endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
-        monkeypatch.delenv('BENCH_API_BASE_URL', raising=False)
-        monkeypatch.delenv('BENCH_API_KEY_FILE', raising=False)
-
-        Generate.preflight(self.OPTIONS, endpoint.env)
-
-    def test_names_each_missing_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        for name in ('BENCH_API_BASE_URL', 'BENCH_API_KEY_FILE', 'BENCH_NIXOS_CONFIG'):
-            monkeypatch.delenv(name, raising=False)
-
-        with pytest.raises(ValueError) as error:
-            Generate.preflight(self.OPTIONS, {})
-
-        assert str(error.value) == (
-            'BENCH_API_BASE_URL, BENCH_API_KEY_FILE, BENCH_NIXOS_CONFIG unset. '
-            'Copy .env.example to .env, and run inside `nix develop`.'
+        _, output = run_agent(
+            endpoint, tmp_path, env={'BENCH_API_CA_FILE': certifi.where()}
         )
 
-    def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:
-        with pytest.raises(ValueError, match="Unknown option 'temperature'"):
-            Generate.preflight(
-                self.OPTIONS | {'temperature': 0},
-                endpoint.env,
-            )
+        assert output.read_text() == 'Hello there.'

@@ -1,3 +1,4 @@
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -62,10 +63,9 @@ class TestSystemConfig:
 
 class TestSystem:
     class TestFingerprint:
-        def test_ignores_the_name(self) -> None:
-            renamed = make_system(name='x')
-
-            assert renamed.fingerprint == make_system().fingerprint
+        def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
+            assert make_system().fingerprint == '293ca99b5baeacd7'
+            assert make_system(name='x').fingerprint == '293ca99b5baeacd7'
 
         @pytest.mark.parametrize(
             'change',
@@ -79,6 +79,42 @@ class TestSystem:
             self, change: dict[str, str]
         ) -> None:
             assert make_system(**change).fingerprint != make_system().fingerprint
+
+
+class TestLoadSystems:
+    def test_resolves_each_table(
+        self, export: NixosConfigExport, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'systems.toml'
+        path.write_text(
+            textwrap.dedent(
+                """\
+                [large]
+                model = "acme-large"
+
+                [small]
+                model = "acme-small"
+                """
+            )
+        )
+
+        systems = load_systems(export, path)
+
+        assert {name: system.route for name, system in systems.items()} == {
+            'large': 'acme/large',
+            'small': 'acme/small',
+        }
+
+    def test_committed_systems_resolve_against_the_pinned_catalog(self) -> None:
+        systems = load_systems(load_export())
+
+        assert set(systems) == {
+            'opus-5.5',
+            'gpt-6.1-sol',
+            'gemini-4-argon',
+            'gemini-3.8-flash',
+            'deepseek-v4.1-flash',
+        }
 
 
 class TestResolveSystem:
@@ -136,17 +172,6 @@ class TestResolveSystem:
 
         assert system.prompt == '# CLAUDE.md\n\nBe direct.'
 
-    def test_reads_a_repo_relative_system_prompt(
-        self, export: NixosConfigExport
-    ) -> None:
-        path = 'families/smoke/tasks/echo/instruction.md'
-
-        system = resolve_system(
-            'large', SystemConfig(model='acme-large', prompt=path), export
-        )
-
-        assert system.prompt == (Path(__file__).parents[1] / path).read_text()
-
     @pytest.mark.parametrize(
         ('config', 'message'),
         [
@@ -163,9 +188,18 @@ class TestResolveSystem:
                 "system 'x': the model takes no effort",
             ),
             (
+                SystemConfig(model='acme-routed'),
+                "system 'x': catalog model 'acme-routed' has channels acme, router, "
+                'so set its `route` and `price` instead',
+            ),
+            (
                 SystemConfig(model='acme-large', prompt='nixos-config:omp'),
                 "system 'x': nixos-config has no 'omp' instructions "
                 '(expected one of claudeCode, codex)',
+            ),
+            (
+                SystemConfig(model='acme-large', prompt='prompts/brief.md'),
+                "system 'x': prompt 'prompts/brief.md' is not nixos-config:<client>",
             ),
         ],
     )
@@ -176,31 +210,3 @@ class TestResolveSystem:
             resolve_system('x', config, export)
 
         assert str(error.value) == message
-
-
-class TestLoadSystems:
-    def test_resolves_each_table(
-        self, export: NixosConfigExport, tmp_path: Path
-    ) -> None:
-        path = tmp_path / 'systems.toml'
-        path.write_text(
-            '[large]\nmodel = "acme-large"\n\n[small]\nmodel = "acme-small"\n'
-        )
-
-        systems = load_systems(export, path)
-
-        assert {name: system.route for name, system in systems.items()} == {
-            'large': 'acme/large',
-            'small': 'acme/small',
-        }
-
-    def test_committed_systems_resolve_against_the_pinned_catalog(self) -> None:
-        systems = load_systems(load_export())
-
-        assert set(systems) == {
-            'opus-5.5',
-            'gpt-6.1-sol',
-            'gemini-4-argon',
-            'gemini-3.8-flash',
-            'deepseek-v4.1-flash',
-        }

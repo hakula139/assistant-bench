@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 from typing import assert_never
 
@@ -28,11 +29,14 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
-# Harbor reuses a trial only when its task's semantic version is unchanged, so an
-# edited case takes a new ID.
+# Harbor reuses a trial whose task version matches up to the patch level, and aborts
+# the job when a task keeps its version but changes its content. An edited case
+# therefore takes a new ID, and a change to every rendered task bumps the patch.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
 N_CONCURRENT_TRIALS = 8
+# Harbor's reuse key covers the whole agent config, so changing this reruns every
+# trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
 
 
@@ -47,7 +51,7 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     """
     paths = []
     for case in cases:
-        task_dir = data_dir() / 'tasks' / family.name / case.id
+        task_dir = _task_dir(family, case)
         (task_dir / 'environment').mkdir(parents=True, exist_ok=True)
         (task_dir / 'instruction.md').write_text(case.instruction)
         config = task_config.TaskConfig(
@@ -62,6 +66,20 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     return paths
 
 
+def changed_cases(family: Family, cases: list[Case]) -> list[str]:
+    """Returns the IDs of cases whose instruction differs from their rendered task."""
+    return [
+        case.id
+        for case in cases
+        if (instruction := _task_dir(family, case) / 'instruction.md').exists()
+        and instruction.read_text() != case.instruction
+    ]
+
+
+def _task_dir(family: Family, case: Case) -> Path:
+    return data_dir() / 'tasks' / family.name / case.id
+
+
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     """Builds a job that runs every system on every case task.
 
@@ -71,18 +89,19 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     assert family.settings.max_output_tokens is not None
     jobs_dir = data_dir() / 'jobs' / family.name
     agents = [
-        trial_config.AgentConfig(
-            **HARNESSES[system.harness],
-            model_name=system.route,
-            n_concurrent=ROUTE_CONCURRENCY,
-            concurrency_group=system.route,
-            kwargs=GenerateOptions(
-                system=system.name,
-                fingerprint=system.fingerprint,
-                effort=system.effort,
-                system_prompt=system.prompt,
-                max_output_tokens=family.settings.max_output_tokens,
-            ).model_dump(),
+        HARNESSES[system.harness].model_copy(
+            update={
+                'model_name': system.route,
+                'n_concurrent': ROUTE_CONCURRENCY,
+                'concurrency_group': system.route,
+                'kwargs': GenerateOptions(
+                    system=system.name,
+                    fingerprint=system.fingerprint,
+                    effort=system.effort,
+                    system_prompt=system.prompt,
+                    max_output_tokens=family.settings.max_output_tokens,
+                ).model_dump(),
+            }
         )
         for system in systems
     ]
@@ -101,7 +120,7 @@ def oracle_job(family: Family) -> JobConfig:
     return _job(
         family,
         data_dir() / 'checks' / family.name,
-        [trial_config.AgentConfig(**HARNESSES['oracle'])],
+        [HARNESSES['oracle']],
         sorted((FAMILIES_DIR / family.name / 'tasks').iterdir()),
         [],
     )
@@ -184,16 +203,28 @@ class Output(BaseModel):
 
 
 def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
-    """Reads every trial of the family's jobs into `outputs/<family>.jsonl`.
+    """Reads the family's trials into `outputs/<family>.jsonl`.
 
-    Costs come from the current catalog price of each system name, so a system
-    missing from `systems` or without a price reports as unpriced.
+    Each case and fingerprint keeps at most `samples` outputs, preferring successful
+    trials, so an errored trial drops out once a rerun replaces it. Costs come from
+    the current catalog price of each system name, so a system missing from
+    `systems` or without a price reports as unpriced.
     """
-    outputs = sorted(
+    groups: defaultdict[tuple[str, str | None], list[Output]] = defaultdict(list)
+    for output in sorted(
         (
             output
             for job_dir in (data_dir() / 'jobs' / family.name).glob('*')
             for output in read_trials(family, job_dir, systems)
+        ),
+        key=lambda output: (output.error is not None, output.job, output.trial),
+    ):
+        groups[(output.case, output.fingerprint)].append(output)
+    outputs = sorted(
+        (
+            output
+            for group in groups.values()
+            for output in group[: family.settings.samples]
         ),
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )

@@ -61,10 +61,12 @@ def load_family(name: str) -> Family:
     """Reads `family.toml` and infers where the family's tasks come from.
 
     Raises:
-        ValueError: The family holds both or neither of `cases.jsonl` and `tasks/`,
-            or a case family sets no `max_output_tokens`.
+        ValueError: No family has the name, the family holds both or neither of
+            `cases.jsonl` and `tasks/`, or a case family sets no `max_output_tokens`.
     """
     directory = FAMILIES_DIR / name
+    if not (directory / 'family.toml').is_file():
+        raise ValueError(f'no family named {name!r}')
     has_cases = (directory / 'cases.jsonl').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
@@ -81,15 +83,30 @@ def load_family(name: str) -> Family:
 
 
 def load_cases(family: Family) -> list[Case]:
-    """Returns the committed cases followed by the local ones, if the family has any."""
+    """Returns the committed cases followed by the local ones, if the family has any.
+
+    Raises:
+        ValueError: Two cases share an ID, within one file or across both.
+    """
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',
         data_dir() / 'cases' / f'{family.name}.jsonl',
     ]
-    return [
-        Case.model_validate_json(line)
-        for path in paths
-        if path.exists()
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
+    cases: dict[str, Case] = {}
+    sources: dict[str, str] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            if not line.strip():
+                continue
+            case = Case.model_validate_json(line)
+            source = f'{path}:{number}'
+            if case.id in cases:
+                raise ValueError(
+                    f'family {family.name!r}: case {case.id!r} appears at '
+                    f'{sources[case.id]} and {source}'
+                )
+            cases[case.id] = case
+            sources[case.id] = source
+    return list(cases.values())

@@ -1,10 +1,10 @@
 import json
+import textwrap
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from assistant_bench import families
 from assistant_bench.families import (
     Family,
     TaskTestsSettings,
@@ -12,13 +12,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
-
-
-@pytest.fixture
-def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / 'families'
-    monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
-    return directory
+from assistant_bench.paths import FAMILIES_DIR
 
 
 def write_family(
@@ -26,29 +20,44 @@ def write_family(
 ) -> None:
     directory = root / name
     directory.mkdir(parents=True)
-    (directory / 'family.toml').write_text(settings)
+    (directory / 'family.toml').write_text(textwrap.dedent(settings))
     if cases:
         (directory / 'cases.jsonl').write_text('')
     if tasks:
         (directory / 'tasks').mkdir()
 
 
-class TestLoadFamily:
-    def test_reads_a_case_family_scored_by_votes(self) -> None:
-        family = load_family('smoke-text')
+def case_line(case_id: str, source: str = 'synthetic') -> str:
+    case = {'id': case_id, 'category': 'reply', 'source': source, 'instruction': 'Hi.'}
+    return json.dumps(case) + '\n'
 
-        assert family.source == 'cases'
-        assert family.settings == VotesSettings(
-            scorer='votes',
-            systems=[
-                'opus-5.5',
-                'gpt-6.1-sol',
-                'gemini-4-argon',
-                'gemini-3.8-flash',
-                'deepseek-v4.1-flash',
-            ],
-            samples=1,
-            max_output_tokens=512,
+
+class TestLoadFamily:
+    def test_reads_a_case_family_scored_by_votes(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "votes"
+            systems = ["large", "small"]
+            samples = 2
+            max_output_tokens = 300
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        family = load_family('f')
+
+        assert family == Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                systems=['large', 'small'],
+                samples=2,
+                max_output_tokens=300,
+            ),
         )
 
     def test_reads_a_task_family_scored_by_tests(self) -> None:
@@ -58,6 +67,10 @@ class TestLoadFamily:
             settings=TaskTestsSettings(scorer='tests', samples=1),
         )
 
+    def test_names_a_missing_family(self, families_dir: Path) -> None:
+        with pytest.raises(ValueError, match="^no family named 'nope'$"):
+            load_family('nope')
+
     @pytest.mark.parametrize(('cases', 'tasks'), [(True, True), (False, False)])
     def test_requires_exactly_one_task_source(
         self, families_dir: Path, cases: bool, tasks: bool
@@ -65,7 +78,10 @@ class TestLoadFamily:
         write_family(
             families_dir,
             'f',
-            'scorer = "tests"\nsamples = 1\n',
+            """\
+            scorer = "tests"
+            samples = 1
+            """,
             cases=cases,
             tasks=tasks,
         )
@@ -77,7 +93,10 @@ class TestLoadFamily:
         write_family(
             families_dir,
             'f',
-            'scorer = "votes"\nsamples = 1\n',
+            """\
+            scorer = "votes"
+            samples = 1
+            """,
             cases=True,
             tasks=False,
         )
@@ -89,7 +108,10 @@ class TestLoadFamily:
         write_family(
             families_dir,
             'f',
-            'scorer = "judges"\nsamples = 1\n',
+            """\
+            scorer = "judges"
+            samples = 1
+            """,
             cases=False,
             tasks=True,
         )
@@ -102,19 +124,47 @@ class TestLoadCases:
     def test_appends_local_cases_to_the_committed_ones(self, data_dir: Path) -> None:
         local = data_dir / 'cases' / 'smoke-text.jsonl'
         local.parent.mkdir(parents=True)
-        local.write_text(
-            json.dumps(
-                {
-                    'id': 'zh-local',
-                    'category': 'reply',
-                    'source': 'held-out',
-                    'instruction': 'Answer.',
-                }
-            )
-            + '\n'
-        )
+        local.write_text(case_line('zh-local', source='held-out'))
 
         cases = load_cases(load_family('smoke-text'))
 
         assert [case.id for case in cases] == ['en-greeting', 'zh-greeting', 'zh-local']
         assert cases[-1].source == 'held-out'
+
+    def test_rejects_a_local_case_that_reuses_a_committed_id(
+        self, data_dir: Path
+    ) -> None:
+        local = data_dir / 'cases' / 'smoke-text.jsonl'
+        local.parent.mkdir(parents=True)
+        local.write_text(case_line('zh-local') + case_line('en-greeting'))
+        committed = FAMILIES_DIR / 'smoke-text' / 'cases.jsonl'
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('smoke-text'))
+
+        assert str(error.value) == (
+            f"family 'smoke-text': case 'en-greeting' appears at {committed}:1 "
+            f'and {local}:2'
+        )
+
+    def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "votes"
+            samples = 1
+            max_output_tokens = 300
+            """,
+            cases=True,
+            tasks=False,
+        )
+        path = families_dir / 'f' / 'cases.jsonl'
+        path.write_text(case_line('a') + '\n' + case_line('a'))
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value) == (
+            f"family 'f': case 'a' appears at {path}:1 and {path}:3"
+        )

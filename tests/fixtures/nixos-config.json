@@ -54,6 +54,14 @@
             "cacheWrite": 0
           }
         }
+      },
+      "acme-routed": {
+        "name": "Acme Routed",
+        "channelId": {
+          "acme": "acme/routed",
+          "router": "router/acme/routed"
+        },
+        "channelCost": {}
       }
     }
   },

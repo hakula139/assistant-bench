@@ -5,10 +5,10 @@ agent name. Harbor records the agent of every trial in the job's `config.json`,
 where `harbor job resume` reads it back, so an import path never changes.
 """
 
-from typing import Any
+from harbor.models.trial.config import AgentConfig
 
 
-HARNESSES: dict[str, dict[str, Any]] = {
-    'generate': {'import_path': 'assistant_bench.harnesses.generate:Generate'},
-    'oracle': {'name': 'oracle'},
+HARNESSES: dict[str, AgentConfig] = {
+    'generate': AgentConfig(import_path='assistant_bench.harnesses.generate:Generate'),
+    'oracle': AgentConfig(name='oracle'),
 }

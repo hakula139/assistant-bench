@@ -10,7 +10,7 @@ from harbor.models.job.config import JobConfig
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System, load_export, load_systems
-from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.families import Case, Family, load_cases, load_family
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -25,10 +25,10 @@ def main() -> None:
 @app.command()
 def check(family: str) -> None:
     """Validate a family, running Harbor's oracle on its task directories."""
-    selected = load_family(family)
+    selected = _load_family(family)
     _family_systems(selected)
     if selected.source == 'cases':
-        typer.echo(f'{family}: {len(load_cases(selected))} valid cases')
+        typer.echo(f'{family}: {len(_load_cases(selected))} valid cases')
         return
 
     job_dir = _run(jobs.oracle_job(selected))
@@ -48,7 +48,7 @@ def check(family: str) -> None:
 @app.command()
 def run(family: str) -> None:
     """Generate the family's missing trials for every system it lists."""
-    selected = load_family(family)
+    selected = _load_family(family)
     if selected.source != 'cases':
         raise typer.BadParameter(
             'single-call systems run only case families', param_hint='FAMILY'
@@ -57,14 +57,14 @@ def run(family: str) -> None:
     if not systems:
         raise typer.BadParameter(f'{family} lists no systems', param_hint='FAMILY')
 
-    tasks = jobs.render_tasks(selected, load_cases(selected))
+    tasks = jobs.render_tasks(selected, _load_cases(selected))
     typer.echo(f'Job written to {_run(jobs.case_job(selected, systems, tasks))}')
 
 
 @app.command()
 def ingest(family: str) -> None:
     """Collect every trial of a family into `outputs/<family>.jsonl`."""
-    outputs = jobs.ingest(load_family(family), load_systems(load_export()))
+    outputs = jobs.ingest(_load_family(family), load_systems(load_export()))
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
     for error, count in errors.most_common():
@@ -72,6 +72,28 @@ def ingest(family: str) -> None:
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
+
+
+def _load_family(name: str) -> Family:
+    try:
+        return load_family(name)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+
+
+def _load_cases(family: Family) -> list[Case]:
+    try:
+        cases = load_cases(family)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+    match jobs.changed_cases(family, cases):
+        case []:
+            return cases
+        case [case_id]:
+            message = f'case {case_id} changed, give it a new ID'
+        case changed:
+            message = f'cases {", ".join(changed)} changed, give each a new ID'
+    raise typer.BadParameter(message, param_hint='FAMILY')
 
 
 def _family_systems(family: Family) -> list[System]:

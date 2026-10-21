@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from assistant_bench.families import Case
+from assistant_bench.paths import REPO_ROOT
 
 
-REPO_ROOT = Path(__file__).parents[1]
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 
