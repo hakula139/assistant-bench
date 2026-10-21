@@ -1,21 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>hakula139/nixos-config//.github/renovate-preset"],
-  "pyenv": {
-    "enabled": false
-  },
-  "lockFileMaintenance": {
-    "automerge": false
-  },
-  "packageRules": [
-    {
-      "matchManagers": ["nix"],
-      "matchUpdateTypes": ["lockFileMaintenance"],
-      "automerge": false
-    },
-    {
-      "matchPackageNames": ["openai"],
-      "allowedVersions": "<3"
-    }
-  ]
+  "extends": ["github>hakula139/nixos-config//.github/renovate-preset"]
 }

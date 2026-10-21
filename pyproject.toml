@@ -8,7 +8,7 @@ requires-python = ">=3.14"
 dependencies = [
   "harbor==0.24.0",
   "httpx>=0.28.1",
-  "openai>=2.54.0,<3",
+  "openai>=2.54.0",
   "pydantic>=2.14.1",
   "python-dotenv>=1.2.4",
   "typer>=0.27.3",
@@ -45,12 +45,16 @@ quote-style = "single"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["B", "C4", "E", "F", "I", "SIM", "UP", "W"]
+select = ["B", "C4", "D", "E", "F", "I", "SIM", "UP", "W"]
+ignore = ["D1"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
 split-on-trailing-comma = true
 combine-as-imports = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

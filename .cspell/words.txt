@@ -17,11 +17,12 @@ nixfmt
 nixos
 Nixpkgs
 npmjs
+numpy
 numtide
 pkgs
 pycache
 pydantic
-pyenv
+pydocstyle
 pypi
 pyproject
 pytest
