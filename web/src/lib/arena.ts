@@ -2,6 +2,9 @@ import { z } from 'astro/zod';
 
 import type { Flag } from '@/lib/report';
 
+// The vote page's policy forbids eval, which Zod otherwise probes for to compile its parsers.
+z.config({ jitless: true });
+
 // ── API Models ──
 
 export type Choice = 'a' | 'b' | 'tie' | 'both_bad';

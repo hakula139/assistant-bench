@@ -214,7 +214,7 @@ export function VoteApp() {
   };
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
-    if (pair === null || event.isComposing || event.repeat) {
+    if (event.isComposing || event.repeat) {
       return;
     }
     const target = event.target;
@@ -232,16 +232,23 @@ export function VoteApp() {
     if (event.metaKey || event.ctrlKey || event.altKey) {
       return;
     }
-    const picked = CHOICES.find(({ key }) => key === event.key);
+    const key = event.key.toLowerCase();
+    if (key === 'u') {
+      event.preventDefault();
+      undo();
+      return;
+    }
+    if (pair === null) {
+      return;
+    }
+    const picked = CHOICES.find((item) => item.key === key);
     const flag = flagNames[Number(event.key) - 1] as Flag | undefined;
     if (picked) {
       setChoice(picked.value);
     } else if (flag) {
       toggleFlag(flag);
-    } else if (event.key === 'n') {
+    } else if (key === 'n') {
       noteField.current?.focus();
-    } else if (event.key === 'u') {
-      undo();
     } else if (event.key === 'Enter') {
       submit();
     } else {

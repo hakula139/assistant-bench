@@ -21,6 +21,7 @@ hanzi
 httpx
 intp
 isort
+jitless
 katex
 kwarg
 kwargs

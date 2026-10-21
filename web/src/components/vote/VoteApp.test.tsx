@@ -13,25 +13,32 @@ interface Cast {
   note: string | null;
 }
 
-/** A stand-in for the arena API that serves numbered pairs and records each vote and undo. */
-function stubApi() {
+/**
+ * A stand-in for the arena API that serves numbered pairs until a session of `size` votes is
+ * complete, and records each vote and undo.
+ */
+function stubApi(size = 30) {
   const casts: Cast[] = [];
   let undos = 0;
   let served = 0;
   const view = (): SessionView => {
     served += 1;
+    const votes = casts.length - undos;
     return {
       id: 's1',
       family: 'prose-zh',
-      votes: casts.length - undos,
-      size: 30,
-      pair: {
-        token: `t${served}`,
-        instruction: `Instruction ${served}`,
-        checklist: [],
-        a: { render: 'text', text: `Output A${served}` },
-        b: { render: 'text', text: `Output B${served}` },
-      },
+      votes,
+      size,
+      pair:
+        votes === size
+          ? null
+          : {
+              token: `t${served}`,
+              instruction: `Instruction ${served}`,
+              checklist: [],
+              a: { render: 'text', text: `Output A${served}` },
+              b: { render: 'text', text: `Output B${served}` },
+            },
     };
   };
   const respond = (value: unknown, status = 200) =>
@@ -110,6 +117,19 @@ describe('VoteApp', () => {
 
     expect(api.undos()).toBe(1);
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'tie', 'b']);
+  });
+
+  test('takes a shortcut typed in upper case, and undoes from the completed session', async () => {
+    const api = stubApi(1);
+    const user = await startSession();
+
+    await user.keyboard('{Shift>}A{/Shift}{Enter}');
+    await screen.findByText('Session complete');
+    await user.keyboard('u');
+    await screen.findByText('Output A3');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+    expect(api.undos()).toBe(1);
   });
 
   test('shows an error from starting a session on the start screen', async () => {
