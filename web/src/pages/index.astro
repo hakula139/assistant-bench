@@ -1,7 +1,7 @@
 ---
 import { FamiliesTable, type FamilySummary } from '@/components/site/FamiliesTable';
 import Base from '@/layouts/Base.astro';
-import { formatLeaderNote } from '@/lib/format';
+import { formatCountOf, formatLeaderNote } from '@/lib/format';
 import type { Report } from '@/lib/report';
 import { getFamilies, latest } from '@/lib/reports';
 
@@ -14,7 +14,7 @@ function standing(
         systems: results.standings.length + results.unranked.length,
         leader: results.decision?.leader,
         leaderNote: formatLeaderNote(results.decision),
-        measure: `${results.votes} votes`,
+        measure: formatCountOf(results.votes, 'vote'),
       };
     case 'tests':
       return {

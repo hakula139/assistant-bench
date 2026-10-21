@@ -22,6 +22,9 @@ export const MISSING = '–';
 export const formatScore = (value: number) => score.format(value);
 export const formatTau = (value: number | null) => (value === null ? MISSING : tau.format(value));
 export const formatCount = (value: number) => count.format(value);
+/** Counts a regular English noun, as in "1 vote" and "34 votes". */
+export const formatCountOf = (value: number, noun: string) =>
+  `${count.format(value)} ${value === 1 ? noun : `${noun}s`}`;
 export const formatPercent = (value: number | null) =>
   value === null ? MISSING : percent.format(value);
 export const formatCost = (value: number | null) => (value === null ? MISSING : cost.format(value));

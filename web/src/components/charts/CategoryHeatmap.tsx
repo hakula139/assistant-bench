@@ -3,7 +3,7 @@ import { bisectRight } from 'd3-array';
 import { useCallback, useMemo } from 'react';
 
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { formatInterval, formatScore } from '@/lib/format';
+import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
 import type { CategoryBoard } from '@/lib/report';
 
 const STEPS = 5;
@@ -157,7 +157,7 @@ export function CategoryHeatmap({ categories, systems }: CategoryHeatmapProps) {
           Plot.text(cells, {
             x: 'category',
             y: 'system',
-            text: (cell: Cell) => `${cell.votes} votes`,
+            text: (cell: Cell) => formatCountOf(cell.votes, 'vote'),
             fill: ink,
             fontSize: 10,
             dy: 8,

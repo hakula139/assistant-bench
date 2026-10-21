@@ -59,7 +59,7 @@ describe('VotesBoard', () => {
     const html = await render('report-early');
 
     expect(text(html)).toContain(
-      'Leader – none while a preliminary system ties with the top score',
+      'Leader – none while a preliminary system ties with the top score Votes 34 over 1 session, 2 more left out',
     );
   });
 });

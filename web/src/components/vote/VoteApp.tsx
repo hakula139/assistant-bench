@@ -20,6 +20,7 @@ import {
   type PairView,
   type SessionView,
 } from '@/lib/arena';
+import { formatCountOf } from '@/lib/format';
 import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 
 const SESSION_KEY = 'bench-session';
@@ -277,7 +278,7 @@ export function VoteApp() {
       <div className="mx-auto max-w-xl space-y-4 px-4 py-16">
         <h1 className="text-2xl font-semibold">Session complete</h1>
         <p className="text-muted-foreground">
-          {session.votes} {session.votes === 1 ? 'vote' : 'votes'} recorded on {session.family}.
+          {formatCountOf(session.votes, 'vote')} recorded on {session.family}.
         </p>
         <ErrorAlert error={error} />
         <div className="flex gap-2">

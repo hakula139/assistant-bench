@@ -56,4 +56,13 @@ describe('system page', () => {
       'acme-pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
     );
   });
+
+  test('leaves out the head-to-head chart for a system without votes', async () => {
+    const rounds = votesRounds(await family());
+
+    const html = await render(SystemPage, { family: 'arena', system: 'acme-tiny', rounds });
+
+    expect(text(html)).toContain('acme-tiny Score 233 (81–321) Rank 6 Votes 0 (0 decisive)');
+    expect(html).not.toContain('Head to head');
+  });
 });

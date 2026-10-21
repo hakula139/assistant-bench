@@ -118,22 +118,24 @@ const length = results.length;
   </header>
 
   <div class="space-y-10">
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Head to head</h2>
-      <p class="max-w-prose text-sm text-muted-foreground">
-        Win rate against each opponent, where ties and both-bad votes count half.
-      </p>
-      <DotRangePlot
-        client:visible
-        rows={headToHead.map((pair) => ({ label: pair.opponent, value: pair.win_rate }))}
-        label="Win rate"
-        format="percent"
-        baseline={0.5}
-      />
-      <TableTwin>
-        <HeadToHeadTable headToHead={headToHead} />
-      </TableTwin>
-    </section>
+    {headToHead.length > 0 && (
+      <section class="space-y-3 border-t pt-6">
+        <h2 class="text-lg font-semibold">Head to head</h2>
+        <p class="max-w-prose text-sm text-muted-foreground">
+          Win rate against each opponent, where ties and both-bad votes count half.
+        </p>
+        <DotRangePlot
+          client:visible
+          rows={headToHead.map((pair) => ({ label: pair.opponent, value: pair.win_rate }))}
+          label="Win rate"
+          format="percent"
+          baseline={0.5}
+        />
+        <TableTwin>
+          <HeadToHeadTable headToHead={headToHead} />
+        </TableTwin>
+      </section>
+    )}
 
     {categoryRows.length > 0 && (
       <section class="space-y-3 border-t pt-6">

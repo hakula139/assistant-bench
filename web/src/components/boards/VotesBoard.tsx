@@ -21,6 +21,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   MISSING,
   formatCost,
+  formatCountOf,
   formatInterval,
   formatPercent,
   formatScore,
@@ -97,7 +98,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
           <dd className="font-medium tabular-nums">
             {results.votes}{' '}
             <span className="font-normal text-muted-foreground">
-              {`over ${results.sessions} sessions${results.dropped_votes > 0 ? `, ${results.dropped_votes} more left out` : ''}`}
+              {`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, ${results.dropped_votes} more left out` : ''}`}
             </span>
           </dd>
         </div>
@@ -106,7 +107,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
           <dd className="font-medium tabular-nums">
             {formatPercent(agreement.agreement)}{' '}
             <span className="font-normal text-muted-foreground">
-              on {agreement.repeats} repeats
+              on {formatCountOf(agreement.repeats, 'repeat')}
             </span>
           </dd>
         </div>
@@ -235,7 +236,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                         return (
                           <TableCell key={board.category} className="text-right">
                             {refit
-                              ? `${formatScore(refit.score)} (${formatInterval(refit.interval)}), ${refit.votes} votes${refit.preliminary ? ', preliminary' : ''}`
+                              ? `${formatScore(refit.score)} (${formatInterval(refit.interval)}), ${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`
                               : MISSING}
                           </TableCell>
                         );
