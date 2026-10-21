@@ -1,0 +1,271 @@
+"""Harbor task rendering, job configs, runs, and ingest of trials."""
+
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import assert_never
+
+from harbor.models.agent.context import AgentContext
+from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
+from harbor.models.task import config as task_config
+from harbor.models.trial import config as trial_config
+from harbor.models.trial.result import TrialResult
+from pydantic import BaseModel
+
+from assistant_bench.catalog import System
+from assistant_bench.families import (
+    Case,
+    Family,
+    Settings,
+    TaskTestsSettings,
+    VotesSettings,
+)
+from assistant_bench.harnesses import HARNESSES
+from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
+from assistant_bench.paths import FAMILIES_DIR, data_dir
+
+
+STOCK_IMAGE = 'debian:trixie-slim'
+# Harbor reuses a trial only when its task's semantic version is unchanged, so an
+# edited case takes a new ID.
+TASK_VERSION = '1.0.0'
+AGENT_TIMEOUT_SEC = 900.0
+N_CONCURRENT_TRIALS = 8
+ROUTE_CONCURRENCY = 4
+
+
+# ── Jobs ──
+
+
+def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
+    """Writes one Harbor task per case under the data directory and returns their paths.
+
+    Each task names a stock image that idles while the agent calls the endpoint from
+    the host. It has no tests, which Harbor accepts while the verifier is disabled.
+    """
+    paths = []
+    for case in cases:
+        task_dir = data_dir() / 'tasks' / family.name / case.id
+        (task_dir / 'environment').mkdir(parents=True, exist_ok=True)
+        (task_dir / 'instruction.md').write_text(case.instruction)
+        config = task_config.TaskConfig(
+            task=task_config.PackageInfo(
+                name=f'{family.name}/{case.id}', version=TASK_VERSION
+            ),
+            agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
+            environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
+        )
+        (task_dir / 'task.toml').write_text(config.model_dump_toml())
+        paths.append(task_dir)
+    return paths
+
+
+def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
+    """Builds a job that runs every system on every case task.
+
+    The job diffs against the family's finished jobs, so Harbor runs only the trials
+    that no earlier job completed with the same task version and agent config.
+    """
+    assert family.settings.max_output_tokens is not None
+    jobs_dir = data_dir() / 'jobs' / family.name
+    agents = [
+        trial_config.AgentConfig(
+            **HARNESSES[system.harness],
+            model_name=system.route,
+            n_concurrent=ROUTE_CONCURRENCY,
+            concurrency_group=system.route,
+            kwargs=GenerateOptions(
+                system=system.name,
+                fingerprint=system.fingerprint,
+                effort=system.effort,
+                system_prompt=system.prompt,
+                max_output_tokens=family.settings.max_output_tokens,
+            ).model_dump(),
+        )
+        for system in systems
+    ]
+    sources = [
+        SourceJobConfig(action='diff', type='local', path=result.parent)
+        for result in sorted(jobs_dir.glob('*/result.json'))
+    ]
+    return _job(family, jobs_dir, agents, tasks, sources)
+
+
+def oracle_job(family: Family) -> JobConfig:
+    """Builds a job that runs Harbor's oracle on every task directory of the family.
+
+    Its trials go under `checks/`, apart from the jobs that ingest reads.
+    """
+    return _job(
+        family,
+        data_dir() / 'checks' / family.name,
+        [trial_config.AgentConfig(**HARNESSES['oracle'])],
+        sorted((FAMILIES_DIR / family.name / 'tasks').iterdir()),
+        [],
+    )
+
+
+def _job(
+    family: Family,
+    jobs_dir: Path,
+    agents: list[trial_config.AgentConfig],
+    tasks: list[Path],
+    sources: list[SourceJobConfig],
+) -> JobConfig:
+    return JobConfig(
+        jobs_dir=jobs_dir,
+        n_attempts=family.settings.samples,
+        n_concurrent_trials=N_CONCURRENT_TRIALS,
+        quiet=True,
+        retry=RetryConfig(max_retries=1),
+        verifier=trial_config.VerifierConfig(disable=not _runs_tests(family.settings)),
+        agents=agents,
+        tasks=[trial_config.TaskConfig(path=path) for path in tasks],
+        source_jobs=sources,
+    )
+
+
+def _runs_tests(settings: Settings) -> bool:
+    match settings:
+        case VotesSettings():
+            return False
+        case TaskTestsSettings():
+            return True
+        case _:
+            assert_never(settings)
+
+
+def run_job(config: JobConfig) -> Path:
+    """Runs the job with the Harbor CLI and returns the job directory.
+
+    Raises:
+        subprocess.CalledProcessError: Harbor exited with an error.
+    """
+    harbor = Path(sys.executable).with_name('harbor')
+    with tempfile.NamedTemporaryFile(
+        'w', suffix='.json', delete_on_close=False
+    ) as file:
+        file.write(config.model_dump_json())
+        file.close()
+        subprocess.run(
+            [harbor, 'run', '--config', file.name, '--yes'],
+            check=True,
+            env={**os.environ, 'HARBOR_TELEMETRY': 'off'},
+        )
+    return config.jobs_dir / config.job_name
+
+
+# ── Ingest ──
+
+
+class Output(BaseModel):
+    """One trial of a family, as the arena and the reports read it."""
+
+    trial: str
+    job: str
+    case: str
+    system: str
+    fingerprint: str | None
+    nixos_config_rev: str | None
+    error: str | None
+    text: str | None
+    reward: float | None
+    finish_reason: str | None
+    input_tokens: int | None
+    cached_tokens: int | None
+    output_tokens: int | None
+    reasoning_tokens: int | None
+    cost_usd: float | None
+    latency_sec: float | None
+    response_model: str | None
+    request_id: str | None
+
+
+def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
+    """Reads every trial of the family's jobs into `outputs/<family>.jsonl`.
+
+    Costs come from the current catalog price of each system name, so a system
+    missing from `systems` or without a price reports as unpriced.
+    """
+    outputs = sorted(
+        (
+            output
+            for job_dir in (data_dir() / 'jobs' / family.name).glob('*')
+            for output in read_trials(family, job_dir, systems)
+        ),
+        key=lambda output: (output.case, output.system, output.job, output.trial),
+    )
+
+    outputs_file = data_dir() / 'outputs' / f'{family.name}.jsonl'
+    outputs_file.parent.mkdir(parents=True, exist_ok=True)
+    outputs_file.write_text(
+        ''.join(f'{output.model_dump_json()}\n' for output in outputs)
+    )
+    return outputs
+
+
+def read_trials(
+    family: Family, job_dir: Path, systems: dict[str, System]
+) -> list[Output]:
+    """Returns one output per finished trial of a job."""
+    return [
+        _output(family, result.parent, systems)
+        for result in sorted(job_dir.glob('*/result.json'))
+    ]
+
+
+def _output(family: Family, trial_dir: Path, systems: dict[str, System]) -> Output:
+    result = TrialResult.model_validate_json((trial_dir / 'result.json').read_bytes())
+    kwargs = result.config.agent.kwargs
+    system = kwargs.get('system', result.agent_info.name)
+    context = result.agent_result or AgentContext()
+    metadata = context.metadata or {}
+    exception = result.exception_info
+    output_file = trial_dir / 'agent' / OUTPUT_FILE
+
+    return Output(
+        trial=result.trial_name,
+        job=trial_dir.parent.name,
+        case=result.task_name.removeprefix(f'{family.name}/'),
+        system=system,
+        fingerprint=kwargs.get('fingerprint'),
+        nixos_config_rev=metadata.get('nixos_config_rev'),
+        error=exception.exception_type if exception else None,
+        text=output_file.read_text() if output_file.exists() else None,
+        reward=_reward(family.settings, result),
+        finish_reason=metadata.get('finish_reason'),
+        input_tokens=context.n_input_tokens,
+        cached_tokens=context.n_cache_tokens,
+        output_tokens=context.n_output_tokens,
+        reasoning_tokens=metadata.get('reasoning_tokens'),
+        cost_usd=_cost(systems.get(system), context),
+        latency_sec=metadata.get('latency_sec'),
+        response_model=metadata.get('response_model'),
+        request_id=metadata.get('request_id'),
+    )
+
+
+def _reward(settings: Settings, result: TrialResult) -> float | None:
+    match settings:
+        case VotesSettings():
+            return None
+        case TaskTestsSettings():
+            rewards = result.verifier_result and result.verifier_result.rewards
+            return rewards.get('reward') if rewards else None
+        case _:
+            assert_never(settings)
+
+
+def _cost(system: System | None, context: AgentContext) -> float | None:
+    if (
+        system is None
+        or system.price is None
+        or context.n_input_tokens is None
+        or context.n_output_tokens is None
+    ):
+        return None
+    return system.price.cost(
+        context.n_input_tokens, context.n_cache_tokens or 0, context.n_output_tokens
+    )

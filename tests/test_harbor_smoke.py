@@ -1,0 +1,46 @@
+"""Harbor trials under Docker, which the Harbor Smoke job runs."""
+
+import pytest
+
+from assistant_bench import jobs
+from assistant_bench.families import load_cases, load_family
+from support import StubEndpoint, make_system
+
+
+pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
+
+
+def test_oracle_solves_every_smoke_task() -> None:
+    family = load_family('smoke')
+
+    job_dir = jobs.run_job(jobs.oracle_job(family))
+
+    (output,) = jobs.read_trials(family, job_dir, {})
+    assert (output.case, output.system, output.error, output.reward) == (
+        'echo',
+        'oracle',
+        None,
+        1.0,
+    )
+
+
+def test_generate_answers_each_case_once_across_reruns(
+    endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, value in endpoint.env.items():
+        monkeypatch.setenv(name, value)
+    family = load_family('smoke-text')
+    cases = load_cases(family)
+    system = make_system()
+
+    for _ in range(2):
+        tasks = jobs.render_tasks(family, cases)
+        jobs.run_job(jobs.case_job(family, [system], tasks))
+
+    outputs = jobs.ingest(family, {system.name: system})
+    assert [(o.case, o.error, o.text, o.output_tokens) for o in outputs] == [
+        ('en-greeting', None, 'Hello there.', 40),
+        ('zh-greeting', None, 'Hello there.', 40),
+    ]
+    prompts = [request.body['messages'][0]['content'] for request in endpoint.requests]
+    assert sorted(prompts) == sorted(case.instruction for case in cases)

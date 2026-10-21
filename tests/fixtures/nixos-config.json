@@ -1,0 +1,65 @@
+{
+  "rev": "0123456789abcdef0123456789abcdef01234567",
+  "catalog": {
+    "defaults": {},
+    "models": {
+      "acme-large": {
+        "name": "Acme Large",
+        "channelId": {
+          "acme": "acme/large"
+        },
+        "channelCost": {
+          "acme": {
+            "input": 2.0,
+            "output": 10.0,
+            "cacheRead": 0.2,
+            "cacheWrite": 2.5
+          }
+        },
+        "thinking": {
+          "efforts": ["low", "medium", "high"],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      },
+      "acme-small": {
+        "name": "Acme Small",
+        "channelId": {
+          "acme": "acme/small"
+        },
+        "channelCost": {
+          "acme": {
+            "input": 0.1,
+            "output": 0.5,
+            "cacheRead": 0.01,
+            "cacheWrite": 0.1
+          }
+        },
+        "thinking": {
+          "efforts": ["low", "high"],
+          "defaultLevel": "high",
+          "requiresEffort": false
+        }
+      },
+      "local-model": {
+        "name": "Local Model",
+        "channelId": {
+          "local": "local/model"
+        },
+        "channelCost": {
+          "local": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      }
+    }
+  },
+  "instructions": {
+    "claudeCode": "# CLAUDE.md\n\nBe direct.",
+    "codex": "# AGENTS.md\n\nBe direct."
+  },
+  "proseTics": "1. **Em-dashes used in place of commas or colons.**\n"
+}
