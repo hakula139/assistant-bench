@@ -27,6 +27,7 @@ from support import (
     EARLY_REPORT_FIXTURE,
     RENDER_ORIGIN,
     REPORT_FIXTURE,
+    REPORT_SCHEMA_FIXTURE,
     SYNTHETIC_CLOSE,
     SYNTHETIC_EARLY_CLOSE,
     Clock,
@@ -169,6 +170,15 @@ class TestReport:
         schema = Report.model_json_schema(mode='serialization')
 
         jsonschema.validate(json.loads(fixture.read_text()), schema)
+
+    def test_matches_the_committed_json_schema(self) -> None:
+        schema = Report.model_json_schema(mode='serialization')
+
+        if json.loads(REPORT_SCHEMA_FIXTURE.read_text()) != schema:
+            REPORT_SCHEMA_FIXTURE.write_text(f'{json.dumps(schema, indent=2)}\n')
+            pytest.fail(
+                f'{REPORT_SCHEMA_FIXTURE.name} was stale and is rewritten, so review it'
+            )
 
 
 class TestClose:

@@ -21,7 +21,7 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 ## Cross-Checks and the Report Fixture
 
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss, the design, or the penalty that moves the estimates fails.
-- `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render. Their test rewrites a file when a model or the ranking changes it, so review the diff and commit the new fixture with the change.
+- `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render, and `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. Their tests rewrite a file when a model or the ranking changes it, so review the diff and commit the new fixture with the change.
 
 ## Docker Trials
 

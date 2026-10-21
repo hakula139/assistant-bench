@@ -25,14 +25,14 @@ web/src/
 ├── lib/                                    # The report schema, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture helper and the page tests
+├── test/                                   # The fixture and JSON Schema helpers and the page tests
 └── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it
 ```
 
 ## Reports
 
 - The site reads only `reports/*/*.json`, through the `reports` collection's `glob()` loader. Nothing under the data directory reaches a build.
-- `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so a report that gains, loses, or retypes a field fails the build. Change both schemas in one PR. `pnpm test` parses `tests/fixtures/report.json`, which the pydantic models write, and fails when the Zod schema stops accepting it.
+- `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so the build rejects a report with a field the schema lacks or a value of another type. Change both schemas in one PR. `pnpm test` parses both report fixtures and compares the Zod schema's JSON Schema with `tests/fixtures/report.schema.json`, which pytest writes from the pydantic models, over each field's types, nullability, and required and allowed keys, so either side drifting fails a check.
 - A new scorer adds a results variant to the schema, a board under `components/boards/`, an entry in the family page's per-scorer summaries, and an arm in the scorer switches of the home and family pages. Each of these fails the type check until it handles the new variant.
 
 ## Components

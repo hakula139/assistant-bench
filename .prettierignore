@@ -2,3 +2,4 @@ pnpm-lock.yaml
 reports/
 tests/fixtures/report.json
 tests/fixtures/report-early.json
+tests/fixtures/report.schema.json
