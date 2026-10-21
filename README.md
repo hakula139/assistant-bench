@@ -13,7 +13,7 @@ A system combines a model with its effort, harness, and system prompt. Every sys
 Early development. What works today:
 
 - **Systems:** declared in [`systems.toml`](systems.toml) and resolved against the model catalog and assistant instructions of [nixos-config](https://github.com/hakula139/nixos-config), each with a fingerprint of what it sends
-- **Families:** `prose-zh` and `prose-en`, with 30 committed writing cases each for blind votes and gates that reject truncated, wrong-language, or Traditional-script outputs, plus the `smoke` and `smoke-text` families that check the setup
+- **Families:** `prose-zh` and `prose-en`, with 30 committed writing cases each and gates that reject empty, truncated, wrong-language, or Traditional-script outputs, plus the `smoke` and `smoke-text` families that check the setup
 - **Runs:** one chat-completions call per trial through any OpenAI-compatible endpoint, with reruns that generate only missing trials
 - **Outputs:** one record per trial with the text or reward, token counts, cost at catalog prices, latency, and provenance
 

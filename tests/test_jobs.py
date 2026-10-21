@@ -11,7 +11,9 @@ from harbor.publisher.packager import Packager
 
 from assistant_bench import jobs
 from assistant_bench.families import (
+    Case,
     Family,
+    Gate,
     Gates,
     TaskTestsSettings,
     VotesSettings,
@@ -19,7 +21,6 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import REPO_ROOT
-from assistant_bench.scoring.gates import Gate
 from support import make_system, write_trial
 
 
@@ -31,6 +32,19 @@ VOTES = Family(
 TESTS = Family(
     name='g', source='tasks', settings=TaskTestsSettings(scorer='tests', samples=1)
 )
+
+
+def record(data_dir: Path, task: Path, version: str = jobs.TASK_VERSION) -> None:
+    content_hash, _ = Packager.compute_content_hash(task)
+    write_trial(
+        data_dir / 'jobs' / 'smoke-text' / 'job-1',
+        f'{task.name}__1',
+        AgentConfig(name='oracle'),
+        task=f'smoke-text/{task.name}',
+        instruction=None,
+        digest=f'sha256:{content_hash}',
+        version=version,
+    )
 
 
 class TestRenderTasks:
@@ -50,59 +64,58 @@ class TestRenderTasks:
         assert task.config.environment.docker_image == jobs.STOCK_IMAGE
         assert task.instruction == case.instruction
 
-
-class TestChangedTasks:
-    @staticmethod
-    def record(data_dir: Path, task: Path, version: str = jobs.TASK_VERSION) -> None:
-        content_hash, _ = Packager.compute_content_hash(task)
-        write_trial(
-            data_dir / 'jobs' / 'smoke-text' / 'job-1',
-            f'{task.name}__1',
-            AgentConfig(name='oracle'),
-            task=f'smoke-text/{task.name}',
-            instruction=None,
-            digest=f'sha256:{content_hash}',
-            version=version,
-        )
-
-    def test_names_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
+    def test_rejects_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
         for task in jobs.render_tasks(family, cases):
-            self.record(data_dir, task)
+            record(data_dir, task)
         edited = [
             cases[0].model_copy(update={'instruction': 'Reworded.'}),
             cases[1],
             cases[1].model_copy(update={'id': 'zh-greeting-2', 'instruction': 'New.'}),
         ]
 
-        changed = jobs.changed_tasks(family, jobs.render_tasks(family, edited))
+        with pytest.raises(ValueError) as error:
+            jobs.render_tasks(family, edited)
 
-        assert changed == ['en-greeting']
+        assert str(error.value) == (
+            "family 'smoke-text': case 'en-greeting' changed, give it a new ID"
+        )
+        tasks = data_dir / 'tasks' / 'smoke-text'
+        assert (tasks / 'en-greeting' / 'instruction.md').read_text() == (
+            cases[0].instruction
+        )
+        assert not (tasks / 'zh-greeting-2').exists()
 
-    def test_names_every_task_when_the_stock_image_changes(
+    def test_rejects_every_task_when_the_stock_image_changes(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
         for task in jobs.render_tasks(family, cases):
-            self.record(data_dir, task)
+            record(data_dir, task)
         monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
 
-        changed = jobs.changed_tasks(family, jobs.render_tasks(family, cases))
+        with pytest.raises(ValueError) as error:
+            jobs.render_tasks(family, cases)
 
-        assert changed == ['en-greeting', 'zh-greeting']
+        assert str(error.value) == (
+            "family 'smoke-text': cases 'en-greeting', 'zh-greeting' changed, "
+            'give each a new ID'
+        )
 
-    def test_ignores_trials_of_another_task_version(self, data_dir: Path) -> None:
+    def test_replaces_a_task_whose_trials_ran_another_version(
+        self, data_dir: Path
+    ) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
         (task,) = jobs.render_tasks(family, [case])
-        self.record(data_dir, task, version='0.9.0')
+        record(data_dir, task, version='0.9.0')
         edited = case.model_copy(update={'instruction': 'Reworded.'})
 
-        changed = jobs.changed_tasks(family, jobs.render_tasks(family, [edited]))
+        (path,) = jobs.render_tasks(family, [edited])
 
-        assert changed == []
+        assert (path / 'instruction.md').read_text() == 'Reworded.'
 
 
 class TestCaseJob:
@@ -328,6 +341,58 @@ class TestIngest:
             ('a', []),
             ('b', [Gate.SCRIPT]),
         ]
+
+    def test_exempts_the_instruction_a_trial_ran_after_a_rejected_edit(
+        self, data_dir: Path
+    ) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                samples=1,
+                max_output_tokens=300,
+                gates=Gates(script='hans'),
+            ),
+        )
+        case = Case(
+            id='a', category='reply', source='held-out', instruction='介绍臺北。'
+        )
+        (task,) = jobs.render_tasks(family, [case])
+        content_hash, _ = Packager.compute_content_hash(task)
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='f/a',
+            output='臺北今天很热。',
+            instruction=None,
+            digest=f'sha256:{content_hash}',
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+        with pytest.raises(ValueError, match="case 'a' changed"):
+            jobs.render_tasks(
+                family, [case.model_copy(update={'instruction': '介绍台北。'})]
+            )
+
+        (output,) = jobs.ingest(family, {})
+
+        assert output.gate_failures == []
+
+    def test_reads_no_instruction_without_the_script_gate(self, data_dir: Path) -> None:
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='f/a',
+            output='Hi.',
+            instruction=None,
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+
+        (output,) = jobs.ingest(VOTES, {})
+
+        assert output.gate_failures == []
 
     def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
         oracle = AgentConfig(name='oracle')

@@ -108,19 +108,9 @@ def _load_family(name: str) -> Family:
 
 def _render_tasks(family: Family) -> list[Path]:
     try:
-        cases = load_cases(family)
+        return jobs.render_tasks(family, load_cases(family))
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
-    tasks = jobs.render_tasks(family, cases)
-    match jobs.changed_tasks(family, tasks):
-        case []:
-            return tasks
-        case [case_id]:
-            message = f'case {case_id!r} changed, give it a new ID'
-        case changed:
-            ids = ', '.join(repr(case_id) for case_id in changed)
-            message = f'cases {ids} changed, give each a new ID'
-    raise typer.BadParameter(f'family {family.name!r}: {message}', param_hint='FAMILY')
 
 
 def _family_systems(family: Family) -> list[System]:

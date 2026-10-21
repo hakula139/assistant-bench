@@ -9,10 +9,10 @@ dependencies = [
   "harbor==0.24.0",
   "httpx>=0.28.1",
   "openai>=2.54.0",
-  "opencc>=1.4.2",
   "pydantic>=2.14.1",
   "python-dotenv>=1.2.4",
   "typer>=0.27.3",
+  "zhon>=2.1.1",
 ]
 
 [project.scripts]
@@ -83,7 +83,7 @@ files = ["src", "tests"]
 exclude_gitignore = true
 strict = true
 
-# Harbor ships type annotations without a `py.typed` marker.
+# Harbor and zhon ship type annotations without a `py.typed` marker.
 [[tool.mypy.overrides]]
-module = ["harbor.*"]
+module = ["harbor.*", "zhon.*"]
 follow_untyped_imports = true

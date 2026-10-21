@@ -1,20 +1,22 @@
 Atoi
 Cachix
 cafile
+cedict
 chatcmpl
 dateutil
 delenv
 direnv
+dists
 dotenv
 envrc
 esbenp
 hakula
+hanzi
 httpx
 isort
 katex
 kwarg
 kwargs
-libstdc
 mypy
 NFKC
 nixfmt
@@ -23,7 +25,7 @@ Nixpkgs
 npmjs
 numpy
 numtide
-opencc
+nvmrc
 pkgs
 pycache
 pydantic
@@ -35,7 +37,6 @@ shfmt
 smol
 srcdoc
 statix
-stdenv
 strconv
 substituters
 taplo
@@ -48,4 +49,5 @@ unrouted
 usize
 venv
 virtualenv
+zhon
 zstd

@@ -20,7 +20,6 @@ max_output_tokens = 512
 | `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                                            |
 | `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
 | `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
-| `render`            | For `votes`, how the vote page shows outputs. Only `text` exists, which is the default                                                    |
 | `language`          | For `votes`, `zh` or `en`, the language the `language` gate requires. Optional                                                            |
 | `[gates]`           | For `votes`, the optional `min_chars`, `max_chars`, and `script = "hans"` gates, which [Prose](../design/families/prose.md#gates) defines |
 

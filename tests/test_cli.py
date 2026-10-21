@@ -11,8 +11,7 @@ from typer.testing import CliRunner
 from assistant_bench import jobs, revisions
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
-from assistant_bench.families import load_cases, load_family
-from assistant_bench.scoring.gates import Gate
+from assistant_bench.families import Gate, load_cases, load_family
 from support import write_trial
 
 

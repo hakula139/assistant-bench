@@ -2,9 +2,8 @@ import textwrap
 
 import pytest
 
-from assistant_bench.families import Gates, VotesSettings
+from assistant_bench.families import Gate, Gates, VotesSettings
 from assistant_bench.scoring.gates import (
-    Gate,
     detect_language,
     failed_gates,
     traditional_characters,
@@ -21,17 +20,7 @@ ZH = VotesSettings(
 EN = VotesSettings(
     scorer='votes', samples=1, max_output_tokens=300, language='en', gates=Gates()
 )
-ZH_REPLY = '我把 `ripgrep` 升到了 15.2.0，并更新了两个哈希。macOS 主机还没有构建。'
-ZH_CODE = textwrap.dedent(
-    """\
-    ```python
-    def fetch(client, cursor=None):
-        # 接口限流为每秒一次，留 0.1 秒余量
-        time.sleep(1.1)
-        return client.get('/bars', params={'cursor': cursor})
-    ```
-    """
-)
+ZH_REPLY = '我把 `widget` 升到了 2.0.1，并更新了锁文件。Windows 版本还没有测试。'
 
 
 class TestFailedGates:
@@ -54,17 +43,18 @@ class TestFailedGates:
     @pytest.mark.parametrize(
         ('text', 'failures'),
         [
-            ('  简短的回复，正好十个字  ', []),
-            ('太短了。', [Gate.LENGTH]),
-            ('长' * 60, []),
+            (' \n' + '短' * 10 + '\n ', []),
+            ('    ' + '短' * 9 + '    ', [Gate.LENGTH]),
+            ('  ' + '长' * 60 + '  ', []),
             ('长' * 61, [Gate.LENGTH]),
         ],
+        ids=['min', 'below-min-padded', 'max-padded', 'above-max'],
     )
     def test_bounds_the_stripped_length(self, text: str, failures: list[Gate]) -> None:
         assert failed_gates(ZH, text, 'stop', '') == failures
 
     def test_rejects_an_output_in_another_language(self) -> None:
-        text = 'I bumped ripgrep to 15.2.0 and updated both hashes.'
+        text = 'I bumped widget to 2.0.1 and updated the lockfile.'
 
         assert failed_gates(ZH, text, 'stop', '') == [Gate.LANGUAGE]
 
@@ -95,11 +85,20 @@ class TestFailedGates:
 
 
 class TestDetectLanguage:
-    def test_ignores_inline_code_and_urls_in_chinese_prose(self) -> None:
-        text = (
-            '运行 `nix build .#packages.x86_64-linux.ripgrep --print-build-logs` 后'
-            '构建通过，详见 https://github.com/BurntSushi/ripgrep/releases/tag/15.2.0'
-        )
+    @pytest.mark.parametrize(
+        'text',
+        [
+            '构建通过，详见 https://example.com/docs/release/notes/install/upgrade/guide',
+            '构建通过，运行 `cargo test --workspace --all-features --release --locked '
+            '--offline --quiet` 即可',
+        ],
+        ids=['url', 'inline-code'],
+    )
+    def test_ignores_urls_and_inline_code_in_prose(self, text: str) -> None:
+        assert detect_language(text) == 'zh'
+
+    def test_ends_a_url_at_chinese_text(self) -> None:
+        text = 'Docs at https://example.com/a，安装方法和迁移说明都在发布页里，旧配置仍可读取'
 
         assert detect_language(text) == 'zh'
 
@@ -110,29 +109,40 @@ class TestDetectLanguage:
 
     @pytest.mark.parametrize(
         ('comment', 'language'),
-        [('接口限流为每秒一次，留 0.1 秒余量', 'zh'), ('Rate limit of 1/s', 'en')],
+        [
+            ('接口限流为每秒两次，留出余量', 'zh'),
+            ('Rate limit of two per second', 'en'),
+        ],
     )
     def test_judges_code_by_its_comments(self, comment: str, language: str) -> None:
-        text = ZH_CODE.replace('接口限流为每秒一次，留 0.1 秒余量', comment)
-
-        assert detect_language(text) == language
-
-    def test_skips_shebangs_and_attributes(self) -> None:
         text = textwrap.dedent(
-            """\
-            ```rust
-            #!/usr/bin/env rust-script
-            #[derive(Debug)]
-            struct Retry; // 重试
+            f"""\
+            ```python
+            def fetch(client, cursor=None):
+                # {comment}
+                time.sleep(0.55)
+                return client.get('/items', params={{'cursor': cursor}})
             ```
             """
         )
 
-        assert detect_language(text) == 'zh'
+        assert detect_language(text) == language
+
+    @pytest.mark.parametrize(
+        'code',
+        [
+            '#!/usr/bin/env rust-script\n#[derive(Debug)]\nstruct Retry; // 重试',
+            '#include <stdio.h>\n#define BUFFER_SIZE 4096\n// 缓冲区',
+            '/* 主色 */\n.button { color: #fff; background: #0a84ff; }',
+        ],
+        ids=['shebang-and-attribute', 'preprocessor', 'css-colors'],
+    )
+    def test_skips_hashes_that_open_no_comment(self, code: str) -> None:
+        assert detect_language(f'```\n{code}\n```\n') == 'zh'
 
     def test_reads_block_comments_and_docstrings(self) -> None:
         text = textwrap.dedent(
-            '''\
+            """\
             ```rust
             /* 缓冲区按页对齐 */
             fn main() { let buffer_length_in_bytes = 4096; }
@@ -140,19 +150,34 @@ class TestDetectLanguage:
 
             ```python
             def parse(raw_input_bytes):
-                """解析原始字节。"""
+                '''解析原始字节。'''
             ```
-            '''
+            """
         )
 
         assert detect_language(text) == 'zh'
+
+    def test_reads_a_prose_fence_whole(self) -> None:
+        text = textwrap.dedent(
+            """\
+            提交信息如下：
+
+            ```text
+            fix: reject a directory passed to the output flag
+
+            The export now checks the path before it starts writing.
+            ```
+            """
+        )
+
+        assert detect_language(text) == 'en'
 
     def test_returns_none_without_natural_language(self) -> None:
         assert detect_language('```\nx = 1\n```\n`y` 42') is None
 
 
 class TestTraditionalCharacters:
-    def test_lists_each_converted_character_once(self) -> None:
+    def test_lists_each_traditional_only_character_once(self) -> None:
         assert traditional_characters('這個設定，這個測試', '') == [
             '這',
             '個',
@@ -161,9 +186,8 @@ class TestTraditionalCharacters:
             '試',
         ]
 
-    def test_keeps_characters_simplified_in_context(self) -> None:
-        assert traditional_characters('乾坤未定，显著提升', '') == []
-        assert traditional_characters('房间很乾淨', '') == ['乾', '淨']
+    def test_never_flags_a_character_valid_in_both_scripts(self) -> None:
+        assert traditional_characters('乾坤未定，著作等身，於是动身', '') == []
 
     def test_exempts_characters_from_the_source(self) -> None:
         assert traditional_characters('请把「臺北」改成「台北」', '原文写作臺北') == []

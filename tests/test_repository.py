@@ -2,8 +2,10 @@ import re
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from assistant_bench.families import Case, load_cases, load_family
+from assistant_bench.cli import app
+from assistant_bench.families import Case
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -27,13 +29,12 @@ def test_committed_cases_hold_only_synthetic_or_public_sources(path: Path) -> No
 
 @pytest.mark.parametrize(
     'name',
-    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/family.toml')),
+    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/cases.jsonl')),
 )
-def test_committed_families_load(name: str) -> None:
-    family = load_family(name)
+def test_committed_case_families_pass_check(name: str) -> None:
+    result = CliRunner().invoke(app, ['check', name])
 
-    if family.source == 'cases':
-        assert load_cases(family)
+    assert result.exit_code == 0, result.output
 
 
 def test_uv_lock_names_only_pypi() -> None:

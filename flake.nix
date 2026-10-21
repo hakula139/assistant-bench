@@ -84,10 +84,6 @@
           env = {
             BENCH_NIXOS_CONFIG = nixosConfigExport;
             UV_PYTHON = pkgs.lib.getExe pkgs.python314;
-          }
-          # Manylinux wheels such as OpenCC's link libstdc++, which Nixpkgs' Python can't find.
-          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
           };
         };
 

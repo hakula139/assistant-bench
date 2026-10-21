@@ -4,7 +4,7 @@
 
 ## Systems and Samples
 
-Each family sends every case to the same five systems at their catalog default effort: `opus-5.5`, `gpt-6.1-sol`, `gemini-4-argon`, `gemini-3.8-flash`, and `deepseek-v4.1-flash`. Each case and system pair runs twice, so every vote can draw one of two samples, and each call may spend up to 16,000 completion tokens, reasoning included.
+Both families send every case to the same systems at their catalog default effort, as each [`family.toml`](../../../families/prose-zh/family.toml) lists them. Each case and system pair runs twice, so every vote can draw one of two samples.
 
 ## Categories
 
@@ -23,7 +23,7 @@ Most instructions supply a list of facts and ask for those facts alone, so a vot
 
 ## Case Sourcing
 
-The committed `cases.jsonl` of each family holds 30 synthetic cases, five per category. The data directory's `cases/<family>.jsonl` holds the rest, about 30% of each family: synthetic `held-out` cases that keep the leaderboard from being fit to the public set, and `transcript` cases drawn from the owner's real tasks. Transcript-derived cases pass gitleaks before they enter the file, since every system receives them.
+The committed `cases.jsonl` of each family holds 30 synthetic cases, five per category. The data directory's `cases/<family>.jsonl` holds the rest, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, and passes gitleaks before it enters the file, since every system receives it. A committed case derived from such a task keeps only its scenario type, never its text.
 
 Chinese cases are written in Chinese and keep code, paths, and commands in their original form. Code-comment cases in `prose-zh` ask for Chinese comments.
 
@@ -37,13 +37,13 @@ Chinese cases are written in Chinese and keep code, paths, and commands in their
 | `truncated` | The endpoint reported a finish reason other than `stop`, or none, such as a cut at the token cap | Always on                        |
 | `length`    | The stripped output has fewer than `min_chars` or more than `max_chars` characters               | `[gates] min_chars`, `max_chars` |
 | `language`  | The output's dominant language differs from the family's `language`                              | `language`                       |
-| `script`    | The output holds Traditional Chinese characters that the case instruction lacks                  | `[gates] script = "hans"`        |
+| `script`    | The output holds Traditional-only characters that the case instruction lacks                     | `[gates] script = "hans"`        |
 
-`prose-zh` bounds outputs to 40 to 6,000 characters and checks the script, and `prose-en` bounds them to 80 to 10,000 characters.
+The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `prose-zh`'s is half of `prose-en`'s because a Chinese character carries about as much as an English word. The maximums sit far above every length a case asks for, so they catch only runaway output that stays under the token cap.
 
-The language gate compares Han characters with Latin words in the output's natural language: the prose outside fenced code blocks, without inline code or URLs, plus the line comments, block comments, and docstrings inside code blocks. Code-comment outputs are therefore judged by the language of their comments, and an output with neither Han characters nor Latin words passes.
+The language gate compares Han characters with Latin words in the output's natural language. That is the prose outside fenced code blocks, without inline code or URLs, plus the whole body of each fence tagged `markdown`, `md`, `text`, or `txt`, such as a fenced commit message. Every other fence counts as code and contributes only its comments: lines opened by `#` and a space or by `//`, `/* */` blocks, and triple-quoted strings. Code-comment outputs are therefore judged by the language of their comments, while `#include`, CSS colors, shebangs, and `#[attribute]` lines count as code. An output with neither Han characters nor Latin words passes.
 
-The script gate converts the whole output with OpenCC's Traditional-to-Simplified table, whose phrase entries keep characters that are Simplified in context, such as the 乾 of 乾坤. Every Han character the conversion changes counts unless it also appears in the instruction, so an output may quote a Traditional name the case supplies.
+The script gate works per character, using the CC-CEDICT character sets that zhon ships: a character fails when it is Traditional and never Simplified, unless the instruction also contains it, so an output may quote a Traditional name the case supplies. Because a failure is an automatic loss, the gate never flags a character valid in both scripts, such as 乾, 著, or 於. It therefore misses Traditional text written only in such characters, such as 於是, which a phrase-level converter would catch, a gap that narrows with length because longer Traditional text rarely avoids every Traditional-only character.
 
 ## Gate Verdicts
 
@@ -55,4 +55,4 @@ The script gate converts the whole output with OpenCC's Traditional-to-Simplifie
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | The trial errored, so it never enters the arena, or the family's scorer has no gates                                  |
 
-The names follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and `bench ingest` prints the count of outputs that failed a gate and the failures by gate.
+The names are the values of `families.Gate`, which sits beside the gate settings so that readers of outputs can import it without the gate code, and they follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and `bench ingest` prints the count of outputs that failed a gate and the failures by gate.
