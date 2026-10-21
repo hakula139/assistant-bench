@@ -195,6 +195,14 @@ class TestRun:
         assert len(endpoint.requests) == 1
         assert not (tmp_path / 'output.txt').exists()
 
+    def test_reaches_an_ipv6_endpoint_without_a_local_address(
+        self, ipv6_endpoint: StubEndpoint, tmp_path: Path
+    ) -> None:
+        _, output = run_agent(ipv6_endpoint, tmp_path)
+
+        assert output.read_text() == 'Hello there.'
+        assert len(ipv6_endpoint.requests) == 1
+
     def test_binds_connections_to_the_local_address_the_env_names(
         self, endpoint: StubEndpoint, tmp_path: Path
     ) -> None:

@@ -1,4 +1,6 @@
+import ipaddress
 import json
+import socket
 import ssl
 import threading
 from collections.abc import Iterator
@@ -14,12 +16,22 @@ from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from support import EXPORT_FILE, Request, StubEndpoint
 
 
+PROXY_VARS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
+
+
+class IPv6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the data directory at a scratch path and leaves any `.env` unread."""
+    """Point the data directory at a scratch path, away from `.env` and any proxy."""
     home = tmp_path / 'xdg-data'
     monkeypatch.setenv('XDG_DATA_HOME', str(home))
     monkeypatch.chdir(tmp_path)
+    for name in PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
     return home / 'assistant-bench'
 
 
@@ -53,10 +65,16 @@ def tls_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
     yield from serve_stub(tmp_path, context, ca_file)
 
 
+@pytest.fixture
+def ipv6_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
+    yield from serve_stub(tmp_path, host='::1')
+
+
 def serve_stub(
     tmp_path: Path,
     context: ssl.SSLContext | None = None,
     ca_file: Path | None = None,
+    host: str = '127.0.0.1',
 ) -> Iterator[StubEndpoint]:
     key_file = tmp_path / 'api-key'
     key_file.write_text('test-key\n')
@@ -83,13 +101,14 @@ def serve_stub(
         def log_message(self, format: str, *args: Any) -> None:
             pass
 
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    ipv6 = ipaddress.ip_address(host).version == 6
+    server = (IPv6Server if ipv6 else ThreadingHTTPServer)((host, 0), Handler)
     scheme = 'http'
     if context is not None:
         server.socket = context.wrap_socket(server.socket, server_side=True)
         scheme = 'https'
     stub = StubEndpoint(
-        url=f'{scheme}://127.0.0.1:{server.server_port}',
+        url=f'{scheme}://{f"[{host}]" if ipv6 else host}:{server.server_port}',
         key_file=key_file,
         ca_file=ca_file,
     )

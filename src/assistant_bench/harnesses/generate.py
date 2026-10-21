@@ -112,17 +112,20 @@ class Generate(BaseAgent):
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
         usage = completion.usage
-        completion_details = usage and usage.completion_tokens_details
+        reasoning_tokens = None
         if usage is not None:
             prompt_details = usage.prompt_tokens_details
+            completion_details = usage.completion_tokens_details
             context.n_input_tokens = usage.prompt_tokens
             context.n_cache_tokens = (
                 prompt_details and prompt_details.cached_tokens
             ) or 0
             context.n_output_tokens = usage.completion_tokens
+            reasoning_tokens = (
+                completion_details and completion_details.reasoning_tokens
+            )
         context.metadata = {
-            'reasoning_tokens': completion_details
-            and completion_details.reasoning_tokens,
+            'reasoning_tokens': reasoning_tokens,
             'latency_sec': round(latency_sec, 3),
             'finish_reason': choice.finish_reason,
             'response_model': completion.model,

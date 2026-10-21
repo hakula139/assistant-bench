@@ -58,7 +58,7 @@ class Case(BaseModel):
 
 
 def load_family(name: str) -> Family:
-    """Read `family.toml` and infers where the family's tasks come from.
+    """Read `family.toml` and infer where the family's tasks come from.
 
     Raises
     ------

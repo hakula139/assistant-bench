@@ -75,7 +75,9 @@ def write_trial(
         exception_info=exception if error else None,
     )
     lock = TrialLock(
-        task=TaskLock(name=name, version=version, type='local', digest=digest),
+        task=TaskLock(
+            name=Path(task).name, version=version, type='local', digest=digest
+        ),
         agent=agent,
         environment=EnvironmentConfig(),
         verifier=VerifierLock(),

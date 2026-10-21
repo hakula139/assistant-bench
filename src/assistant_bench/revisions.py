@@ -45,5 +45,5 @@ def changed_fingerprints(base: dict[str, System], head: dict[str, System]) -> li
 
 def _output(*args: str) -> str:
     return subprocess.run(
-        args, check=True, capture_output=True, text=True, cwd=REPO_ROOT
+        args, check=True, stdout=subprocess.PIPE, text=True, cwd=REPO_ROOT
     ).stdout.strip()

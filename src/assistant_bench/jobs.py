@@ -46,7 +46,7 @@ ROUTE_CONCURRENCY = 4
 
 
 def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
-    """Write one Harbor task per case under the data directory and returns their paths.
+    """Write one Harbor task per case under the data directory and return their paths.
 
     Each task names a stock image that idles while the agent calls the endpoint from
     the host. It has no tests, which Harbor accepts while the verifier is disabled.
@@ -177,7 +177,7 @@ def _runs_tests(settings: Settings) -> bool:
 
 
 def run_job(config: JobConfig) -> Path:
-    """Run the job with the Harbor CLI and returns the job directory.
+    """Run the job with the Harbor CLI and return the job directory.
 
     Raises
     ------

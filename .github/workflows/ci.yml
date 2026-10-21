@@ -95,11 +95,13 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
 
+      # A push to main compares with the previous head, so two PRs that pass alone but conflict
+      # together are flagged once both land.
       - name: Check fingerprints
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
   harbor-smoke:
     name: Harbor Smoke
