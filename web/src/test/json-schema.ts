@@ -4,9 +4,11 @@ const SCALARS = new Set(['boolean', 'integer', 'null', 'number', 'string']);
 
 /**
  * Flattens a JSON Schema into what each path admits: its types, constants and enums, and each
- * object's properties, required keys, and extra keys. `$ref`, unions, and type arrays resolve, so
- * pydantic's and Zod's spellings of one schema compare equal, while titles, descriptions, formats,
- * and numeric bounds are ignored.
+ * object's properties, required keys, extra keys, and the names those keys may take. `$ref`,
+ * unions, and type arrays resolve, so pydantic's and Zod's spellings of one schema compare equal,
+ * while titles, descriptions, formats, and numeric bounds are ignored. Each union option that a
+ * constant property tags, as `scorer` tags a report's results, gets its own paths, such as
+ * `$.results<votes>.standings[]`.
  */
 export function schemaShape(root: Schema): Record<string, string[]> {
   const defs = (root.$defs ?? {}) as Record<string, Schema | undefined>;
@@ -15,19 +17,31 @@ export function schemaShape(root: Schema): Record<string, string[]> {
     shape.set(path, (shape.get(path) ?? new Set()).add(entry));
   };
 
-  const walk = (node: Schema, path: string): void => {
-    if (typeof node.$ref === 'string') {
-      const target = defs[node.$ref.replace('#/$defs/', '')];
-      if (target === undefined) {
-        throw new Error(`unresolved ${node.$ref}`);
-      }
-      walk(target, path);
-      return;
+  const resolve = (node: Schema): Schema => {
+    if (typeof node.$ref !== 'string') {
+      return node;
     }
+    const target = defs[node.$ref.replace('#/$defs/', '')];
+    if (target === undefined) {
+      throw new Error(`unresolved ${node.$ref}`);
+    }
+    return resolve(target);
+  };
+
+  const tag = (option: Schema): string => {
+    const properties = (option.properties ?? {}) as Record<string, Schema>;
+    const tags = Object.values(properties)
+      .map(resolve)
+      .flatMap((property) => ('const' in property ? [String(property.const)] : []));
+    return tags.length > 0 ? `<${tags.toSorted().join(',')}>` : '';
+  };
+
+  const walk = (schema: Schema, path: string): void => {
+    const node = resolve(schema);
     const union = (node.anyOf ?? node.oneOf) as Schema[] | undefined;
     if (union) {
-      for (const option of union) {
-        walk(option, path);
+      for (const option of union.map(resolve)) {
+        walk(option, `${path}${tag(option)}`);
       }
       return;
     }
@@ -62,6 +76,9 @@ export function schemaShape(root: Schema): Record<string, string[]> {
       }
       if (typeof extra === 'object') {
         walk(extra as Schema, `${path}{}`);
+      }
+      if (typeof node.propertyNames === 'object') {
+        walk(node.propertyNames as Schema, `${path}{key}`);
       }
     } else {
       add(path, `any ${JSON.stringify(node)}`);
