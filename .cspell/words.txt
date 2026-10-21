@@ -21,6 +21,7 @@ numtide
 pkgs
 pycache
 pydantic
+pyenv
 pypi
 pyproject
 pytest
