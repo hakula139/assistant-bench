@@ -14,12 +14,15 @@ samples = 1
 max_output_tokens = 512
 ```
 
-| Field               | Meaning                                                                                                            |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `scorer`            | `votes` for outputs ranked by the owner's blind pairwise votes, or `tests` for the reward of each task's own tests |
-| `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                     |
-| `samples`           | Harbor attempts per task and system, at least 1                                                                    |
-| `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                              |
+| Field               | Meaning                                                                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `scorer`            | `votes` for outputs ranked by the owner's blind pairwise votes, or `tests` for the reward of each task's own tests                        |
+| `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                                            |
+| `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
+| `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
+| `render`            | For `votes`, how the vote page shows outputs. Only `text` exists, which is the default                                                    |
+| `language`          | For `votes`, `zh` or `en`, the language the `language` gate requires. Optional                                                            |
+| `[gates]`           | For `votes`, the optional `min_chars`, `max_chars`, and `script = "hans"` gates, which [Prose](../design/families/prose.md#gates) defines |
 
 ## Cases
 
@@ -36,7 +39,7 @@ Each line of `cases.jsonl` is one case:
 ```
 
 - `id` is unique across the committed and local cases of the family and uses lowercase letters, digits, and hyphens. Once a case has run, an edited instruction needs a new ID, because Harbor aborts a job whose task keeps its version but changes its content. `bench check` and `bench run` compare each rendered task with the digest Harbor recorded for it and name such a case before Harbor starts, so an edit is accepted while no trial has run the case.
-- `category` tags the case for per-category leaderboards.
+- `category` tags the case for per-category leaderboards. A family's page under [`design/families/`](../design/families/) lists its categories.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `$XDG_DATA_HOME/assistant-bench/cases/<family>.jsonl`, which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `checklist` is an optional list of judging hints shown beside the outputs.
 

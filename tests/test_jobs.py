@@ -12,12 +12,14 @@ from harbor.publisher.packager import Packager
 from assistant_bench import jobs
 from assistant_bench.families import (
     Family,
+    Gates,
     TaskTestsSettings,
     VotesSettings,
     load_cases,
     load_family,
 )
 from assistant_bench.paths import REPO_ROOT
+from assistant_bench.scoring.gates import Gate
 from support import make_system, write_trial
 
 
@@ -58,6 +60,7 @@ class TestChangedTasks:
             f'{task.name}__1',
             AgentConfig(name='oracle'),
             task=f'smoke-text/{task.name}',
+            instruction=None,
             digest=f'sha256:{content_hash}',
             version=version,
         )
@@ -222,7 +225,7 @@ class TestIngest:
             ('a', 'TimeoutError'),
             ('b', None),
         ]
-        assert outputs[0].cost_usd is None
+        assert (outputs[0].cost_usd, outputs[0].gate_failures) == (None, None)
         assert outputs[1].model_dump(exclude={'case', 'error'}) == {
             'trial': 'b__1',
             'job': 'job-1',
@@ -231,6 +234,7 @@ class TestIngest:
             'nixos_config_rev': 'rev-a',
             'text': 'Hi.',
             'reward': None,
+            'gate_failures': [],
             'finish_reason': 'stop',
             'input_tokens': 1_000,
             'cached_tokens': 600,
@@ -291,6 +295,40 @@ class TestIngest:
             ('old-name', 'old-name'),
         ]
 
+    def test_gates_each_output_against_its_case_instruction(
+        self, data_dir: Path
+    ) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                samples=1,
+                max_output_tokens=300,
+                language='zh',
+                gates=Gates(script='hans'),
+            ),
+        )
+        generate = AgentConfig(import_path='x:Y', kwargs={'system': 's'})
+        stop = AgentContext(metadata={'finish_reason': 'stop'})
+        for case, output in (('a', '臺北今天很热。'), ('b', '臺北今天很熱。')):
+            write_trial(
+                data_dir / 'jobs' / 'f' / 'job-1',
+                f'{case}__1',
+                generate,
+                task=f'f/{case}',
+                output=output,
+                instruction='介绍一下臺北的天气。',
+                context=stop,
+            )
+
+        outputs = jobs.ingest(family, {})
+
+        assert [(o.case, o.gate_failures) for o in outputs] == [
+            ('a', []),
+            ('b', [Gate.SCRIPT]),
+        ]
+
     def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
         oracle = AgentConfig(name='oracle')
         for family in ('f', 'g'):
@@ -301,6 +339,7 @@ class TestIngest:
         (voted,) = jobs.ingest(VOTES, {})
 
         assert (scored.case, scored.system, scored.reward) == ('a', 'oracle', 1.0)
+        assert scored.gate_failures is None
         assert voted.reward is None
 
     def test_leaves_a_system_missing_from_the_catalog_unpriced(

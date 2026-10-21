@@ -69,6 +69,14 @@ def ingest(family: str) -> None:
     typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
     for error, count in errors.most_common():
         typer.echo(f'  {error}: {count}')
+    gated = [output for output in outputs if output.gate_failures]
+    if gated:
+        typer.echo(f'{len(gated)} failed a gate')
+        failures = Counter(
+            gate for output in gated for gate in output.gate_failures or []
+        )
+        for gate, count in failures.most_common():
+            typer.echo(f'  {gate}: {count}')
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')

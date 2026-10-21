@@ -28,6 +28,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.scoring.gates import Gate, failed_gates
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
@@ -53,7 +54,7 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     """
     paths = []
     for case in cases:
-        task_dir = data_dir() / 'tasks' / family.name / case.id
+        task_dir = case_task(family, case.id)
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / 'instruction.md').write_text(case.instruction)
         config = task_config.TaskConfig(
@@ -66,6 +67,11 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
         (task_dir / 'task.toml').write_text(config.model_dump_toml())
         paths.append(task_dir)
     return paths
+
+
+def case_task(family: Family, case_id: str) -> Path:
+    """Return the directory that `render_tasks` writes a case's task to."""
+    return data_dir() / 'tasks' / family.name / case_id
 
 
 def changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
@@ -202,7 +208,12 @@ def run_job(config: JobConfig) -> Path:
 
 
 class Output(BaseModel):
-    """One trial of a family, as the arena and the reports read it."""
+    """One trial of a family, as the arena and the reports read it.
+
+    `gate_failures` lists the gates a voted output fails, so an empty list admits
+    it to votes and any failure resolves its pairs automatically. It is `None` for
+    an errored trial and for a family whose scorer has no gates.
+    """
 
     trial: str
     job: str
@@ -213,6 +224,7 @@ class Output(BaseModel):
     error: str | None
     text: str | None
     reward: float | None
+    gate_failures: list[Gate] | None
     finish_reason: str | None
     input_tokens: int | None
     cached_tokens: int | None
@@ -277,18 +289,24 @@ def _output(family: Family, trial_dir: Path, systems: dict[str, System]) -> Outp
     metadata = context.metadata or {}
     exception = result.exception_info
     output_file = trial_dir / 'agent' / OUTPUT_FILE
+    text = output_file.read_text() if output_file.exists() else None
+    case = result.task_name.removeprefix(f'{family.name}/')
+    finish_reason = metadata.get('finish_reason')
 
     return Output(
         trial=result.trial_name,
         job=trial_dir.parent.name,
-        case=result.task_name.removeprefix(f'{family.name}/'),
+        case=case,
         system=system,
         fingerprint=kwargs.get('fingerprint'),
         nixos_config_rev=metadata.get('nixos_config_rev'),
         error=exception.exception_type if exception else None,
-        text=output_file.read_text() if output_file.exists() else None,
+        text=text,
         reward=_reward(family.settings, result),
-        finish_reason=metadata.get('finish_reason'),
+        gate_failures=None
+        if exception
+        else _gate_failures(family, case, text or '', finish_reason),
+        finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
         output_tokens=context.n_output_tokens,
@@ -309,6 +327,19 @@ def _reward(settings: Settings, result: TrialResult) -> float | None:
             return rewards.get('reward') if rewards else None
         case _:
             assert_never(settings)
+
+
+def _gate_failures(
+    family: Family, case: str, text: str, finish_reason: str | None
+) -> list[Gate] | None:
+    match family.settings:
+        case VotesSettings():
+            instruction = (case_task(family, case) / 'instruction.md').read_text()
+            return failed_gates(family.settings, text, finish_reason, instruction)
+        case TaskTestsSettings():
+            return None
+        case _:
+            assert_never(family.settings)
 
 
 def _cost(system: System | None, context: AgentContext) -> float | None:

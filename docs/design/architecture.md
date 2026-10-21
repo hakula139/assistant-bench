@@ -12,6 +12,8 @@ src/assistant_bench/
 ├── harnesses/
 │   ├── __init__.py                         # Harness name to a Harbor agent name or import path
 │   └── generate.py                         # The single-call agent
+├── scoring/
+│   └── gates.py                            # Eligibility gates for voted outputs
 ├── families.py                             # family.toml and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
 └── paths.py                                # Repo and data directory locations
@@ -23,26 +25,26 @@ Imports point downward through these layers, so a module never imports one above
 
 1. `cli`
 2. `jobs` and `revisions`
-3. `harnesses`
+3. `scoring` and `harnesses`
 4. `families` and `catalog`
 5. `paths`
 
-`families` is separated from `jobs` so that code reading family settings needs no Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents.
+`families` is separated from `jobs` so that code reading family settings needs no Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 
 A family directory holds only data: `family.toml` and either `cases.jsonl` or `tasks/`, with `load_family` inferring the source from whichever exists. In `family.toml`, `scorer` discriminates the settings model, and each place that depends on the scorer matches on that model and ends in `assert_never`, so mypy reports any scorer that a `match` misses:
 
-| Scorer  | Task source     | Verifier | Reward on each output              |
-| ------- | --------------- | -------- | ---------------------------------- |
-| `votes` | `cases.jsonl`   | Disabled | None, since votes rank the outputs |
-| `tests` | `tasks/<task>/` | Enabled  | The task's `reward` from Harbor    |
+| Scorer  | Task source     | Verifier | Scored at ingest                                          |
+| ------- | --------------- | -------- | --------------------------------------------------------- |
+| `votes` | `cases.jsonl`   | Disabled | `gate_failures` from the family's gates, while votes rank |
+| `tests` | `tasks/<task>/` | Enabled  | `reward`, the task's reward from Harbor                   |
 
 ## Data Flow
 
 1. `bench run <family>` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml` naming a stock image, builds a job config with one agent per system listed in `family.toml`, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent, where `Generate` sends one chat-completions request from the host, writes the reply to `output.txt` in the trial's agent logs, and records tokens, latency, the finish reason, the response model, the request ID, and the nixos-config rev on the trial's `AgentContext`.
-3. `bench ingest <family>` reads the trials of the family's jobs into `outputs/<family>.jsonl`, pricing tokens from the catalog and taking the reward when the scorer is `tests`.
+3. `bench ingest <family>` reads the trials of the family's jobs into `outputs/<family>.jsonl`, pricing tokens from the catalog, running the gates against each case's rendered instruction when the scorer is `votes`, and taking the reward when it is `tests`.
 
 `bench check <family>` validates a family, and for a `tests` family it also runs Harbor's oracle on every task, placing its jobs under `checks/` so that ingest never reads them.
 

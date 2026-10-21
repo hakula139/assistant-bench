@@ -13,7 +13,7 @@ A system combines a model with its effort, harness, and system prompt. Every sys
 Early development. What works today:
 
 - **Systems:** declared in [`systems.toml`](systems.toml) and resolved against the model catalog and assistant instructions of [nixos-config](https://github.com/hakula139/nixos-config), each with a fingerprint of what it sends
-- **Families:** `smoke`, with one Harbor task checked by its tests, and `smoke-text`, with two short cases sent to every system
+- **Families:** `prose-zh` and `prose-en`, with 30 committed writing cases each for blind votes and gates that reject truncated, wrong-language, or Traditional-script outputs, plus the `smoke` and `smoke-text` families that check the setup
 - **Runs:** one chat-completions call per trial through any OpenAI-compatible endpoint, with reruns that generate only missing trials
 - **Outputs:** one record per trial with the text or reward, token counts, cost at catalog prices, latency, and provenance
 
@@ -35,7 +35,7 @@ The [quickstart](docs/guide/quickstart.md) walks through the setup, and [Running
 ## Documentation
 
 - [User guide](docs/guide/): quickstart, running a family, authoring cases, families, and systems
-- [Design](docs/design/): architecture and systems
+- [Design](docs/design/): architecture, systems, and the prose families
 - [Conventions](docs/conventions/) and [`AGENTS.md`](AGENTS.md): how changes are written and checked
 
 ## License

@@ -16,10 +16,33 @@ class _Settings(BaseModel):
     max_output_tokens: int | None = Field(default=None, ge=1)
 
 
+type Language = Literal['en', 'zh']
+
+
+class Gates(BaseModel):
+    """Eligibility bounds for voted outputs, in characters of the stripped text.
+
+    `script = "hans"` rejects Traditional characters absent from the instruction.
+    """
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    min_chars: int | None = Field(default=None, ge=1)
+    max_chars: int | None = Field(default=None, ge=1)
+    script: Literal['hans'] | None = None
+
+
 class VotesSettings(_Settings):
-    """A family ranked by the owner's blind pairwise votes."""
+    """A family ranked by the owner's blind pairwise votes.
+
+    `language` is the language every output must be written in, which the gates
+    check when it is set.
+    """
 
     scorer: Literal['votes']
+    render: Literal['text'] = 'text'
+    language: Language | None = None
+    gates: Gates = Gates()
 
 
 class TaskTestsSettings(_Settings):
