@@ -67,6 +67,7 @@ class TestSystem:
         def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
             assert make_system().fingerprint == '293ca99b5baeacd7'
             assert make_system(name='x').fingerprint == '293ca99b5baeacd7'
+            assert make_system(display_name='x').fingerprint == '293ca99b5baeacd7'
 
         @pytest.mark.parametrize(
             'change',

@@ -140,7 +140,7 @@ function ForestRow({
         <div
           role="img"
           tabIndex={0}
-          aria-label={`${row.name}:${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
+          aria-label={`${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
           className="focus-visible:outline-offset-[-2px]"
         >
           <PlotFigure plot={plot} height={ROW_HEIGHT} />
@@ -194,7 +194,6 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
           ]
         : []),
       helper.accessor('name', {
-        id: 'system',
         header: 'System',
         sortFn: 'alphanumeric',
         cell: ({ row: { original } }) => (

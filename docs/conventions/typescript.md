@@ -18,20 +18,20 @@ web/src/
 ├── components/site/                        # Header, wordmark, family panel, static forest, glossary, and shared page parts
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
-├── content.config.ts                       # The families and reports collections
+├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
-├── lib/                                    # The report and family schemas, the forest axis, the site name, the vote API client, formatters, hooks
+├── lib/                                    # The report and family schemas, the system names, the forest axis, the site name, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture and JSON Schema helpers and the page tests
+├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
 └── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it
 ```
 
 ## Reports
 
-- The site reads only `families/*/family.toml` and `reports/*/*.json`, through the `families` and `reports` collections' `glob()` loaders, and drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
+- The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, `systems.toml` through the `systems` collection's `file()` loader, and the export that `BENCH_NIXOS_CONFIG` names through the `models` collection's inline loader, so `pnpm build` and `pnpm typecheck` run only inside the dev shell. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
 - `lib/family.ts` lists only the `family.toml` keys the site reads, with objects that drop the rest, since the pydantic settings model already rejects unknown keys.
 - `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so the build rejects a report with a field the schema lacks or a value of another type. Change both schemas in one PR. `pnpm test` parses both report fixtures and compares the Zod schema's JSON Schema with `tests/fixtures/report.schema.json`, which pytest writes from the pydantic models, within each results variant, over every field's types, nullability, constants and enums, and every object's required keys, allowed keys, and map key names, so a schema change on either side fails a check. Numeric bounds, formats, and descriptions are not compared.
 - A new scorer adds a results variant to the schema, a board under `components/boards/`, an arm in the scorer switches of the home and family pages, and a methodology section that the family page's arm links. The type check fails until every switch handles the new variant, and `pnpm test` fails until the linked section exists.

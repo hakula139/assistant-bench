@@ -1,6 +1,6 @@
 # Site
 
-The site under `web/` has two views built from one Astro project and one component set: the public results, built only from the committed reports, and the local vote page, which only `bench serve` hosts. [TypeScript](../conventions/typescript.md) gives the conventions for changing either, and [CI](../conventions/ci.md#deploy) covers how the public build deploys.
+The site under `web/` has two views built from one Astro project and one component set: the public results, built from the committed families, systems, and reports and the nixos-config catalog, and the local vote page, which only `bench serve` hosts. [TypeScript](../conventions/typescript.md) gives the conventions for changing either, and [CI](../conventions/ci.md#deploy) covers how the public build deploys.
 
 ## Results
 

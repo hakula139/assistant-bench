@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 
 import { defineCollection } from 'astro:content';
-import { z } from 'astro/zod';
 import { file, glob } from 'astro/loaders';
+import { z } from 'astro/zod';
 
 import { familyConfigSchema } from '@/lib/family';
 import { reportSchema } from '@/lib/report';

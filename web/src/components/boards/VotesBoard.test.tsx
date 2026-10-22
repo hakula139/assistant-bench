@@ -19,11 +19,11 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
   return { round: report.round, results: report.results };
 }
 
-function render({ round, results }: VotesRound): string {
+function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
   const reversed = { ...results, standings: results.standings.toReversed() };
   return renderToString(
-    <VotesBoard family="arena" rounds={[{ round, results: reversed }]} names={FIXTURE_NAMES} />,
+    <VotesBoard family="arena" rounds={[{ round, results: reversed }]} names={names} />,
   );
 }
 
@@ -63,12 +63,18 @@ describe('VotesBoard', () => {
     expect(text(html)).toMatch(/Acme Tiny Preliminary [^%]*? 0 – /);
   });
 
-  test('names the unranked systems after the table', async () => {
-    const html = render(await load());
+  test('names the unranked systems after the table, sorted by display name', async () => {
+    const html = render(await load(), { ...FIXTURE_NAMES, 'acme-edge': 'Acme Zeta' });
 
     expect(text(html)).toContain(
-      'Unranked until more comparisons connect them to the reference: Acme Edge, Acme Nano.',
+      'Unranked until more comparisons connect them to the reference: Acme Nano, Acme Zeta.',
     );
+  });
+
+  test("labels each system's interval with its display name and score", async () => {
+    const html = render(await load());
+
+    expect(html).toContain('aria-label="Acme Pro: 1,004, 95% interval 955–1,065"');
   });
 
   test.each(['all', 'message'])(

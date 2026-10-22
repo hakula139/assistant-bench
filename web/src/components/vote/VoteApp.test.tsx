@@ -138,9 +138,10 @@ describe('VoteApp', () => {
     expect(api.undos()).toBe(1);
   });
 
-  test('starts the family it shows by display name, and names it when the session ends', async () => {
+  test('starts the family it shows by display name, and names it in the session', async () => {
     const api = stubApi(1);
     const user = await startSession();
+    expect(screen.getByText('Technical Writing · Chinese, pair 1 of 1')).toBeDefined();
 
     await user.keyboard('a{Enter}');
     await screen.findByText('1 vote recorded on Technical Writing · Chinese.');

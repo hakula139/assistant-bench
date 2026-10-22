@@ -196,7 +196,10 @@ export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className={cn('-mt-4', note)}>
-            {`Unranked until more comparisons connect them to the reference: ${unranked.map((system) => systemName(names, system)).join(', ')}.`}
+            {`Unranked until more comparisons connect them to the reference: ${unranked
+              .map((system) => systemName(names, system))
+              .toSorted((a, b) => a.localeCompare(b))
+              .join(', ')}.`}
           </p>
         )}
 

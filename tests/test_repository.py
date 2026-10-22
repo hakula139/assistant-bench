@@ -56,19 +56,43 @@ def named_systems(value: object) -> set[str]:
             return set()
 
 
+def test_named_systems_reads_every_key_that_names_a_system() -> None:
+    results = {
+        'reference': 'reference',
+        'standings': [{'system': 'ranked'}],
+        'unranked': ['unranked'],
+        'head_to_head': [{'system': 'ranked', 'opponent': 'opponent'}],
+        'categories': [{'standings': [{'system': 'category'}]}],
+        'decision': {'leader': 'leader'},
+    }
+
+    names = named_systems({'family': 'f', 'results': results})
+
+    assert names == {
+        'reference',
+        'ranked',
+        'unranked',
+        'opponent',
+        'category',
+        'leader',
+    }
+
+
 def test_committed_families_and_reports_name_only_tabled_systems() -> None:
     tabled = set(tomllib.loads((REPO_ROOT / 'systems.toml').read_text()))
     named = {
-        f'{path.parent.name}/{system}'
+        (path.parent.name, system)
         for path in (REPO_ROOT / 'families').glob('*/family.toml')
         for system in tomllib.loads(path.read_text()).get('systems', [])
     } | {
-        f'{path.relative_to(REPO_ROOT)}/{system}'
+        (str(path.relative_to(REPO_ROOT)), system)
         for path in (REPO_ROOT / 'reports').glob('*/*.json')
         for system in named_systems(json.loads(path.read_text()))
     }
 
-    assert {name for name in named if name.rpartition('/')[2] not in tabled} == set()
+    assert {
+        (source, system) for source, system in named if system not in tabled
+    } == set()
 
 
 def test_uv_lock_names_only_pypi() -> None:

@@ -1,7 +1,7 @@
 import { getContainerRenderer } from '@astrojs/react/container-renderer';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { loadRenderers } from 'astro:container';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import type { FamilyConfig } from '@/lib/family';
@@ -11,6 +11,13 @@ import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
+
+/** The families the header lists, since the content collections stay empty under Vitest. */
+const listed = vi.hoisted(() => ({ families: [] as Family[] }));
+vi.mock(import('@/lib/reports'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  getFamilies: () => Promise.resolve(listed.families),
+}));
 
 /** The fixture's systems and the family itself, whose table and directory names pages hide. */
 const SLUGS = { ...FIXTURE_NAMES, arena: 'Arena Writing' };
@@ -226,5 +233,23 @@ describe('system page', () => {
 
     expect(text(html)).toContain('Acme Tiny Score 233 (81–321) Rank 6 Votes 0 (0 decisive)');
     expect(html).not.toContain('Head to head');
+  });
+});
+
+describe('header', () => {
+  test('links each listed family by its display name', async () => {
+    listed.families = [await family()];
+
+    const html = await render(MethodologyPage, {});
+
+    const nav = /<nav\b[^>]*aria-label="Main"[^>]*>([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? '';
+    const links = [...nav.matchAll(/<li><a href="([^"]+)"[^>]*>([^<]*)<\/a>/g)].map(
+      ([, href, label]) => [href, label.trim()],
+    );
+
+    expect(links).toEqual([
+      ['/arena/', 'Arena Writing'],
+      ['/methodology/', 'Methodology'],
+    ]);
   });
 });

@@ -69,13 +69,13 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 | Key            | Meaning                                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------------------------------- |
-| `model`        | A nixos-config catalog model, which supplies the route, the default effort, and prices                        |
+| `model`        | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
 | `route`        | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
 | `price`        | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
 | `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
 | `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
 | `display_name` | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
 
-Every page names a system by its display name, which defaults to the catalog model's `name`, while URLs, outputs, and reports keep the table name. Display names must be unique across `systems.toml`, so a variant or a snapshot sets a `display_name` that tells it apart.
+Every page names a system by its display name, while URLs, outputs, and reports keep the table name. Display names must be unique across `systems.toml`, so a variant or a snapshot sets a `display_name` that tells it apart.
 
 Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
