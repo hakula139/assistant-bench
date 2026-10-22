@@ -4,7 +4,7 @@
 
 ## Systems and Samples
 
-Both families send every case to the same systems at their catalog default effort, as each [`family.toml`](../../../families/prose-zh/family.toml) lists them. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash` is the reference whose score anchors both boards at 1000.
+Both families send every case to the systems each [`family.toml`](../../../families/prose-zh/family.toml) lists, each at the effort it resolves to, so a model without `requiresEffort` receives no `reasoning_effort`, as [Systems](../systems.md#resolution) describes. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash` is the reference whose score anchors both boards at 1000.
 
 ## Categories
 

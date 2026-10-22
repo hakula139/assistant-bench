@@ -110,10 +110,12 @@ class TestLoadSystems:
 
         assert set(systems) == {
             'opus-5.5',
+            'gpt-6-astra',
             'gpt-6.1-sol',
             'gemini-4-argon',
             'gemini-3.8-flash',
             'deepseek-v4.1-flash',
+            'kimi-k3',
         }
 
 

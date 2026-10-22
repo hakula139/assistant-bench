@@ -23,6 +23,7 @@ intp
 isort
 jitless
 katex
+kimi
 kwarg
 kwargs
 lastrowid
