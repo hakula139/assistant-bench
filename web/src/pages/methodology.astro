@@ -19,39 +19,34 @@ const columns = [
   {
     term: 'Rank',
     definition:
-      'The best to the worst rank the intervals allow: 1 plus the systems whose interval lies wholly above this one, to 1 plus those whose interval reaches above its lower end.',
+      'From 1 plus the systems whose interval lies wholly above this one, to 1 plus those whose interval reaches above its lower end.',
   },
   {
     term: 'Preliminary',
     badge: true,
     definition:
-      'Fewer than 40 decisive votes, meaning votes won by either side, so the score may still move. The plot draws it as a hollow dot.',
+      'Fewer than 40 decisive votes, those won by either side, so the score may still move.',
   },
   {
     term: 'Unranked',
     definition:
-      'Listed below the table without a score until enough comparisons connect the system to the reference.',
+      'Listed below the table without a score until enough comparisons connect it to the reference.',
   },
   {
     term: 'Votes',
-    definition:
-      "The rater's votes on the system. Results settled without a vote count toward the score but not here.",
+    definition: "The rater's votes on the system, leaving out results settled without a vote.",
   },
   {
     term: 'Both bad',
-    definition: 'The share of those votes that judged both outputs bad.',
+    definition: 'The share of its votes judged both bad.',
   },
   {
     term: 'Gate failures',
-    definition: "The share of the system's outputs that failed a gate.",
+    definition: 'The share of its outputs that failed a gate.',
   },
   {
-    term: 'Cost / output',
-    definition: 'The mean cost of one output at list prices.',
-  },
-  {
-    term: 'p50 latency',
-    definition: 'The median time from the request to the complete response.',
+    term: 'Cost / output and p50 latency',
+    definition: 'The mean cost at list prices and the median time to the complete response.',
   },
 ];
 
@@ -68,7 +63,12 @@ const diagnostics = [
   {
     term: 'Split-half τ',
     definition:
-      "Kendall's τ between the orders fit to odd and to even sessions, where 1 means both halves rank the systems the same.",
+      "Kendall's τ between the orders fit to odd and to even sessions, where 1 means the same order.",
+  },
+  {
+    term: 'Left out of the fit',
+    definition:
+      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle.',
   },
 ];
 
@@ -82,8 +82,8 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
     <header class="space-y-3 lg:col-start-1">
       <h1 class="text-[1.75rem] leading-tight font-semibold">Methodology</h1>
       <p class="leading-relaxed text-muted-foreground">
-        Every system in a family answers the same cases, and one rater compares the outputs two at a
-        time without seeing which system wrote which.
+        Every system in a family answers the same cases with the same instruction, and one rater
+        compares their outputs in blind pairs.
       </p>
     </header>
 
@@ -110,23 +110,18 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         </h2>
         <ol class:list={['list-decimal', list]}>
           <li>
-            A family is one kind of task with its own cases and leaderboard. Every system in it, a
-            model with its effort, harness, and prompt, answers the same cases with the same
-            instruction, and changing any part makes a new system.
+            A family is one kind of task with its own cases and leaderboard. A system is a model
+            with its effort, harness, and prompt, and changing any part makes a new system.
           </li>
           <li>
             Gates check each output for problems such as truncation or the wrong script. A failing
             output loses without a vote, and two identical outputs tie.
           </li>
           <li>
-            The rater sees two outputs side by side without system names and picks the better one, a
-            tie, or both bad, in sessions of up to 30 pairs. Sides are counterbalanced, and some
-            pairs return later swapped to check the rater's consistency.
+            The rater picks the better output, a tie, or both bad, in sessions of up to 30 pairs,
+            with sides counterbalanced.
           </li>
-          <li>
-            Each round is a dated snapshot that refits every vote cast so far, so its board is
-            cumulative.
-          </li>
+          <li>Each round is a dated snapshot that refits every vote cast so far.</li>
         </ol>
       </section>
 
@@ -135,15 +130,14 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           {sections.scores}
         </h2>
         <p>
-          A Bradley-Terry model turns the votes and the results settled without a vote into scores
-          on an Elo-like scale, with the family's reference system at 1,000 and ties and both-bad
-          votes counting as half a win. A 100-point gap means the higher system is expected to win
-          about 64% of the votes between them.
+          A Bradley-Terry model turns the votes and the results settled without a vote into Elo-like
+          scores, counting ties and both-bad votes as half a win. Each family's reference system
+          sits at 1,000, so scores compare only within a family. A 100-point gap means the higher
+          system should take about 64% of the votes between them.
         </p>
         <p>
           The 95% intervals come from 1,000 bootstrap resamples of whole cases, since votes on one
-          case are correlated. Each category's board refits that category's votes alone, so its
-          intervals are wider and it shows no rank.
+          case are correlated.
         </p>
       </section>
 
@@ -152,8 +146,8 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           {sections.leaderboard}
         </h2>
         <p>
-          The plot draws each 95% interval on one shared axis, with a vertical line at the reference
-          system's score.
+          The plot draws each 95% interval on one axis, with a line at the reference score and
+          hollow dots for preliminary systems.
         </p>
         <dl class={dl}>
           {columns.map(({ term, badge, definition }) => (
@@ -172,8 +166,9 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           ))}
         </dl>
         <p>
-          A dash marks a missing value. In a category view, the four columns marked all categories
-          still cover the whole family.
+          A dash marks a missing value. A category view refits that category's votes alone, so
+          intervals widen and Rank disappears, while the columns labeled "all categories" stay
+          family-wide.
         </p>
       </section>
 
@@ -183,18 +178,17 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         </h2>
         <ol class:list={['list-decimal', list]}>
           <li>
-            Every ranked system whose score difference from the top one has a 95% interval
-            containing 0, or an unbounded one, ties for the top. The difference is paired within
-            each resample, so two systems can separate even when their intervals overlap.
+            A ranked system ties for the top when the 95% interval of its score difference from the
+            top system, paired within each resample, contains 0 or is unbounded. Pairing can
+            separate two systems whose intervals overlap.
           </li>
           <li>
             While any system tied for the top, the top one included, is preliminary, the round names
             no leader.
           </li>
           <li>
-            Otherwise a system alone at the top leads, and a tie goes to the lower cost per output,
-            then the lower median latency, then the higher score, with a known value beating a
-            missing one.
+            Otherwise a lone top system leads, and a tie goes to the lower cost per output, then the
+            lower median latency, then the higher score, with a known value beating a missing one.
           </li>
         </ol>
       </section>
@@ -203,7 +197,6 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         <h2 id="summary" class={h2}>
           {sections.summary}
         </h2>
-        <p>The summary above each board reports how far its order can be trusted.</p>
         <dl class={dl}>
           {diagnostics.map(({ term, definition }) => (
             <div class="sm:contents">
@@ -212,11 +205,6 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
             </div>
           ))}
         </dl>
-        <p>
-          A vote leaves the fit, though it stays on record, when its case is retired, when either
-          output was removed or now fails a gate, or when the two outputs now settle the pair
-          without a vote.
-        </p>
       </section>
 
       <section class="space-y-3">
@@ -224,10 +212,9 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           {sections.tests}
         </h2>
         <p>
-          Some families run each system on tasks that automated tests check, where each run is a
-          trial. Pass rate is the share of trials that pass, with errored trials counted as failures
-          and tallied under Errored. Cost / trial and p50 latency are a trial's mean cost and median
-          time.
+          Some families score each trial, one run of a system on a task, by automated tests. Pass
+          rate counts errored trials as failures, and Cost / trial and p50 latency are a trial's
+          mean cost and median time.
         </p>
       </section>
 
@@ -241,8 +228,6 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
             Scores are relative, so the both-bad and gate-failure rates are the only absolute
             signals.
           </li>
-          <li>Each family anchors its own reference at 1,000, so scores compare only within it.</li>
-          <li>Votes are few, so only clear preferences separate.</li>
           <li>
             Scores carry no length adjustment. Each system page reports whether the rater favors
             longer or shorter outputs.
