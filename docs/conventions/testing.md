@@ -21,7 +21,7 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 ## Cross-Checks and the Report Fixture
 
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss, the design, or the penalty that moves the estimates fails.
-- `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render, and `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. Their tests rewrite a file when a model or the ranking changes it, so review the diff and commit the new fixture with the change.
+- `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render, and `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. Their tests fail when a model or ranking change leaves a file stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
 
 ## Docker Trials
 
@@ -29,4 +29,4 @@ Tests marked `docker` run real Harbor jobs: the smoke family's oracle, and `Gene
 
 ## Coverage
 
-`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. CI uploads both to Codecov under the `python` and `web` flags. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed Python lines, as `codecov.yml` sets, and `codecov/patch/web` reports the same bar for the site without being required.
+`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. CI uploads both to Codecov under the `python` and `web` flags. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed Python lines, as `codecov.yml` sets, and `codecov/patch/web` reports the same bar for the site without being required.

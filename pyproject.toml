@@ -96,6 +96,9 @@ markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke j
 [tool.coverage.run]
 source = ["assistant_bench"]
 
+[tool.coverage.report]
+exclude_also = ['case _:\n\s*assert_never\(']
+
 [tool.mypy]
 files = ["src", "tests"]
 exclude_gitignore = true

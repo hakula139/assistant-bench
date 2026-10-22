@@ -290,37 +290,6 @@ class TestRun:
         assert exit_code == 3
 
 
-class TestFingerprints:
-    @pytest.mark.parametrize(
-        ('changed', 'exit_code', 'message'),
-        [
-            (False, 0, 'Every system keeps its fingerprint since origin/main'),
-            (
-                True,
-                1,
-                "system 'opus-5.5' changed its fingerprint since origin/main, "
-                'so give the changed system a new name',
-            ),
-        ],
-    )
-    def test_compares_each_system_with_the_base_revision(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        changed: bool,
-        exit_code: int,
-        message: str,
-    ) -> None:
-        head = load_systems(load_export())
-        opus = head['opus-5.5']
-        old = opus.model_copy(update={'route': f'{opus.route}-old'})
-        base = head | {'opus-5.5': old} if changed else head
-        monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
-
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
-
-        assert (result.exit_code, result.output) == (exit_code, f'{message}\n')
-
-
 class TestIngest:
     def test_summarizes_gate_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -447,7 +416,7 @@ class TestClose:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_synthetic_round(families_dir, store)
+        write_synthetic_round(families_dir, store, sessions=1)
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
 
         exit_code, message = invoke('close', 'arena')
@@ -464,3 +433,34 @@ class TestClose:
 
         assert exit_code == 2
         assert "family 'f' has no votes" in message
+
+
+class TestFingerprints:
+    @pytest.mark.parametrize(
+        ('changed', 'exit_code', 'message'),
+        [
+            (False, 0, 'Every system keeps its fingerprint since origin/main'),
+            (
+                True,
+                1,
+                "system 'opus-5.5' changed its fingerprint since origin/main, "
+                'so give the changed system a new name',
+            ),
+        ],
+    )
+    def test_compares_each_system_with_the_base_revision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        changed: bool,
+        exit_code: int,
+        message: str,
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(update={'route': f'{opus.route}-old'})
+        base = head | {'opus-5.5': old} if changed else head
+        monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert (result.exit_code, result.output) == (exit_code, f'{message}\n')
