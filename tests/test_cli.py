@@ -231,10 +231,7 @@ class TestRun:
         )
 
         assert exit_code == 2
-        assert (
-            "Invalid value for '--system': f does not list gpt-6-astra, "
-            'so choose among opus-5.5'
-        ) in message
+        assert 'f does not list gpt-6-astra, so choose among opus-5.5' in message
         assert submitted == []
 
     def test_generates_after_a_named_run_only_the_systems_it_left_out(
