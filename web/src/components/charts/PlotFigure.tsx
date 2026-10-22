@@ -56,7 +56,14 @@ export function PlotFigure({ plot, height, className }: PlotFigureProps) {
       return;
     }
     const options = plot({ width, measure: labelMeasure(element) });
-    const figure = Plot.plot({ className: 'bench-plot', ...options, width });
+    // Plot's injected :where(.bench-plot) { --plot-background: white } sits outside any cascade
+    // layer, so it beats every layered rule in global.css.
+    const figure = Plot.plot({
+      className: 'bench-plot',
+      style: '--plot-background: var(--popover)',
+      ...options,
+      width,
+    });
     element.replaceChildren(figure);
     return () => {
       figure.remove();

@@ -172,7 +172,6 @@
 
 @layer components {
   .bench-plot {
-    --plot-background: var(--popover);
     @apply font-sans text-xs text-muted-foreground;
 
     [aria-label='tip'] {
