@@ -75,6 +75,7 @@ usize
 uvicorn
 venv
 virtualenv
+WakaTime
 workerd
 zhon
 zstd

@@ -3,6 +3,7 @@
 [![CI](https://github.com/hakula139/assistant-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/hakula139/assistant-bench/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/hakula139/assistant-bench/branch/main/graph/badge.svg)](https://app.codecov.io/gh/hakula139/assistant-bench/tree/main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![WakaTime coding time for assistant-bench](https://wakatime.com/badge/user/f4a35a1f-0e29-4093-a647-e66aad164737/project/cbd2e36f-3ab4-4fc6-b6b9-840bd73f7594.svg)
 
 A benchmark of AI assistant systems on everyday work, run on [Harbor](https://github.com/harbor-framework/harbor), with leaderboards published at [bench.hakula.xyz](https://bench.hakula.xyz) as rounds close.
 
