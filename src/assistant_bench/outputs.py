@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from assistant_bench.families import Gate
-from assistant_bench.paths import data_dir
+from assistant_bench.paths import data_dir, write_atomically
 
 
 class Output(BaseModel):
@@ -50,6 +50,7 @@ def read_outputs(family: str) -> list[Output]:
 
 
 def write_outputs(family: str, outputs: list[Output]) -> None:
-    path = outputs_file(family)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(''.join(f'{output.model_dump_json()}\n' for output in outputs))
+    write_atomically(
+        outputs_file(family),
+        ''.join(f'{output.model_dump_json()}\n' for output in outputs),
+    )
