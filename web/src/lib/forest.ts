@@ -1,4 +1,4 @@
-import { nice, ticks } from 'd3-array';
+import { nice, tickStep, ticks } from 'd3-array';
 
 import type { Interval, Standing } from '@/lib/report';
 
@@ -43,25 +43,32 @@ export function forestDomain(estimates: Estimate[]): [number, number] {
 }
 
 /**
- * Returns one axis for several boards, such as a round's categories, covering each board's own
- * `forestDomain` so that every board keeps its own cut below its own top score.
+ * Returns one axis for several boards, such as a round's categories, from the lowest board's
+ * `forestDomain` start to the highest one's stop, so that every board keeps its own cut below its
+ * own top score.
  */
 export function sharedDomain(boards: Estimate[][]): [number, number] {
   const domains = boards.filter((board) => board.length > 0).map(forestDomain);
   if (domains.length === 0) {
     return EMPTY_DOMAIN;
   }
-  const [start, stop] = nice(
-    Math.min(...domains.map(([low]) => low)),
-    Math.max(...domains.map(([, high]) => high)),
-    TICKS,
-  );
-  return [start, stop];
+  return [
+    Math.min(...domains.map(([start]) => start)),
+    Math.max(...domains.map(([, stop]) => stop)),
+  ];
 }
 
-/** Returns the round values a forest plot draws gridlines at, both domain ends included. */
+/**
+ * Returns the values a forest plot draws gridlines at: both domain ends, which a `sharedDomain`
+ * may leave off the round step, and the round values between them that sit at least half a step
+ * from either end, so no two labels crowd.
+ */
 export function forestTicks([start, stop]: [number, number]): number[] {
-  return ticks(start, stop, TICKS);
+  const step = tickStep(start, stop, TICKS);
+  const inner = ticks(start, stop, TICKS).filter(
+    (tick) => tick - start >= step / 2 && stop - tick >= step / 2,
+  );
+  return [start, ...inner, stop];
 }
 
 /**

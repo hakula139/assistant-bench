@@ -4,6 +4,7 @@ import {
   EMPTY_DOMAIN,
   clip,
   forestDomain,
+  forestTicks,
   roundRows,
   sharedDomain,
   sparseTicks,
@@ -37,18 +38,23 @@ describe('forestDomain', () => {
 describe('sharedDomain', () => {
   test("cuts each board below its own top score, not the highest board's", () => {
     const strong = [estimate(1400, 1300, 1500), estimate(1000, 950, 1050)];
-    const weak = [estimate(1000, 950, 1050), estimate(750, 700, 800)];
+    const weak = [estimate(1000, 950, 1050), estimate(200, 100, 300)];
 
-    const [start, stop] = sharedDomain([strong, weak]);
+    const domain = sharedDomain([strong, weak]);
 
-    expect(start).toBeLessThanOrEqual(700);
-    expect(stop).toBeGreaterThanOrEqual(1500);
+    expect(domain).toEqual([400, 1500]);
   });
 
   test('ignores boards without estimates', () => {
     const domain = sharedDomain([[], [estimate(1004, 955, 1065), estimate(825, 773, 890)]]);
 
     expect(domain).toEqual([750, 1100]);
+  });
+});
+
+describe('forestTicks', () => {
+  test('keeps both ends of an axis that sits off the round step', () => {
+    expect(forestTicks([400, 2500])).toEqual([400, 1000, 1500, 2000, 2500]);
   });
 });
 
