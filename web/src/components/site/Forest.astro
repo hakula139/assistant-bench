@@ -1,6 +1,6 @@
 ---
 import { REFERENCE_SCORE, clip, forestTicks, type ForestRow } from '@/lib/forest';
-import { formatInterval, formatScore } from '@/lib/format';
+import { MISSING, formatInterval, formatScore } from '@/lib/format';
 
 interface Props {
   rows: ForestRow[];
@@ -27,9 +27,9 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
 <table class="w-full table-fixed border-collapse text-sm">
   <caption class="sr-only">{caption}</caption>
   <colgroup>
-    <col class={large ? 'w-32 sm:w-48' : 'w-28 sm:w-36'} />
+    <col class={large ? 'w-36 sm:w-48' : 'w-36'} />
     <col />
-    <col class="w-16 sm:w-20" />
+    <col class="w-14 sm:w-20" />
   </colgroup>
   <thead>
     <tr>
@@ -133,13 +133,18 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
               )}
             </span>
           </td>
-          <td class="pl-3 text-right tabular-nums">
+          <td class="pl-3 text-right whitespace-nowrap tabular-nums">
             {row.estimate ? (
               formatScore(row.estimate.score)
             ) : row.reference ? (
               '1,000'
             ) : (
-              <span class="text-faint">no votes</span>
+              <span class="text-faint">
+                <span aria-hidden="true" class="sm:hidden">
+                  {MISSING}
+                </span>
+                <span class="max-sm:sr-only">no votes</span>
+              </span>
             )}
           </td>
         </tr>

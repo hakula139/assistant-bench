@@ -102,7 +102,7 @@ describe('family page', () => {
 
     expect(text(html)).toContain('No round has closed yet. These 3 systems are in the first one.');
     expect(text(html)).toContain('acme-large Fixed at 1,000 as the reference 1,000');
-    expect(text(html)).toContain('acme-pro Unbounded no votes');
+    expect(text(html)).toContain('acme-pro Unbounded – no votes');
     expect(html).not.toContain('Leader');
   });
 
