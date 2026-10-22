@@ -59,7 +59,6 @@ srcdoc
 SSIM
 statix
 strconv
-substituters
 taplo
 tokei
 triu

@@ -19,7 +19,7 @@ The fingerprint check enforces the rule in [Systems](../design/systems.md#finger
 
 Python Check authenticates its Codecov upload with a GitHub OIDC token, so it alone holds `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing `codecov/patch` check shows the cause in CI.
 
-No job in the CI workflow reads any secret other than the Cachix token. List each new job in CI Result's `needs`.
+No job in the CI workflow reads a secret. List each new job in CI Result's `needs`.
 
 ## Deploy
 

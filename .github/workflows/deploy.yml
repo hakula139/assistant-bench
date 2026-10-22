@@ -12,9 +12,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CACHIX_NAME: hakula
-
 jobs:
   build:
     if: github.ref == 'refs/heads/main'
