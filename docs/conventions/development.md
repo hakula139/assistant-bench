@@ -35,7 +35,7 @@ Commands stay minimal, and settings live in config files:
 | Systems under test                                                            | `systems.toml`                                                                                                        |
 | A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                                                                                       |
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
-| Session size, repeat share, and seed votes                                    | `arena/service.py` and `arena/scheduler.py`                                                                           |
+| Session size, repeat share, seed votes, and the refit interval                | `arena/service.py` and `arena/scheduler.py`                                                                           |
 | The arena's loopback ports and render policy                                  | `arena/api.py`                                                                                                        |
 | Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                                                                                  |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
