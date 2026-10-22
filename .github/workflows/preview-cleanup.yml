@@ -1,6 +1,5 @@
 name: Preview Cleanup
 
-# `pull_request` skips closed PRs with merge conflicts. Secrets are in reach: never run PR code.
 on:
   pull_request_target:
     types: [closed]
@@ -18,7 +17,6 @@ env:
 jobs:
   cleanup:
     name: Delete Preview
-    # Pull requests from forks and Dependabot never get a preview.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]'
@@ -51,7 +49,7 @@ jobs:
             wrangler preview delete --name "pr-$PR_NUMBER" --skip-confirmation; then
             exit 0
           fi
-          # Cloudflare API error 10025 is "Preview not found", so nothing is left to delete.
+          # Cloudflare API error 10025 is "Preview not found".
           jq -e 'select(.type == "command-failed") | .code == 10025' "$WRANGLER_OUTPUT_FILE_PATH"
 
       - name: Deactivate deployments
