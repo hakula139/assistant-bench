@@ -56,7 +56,13 @@ export function PlotFigure({ plot, height, className }: PlotFigureProps) {
       return;
     }
     const options = plot({ width, measure: labelMeasure(element) });
-    const figure = Plot.plot({ className: 'bench-plot', ...options, width });
+    // Plot injects --plot-background: white outside any cascade layer, so only an inline style outranks it.
+    const figure = Plot.plot({
+      className: 'bench-plot',
+      style: '--plot-background: var(--popover)',
+      ...options,
+      width,
+    });
     element.replaceChildren(figure);
     return () => {
       figure.remove();
