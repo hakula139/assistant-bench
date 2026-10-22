@@ -3,6 +3,7 @@ compatibility_date = "2026-10-01"
 
 routes = [{ pattern = "bench.hakula.xyz", custom_domain = true }]
 preview_urls = true
+previews = {}
 
 [assets]
 directory = "./dist"
