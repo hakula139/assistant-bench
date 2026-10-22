@@ -33,4 +33,4 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 
 ## Concurrency
 
-Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time, while a job runs at most eight trials at once. Each trial is bounded by the family's `max_output_tokens`, its `samples`, and a 900-second agent timeout, and a failed trial is retried once.
+Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time, while a job runs at most eight trials at once. Each trial is bounded by the family's `max_output_tokens` and a 900-second agent timeout, and a failed trial is retried once.

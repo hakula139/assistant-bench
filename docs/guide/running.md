@@ -16,7 +16,7 @@ Single-call systems send OpenAI chat-completions requests to an endpoint configu
 
 Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 
-Each system's route is the model ID the endpoint expects, and every trial sends one request with the case instruction as the user message, the system's prompt as the system message when it has one, the family's `max_output_tokens` as `max_completion_tokens`, and the system's effort as `reasoning_effort`.
+Each system's route is the model ID the endpoint expects, and every trial sends one request with the case instruction as the user message, the system's prompt as the system message when it has one, the family's `max_output_tokens` as `max_completion_tokens`, and the system's effort, when it resolves to one, as `reasoning_effort`.
 
 ## Checking a Family
 
@@ -25,7 +25,7 @@ uv run bench check smoke-text
 uv run bench check smoke
 ```
 
-`bench check` validates `family.toml`, its systems, and its cases, and renders the cases into Harbor tasks to name any that changed since a trial ran them. For a family scored by `tests`, it also runs Harbor's oracle on every task and fails unless each reference solution earns reward 1. The check requires Docker, but no endpoint.
+`bench check` validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks to name any that changed since a trial ran them, which needs neither Docker nor an endpoint. For a `tasks/` family, it runs Harbor's oracle on every task and fails unless each reference solution earns reward 1, which needs Docker but no endpoint.
 
 ## Running a Family
 
