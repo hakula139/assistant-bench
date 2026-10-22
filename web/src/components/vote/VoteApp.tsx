@@ -1,8 +1,9 @@
 import { ChevronDown } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 
 import { OutputPane } from '@/components/vote/OutputPane';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Kbd } from '@/components/ui/kbd';
 import { Progress } from '@/components/ui/progress';
@@ -47,6 +48,16 @@ function ErrorAlert({ error }: { error: string | null }) {
   );
 }
 
+/** A centered page for the states around a session, with its heading. */
+function Screen({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-16">
+      <h1 className="text-2xl font-semibold">{title}</h1>
+      {children}
+    </div>
+  );
+}
+
 interface StartScreenProps {
   busy: boolean;
   error: string | null;
@@ -64,8 +75,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   }, []);
 
   return (
-    <div className="mx-auto max-w-xl space-y-4 px-4 py-16">
-      <h1 className="text-2xl font-semibold">Start a voting session</h1>
+    <Screen title="Start a voting session">
       <ErrorAlert error={error === null ? startError : `Could not list families: ${error}`} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
@@ -87,30 +97,34 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
           </li>
         ))}
       </ul>
-    </div>
+    </Screen>
   );
 }
 
 function Brief({ pair }: { pair: PairView }) {
   return (
-    <Collapsible defaultOpen className="border-b">
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-semibold hover:bg-muted">
-        <ChevronDown
-          className="size-4 transition-transform group-data-[state=closed]:-rotate-90"
-          aria-hidden="true"
-        />
-        Brief
-      </CollapsibleTrigger>
-      <CollapsibleContent className="max-h-[30dvh] space-y-3 overflow-y-auto px-4 pb-3">
-        <p className="leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
-        {pair.checklist.length > 0 && (
-          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            {pair.checklist.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        )}
-      </CollapsibleContent>
+    <Collapsible defaultOpen asChild>
+      <Card size="sm" className="gap-0 py-0">
+        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-(--card-spacing) py-2.5 text-left font-semibold hover:bg-muted">
+          <ChevronDown
+            className="size-4 transition-transform group-data-[state=closed]:-rotate-90"
+            aria-hidden="true"
+          />
+          Brief
+        </CollapsibleTrigger>
+        <CollapsibleContent asChild>
+          <CardContent className="max-h-[30dvh] space-y-3 overflow-y-auto pb-3">
+            <p className="text-base leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
+            {pair.checklist.length > 0 && (
+              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                {pair.checklist.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
     </Collapsible>
   );
 }
@@ -282,8 +296,7 @@ export function VoteApp() {
 
   if (pair === null) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 px-4 py-16">
-        <h1 className="text-2xl font-semibold">Session complete</h1>
+      <Screen title="Session complete">
         <p className="text-muted-foreground">
           {formatCountOf(session.votes, 'vote')} recorded on {session.family}.
         </p>
@@ -301,7 +314,7 @@ export function VoteApp() {
             Undo last vote
           </Button>
         </div>
-      </div>
+      </Screen>
     );
   }
 
@@ -311,16 +324,57 @@ export function VoteApp() {
       tabIndex={-1}
       role="group"
       aria-label={`Pair ${session.votes + 1} of ${session.size}`}
-      className="flex h-dvh flex-col outline-none"
+      className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 outline-none sm:px-6 md:min-h-0 md:flex-1"
     >
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+        <div className="flex min-w-48 flex-1 items-center gap-3">
+          <span className="whitespace-nowrap tabular-nums">
+            {session.family}, pair {session.votes + 1} of {session.size}
+          </span>
+          <Progress
+            value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
+            aria-label="Session progress"
+            className="max-w-64"
+          />
+        </div>
+
+        {hasText && (
+          <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
+            Markdown
+          </Toggle>
+        )}
+
+        {hasFrames && (
+          <ToggleGroup
+            type="single"
+            size="sm"
+            variant="outline"
+            spacing={0}
+            value={String(viewport)}
+            onValueChange={(value) => {
+              if (value !== '') {
+                setViewport(Number(value));
+              }
+            }}
+            aria-label="Viewport width"
+          >
+            {VIEWPORTS.map((width) => (
+              <ToggleGroupItem key={width} value={String(width)}>
+                {width} px
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        )}
+      </div>
+
       <Brief key={pair.token} pair={pair} />
 
-      <div className="grid min-h-0 flex-1 grid-rows-2 divide-y md:grid-cols-2 md:grid-rows-1 md:divide-x md:divide-y-0">
+      <div className="grid gap-4 md:min-h-0 md:flex-1 md:grid-cols-2">
         <OutputPane side="A" pane={pair.a} asMarkdown={asMarkdown} viewport={viewport} />
         <OutputPane side="B" pane={pair.b} asMarkdown={asMarkdown} viewport={viewport} />
       </div>
 
-      <div className="space-y-3 border-t bg-muted px-4 py-3">
+      <div className="space-y-3">
         {frameFocused && (
           <p role="status" className="text-sm text-muted-foreground">
             Keys go to the output frame while it has focus. Click outside the frame to vote by
@@ -329,36 +383,32 @@ export function VoteApp() {
         )}
         <ErrorAlert error={error} />
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            spacing={1}
-            value={choice ?? ''}
-            onValueChange={(value) => {
-              setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
-            }}
-            aria-label="Verdict"
-            className="flex-wrap"
-          >
-            {CHOICES.map(({ value, label, key }) => (
-              <ToggleGroupItem
-                key={value}
-                value={value}
-                aria-keyshortcuts={key.toUpperCase()}
-                className="gap-2 bg-background px-3 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+        <ToggleGroup
+          type="single"
+          variant="choice"
+          size="lg"
+          spacing={2}
+          value={choice ?? ''}
+          onValueChange={(value) => {
+            setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
+          }}
+          aria-label="Verdict"
+          className="grid w-full grid-cols-2 sm:grid-cols-4"
+        >
+          {CHOICES.map(({ value, label, key }) => (
+            <ToggleGroupItem key={value} value={value} aria-keyshortcuts={key.toUpperCase()}>
+              {label}
+              <Kbd
+                aria-hidden="true"
+                className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
               >
-                {label}
-                <Kbd
-                  aria-hidden="true"
-                  className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
-                >
-                  {key.toUpperCase()}
-                </Kbd>
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+                {key.toUpperCase()}
+              </Kbd>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
 
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Flags">
             {flagNames.map((value, index) => (
               <Toggle
@@ -370,16 +420,13 @@ export function VoteApp() {
                 onPressedChange={() => {
                   toggleFlag(value);
                 }}
-                className="gap-1.5 bg-background"
               >
                 {flagLabels[value]}
                 <Kbd aria-hidden="true">{index + 1}</Kbd>
               </Toggle>
             ))}
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
             <span className="inline-flex items-center gap-2 text-muted-foreground">
               Note <Kbd aria-hidden="true">N</Kbd>
@@ -394,7 +441,7 @@ export function VoteApp() {
               onChange={(event) => {
                 setNote(event.target.value);
               }}
-              className="min-h-9 bg-background"
+              className="min-h-9"
             />
           </label>
 
@@ -414,53 +461,6 @@ export function VoteApp() {
               </Kbd>
             </Button>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-          <div className="flex min-w-48 flex-1 items-center gap-3">
-            <span className="whitespace-nowrap tabular-nums">
-              Session {session.votes} / {session.size}
-            </span>
-            <Progress
-              value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
-              aria-label="Session progress"
-              className="max-w-64"
-            />
-          </div>
-
-          {hasText && (
-            <Toggle
-              size="sm"
-              variant="outline"
-              pressed={asMarkdown}
-              onPressedChange={setAsMarkdown}
-              className="bg-background"
-            >
-              Markdown
-            </Toggle>
-          )}
-
-          {hasFrames && (
-            <ToggleGroup
-              type="single"
-              size="sm"
-              variant="outline"
-              spacing={0}
-              value={String(viewport)}
-              onValueChange={(value) => {
-                if (value !== '') {
-                  setViewport(Number(value));
-                }
-              }}
-              aria-label="Viewport width"
-            >
-              {VIEWPORTS.map((width) => (
-                <ToggleGroupItem key={width} value={String(width)} className="bg-background px-2.5">
-                  {width} px
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          )}
         </div>
       </div>
     </div>

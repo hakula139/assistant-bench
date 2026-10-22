@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import { useEffect, useRef, useState } from 'react';
 
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Pane } from '@/lib/arena';
 
 const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image');
@@ -54,21 +55,29 @@ function FramedOutput({ url, viewport, side }: { url: string; viewport: number; 
 /** One side of a pair, shown exactly as written unless the Markdown view is on. */
 export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps) {
   return (
-    <section aria-label={`Output ${side}`} className="flex min-h-0 flex-col">
-      <h2 className="border-b px-4 py-2 text-sm font-semibold">{side}</h2>
+    <Card
+      role="region"
+      aria-label={`Output ${side}`}
+      className="h-[60dvh] gap-0 py-0 md:h-auto md:min-h-0"
+    >
+      <CardHeader className="border-b py-3">
+        <CardTitle>Output {side}</CardTitle>
+      </CardHeader>
       {pane.render === 'html' ? (
-        <FramedOutput url={pane.url} viewport={viewport} side={side} />
+        <CardContent className="min-h-0 flex-1 p-0">
+          <FramedOutput url={pane.url} viewport={viewport} side={side} />
+        </CardContent>
       ) : asMarkdown ? (
-        <div
-          className="prose min-h-0 max-w-none flex-1 overflow-y-auto px-4 py-3 text-foreground dark:prose-invert prose-code:before:content-none prose-code:after:content-none"
+        <CardContent
+          className="prose min-h-0 max-w-none flex-1 overflow-y-auto py-3 text-foreground dark:prose-invert prose-code:before:content-none prose-code:after:content-none"
           // With `html` off markdown-it escapes raw HTML, and with the image rule off it never loads an image.
           dangerouslySetInnerHTML={{ __html: markdown.render(pane.text) }}
         />
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 leading-relaxed whitespace-pre-wrap">
+        <CardContent className="min-h-0 flex-1 overflow-y-auto py-3 leading-relaxed whitespace-pre-wrap">
           {pane.text}
-        </div>
+        </CardContent>
       )}
-    </section>
+    </Card>
   );
 }
