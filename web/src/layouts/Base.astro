@@ -1,6 +1,7 @@
 ---
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
+import { REPOSITORY, SITE_NAME } from '@/lib/site';
 
 interface Props {
   /** The page's own title, which the site name follows. */
@@ -18,7 +19,7 @@ const {
 <html lang="en">
   <head>
     <Head
-      title={title === undefined ? 'assistant-bench' : `${title} | assistant-bench`}
+      title={title === undefined ? SITE_NAME : `${title} | ${SITE_NAME}`}
       description={description}
     />
   </head>
@@ -29,8 +30,8 @@ const {
     </main>
     <footer class="border-t">
       <p class="mx-auto max-w-6xl px-4 py-6 text-sm text-muted-foreground sm:px-6">
-        A <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code, cases, and reports on{' '}
-        <a href="https://github.com/hakula139/assistant-bench">GitHub</a>.
+        {SITE_NAME} is a <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code, cases,
+        and reports on <a href={REPOSITORY}>GitHub</a>.
       </p>
     </footer>
   </body>

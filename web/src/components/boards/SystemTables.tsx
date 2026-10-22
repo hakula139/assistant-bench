@@ -25,26 +25,24 @@ export function HeadToHeadTable({ headToHead }: { headToHead: HeadToHead[] }) {
       <TableHeader>
         <TableRow>
           <TableHead>Opponent</TableHead>
-          <TableHead className="text-right">Votes</TableHead>
-          <TableHead className="text-right">Wins</TableHead>
-          <TableHead className="text-right">Losses</TableHead>
-          <TableHead className="text-right">Ties</TableHead>
-          <TableHead className="text-right">Both bad</TableHead>
-          <TableHead className="text-right">Win rate</TableHead>
+          <TableHead numeric>Votes</TableHead>
+          <TableHead numeric>Wins</TableHead>
+          <TableHead numeric>Losses</TableHead>
+          <TableHead numeric>Ties</TableHead>
+          <TableHead numeric>Both bad</TableHead>
+          <TableHead numeric>Win rate</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {headToHead.map((pair) => (
           <TableRow key={pair.opponent}>
             <TableCell>{pair.opponent}</TableCell>
-            <TableCell className="text-right tabular-nums">{pair.votes}</TableCell>
-            <TableCell className="text-right tabular-nums">{pair.wins}</TableCell>
-            <TableCell className="text-right tabular-nums">{pair.losses}</TableCell>
-            <TableCell className="text-right tabular-nums">{pair.ties}</TableCell>
-            <TableCell className="text-right tabular-nums">{pair.both_bad}</TableCell>
-            <TableCell className="text-right tabular-nums">
-              {formatPercent(pair.win_rate)}
-            </TableCell>
+            <TableCell numeric>{pair.votes}</TableCell>
+            <TableCell numeric>{pair.wins}</TableCell>
+            <TableCell numeric>{pair.losses}</TableCell>
+            <TableCell numeric>{pair.ties}</TableCell>
+            <TableCell numeric>{pair.both_bad}</TableCell>
+            <TableCell numeric>{formatPercent(pair.win_rate)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -58,18 +56,16 @@ export function CategoryTable({ categories }: { categories: ForestPlotRow[] }) {
       <TableHeader>
         <TableRow>
           <TableHead>Category</TableHead>
-          <TableHead className="text-right">Score</TableHead>
-          <TableHead className="text-right">95% interval</TableHead>
+          <TableHead numeric>Score</TableHead>
+          <TableHead numeric>95% interval</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {categories.map(({ label, refit }) => (
           <TableRow key={label}>
             <TableCell>{label}</TableCell>
-            <TableCell className="text-right tabular-nums">{formatScore(refit.score)}</TableCell>
-            <TableCell className="text-right tabular-nums">
-              {formatInterval(refit.interval)}
-            </TableCell>
+            <TableCell numeric>{formatScore(refit.score)}</TableCell>
+            <TableCell numeric>{formatInterval(refit.interval)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -96,20 +92,16 @@ export function DistributionTable({
       <TableHeader>
         <TableRow>
           <TableHead>System</TableHead>
-          <TableHead className="text-right">Output tokens</TableHead>
-          <TableHead className="text-right">Latency</TableHead>
+          <TableHead numeric>Output tokens</TableHead>
+          <TableHead numeric>Latency</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {standings.map((item) => (
           <TableRow key={item.system} className={item.system === system ? 'font-medium' : ''}>
             <TableCell>{item.system}</TableCell>
-            <TableCell className="text-right tabular-nums">
-              {formatDistribution(item.output_tokens, formatCount)}
-            </TableCell>
-            <TableCell className="text-right tabular-nums">
-              {formatDistribution(item.latency_sec, formatSeconds)}
-            </TableCell>
+            <TableCell numeric>{formatDistribution(item.output_tokens, formatCount)}</TableCell>
+            <TableCell numeric>{formatDistribution(item.latency_sec, formatSeconds)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -123,14 +115,14 @@ export function FlagsTable({ standing }: { standing: Standing }) {
       <TableHeader>
         <TableRow>
           <TableHead>Flag</TableHead>
-          <TableHead className="text-right">Votes</TableHead>
+          <TableHead numeric>Votes</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {flags.map((flag) => (
           <TableRow key={flag}>
             <TableCell>{flagLabels[flag]}</TableCell>
-            <TableCell className="text-right tabular-nums">{standing.flags[flag] ?? 0}</TableCell>
+            <TableCell numeric>{standing.flags[flag] ?? 0}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -149,20 +141,18 @@ export function RoundsTable({
       <TableHeader>
         <TableRow>
           <TableHead>Round</TableHead>
-          <TableHead className="text-right">Score</TableHead>
-          <TableHead className="text-right">95% interval</TableHead>
-          <TableHead className="text-right">Votes</TableHead>
+          <TableHead numeric>Score</TableHead>
+          <TableHead numeric>95% interval</TableHead>
+          <TableHead numeric>Votes</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {appearances.toReversed().map(({ round, standing: past }) => (
           <TableRow key={round}>
             <TableCell>{round}</TableCell>
-            <TableCell className="text-right tabular-nums">{formatScore(past.score)}</TableCell>
-            <TableCell className="text-right tabular-nums">
-              {formatInterval(past.interval)}
-            </TableCell>
-            <TableCell className="text-right tabular-nums">{past.votes}</TableCell>
+            <TableCell numeric>{formatScore(past.score)}</TableCell>
+            <TableCell numeric>{formatInterval(past.interval)}</TableCell>
+            <TableCell numeric>{past.votes}</TableCell>
           </TableRow>
         ))}
       </TableBody>

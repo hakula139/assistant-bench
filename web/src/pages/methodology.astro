@@ -1,16 +1,19 @@
 ---
-import Forest from '@/components/site/Forest.astro';
-import { Badge } from '@/components/ui/badge';
+import { cn } from 'cn';
+
+import { Forest } from '@/components/site/Forest';
+import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
+import { section } from '@/components/site/Summary';
 import Base from '@/layouts/Base.astro';
 import { EMPTY_DOMAIN } from '@/lib/forest';
+import { REPOSITORY } from '@/lib/site';
 
 const example = (score: number, lower: number, upper: number) => ({
   score,
   interval: { lower, upper },
 });
 
-const repo = 'https://github.com/hakula139/assistant-bench';
-const docs = `${repo}/blob/main/docs/design`;
+const docs = `${REPOSITORY}/blob/main/docs/design`;
 
 const sections = {
   rounds: 'How a round works',
@@ -22,7 +25,7 @@ const sections = {
   limits: 'Known limits',
 } as const;
 
-const columns = [
+const columns: GlossaryEntry[] = [
   {
     term: 'Rank',
     definition:
@@ -57,7 +60,7 @@ const columns = [
   },
 ];
 
-const diagnostics = [
+const diagnostics: GlossaryEntry[] = [
   {
     term: 'Rater agreement',
     definition:
@@ -79,8 +82,7 @@ const diagnostics = [
   },
 ];
 
-const h2 = 'scroll-mt-6 text-lg font-semibold target:text-link';
-const dl = 'grid gap-y-4 sm:grid-cols-[9rem_1fr] sm:gap-x-6 sm:gap-y-2';
+const h2 = cn(section.title, 'scroll-mt-6 target:text-link');
 const list = 'space-y-2 pl-6 marker:text-muted-foreground';
 ---
 
@@ -173,22 +175,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
             the top score, and a system with no votes yet runs off both ends.
           </figcaption>
         </figure>
-        <dl class={dl}>
-          {columns.map(({ term, badge, definition }) => (
-            <div class="sm:contents">
-              <dt class="font-medium">
-                {badge ? (
-                  <Badge variant="outline" className="font-normal text-muted-foreground">
-                    {term}
-                  </Badge>
-                ) : (
-                  term
-                )}
-              </dt>
-              <dd>{definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <Glossary heading="Column" entries={columns} />
         <p>
           A dash marks a missing value. A category view refits that category's votes alone, so
           intervals widen and Rank disappears, while the columns labeled "all categories" stay
@@ -221,14 +208,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         <h2 id="summary" class={h2}>
           {sections.summary}
         </h2>
-        <dl class={dl}>
-          {diagnostics.map(({ term, definition }) => (
-            <div class="sm:contents">
-              <dt class="font-medium">{term}</dt>
-              <dd>{definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <Glossary heading="Figure" entries={diagnostics} />
       </section>
 
       <section class="space-y-3">
@@ -260,7 +240,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         <p class="text-muted-foreground">
           The design notes on <a href={`${docs}/ranking.md`}>ranking</a>, the{' '}
           <a href={`${docs}/arena.md`}>vote arena</a>, and each{' '}
-          <a href={`${repo}/tree/main/docs/design/families`}>family</a> cover the math.
+          <a href={`${REPOSITORY}/tree/main/docs/design/families`}>family</a> cover the math.
         </p>
       </section>
     </article>

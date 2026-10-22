@@ -8,6 +8,7 @@ import {
   HeadToHeadTable,
   RoundsTable,
 } from '@/components/boards/SystemTables';
+import { Stat, section, statList } from '@/components/site/Summary';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
@@ -80,38 +81,19 @@ const length = results.length;
       <a href={`/${family}/`}>{family}</a>
     </p>
     <h1 class="text-[1.75rem] leading-tight font-semibold">{system}</h1>
-    <dl class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-      <div>
-        <dt class="text-muted-foreground">Score</dt>
-        <dd class="font-medium">
-          {formatScore(standing.score)}{' '}
-          <span class="font-normal text-muted-foreground">
-            ({formatInterval(standing.interval)})
-          </span>
-        </dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Rank</dt>
-        <dd class="font-medium">{formatRank(standing.best_rank, standing.worst_rank)}</dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Votes</dt>
-        <dd class="font-medium">
-          {standing.votes}{' '}
-          <span class="font-normal text-muted-foreground">
-            ({standing.decisive_votes} decisive)
-          </span>
-        </dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Round</dt>
-        <dd class="font-medium">{round}</dd>
-      </div>
+    <dl class={statList}>
+      <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
+        {formatScore(standing.score)}
+      </Stat>
+      <Stat label="Rank">{formatRank(standing.best_rank, standing.worst_rank)}</Stat>
+      <Stat label="Votes" detail={`(${standing.decisive_votes} decisive)`}>
+        {standing.votes}
+      </Stat>
+      <Stat label="Round">{round}</Stat>
       {standing.fingerprint !== null && (
-        <div>
-          <dt class="text-muted-foreground">Fingerprint</dt>
-          <dd class="font-mono text-xs leading-5">{standing.fingerprint}</dd>
-        </div>
+        <Stat label="Fingerprint">
+          <code class="font-mono text-xs font-normal">{standing.fingerprint}</code>
+        </Stat>
       )}
     </dl>
     {standing.preliminary && (
@@ -123,8 +105,8 @@ const length = results.length;
 
   <div class="space-y-10">
     {headToHead.length > 0 && (
-      <section class="space-y-3 border-t pt-6">
-        <h2 class="text-lg font-semibold">Head to head</h2>
+      <section class={section.root}>
+        <h2 class={section.title}>Head to head</h2>
         <p class="max-w-prose text-sm text-muted-foreground">
           Win rate against each opponent, where ties and both-bad votes count half.
         </p>
@@ -142,8 +124,8 @@ const length = results.length;
     )}
 
     {categoryRows.length > 0 && (
-      <section class="space-y-3 border-t pt-6">
-        <h2 class="text-lg font-semibold">Categories</h2>
+      <section class={section.root}>
+        <h2 class={section.title}>Categories</h2>
         <p class="max-w-prose text-sm text-muted-foreground">
           Scores from each category's votes alone, with 95% intervals.
         </p>
@@ -159,8 +141,8 @@ const length = results.length;
       </section>
     )}
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Output length and latency</h2>
+    <section class={section.root}>
+      <h2 class={section.title}>Output length and latency</h2>
       <p class="max-w-prose text-sm text-muted-foreground">
         Each system's median and 10th to 90th percentile range in this round.
         {length !== null &&
@@ -179,8 +161,8 @@ const length = results.length;
       </TableTwin>
     </section>
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Flags</h2>
+    <section class={section.root}>
+      <h2 class={section.title}>Flags</h2>
       <p class="max-w-prose text-sm text-muted-foreground">
         Votes that flagged a problem in this system's output. A flag counts against the losing side,
         or against both sides of a tie or a both-bad vote.
@@ -188,8 +170,8 @@ const length = results.length;
       <FlagsTable standing={standing} />
     </section>
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Rounds</h2>
+    <section class={section.root}>
+      <h2 class={section.title}>Rounds</h2>
       <RoundsTable appearances={appearances} />
     </section>
   </div>

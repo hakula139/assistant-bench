@@ -1,5 +1,14 @@
 ---
-import Forest from '@/components/site/Forest.astro';
+import { Forest } from '@/components/site/Forest';
+import { section } from '@/components/site/Summary';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { EMPTY_DOMAIN, forestDomain, roundRows, unmeasuredRows } from '@/lib/forest';
 import { MISSING, formatCountOf, formatLeaderNote, formatPercent } from '@/lib/format';
 import { latest, type Family } from '@/lib/reports';
@@ -19,7 +28,7 @@ const status = report
 
 <section class="space-y-3" aria-labelledby={`family-${family.name}`}>
   <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
-    <h2 id={`family-${family.name}`} class="text-lg font-semibold">
+    <h2 id={`family-${family.name}`} class={section.title}>
       <a href={`/${family.name}/`} class="text-foreground hover:text-link">
         {family.name}
       </a>
@@ -49,16 +58,24 @@ const status = report
       />
     )
   ) : results?.scorer === 'tests' ? (
-    <ul class="space-y-1 text-sm">
-      {results.standings
-        .toSorted((a, b) => b.pass_rate - a.pass_rate)
-        .map((standing) => (
-          <li class="flex justify-between gap-4">
-            <span>{standing.system}</span>
-            <span class="tabular-nums">{formatPercent(standing.pass_rate)} pass</span>
-          </li>
-        ))}
-    </ul>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>System</TableHead>
+          <TableHead numeric>Pass rate</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {results.standings
+          .toSorted((a, b) => b.pass_rate - a.pass_rate)
+          .map((standing) => (
+            <TableRow>
+              <TableCell>{standing.system}</TableCell>
+              <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
+            </TableRow>
+          ))}
+      </TableBody>
+    </Table>
   ) : (
     <p class="text-sm text-muted-foreground">{config.systems.join(', ') || MISSING}</p>
   )}

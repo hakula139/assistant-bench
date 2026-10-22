@@ -1,12 +1,13 @@
 ---
 import Head from '@/components/site/Head.astro';
 import { VoteApp } from '@/components/vote/VoteApp';
+import { SITE_NAME } from '@/lib/site';
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
-    <Head title="Vote | assistant-bench" description="Blind pairwise voting on local outputs." />
+    <Head title={`Vote | ${SITE_NAME}`} description="Blind pairwise voting on local outputs." />
     <meta name="robots" content="noindex" />
   </head>
   <body>

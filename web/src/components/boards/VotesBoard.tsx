@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
 import { Leaderboard, type LeaderboardRow } from '@/components/boards/Leaderboard';
+import { Section, Stat, statList } from '@/components/site/Summary';
 import { CategoryForests } from '@/components/charts/CategoryForests';
 import {
   ParetoScatter,
@@ -81,42 +82,24 @@ function RoundSummary({ results }: { results: VotesResults }) {
   const note = formatLeaderNote(decision);
   return (
     <div className="space-y-3">
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:flex sm:flex-wrap">
-        <div>
-          <dt className="text-muted-foreground">Leader</dt>
-          <dd className="font-medium">
-            {decision?.leader ?? MISSING}
-            {note !== null && (
-              <span className="block text-xs font-normal text-muted-foreground">{note}</span>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Votes</dt>
-          <dd className="font-medium tabular-nums">
-            {results.votes}{' '}
-            <span className="font-normal text-muted-foreground">
-              {`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Rater agreement</dt>
-          <dd className="font-medium tabular-nums">
-            {formatPercent(agreement.agreement)}{' '}
-            <span className="font-normal text-muted-foreground">
-              on {formatCountOf(agreement.repeats, 'repeat')}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Separated pairs</dt>
-          <dd className="font-medium tabular-nums">{formatPercent(results.separability)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Split-half τ</dt>
-          <dd className="font-medium tabular-nums">{formatTau(results.split_half_tau)}</dd>
-        </div>
+      <dl className={statList}>
+        <Stat label="Leader">
+          {decision?.leader ?? MISSING}
+          {note !== null && (
+            <span className="block text-xs font-normal text-muted-foreground">{note}</span>
+          )}
+        </Stat>
+        <Stat
+          label="Votes"
+          detail={`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
+        >
+          {results.votes}
+        </Stat>
+        <Stat label="Rater agreement" detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}>
+          {formatPercent(agreement.agreement)}
+        </Stat>
+        <Stat label="Separated pairs">{formatPercent(results.separability)}</Stat>
+        <Stat label="Split-half τ">{formatTau(results.split_half_tau)}</Stat>
       </dl>
       {agreement.below_floor && (
         <p className="max-w-prose text-sm text-muted-foreground">
@@ -124,15 +107,6 @@ function RoundSummary({ results }: { results: VotesResults }) {
         </p>
       )}
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-3 border-t pt-6">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {children}
-    </section>
   );
 }
 
@@ -224,7 +198,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                   <TableRow>
                     <TableHead>System</TableHead>
                     {categories.map((name) => (
-                      <TableHead key={name} className="text-right">
+                      <TableHead key={name} numeric>
                         {name}
                       </TableHead>
                     ))}
@@ -237,7 +211,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                       {results.categories.map((board) => {
                         const refit = board.standings.find((item) => item.system === system);
                         return (
-                          <TableCell key={board.category} className="text-right">
+                          <TableCell key={board.category} numeric>
                             {refit
                               ? `${formatScore(refit.score)} (${formatInterval(refit.interval)}), ${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`
                               : MISSING}
@@ -287,9 +261,9 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>System</TableHead>
-                    <TableHead className="text-right">Score</TableHead>
-                    <TableHead className="text-right">Cost / output</TableHead>
-                    <TableHead className="text-right">p50 latency</TableHead>
+                    <TableHead numeric>Score</TableHead>
+                    <TableHead numeric>Cost / output</TableHead>
+                    <TableHead numeric>p50 latency</TableHead>
                     <TableHead>On the frontier for</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -303,15 +277,11 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                     return (
                       <TableRow key={system}>
                         <TableCell>{system}</TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell numeric>
                           {formatScore(row.score)} ({formatInterval(row.interval)})
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCost(row.standing.mean_cost_usd)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatSeconds(row.standing.p50_latency_sec)}
-                        </TableCell>
+                        <TableCell numeric>{formatCost(row.standing.mean_cost_usd)}</TableCell>
+                        <TableCell numeric>{formatSeconds(row.standing.p50_latency_sec)}</TableCell>
                         <TableCell>{frontiers.join(' and ') || MISSING}</TableCell>
                       </TableRow>
                     );

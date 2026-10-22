@@ -52,12 +52,20 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
   );
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
+/** Right-aligns a column of numbers in tabular figures. */
+const numericCell = 'text-right tabular-nums';
+
+function TableHead({
+  className,
+  numeric = false,
+  ...props
+}: React.ComponentProps<'th'> & { numeric?: boolean }) {
   return (
     <th
       data-slot="table-head"
       className={cn(
         'h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0',
+        numeric && numericCell,
         className,
       )}
       {...props}
@@ -65,11 +73,19 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
   );
 }
 
-function TableCell({ className, ...props }: React.ComponentProps<'td'>) {
+function TableCell({
+  className,
+  numeric = false,
+  ...props
+}: React.ComponentProps<'td'> & { numeric?: boolean }) {
   return (
     <td
       data-slot="table-cell"
-      className={cn('p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0', className)}
+      className={cn(
+        'p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0',
+        numeric && numericCell,
+        className,
+      )}
       {...props}
     />
   );

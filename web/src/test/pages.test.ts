@@ -4,7 +4,6 @@ import { loadRenderers } from 'astro:container';
 import { describe, expect, test } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
-import Forest from '@/components/site/Forest.astro';
 import type { FamilyConfig } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
 import { votesRounds, type Family } from '@/lib/reports';
@@ -135,47 +134,6 @@ describe('family panel', () => {
 
     expect(text(html)).toContain('acme-edge Unbounded, too few comparisons to place it unranked');
     expect(text(html)).toContain('acme-new Unbounded no votes');
-  });
-});
-
-describe('static forest', () => {
-  /** Each body row's markup, by system. */
-  async function rows(): Promise<Record<string, string>> {
-    const estimate = (score: number, lower: number, upper: number) => ({
-      score,
-      interval: { lower, upper },
-    });
-    const html = await render(Forest, {
-      caption: 'Example',
-      domain: [400, 1100],
-      rows: [
-        { system: 'settled', estimate: estimate(1000, 950, 1050), preliminary: false },
-        { system: 'preliminary', estimate: estimate(900, 800, 1000), preliminary: true },
-        { system: 'cut', estimate: estimate(500, 300, 700), preliminary: false },
-      ],
-    });
-    const body = html.slice(html.indexOf('<tbody'));
-    return Object.fromEntries(
-      body
-        .split('<tr')
-        .slice(1)
-        .map((row): [string, string] => [/scope="row"[^>]*>([^<]+)</.exec(row)?.[1] ?? '', row]),
-    );
-  }
-
-  test('dashes only the preliminary interval', async () => {
-    const { settled, preliminary } = await rows();
-
-    expect(settled).toContain('border-solid');
-    expect(settled).not.toContain('border-dashed');
-    expect(preliminary).toContain('border-dashed');
-  });
-
-  test('ends an interval the axis cuts in an arrowhead', async () => {
-    const { settled, cut } = await rows();
-
-    expect(cut).toContain('<svg');
-    expect(settled).not.toContain('<svg');
   });
 });
 

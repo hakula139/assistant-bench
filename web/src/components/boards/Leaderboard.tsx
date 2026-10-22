@@ -203,11 +203,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
             ) : (
               <span className="font-medium whitespace-nowrap">{original.system}</span>
             )}
-            {original.preliminary && (
-              <Badge variant="outline" className="font-normal text-muted-foreground">
-                Preliminary
-              </Badge>
-            )}
+            {original.preliminary && <Badge variant="status">Preliminary</Badge>}
           </span>
         ),
         meta: { wraps: true },
@@ -300,7 +296,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
               return (
                 <TableHead
                   key={header.id}
-                  className={numeric ? 'text-right' : undefined}
+                  numeric={numeric}
                   aria-sort={
                     sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
                   }
@@ -328,11 +324,8 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
               return (
                 <TableCell
                   key={cell.id}
-                  className={cn(
-                    forest && 'p-0',
-                    numeric && 'text-right tabular-nums',
-                    wraps && 'whitespace-normal',
-                  )}
+                  numeric={numeric}
+                  className={cn(forest && 'p-0', wraps && 'whitespace-normal')}
                 >
                   <table.FlexRender cell={cell} />
                 </TableCell>
