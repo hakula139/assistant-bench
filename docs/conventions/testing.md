@@ -29,4 +29,4 @@ Tests marked `docker` run real Harbor jobs: the smoke family's oracle, and `Gene
 
 ## Coverage
 
-`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, which CI uploads to Codecov for patch coverage. A line may stay uncovered only when the Docker trials alone reach it, which the PR's Test plan states.
+`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, which CI uploads to Codecov. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed lines, as `codecov.yml` sets.
