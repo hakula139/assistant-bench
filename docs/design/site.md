@@ -19,7 +19,7 @@ Every chart has a table twin with the same values and a tooltip on hover. The st
 
 ## The Vote Page
 
-`/vote/` exists only in builds with `BENCH_LOCAL=1`, which `bench serve` makes, and it fetches pairs from the API that [Arena](arena.md#vote-api) defines at runtime. It shows the brief above two outputs that scroll independently and render as written, with a toggle that renders text outputs as Markdown, while HTML outputs load in sandboxed frames from the render origin with viewport presets of 375, 768, and 1280 px. Nothing is preselected, and the verdicts, flags, note, submit, and undo each have a key, which [Voting](../guide/voting.md#casting-a-vote) lists. Each new pair takes focus back from the control that loaded it, so the next key is a shortcut again.
+`/vote/` exists only in builds with `BENCH_LOCAL=1`, which `bench serve` makes, and it fetches pairs from the API that [Arena](arena.md#vote-api) defines at runtime. It shows the brief above two outputs, or in a column beside them from 1280 px wide. The outputs scroll independently and render as written, with a toggle that renders text outputs as Markdown, while HTML outputs load in sandboxed frames from the render origin with viewport presets of 375, 768, and 1280 px. Nothing is preselected, and the verdicts, flags, note, submit, and undo each have a key, which [Voting](../guide/voting.md#casting-a-vote) lists. Each new pair takes focus back from the control that loaded it, so the next key is a shortcut again.
 
 ## Design Direction
 

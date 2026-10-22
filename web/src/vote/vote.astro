@@ -12,7 +12,9 @@ import { SITE_NAME } from '@/lib/site';
     <meta name="robots" content="noindex" />
   </head>
   <body class="flex min-h-dvh flex-col md:h-dvh">
-    <Header />
-    <VoteApp client:only="react" />
+    <Header wide />
+    <main class="flex flex-1 flex-col md:min-h-0">
+      <VoteApp client:only="react" />
+    </main>
   </body>
 </html>

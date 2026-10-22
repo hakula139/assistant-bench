@@ -1,7 +1,10 @@
+import { cn } from 'cn';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 
+import { wideContainer } from '@/components/site/PageParts';
 import { OutputPane } from '@/components/vote/OutputPane';
+import { band, panel, scroll } from '@/components/vote/panel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -27,10 +30,11 @@ import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 const SESSION_KEY = 'bench-session';
 const VIEWPORTS = [375, 768, 1280] as const;
 
-const CHOICES: { value: Choice; label: string; key: string }[] = [
+/** The verdicts in key order. On phones, two to a row, A and B share the first. */
+const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
   { value: 'a', label: 'A is better', key: 'a' },
-  { value: 'tie', label: 'Tie', key: 't' },
-  { value: 'both_bad', label: 'Both bad', key: 'x' },
+  { value: 'tie', label: 'Tie', key: 't', className: 'max-sm:order-1' },
+  { value: 'both_bad', label: 'Both bad', key: 'x', className: 'max-sm:order-1' },
   { value: 'b', label: 'B is better', key: 'b' },
 ];
 
@@ -101,20 +105,29 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   );
 }
 
-function Brief({ pair }: { pair: PairView }) {
+/** The case's brief and checklist, with the session's status in its band. */
+function Brief({ pair, status }: { pair: PairView; status: ReactNode }) {
   return (
     <Collapsible defaultOpen asChild>
-      <Card size="sm" className="gap-0 py-0">
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-(--card-spacing) py-2.5 text-left font-semibold hover:bg-muted">
-          <ChevronDown
-            className="size-4 transition-transform group-data-[state=closed]:-rotate-90"
-            aria-hidden="true"
-          />
-          Brief
-        </CollapsibleTrigger>
+      <Card
+        size="sm"
+        className={cn(panel, 'data-[state=closed]:self-start md:col-span-2 xl:col-span-1')}
+      >
+        <div className={cn(band, 'group-data-[state=open]/card:border-b')}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="-ml-2">
+              <ChevronDown
+                className="transition-transform in-data-[state=closed]:-rotate-90"
+                aria-hidden="true"
+              />
+              Brief
+            </Button>
+          </CollapsibleTrigger>
+          {status}
+        </div>
         <CollapsibleContent asChild>
-          <CardContent className="max-h-[30dvh] space-y-3 overflow-y-auto pb-3">
-            <p className="text-base leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
+          <CardContent className={cn(scroll, 'space-y-3 text-base max-xl:max-h-[30dvh]')}>
+            <p className="leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
             {pair.checklist.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
                 {pair.checklist.map((item) => (
@@ -227,6 +240,10 @@ export function VoteApp() {
     );
   };
 
+  // Enter on a focused control outside the pair, such as a header link, keeps its own action.
+  const outside = (target: EventTarget | null) =>
+    target instanceof Node && target !== document.body && !pairView.current?.contains(target);
+
   const onKey = useEffectEvent((event: KeyboardEvent) => {
     if (event.isComposing || event.repeat) {
       return;
@@ -263,7 +280,7 @@ export function VoteApp() {
       toggleFlag(flag);
     } else if (key === 'n') {
       noteField.current?.focus();
-    } else if (event.key === 'Enter') {
+    } else if (event.key === 'Enter' && !outside(target)) {
       submit();
     } else {
       return;
@@ -318,58 +335,57 @@ export function VoteApp() {
     );
   }
 
+  const status = (
+    <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+      <span className="whitespace-nowrap tabular-nums">
+        {session.family}, pair {session.votes + 1} of {session.size}
+      </span>
+      <Progress
+        value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
+        aria-label="Session progress"
+        className="w-32 max-sm:hidden xl:hidden"
+      />
+
+      {hasText && (
+        <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
+          Markdown
+        </Toggle>
+      )}
+
+      {hasFrames && (
+        <ToggleGroup
+          type="single"
+          size="sm"
+          variant="outline"
+          spacing={0}
+          value={String(viewport)}
+          onValueChange={(value) => {
+            if (value !== '') {
+              setViewport(Number(value));
+            }
+          }}
+          aria-label="Viewport width"
+        >
+          {VIEWPORTS.map((width) => (
+            <ToggleGroupItem key={width} value={String(width)}>
+              {width} px
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={pairView}
       tabIndex={-1}
       role="group"
       aria-label={`Pair ${session.votes + 1} of ${session.size}`}
-      className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 outline-none sm:px-6 md:min-h-0 md:flex-1"
+      className={cn(wideContainer, 'flex flex-col gap-3 py-4 outline-none md:min-h-0 md:flex-1')}
     >
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-        <div className="flex min-w-48 flex-1 items-center gap-3">
-          <span className="whitespace-nowrap tabular-nums">
-            {session.family}, pair {session.votes + 1} of {session.size}
-          </span>
-          <Progress
-            value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
-            aria-label="Session progress"
-            className="max-w-64"
-          />
-        </div>
-
-        {hasText && (
-          <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
-            Markdown
-          </Toggle>
-        )}
-
-        {hasFrames && (
-          <ToggleGroup
-            type="single"
-            size="sm"
-            variant="outline"
-            spacing={0}
-            value={String(viewport)}
-            onValueChange={(value) => {
-              if (value !== '') {
-                setViewport(Number(value));
-              }
-            }}
-            aria-label="Viewport width"
-          >
-            {VIEWPORTS.map((width) => (
-              <ToggleGroupItem key={width} value={String(width)}>
-                {width} px
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        )}
-      </div>
-
-      <Brief key={pair.token} pair={pair} />
-
-      <div className="grid gap-4 md:min-h-0 md:flex-1 md:grid-cols-2">
+      <div className="grid gap-4 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
+        <Brief key={pair.token} pair={pair} status={status} />
         <OutputPane side="A" pane={pair.a} asMarkdown={asMarkdown} viewport={viewport} />
         <OutputPane side="B" pane={pair.b} asMarkdown={asMarkdown} viewport={viewport} />
       </div>
@@ -383,32 +399,7 @@ export function VoteApp() {
         )}
         <ErrorAlert error={error} />
 
-        <ToggleGroup
-          type="single"
-          variant="choice"
-          size="lg"
-          spacing={2}
-          value={choice ?? ''}
-          onValueChange={(value) => {
-            setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
-          }}
-          aria-label="Verdict"
-          className="grid w-full grid-cols-2 sm:grid-cols-4"
-        >
-          {CHOICES.map(({ value, label, key }) => (
-            <ToggleGroupItem key={value} value={value} aria-keyshortcuts={key.toUpperCase()}>
-              {label}
-              <Kbd
-                aria-hidden="true"
-                className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
-              >
-                {key.toUpperCase()}
-              </Kbd>
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Flags">
             {flagNames.map((value, index) => (
               <Toggle
@@ -427,41 +418,73 @@ export function VoteApp() {
             ))}
           </div>
 
-          <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
-            <span className="inline-flex items-center gap-2 text-muted-foreground">
-              Note <Kbd aria-hidden="true">N</Kbd>
-            </span>
-            <Textarea
-              ref={noteField}
-              rows={1}
-              aria-keyshortcuts="N"
-              placeholder="⌘↵ or Ctrl+↵ submits from here"
-              maxLength={500}
-              value={note}
-              onChange={(event) => {
-                setNote(event.target.value);
-              }}
-              className="min-h-9"
-            />
-          </label>
+          <Textarea
+            ref={noteField}
+            rows={1}
+            aria-label="Note"
+            aria-keyshortcuts="N"
+            placeholder="Note (N), where ⌘↵ or Ctrl+↵ submits"
+            maxLength={500}
+            value={note}
+            onChange={(event) => {
+              setNote(event.target.value);
+            }}
+            className="min-h-9 min-w-64 flex-1"
+          />
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={undo}
-              disabled={session.votes === 0 || busy}
-              aria-keyshortcuts="U"
-            >
-              Undo <Kbd aria-hidden="true">U</Kbd>
-            </Button>
-            <Button onClick={submit} disabled={choice === null || busy} aria-keyshortcuts="Enter">
-              Submit vote{' '}
-              <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
-                ↵
-              </Kbd>
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            onClick={undo}
+            disabled={session.votes === 0 || busy}
+            aria-keyshortcuts="U"
+          >
+            Undo <Kbd aria-hidden="true">U</Kbd>
+          </Button>
         </div>
+      </div>
+
+      <div className="grid gap-2 max-md:sticky max-md:bottom-0 max-md:-mx-4 max-md:border-t max-md:bg-background max-md:px-4 max-md:py-3 sm:grid-cols-[1fr_auto] sm:max-md:-mx-6 sm:max-md:px-6">
+        <ToggleGroup
+          type="single"
+          variant="choice"
+          size="lg"
+          spacing={2}
+          value={choice ?? ''}
+          onValueChange={(value) => {
+            setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
+          }}
+          aria-label="Verdict"
+          className="grid w-full grid-cols-2 sm:grid-cols-4"
+        >
+          {CHOICES.map(({ value, label, key, className }) => (
+            <ToggleGroupItem
+              key={value}
+              value={value}
+              aria-keyshortcuts={key.toUpperCase()}
+              className={className}
+            >
+              {label}
+              <Kbd
+                aria-hidden="true"
+                className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
+              >
+                {key.toUpperCase()}
+              </Kbd>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+
+        <Button
+          size="lg"
+          onClick={submit}
+          disabled={choice === null || busy}
+          aria-keyshortcuts="Enter"
+        >
+          Submit vote{' '}
+          <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
+            ↵
+          </Kbd>
+        </Button>
       </div>
     </div>
   );
