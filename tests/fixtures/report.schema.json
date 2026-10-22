@@ -495,7 +495,7 @@
     },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `unranked` lists\nthe voted systems that no comparison connects to the reference, or that so\nmany resamples leave unconnected that their interval is unbounded. `position` is\nthe left pane's advantage, and `length` the score change per standard\ndeviation of the relative length difference, both in score points.\n`split_half_tau` compares the orders fit to odd and even sessions, and\n`decision` is absent while a system tied with the top one is preliminary.",
+      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `unranked` lists\nthe voted systems that no comparison connects to the reference, or that so\nmany resamples leave unconnected that their interval is unbounded. `position` is\nthe left pane's advantage, and `length` the score change per standard\ndeviation of the relative length difference, both in score points, where\n`length` is absent when no connected vote varies that difference.\n`split_half_tau` compares the orders fit to odd and even sessions, and\n`decision` is absent while a system tied with the top one is preliminary.",
       "properties": {
         "scorer": {
           "const": "votes",

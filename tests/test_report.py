@@ -378,6 +378,40 @@ class TestClose:
         assert results.length is not None
         assert results.length > 50
 
+    @pytest.mark.parametrize(
+        'texts',
+        [
+            {'x': '{case} answer', 'y': '{case} reply'},
+            {'x': '{case} gives an answer', 'y': '{case}'},
+        ],
+        ids=['equal', 'constant-ratio'],
+    )
+    def test_leaves_length_out_when_no_vote_varies_it(
+        self, families_dir: Path, store: VoteStore, texts: dict[str, str]
+    ) -> None:
+        cases = {f'c{i}': 'reply' for i in range(4)}
+        write_votes_family(families_dir, 'f', ['x', 'y'], cases)
+        outputs = passing_outputs(
+            cases,
+            {case: {s: texts[s].format(case=case) for s in 'xy'} for case in cases},
+        )
+        session = store.start_session('f', AT)
+        for case in cases:
+            for choice in ('a', 'b', 'tie'):
+                record(
+                    store,
+                    session.id,
+                    outputs[(case, 'x')],
+                    outputs[(case, 'y')],
+                    choice,
+                )
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert {standing.system for standing in results.standings} == {'x', 'y'}
+        assert results.length is None
+
     def test_agrees_across_halves_split_by_session_parity(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -493,6 +527,27 @@ class TestClose:
 
         with pytest.raises(ValueError, match="'large' has outputs under several"):
             close(family, store, AT)
+
+    def test_rejects_an_unranked_system_under_several_fingerprints(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {'c1': 'reply', 'c2': 'reply'}
+        write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
+        outputs = passing_outputs(
+            cases, {case: {s: f'{s} on {case}' for s in 'abcd'} for case in cases}
+        )
+        old = outputs[('c2', 'd')].model_copy(
+            update={'trial': 'old', 'fingerprint': 'fp-old', 'text': 'd before'}
+        )
+        write_outputs('f', [*outputs.values(), old])
+        session = store.start_session('f', AT)
+        for left, right, case in (('a', 'b', 'c1'), ('c', 'd', 'c2')):
+            record(
+                store, session.id, outputs[(case, left)], outputs[(case, right)], 'a'
+            )
+
+        with pytest.raises(ValueError, match="'d' has outputs under several"):
+            close(load_family('f'), store, AT)
 
     @pytest.mark.parametrize(
         ('fingerprints', 'message'),
