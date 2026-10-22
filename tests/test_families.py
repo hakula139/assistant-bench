@@ -188,8 +188,10 @@ class TestLoadFamily:
             """\
             scorer = "votes"
             display_name = "Family F"
+            systems = ["large"]
             samples = 1
             max_output_tokens = 300
+            reference = "large"
 
             [gates]
             min_chars = 500

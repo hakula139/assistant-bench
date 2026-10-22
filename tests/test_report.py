@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -171,14 +172,13 @@ class TestReport:
 
         jsonschema.validate(json.loads(fixture.read_text()), schema)
 
-    def test_matches_the_committed_json_schema(self) -> None:
+    def test_matches_the_committed_json_schema(
+        self, stale_fixture: Callable[[Path, str], None]
+    ) -> None:
         schema = Report.model_json_schema(mode='serialization')
 
         if json.loads(REPORT_SCHEMA_FIXTURE.read_text()) != schema:
-            REPORT_SCHEMA_FIXTURE.write_text(f'{json.dumps(schema, indent=2)}\n')
-            pytest.fail(
-                f'{REPORT_SCHEMA_FIXTURE.name} was stale and is rewritten, so review it'
-            )
+            stale_fixture(REPORT_SCHEMA_FIXTURE, f'{json.dumps(schema, indent=2)}\n')
 
 
 class TestClose:
@@ -190,6 +190,7 @@ class TestClose:
         fixture: Path,
         sessions: int,
         closed_at: datetime,
+        stale_fixture: Callable[[Path, str], None],
     ) -> None:
         write_synthetic_round(families_dir, store, sessions)
 
@@ -197,8 +198,7 @@ class TestClose:
 
         written = json.loads(closed.model_dump_json())
         if json.loads(fixture.read_text()) != approx(written):
-            fixture.write_text(f'{closed.model_dump_json(indent=2)}\n')
-            pytest.fail(f'{fixture.name} was stale and is rewritten, so review it')
+            stale_fixture(fixture, f'{closed.model_dump_json(indent=2)}\n')
 
     def test_reports_aggregates_under_public_names_only(
         self, families_dir: Path, store: VoteStore

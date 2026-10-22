@@ -3,7 +3,7 @@ import json
 import socket
 import ssl
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,31 @@ PROXY_VARS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
 
 class IPv6Server(ThreadingHTTPServer):
     address_family = socket.AF_INET6
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        '--update-fixtures',
+        action='store_true',
+        help='Rewrite each committed fixture a test finds stale.',
+    )
+
+
+@pytest.fixture
+def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]:
+    """Fail on a stale committed fixture, or rewrite it under `--update-fixtures`."""
+
+    def handle(path: Path, current: str) -> None:
+        __tracebackhide__ = True
+        if request.config.getoption('update_fixtures'):
+            path.write_text(current)
+        else:
+            pytest.fail(
+                f'{path.name} is stale, so rerun with --update-fixtures '
+                'and review the diff'
+            )
+
+    return handle
 
 
 @pytest.fixture(autouse=True)
