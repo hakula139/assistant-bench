@@ -103,7 +103,7 @@ strict = true
 # threadpoolctl leaves `threadpool_limits` unannotated.
 untyped_calls_exclude = ["threadpoolctl"]
 
-# Harbor, threadpoolctl, and zhon lack a `py.typed` marker, so mypy follows their imports by override.
+# Harbor, threadpoolctl, and zhon lack a `py.typed` marker, so mypy follows their imports.
 [[tool.mypy.overrides]]
 module = ["harbor.*", "threadpoolctl", "zhon.*"]
 follow_untyped_imports = true
