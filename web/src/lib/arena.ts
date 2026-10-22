@@ -1,5 +1,6 @@
 import { z } from 'astro/zod';
 
+import { aspectIds } from '@/lib/aspects';
 import type { Flag } from '@/lib/report';
 
 // The vote page's policy forbids eval, which Zod otherwise probes for to compile its parsers.
@@ -22,7 +23,11 @@ const pairView = z.object({
   b: pane,
 });
 
-const familyView = z.object({ name: z.string(), display_name: z.string() });
+const familyView = z.object({
+  name: z.string(),
+  aspect: z.enum(aspectIds).nullable(),
+  display_name: z.string(),
+});
 
 const sessionView = z.object({
   id: z.string(),

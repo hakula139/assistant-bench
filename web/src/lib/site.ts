@@ -3,3 +3,6 @@ export const SITE_NAME = 'HAKULA†BENCH';
 
 /** Where the site's code, cases, and reports live. */
 export const REPOSITORY = 'https://github.com/hakula139/assistant-bench';
+
+/** The parts of the site the header links, each page sitting under at most one. */
+export type HeaderSection = 'leaderboards' | 'methodology' | 'vote';

@@ -26,13 +26,13 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 
 `uv run bench serve` builds the vote page with `BENCH_LOCAL=1` and serves it from `web/dist/` with the API on `http://127.0.0.1:8790`, for every family scored by votes that has outputs:
 
-| Route                          | Does                                                                      |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `GET /api/families`            | Lists the families with outputs, each as `{"name", "display_name"}`       |
-| `POST /api/sessions`           | Starts a session on `{"family": ...}` and returns it with its first pair  |
-| `POST /api/sessions/{id}/pair` | Returns the session's open pair, drawing one if none is open              |
-| `POST /api/pairs/{token}/vote` | Records `{"choice", "flags", "note"}` and returns the session's next pair |
-| `POST /api/sessions/{id}/undo` | Withdraws the session's latest owner vote and shows its pair again        |
+| Route                          | Does                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `GET /api/families`            | Lists the families with outputs, each as `{"name", "aspect", "display_name"}` |
+| `POST /api/sessions`           | Starts a session on `{"family": ...}` and returns it with its first pair      |
+| `POST /api/sessions/{id}/pair` | Returns the session's open pair, drawing one if none is open                  |
+| `POST /api/pairs/{token}/vote` | Records `{"choice", "flags", "note"}` and returns the session's next pair     |
+| `POST /api/sessions/{id}/undo` | Withdraws the session's latest owner vote and shows its pair again            |
 
 `TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. Flags are `meaning`, `punctuation`, `register`, `script`, and `length`, and a note holds at most 500 characters. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
 

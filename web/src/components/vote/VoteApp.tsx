@@ -2,7 +2,8 @@ import { cn } from 'cn';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 
-import { pageTitle, wideContainer } from '@/components/site/PageParts';
+import { AspectTitle } from '@/components/site/Method';
+import { pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ import {
   type PairView,
   type SessionView,
 } from '@/lib/arena';
+import { familyTitle, groupByAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
 import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 
@@ -87,21 +89,32 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
           No family has outputs to vote on. Run and ingest a family, then reload this page.
         </p>
       )}
-      <ul className="flex flex-wrap gap-2">
-        {families?.map((family) => (
-          <li key={family.name}>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                onStart(family.name);
-              }}
-            >
-              {family.display_name}
-            </Button>
-          </li>
-        ))}
-      </ul>
+      {families &&
+        groupByAspect(families).map(({ aspect, members }) => {
+          const id = `aspect-${aspect ?? 'unlisted'}`;
+          return (
+            <section key={id} className="space-y-3" aria-labelledby={id}>
+              <h2 id={id} className={cn(sectionTitle, 'flex items-center gap-2')}>
+                {aspect ? <AspectTitle aspect={aspect} /> : 'Unlisted'}
+              </h2>
+              <ul className="flex flex-wrap gap-2">
+                {members.map((family) => (
+                  <li key={family.name}>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        onStart(family.name);
+                      }}
+                    >
+                      {family.display_name}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
     </Screen>
   );
 }
@@ -331,7 +344,7 @@ export function VoteApp() {
     return (
       <Screen title="Session complete">
         <p className="text-muted-foreground">
-          {formatCountOf(session.votes, 'vote')} recorded on {session.family.display_name}.
+          {formatCountOf(session.votes, 'vote')} recorded on {familyTitle(session.family)}.
         </p>
         <ErrorAlert error={error} />
         <div className="flex gap-2">
@@ -354,7 +367,7 @@ export function VoteApp() {
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
       <span className="whitespace-nowrap tabular-nums">
-        {session.family.display_name}, pair {session.votes + 1} of {session.size}
+        {familyTitle(session.family)}, pair {session.votes + 1} of {session.size}
       </span>
       <Progress
         value={session.size === 0 ? 0 : (100 * session.votes) / session.size}

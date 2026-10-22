@@ -1,5 +1,6 @@
 import { getCollection } from 'astro:content';
 
+import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
@@ -16,6 +17,10 @@ export interface TestsRound {
 
 export interface Family {
   name: string;
+  /** The family's full name, which titles and lists outside its aspect show. */
+  title: string;
+  /** The aspect the family is listed under, which every public family has. */
+  aspect: Aspect;
   config: FamilyConfig;
   /**
    * Closed rounds, oldest first, so the last one carries the cumulative board. Empty until the
@@ -27,10 +32,11 @@ export interface Family {
 }
 
 /**
- * Pairs each public family's config with its reports, by name. Families without `public = true`
- * stay off the site together with their reports.
+ * Pairs each public family's config with its reports, by name, and lists them by name. Families
+ * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a display name.
+ * @throws Error when two families, listed or not, share a full name, or a public family has no
+ *   aspect.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -39,25 +45,31 @@ export function listFamilies(
 ): Family[] {
   const owners = new Map<string, string>();
   for (const { name, config } of configs) {
-    const owner = owners.get(config.display_name);
+    const title = familyTitle(config);
+    const owner = owners.get(title);
     if (owner !== undefined) {
-      throw new Error(
-        `families ${owner} and ${name} share the display name ${config.display_name}`,
-      );
+      throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
-    owners.set(config.display_name, name);
+    owners.set(title, name);
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
   return configs
     .filter(({ config }) => config.public)
-    .map(({ name, config }) => ({
-      name,
-      config,
-      rounds: (rounds.get(name) ?? []).toSorted(
-        (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
-      ),
-      systemNames,
-    }))
+    .map(({ name, config }) => {
+      if (config.aspect === undefined) {
+        throw new Error(`public family ${name} has no aspect`);
+      }
+      return {
+        name,
+        title: familyTitle(config),
+        aspect: config.aspect,
+        config,
+        rounds: (rounds.get(name) ?? []).toSorted(
+          (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
+        ),
+        systemNames,
+      };
+    })
     .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -107,5 +119,64 @@ export function votesRounds(family: Family): VotesRound[] {
 export function testsRounds(family: Family): TestsRound[] {
   return family.rounds.flatMap(({ round, results }) =>
     results.scorer === 'tests' ? [{ round, results }] : [],
+  );
+}
+
+/** Returns the systems with a page on a family's board: those its voted rounds placed. */
+export function systemPages(family: Family): Set<string> {
+  return new Set(
+    votesRounds(family).flatMap(({ results }) => results.standings.map((s) => s.system)),
+  );
+}
+
+/** A link to one of an aspect's boards, where `current` marks the board on screen. */
+export interface BoardLink {
+  href: string;
+  label: string;
+  current: boolean;
+}
+
+/** Returns the families listed under `family`'s aspect, itself included, in `listFamilies` order. */
+function siblings(families: Family[], family: Family): Family[] {
+  // A `filter` on the aspect fails `no-unnecessary-condition` while the registry has one aspect.
+  return Map.groupBy(families, (item) => item.aspect).get(family.aspect) ?? [];
+}
+
+/** Returns each family page's params and props: the family and its aspect's boards. */
+export function familyPaths(families: Family[]) {
+  return families.map((family) => ({
+    params: { family: family.name },
+    props: {
+      family,
+      boards: siblings(families, family).map((item): BoardLink => ({
+        href: `/${item.name}/`,
+        label: item.config.display_name,
+        current: item.name === family.name,
+      })),
+    },
+  }));
+}
+
+/**
+ * Returns each system page's params and props: the family, the system, and the system's pages on
+ * the boards of the family's aspect that give it one.
+ */
+export function systemPaths(families: Family[]) {
+  const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
+  return families.flatMap((family) =>
+    [...systemPages(family)].map((system) => ({
+      params: { family: family.name, system },
+      props: {
+        family,
+        system,
+        boards: siblings(families, family)
+          .filter((item) => pages.get(item.name)?.has(system))
+          .map((item): BoardLink => ({
+            href: `/${item.name}/${system}/`,
+            label: item.config.display_name,
+            current: item.name === family.name,
+          })),
+      },
+    })),
   );
 }

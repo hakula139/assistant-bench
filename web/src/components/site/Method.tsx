@@ -6,6 +6,7 @@ import {
   FileText,
   FlaskConical,
   ListChecks,
+  PenLine,
   Percent,
   Play,
   ShieldCheck,
@@ -14,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { aspects, type Aspect } from '@/lib/aspects';
 import type { Scorer, VotesConfig } from '@/lib/family';
 import { methodSteps, scorers, type MethodStep } from '@/lib/method';
 
@@ -29,6 +31,24 @@ const stepIcons: Record<MethodStep['step'], LucideIcon> = {
 };
 
 const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConical };
+
+const aspectIcons: Record<Aspect, LucideIcon> = { 'technical-writing': PenLine };
+
+/** An aspect's icon, which decorates the aspect's title beside it. */
+export function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
+  const Icon = aspectIcons[aspect];
+  return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;
+}
+
+/** An aspect's icon and title, the content of a heading that names the aspect. */
+export function AspectTitle({ aspect }: { aspect: Aspect }) {
+  return (
+    <>
+      <AspectIcon aspect={aspect} className="size-[0.8em]" />
+      {aspects[aspect].title}
+    </>
+  );
+}
 
 /** A scorer's icon, which decorates the scorer's title beside it. */
 export function ScorerIcon({ scorer, className }: { scorer: Scorer; className?: string }) {

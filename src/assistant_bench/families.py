@@ -20,13 +20,16 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir
 class _Settings(BaseModel):
     """Settings every family shares.
 
-    `display_name` is the name the site and the vote page show, `categories` lists
-    the categories its cases may carry, which reports publish, and `public` says
-    whether the public site lists the family.
+    `aspect` names the skill the family measures, which the site groups families
+    by and validates, and `display_name` is the family's short name within its
+    aspect, or its whole name without one. `categories` lists the categories its
+    cases may carry, which reports publish, and `public` says whether the public
+    site lists the family.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 
+    aspect: str | None = None
     display_name: str = Field(min_length=1)
     systems: list[str] = []
     samples: int = Field(ge=1)

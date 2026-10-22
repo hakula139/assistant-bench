@@ -1,6 +1,9 @@
 import { z } from 'astro/zod';
 
+import { aspectIds } from '@/lib/aspects';
+
 const shared = {
+  aspect: z.enum(aspectIds).optional(),
   display_name: z.string(),
   systems: z.array(z.string()).default([]),
   public: z.boolean().default(false),
@@ -15,7 +18,8 @@ const gatesSchema = z.object({
 
 /**
  * The fields of `families/<family>/family.toml` the site reads. The pydantic settings model
- * validates the whole file, so these objects drop the keys they do not list.
+ * validates the whole file, so these objects drop the keys they do not list. The site alone knows
+ * the aspects, so it rejects an unknown one.
  */
 export const familyConfigSchema = z.discriminatedUnion('scorer', [
   z.object({
