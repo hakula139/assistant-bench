@@ -1,4 +1,6 @@
 ---
+import plexLatin from '@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2?url';
+
 import '@/styles/global.css';
 import { SITE_NAME } from '@/lib/site';
 
@@ -14,6 +16,7 @@ const { title, description } = Astro.props;
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content={description} />
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preload" href={plexLatin} as="font" type="font/woff2" crossorigin />
 <title>{title}</title>
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content={SITE_NAME} />

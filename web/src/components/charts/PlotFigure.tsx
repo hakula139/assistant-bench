@@ -1,5 +1,4 @@
 import * as Plot from '@observablehq/plot';
-import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
 
 export interface PlotFrame {
@@ -19,7 +18,6 @@ interface PlotFigureProps {
    * where an enclosing element already names the chart.
    */
   label?: string;
-  className?: string;
 }
 
 function labelMeasure(element: HTMLElement): (text: string) => number {
@@ -33,7 +31,7 @@ function labelMeasure(element: HTMLElement): (text: string) => number {
 }
 
 /** Renders an Observable Plot chart that fills its container's width. */
-export function PlotFigure({ plot, height, label, className }: PlotFigureProps) {
+export function PlotFigure({ plot, height, label }: PlotFigureProps) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
@@ -81,7 +79,7 @@ export function PlotFigure({ plot, height, label, className }: PlotFigureProps) 
       ref={container}
       role={label === undefined ? undefined : 'img'}
       aria-label={label}
-      className={cn('bench-plot', className)}
+      className="bench-plot"
       style={{ minHeight: height }}
     />
   );

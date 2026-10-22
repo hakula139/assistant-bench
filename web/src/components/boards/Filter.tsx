@@ -1,12 +1,6 @@
 import { useId } from 'react';
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 interface FilterProps {
   label: string;
@@ -23,18 +17,21 @@ export function Filter({ label, value, options, onChange }: FilterProps) {
       <label htmlFor={id} className="text-muted-foreground">
         {label}
       </label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger id={id} size="sm" className="min-w-36">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <NativeSelect
+        id={id}
+        size="sm"
+        className="min-w-36"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      >
+        {options.map((option) => (
+          <NativeSelectOption key={option.value} value={option.value}>
+            {option.label}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
     </div>
   );
 }

@@ -17,7 +17,7 @@ Each family scored by votes gets a page at `/<family>/` showing one round, with 
 
 Each system has a page at `/<family>/<system>/` from its latest round: its score, rank spread, votes, and fingerprint, then head-to-head win rates, category scores on the family page's category axis, output tokens and latency beside the other systems, flag tallies, and its standing in every round it appeared in. Families scored by tests get a table of pass rates, and the home page shows each listed family's latest scores as a compact forest plot with its leader, followed by its unranked systems and those without votes.
 
-Every chart has a table twin with the same values and a tooltip on hover. The static forest plots on the home page, on a family page before its first round, and in the methodology are tables themselves, with each row's values in text and in a hover title. Both themes read their colors from CSS variables, so a theme switch needs no re-render.
+Every chart has a table twin with the same values and a tooltip on hover. The static forest plots on the home page, on a family page before its first round, and in the methodology are tables themselves, with each row's values in text and in a hover title, as are the leaderboard's interval cells, which repeat the Score column beside them. Both themes read their colors from CSS variables, so a theme switch needs no re-render.
 
 ## The Vote Page
 
