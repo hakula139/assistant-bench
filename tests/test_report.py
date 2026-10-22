@@ -329,6 +329,40 @@ class TestClose:
         assert {standing.system for standing in board.standings} == {'a', 'b'}
         assert board.unranked == ['c', 'd']
 
+    def test_leaves_out_a_system_whose_outputs_only_settle_results(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {'c1': 'reply', 'c2': 'reply'}
+        write_votes_family(families_dir, 'f', ['a', 'b', 'c'], cases)
+        outputs = passing_outputs(
+            cases, {case: {s: f'{s} on {case}' for s in 'abc'} for case in cases}
+        )
+        write_outputs(
+            'f',
+            [
+                output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
+                if output.system == 'c'
+                else output
+                for output in outputs.values()
+            ],
+        )
+        session = store.start_session('f', AT)
+        for case in cases:
+            for choice in ('a', 'b', 'tie'):
+                record(
+                    store,
+                    session.id,
+                    outputs[(case, 'a')],
+                    outputs[(case, 'b')],
+                    choice,
+                )
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert {standing.system for standing in results.standings} == {'a', 'b'}
+        assert results.unranked == []
+
     def test_leaves_the_systems_a_board_cannot_bound_unranked_there(
         self, families_dir: Path, store: VoteStore
     ) -> None:

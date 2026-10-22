@@ -184,18 +184,23 @@ class TestBoard:
 
 
 class TestDraw:
-    def test_seeds_every_ordered_pair_before_adapting(self) -> None:
+    def test_seeds_every_ordered_pair_fewest_votes_first(self) -> None:
         pool = make_pool()
         rng = np.random.default_rng(0)
         votes: list[Vote] = []
+        counts = []
 
         for vote_id in range(1, 13):
             picked = draw(pool, matched(pool, votes), set(), NOW, rng, Board())
             assert picked is not None
             votes.append(vote_on(picked, 'a', vote_id))
+            if vote_id % 6 == 0:
+                counts.append(Counter((v.a.system, v.b.system) for v in votes))
 
-        counts = Counter((vote.a.system, vote.b.system) for vote in votes)
-        assert counts == dict.fromkeys(permutations(SYSTEMS, 2), 2)
+        assert counts == [
+            dict.fromkeys(permutations(SYSTEMS, 2), 1),
+            dict.fromkeys(permutations(SYSTEMS, 2), 2),
+        ]
 
     def test_draws_only_cases_the_session_has_not_used(self) -> None:
         pool = make_pool(cases=3)
@@ -282,6 +287,27 @@ class TestDraw:
                 original.b,
                 original.a,
             )
+
+    def test_skips_a_repeat_on_a_case_the_session_used(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
+        pool = make_pool(systems=('large', 'small'))
+        (original,) = votes_between(pool, 'large', 'small', ['a'])
+        original = original.model_copy(update={'recorded_at': NOW - timedelta(days=1)})
+
+        picked = draw(
+            pool,
+            matched(pool, [original]),
+            {original.case},
+            NOW,
+            np.random.default_rng(0),
+            Board(),
+        )
+
+        assert picked is not None
+        assert picked.repeat_of is None
+        assert picked.case != original.case
 
 
 class TestPairWeights:

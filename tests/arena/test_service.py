@@ -72,7 +72,11 @@ class TestArena:
         assert (view.votes, view.size) == (0, 3)
         assert view.pair.instruction.startswith('Write about c')
         exposed = view.model_dump_json()
-        for hidden in ('fp-', 'job-1', '__', 'large"', 'small"'):
+        trials = [
+            f'{case}__{system}' for case in ARENA_CASES for system in ARENA_SYSTEMS
+        ]
+        fingerprints = [f'fp-{system}' for system in ARENA_SYSTEMS]
+        for hidden in (*trials, *fingerprints, 'job-1', 'large"', 'small"'):
             assert hidden not in exposed
 
     def test_records_a_vote_with_its_sides_and_duration(
@@ -139,6 +143,45 @@ class TestArena:
         assert (undone.pair.a, undone.pair.b) == (first.pair.a, first.pair.b)
         with pytest.raises(NothingToUndo):
             arena.undo(first.id)
+
+    def test_undo_retires_the_pair_it_replaces(
+        self, families_dir: Path, clock: Clock, store: VoteStore
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        first = arena.start('f')
+        assert first.pair is not None
+        second = arena.vote(first.pair.token, 'a', frozenset(), None)
+        assert second.pair is not None
+
+        arena.undo(first.id)
+
+        with pytest.raises(UnknownItem):
+            arena.vote(second.pair.token, 'a', frozenset(), None)
+
+    def test_undo_keeps_a_repeat_a_repeat(
+        self,
+        families_dir: Path,
+        clock: Clock,
+        store: VoteStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        first = arena.start('f')
+        assert first.pair is not None
+        arena.vote(first.pair.token, 'a', frozenset(), None)
+        (original,) = store.votes('f')
+        clock.now += timedelta(days=1)
+        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
+        repeat = arena.start('f')
+        assert repeat.pair is not None
+        arena.vote(repeat.pair.token, 'b', frozenset(), None)
+
+        undone = arena.undo(repeat.id)
+        assert undone.pair is not None
+        arena.vote(undone.pair.token, 'b', frozenset(), None)
+
+        *_, recast = store.votes('f')
+        assert recast.repeat_of == original.id
 
     def test_undo_draws_afresh_once_the_vote_s_output_left(
         self, families_dir: Path, clock: Clock, store: VoteStore

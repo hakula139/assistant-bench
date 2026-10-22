@@ -303,8 +303,17 @@ class TestIngest:
             ('job-2', 'a', None, 'Hi.')
         ]
 
-    def test_keeps_a_renamed_system_beside_its_old_name(self, data_dir: Path) -> None:
-        system = make_system()
+    @pytest.mark.parametrize(
+        ('names', 'fingerprints'),
+        [
+            (('old-name', 'new-name'), ('fp', 'fp')),
+            (('acme-large', 'acme-large'), ('fp-old', 'fp-new')),
+        ],
+        ids=['renamed', 'new-fingerprint'],
+    )
+    def test_keeps_samples_per_name_and_fingerprint(
+        self, data_dir: Path, names: tuple[str, str], fingerprints: tuple[str, str]
+    ) -> None:
         family = Family(
             name='f',
             source='cases',
@@ -318,19 +327,19 @@ class TestIngest:
             ),
         )
         jobs_dir = data_dir / 'jobs' / 'f'
-        for job, name in (('job-1', 'old-name'), ('job-2', 'new-name')):
+        samples = list(zip(('job-1', 'job-2'), names, fingerprints, strict=True))
+        for job, name, fingerprint in samples:
             agent = AgentConfig(
                 import_path='assistant_bench.harnesses.generate:Generate',
-                kwargs={'system': name, 'fingerprint': system.fingerprint},
+                kwargs={'system': name, 'fingerprint': fingerprint},
             )
-            write_trial(jobs_dir / job, 'a__1', agent, task='f/a', output=name)
+            write_trial(jobs_dir / job, 'a__1', agent, task='f/a', output=job)
 
         outputs = jobs.ingest(family, {})
 
-        assert [(o.system, o.text) for o in outputs] == [
-            ('new-name', 'new-name'),
-            ('old-name', 'old-name'),
-        ]
+        assert sorted((o.system, o.fingerprint, o.text) for o in outputs) == sorted(
+            (name, fingerprint, job) for job, name, fingerprint in samples
+        )
 
     def test_gates_each_output_against_its_case_instruction(
         self, data_dir: Path
