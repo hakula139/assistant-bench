@@ -17,9 +17,9 @@ Each case declares its `source`, which determines where the case and everything 
 
 ## The Data Directory
 
-Everything a run produces lives under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, ingested outputs, and votes stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs, and the endpoint's replies, and votes name the cases and trials they compare. [Running](../guide/running.md#the-data-directory) lists its layout.
+Everything a run produces lives in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, ingested outputs, and votes stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs, and the endpoint's replies, and votes name the cases and trials they compare. [Running](../guide/running.md#the-data-directory) lists its layout.
 
-uv also finds its managed interpreters under `XDG_DATA_HOME`, so `XDG_DATA_HOME=<dir> uv run ...` installs a new CPython in `<dir>` and relinks `.venv` to it, which breaks once `<dir>` is removed. To point a single run at a scratch data directory, set the variable in-process or call `.venv/bin/bench` directly.
+Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leave `XDG_DATA_HOME` alone, since uv keeps its managed interpreters under it and would install a new CPython in `<dir>` and relink `.venv` to it, which breaks once `<dir>` is removed.
 
 ## Committed and Published Text
 

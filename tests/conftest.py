@@ -14,6 +14,7 @@ import trustme
 from assistant_bench import families
 from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.paths import DATA_DIR_VAR
 from support import EXPORT_FILE, Clock, Request, StubEndpoint
 
 
@@ -27,13 +28,13 @@ class IPv6Server(ThreadingHTTPServer):
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the data directory at a scratch path, away from `.env` and any proxy."""
-    home = tmp_path / 'xdg-data'
-    monkeypatch.setenv('XDG_DATA_HOME', str(home))
+    path = tmp_path / 'data'
+    monkeypatch.setenv(DATA_DIR_VAR, str(path))
     monkeypatch.chdir(tmp_path)
     for name in PROXY_VARS:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
-    return home / 'assistant-bench'
+    return path
 
 
 @pytest.fixture
