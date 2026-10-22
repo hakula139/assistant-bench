@@ -34,6 +34,19 @@ describe('listFamilies', () => {
     ]);
   });
 
+  test('lists the families by name', () => {
+    const families = listFamilies(
+      [
+        { name: 'prose-zh', config: votes(true, 'Chinese Prose') },
+        { name: 'prose-en', config: votes(true, 'English Prose') },
+      ],
+      [],
+      FIXTURE_NAMES,
+    );
+
+    expect(families.map((family) => family.name)).toEqual(['prose-en', 'prose-zh']);
+  });
+
   test('lists a public family before its first round closes', () => {
     const families = listFamilies([{ name: 'prose', config: votes(true) }], [], FIXTURE_NAMES);
 

@@ -83,11 +83,7 @@ describe('VoteApp', () => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+  afterEach(cleanup);
 
   test('submits from the note by chord, then takes the next key as a shortcut', async () => {
     const api = stubApi();

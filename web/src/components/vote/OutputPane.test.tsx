@@ -5,10 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { OutputPane } from '@/components/vote/OutputPane';
 
 describe('OutputPane', () => {
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
+  afterEach(cleanup);
 
   test('loads an HTML output by URL in a frame that may only run scripts', () => {
     vi.stubGlobal(

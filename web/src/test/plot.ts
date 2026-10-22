@@ -2,8 +2,8 @@ import { vi } from 'vitest';
 
 /**
  * Stubs what `PlotFigure` and Plot's tips read from the browser, so a chart draws once in jsdom at
- * `width` with labels 7 px per character. Undo with `vi.unstubAllGlobals()` and
- * `vi.restoreAllMocks()`.
+ * `width` with labels 7 px per character. The Vitest config restores the observer and the canvas
+ * after each test, while `document.fonts` and `getBBox` stay stubbed for the rest of the file.
  */
 export function stubPlotFrame(width = 600) {
   vi.stubGlobal(

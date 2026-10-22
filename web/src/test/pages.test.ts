@@ -72,7 +72,7 @@ async function render(
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-/** A family scored by tests, with one round. */
+/** A family scored by tests, with one round that lists the weaker system first. */
 function testsFamily(): Family {
   const report = reportSchema.parse({
     family: 'smoke',
@@ -81,6 +81,15 @@ function testsFamily(): Family {
     results: {
       scorer: 'tests',
       standings: [
+        {
+          system: 'acme-small',
+          fingerprint: null,
+          trials: 4,
+          errored: 0,
+          pass_rate: 0.25,
+          mean_cost_usd: null,
+          p50_latency_sec: null,
+        },
         {
           system: 'acme-pro',
           fingerprint: null,
@@ -98,7 +107,7 @@ function testsFamily(): Family {
     config: {
       scorer: 'tests',
       display_name: 'Smoke Tasks',
-      systems: ['acme-pro'],
+      systems: ['acme-pro', 'acme-small'],
       public: true,
     },
     rounds: [report],
@@ -116,7 +125,7 @@ function guide(html: string): string {
 }
 
 describe('family page', () => {
-  test('renders the votes board with the round summary', async () => {
+  test('renders the votes board on the latest round with its summary', async () => {
     const html = await render(FamilyPage, { family: await family() });
 
     expect(text(html)).toContain(
@@ -125,6 +134,7 @@ describe('family page', () => {
     expect(text(html)).toContain(
       'Leader Acme Large tied with the top score, chosen by the lower cost',
     );
+    expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
   });
 
   test('lists the systems with unbounded intervals before the first round closes', async () => {
@@ -193,6 +203,12 @@ describe('family panel', () => {
 
     expect(text(html)).toContain(`${loaded.config.display_name} `);
     expect(shownSlugs(html, { ...SLUGS, smoke: 'Smoke Tasks' })).toEqual([]);
+  });
+
+  test("lists a tests family's systems by pass rate, best first", async () => {
+    const html = await render(FamilyPanel, { family: testsFamily() });
+
+    expect(text(html)).toContain('System Pass rate Acme Pro 75% Acme Small 25%');
   });
 });
 

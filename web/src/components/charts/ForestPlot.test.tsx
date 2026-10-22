@@ -75,11 +75,7 @@ describe('CategoryForests', () => {
     stubPlotFrame();
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+  afterEach(cleanup);
 
   test('draws every category on the same axis, labelled by display name', async () => {
     const board = (category: string, standings: CategoryBoard['standings']): CategoryBoard => ({
