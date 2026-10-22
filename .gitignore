@@ -2,6 +2,7 @@
 /.coverage
 /coverage.xml
 /web/.astro/
+/web/coverage/
 /web/dist/
 __pycache__/
 *.egg-info/

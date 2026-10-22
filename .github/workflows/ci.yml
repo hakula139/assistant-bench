@@ -35,6 +35,9 @@ jobs:
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -61,6 +64,14 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          fail_ci_if_error: true
+          files: web/coverage/lcov.info
+          flags: web
+          use_oidc: true
 
   build:
     name: Build Site
@@ -137,6 +148,7 @@ jobs:
         with:
           fail_ci_if_error: true
           files: coverage.xml
+          flags: python
           use_oidc: true
 
   harbor-smoke:

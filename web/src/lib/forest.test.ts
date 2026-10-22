@@ -5,6 +5,7 @@ import {
   clip,
   forestDomain,
   forestTicks,
+  labelledTicks,
   roundRows,
   sharedDomain,
   sparseTicks,
@@ -69,6 +70,16 @@ describe('sparseTicks', () => {
   });
 });
 
+describe('labelledTicks', () => {
+  test('labels only the sparse ticks below 240 px and every tick from there', () => {
+    const domain: [number, number] = [600, 1400];
+
+    const ticks = [labelledTicks(domain, 240), labelledTicks(domain, 239)];
+
+    expect(ticks).toEqual([forestTicks(domain), [600, 1000, 1400]]);
+  });
+});
+
 describe('clip', () => {
   test('moves a score below the axis to its start and marks the cut', () => {
     const clipped = clip(estimate(233, 81, 321), [400, 1100]);
@@ -96,13 +107,19 @@ describe('clip', () => {
 });
 
 describe('roundRows', () => {
-  test('follows the standings with the unranked systems, then those without votes', async () => {
+  test('orders the standings by score, then the unranked and those without votes by name', async () => {
     const report = reportSchema.parse(await readFixture());
     if (report.results.scorer !== 'votes') {
       throw new Error('the fixture is a votes report');
     }
+    const { standings, unranked } = report.results;
 
-    const rows = roundRows('arena', ['acme-large', 'acme-new'], report.results, FIXTURE_NAMES);
+    const rows = roundRows(
+      'arena',
+      ['acme-new', 'acme-large', 'acme-gone'],
+      { standings: standings.toReversed(), unranked: unranked.toReversed() },
+      { ...FIXTURE_NAMES, 'acme-gone': 'Acme Gone' },
+    );
 
     expect(rows.map((row) => [row.system, 'unplaced' in row ? row.unplaced : 'placed'])).toEqual([
       ['acme-pro', 'placed'],
@@ -113,6 +130,7 @@ describe('roundRows', () => {
       ['acme-tiny', 'placed'],
       ['acme-edge', 'unranked'],
       ['acme-nano', 'unranked'],
+      ['acme-gone', 'no-votes'],
       ['acme-new', 'no-votes'],
     ]);
   });

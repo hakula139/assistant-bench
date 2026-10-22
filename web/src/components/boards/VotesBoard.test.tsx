@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import { cleanup, render as renderInDom } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
@@ -5,6 +7,7 @@ import { VotesBoard } from '@/components/boards/VotesBoard';
 import { reportSchema } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
+import { stubPlotFrame } from '@/test/plot';
 
 const search = vi.hoisted(() => new URLSearchParams());
 vi.mock('@/lib/use-search-param', () => ({
@@ -29,9 +32,19 @@ function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
+const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
+
+/** The x positions of a row's vertical rules, which only the reference draws. */
+function verticalRules(row: Element): number[] {
+  return [...row.querySelectorAll('g[aria-label="rule"] line')]
+    .filter((line) => line.getAttribute('y1') !== line.getAttribute('y2'))
+    .map((line) => Number(line.getAttribute('x1')));
+}
+
 describe('VotesBoard', () => {
   afterEach(() => {
     search.delete('category');
+    cleanup();
   });
 
   test('lists the ranked systems by score, best first', async () => {
@@ -120,6 +133,50 @@ describe('VotesBoard', () => {
 
     expect(html).not.toContain('Mean cost per output');
     expect(html).toContain('Median latency');
+  });
+
+  test('drops the rank column in a category and marks the columns that stay family-wide', async () => {
+    search.set('category', 'message');
+
+    const html = render(await load());
+
+    expect(text(head(html))).toBe(
+      ' System 95% interval Score Votes Both bad all categories Gate failures all categories Cost / output all categories p50 latency all categories ',
+    );
+  });
+
+  test('shows the family board for a category the round does not have', async () => {
+    search.set('category', 'missing');
+
+    const html = render(await load());
+
+    expect(text(head(html))).toMatch(/^ Rank System /);
+    expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
+  });
+
+  test("draws the reference's score as one rule through every row", async () => {
+    const { round, results } = await load();
+    stubPlotFrame();
+
+    const { container } = renderInDom(
+      <VotesBoard family="arena" rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
+    );
+    const rows = await vi.waitFor(() => {
+      const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
+        row.querySelector('svg'),
+      );
+      expect(drawn).toHaveLength(results.standings.length);
+      return drawn;
+    });
+
+    const referenceRow = rows.find((row) =>
+      row.querySelector(`a[href="/arena/${results.reference}/"]`),
+    );
+    const referenceScore = Number(
+      referenceRow?.querySelector('g[aria-label="dot"] circle')?.getAttribute('cx'),
+    );
+
+    expect(rows.map(verticalRules)).toEqual(rows.map(() => [referenceScore]));
   });
 
   test('keeps every category row and the systems only the category ranks', async () => {

@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import type { SystemNames } from '@/lib/systems';
 
 /** Display names for every system the fixtures name, each unlike its table name. */
@@ -67,6 +65,11 @@ export function shownSlugs(html: string, names: SystemNames = FIXTURE_NAMES): st
   );
 }
 
+const fixtures = import.meta.glob<Record<string, unknown>>(
+  '../../../tests/fixtures/{report,report-early,report.schema}.json',
+  { import: 'default' },
+);
+
 /**
  * Reads a committed fixture as raw JSON, so each test can alter its own copy: `report` after ten
  * simulated sessions, `report-early` after the first, which has no decision, or `report.schema`.
@@ -75,6 +78,5 @@ export function shownSlugs(html: string, names: SystemNames = FIXTURE_NAMES): st
 export async function readFixture(
   name: 'report' | 'report-early' | 'report.schema' = 'report',
 ): Promise<Record<string, unknown>> {
-  const path = new URL(`../../../tests/fixtures/${name}.json`, import.meta.url);
-  return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  return structuredClone(await fixtures[`../../../tests/fixtures/${name}.json`]());
 }

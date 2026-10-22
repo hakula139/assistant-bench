@@ -5,7 +5,7 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 ## Placement
 
 - Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
-- The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment.
+- The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom.
 - `test_repository.py` checks committed data and lockfiles, and `test_harbor_smoke.py` holds the trials that need Docker.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
@@ -29,4 +29,4 @@ Tests marked `docker` run real Harbor jobs: the smoke family's oracle, and `Gene
 
 ## Coverage
 
-`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, which CI uploads to Codecov. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed lines, as `codecov.yml` sets.
+`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. CI uploads both to Codecov under the `python` and `web` flags. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed Python lines, as `codecov.yml` sets, and `codecov/patch/web` reports the same bar for the site without being required.

@@ -65,11 +65,7 @@ describe('ParetoScatter', () => {
     stubPlotFrame();
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+  afterEach(cleanup);
 
   test('labels the frontier and its tips by display name', async () => {
     const points = [point('cheap', 1, 900), point('best', 4, 1000), point('dominated', 3, 850)];

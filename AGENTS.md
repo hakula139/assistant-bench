@@ -75,7 +75,7 @@ pnpm format                                 # Check formatting of the site, JSON
 pnpm lint                                   # Lint Markdown and the site
 pnpm spellcheck                             # Spell check
 pnpm typecheck                              # Type check the site
-pnpm test                                   # Test the site: schema, charts, pages, and the vote page
+pnpm test                                   # Test the site, with coverage: schema, charts, pages, and the vote page
 pnpm build                                  # Build the site from reports/
 nix flake check                             # After a flake change, run the hooks in the Nix sandbox
 ```

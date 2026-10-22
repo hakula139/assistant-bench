@@ -4,6 +4,16 @@ coverage:
       default:
         target: auto
         threshold: 1%
+        flags: [python]
+      web:
+        target: auto
+        threshold: 1%
+        flags: [web]
+    # The main ruleset requires `codecov/patch`, which the default status reports.
     patch:
       default:
         target: 80%
+        flags: [python]
+      web:
+        target: 80%
+        flags: [web]
