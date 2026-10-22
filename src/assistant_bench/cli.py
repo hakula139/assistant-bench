@@ -6,6 +6,7 @@ from collections import Counter
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from dotenv import find_dotenv, load_dotenv
@@ -56,8 +57,14 @@ def check(family: str) -> None:
 
 
 @app.command()
-def run(family: str) -> None:
-    """Generate the family's missing trials for every system it lists."""
+def run(
+    family: str,
+    system: Annotated[
+        list[str] | None,
+        typer.Option(help='Run only this listed system, and repeat for several.'),
+    ] = None,
+) -> None:
+    """Generate the family's missing trials for every system it lists or each named."""
     selected = _load_family(family)
     if selected.source != 'cases':
         raise typer.BadParameter(
@@ -66,6 +73,8 @@ def run(family: str) -> None:
     systems = _family_systems(selected)
     if not systems:
         raise typer.BadParameter(f'{family} lists no systems', param_hint='FAMILY')
+    if system:
+        systems = _named_systems(selected, systems, system)
 
     tasks = _render_tasks(selected)
     typer.echo(f'Job written to {_run(jobs.case_job(selected, systems, tasks))}')
@@ -177,6 +186,20 @@ def _family_systems(family: Family) -> list[System]:
             param_hint='FAMILY',
         )
     return [known[name] for name in family.settings.systems]
+
+
+def _named_systems(
+    family: Family, systems: list[System], names: list[str]
+) -> list[System]:
+    listed = [system.name for system in systems]
+    unknown = [name for name in dict.fromkeys(names) if name not in listed]
+    if unknown:
+        raise typer.BadParameter(
+            f'{family.name} does not list {", ".join(unknown)}, '
+            f'so choose among {", ".join(listed)}',
+            param_hint="'--system'",
+        )
+    return [system for system in systems if system.name in names]
 
 
 def _run(job: JobConfig) -> Path:

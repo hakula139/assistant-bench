@@ -14,7 +14,7 @@ from assistant_bench.arena.service import (
     load_families,
 )
 from assistant_bench.arena.store import Side, VoteStore
-from assistant_bench.outputs import read_outputs, write_outputs
+from assistant_bench.outputs import Output, read_outputs, write_outputs
 from support import (
     ARENA_CASES,
     ARENA_SYSTEMS,
@@ -174,6 +174,47 @@ class TestArena:
             view = arena.vote(view.pair.token, 'tie', frozenset(), None)
 
         assert (view.votes, view.size, view.pair) == (2, 2, None)
+
+    def test_pairs_the_systems_with_outputs_until_the_others_join(
+        self, families_dir: Path, clock: Clock, store: VoteStore
+    ) -> None:
+        cases = {f'c{i}': 'reply' for i in range(8)}
+        write_votes_family(families_dir, 'f', ['ref', *ARENA_SYSTEMS], cases)
+
+        def outputs(systems: list[str]) -> list[Output]:
+            return [
+                make_output(
+                    trial=f'{case}__{system}',
+                    job=f'job-{system}',
+                    case=case,
+                    system=system,
+                    fingerprint=f'fp-{system}',
+                    text=f'{system} answers {case}',
+                    gate_failures=[],
+                )
+                for case in cases
+                for system in systems
+            ]
+
+        write_outputs('f', outputs(ARENA_SYSTEMS))
+        arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
+        view = arena.start('f')
+        while view.pair is not None:
+            view = arena.vote(view.pair.token, 'a', frozenset(), None)
+        write_outputs('f', outputs(['ref', *ARENA_SYSTEMS]))
+        clock.now += timedelta(hours=1)
+        arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
+
+        joining = arena.start('f')
+        assert joining.pair is not None
+        arena.vote(joining.pair.token, 'a', frozenset(), None)
+
+        first, *rest, joined = store.votes('f')
+        assert len(rest) == len(cases) - 1
+        assert {
+            frozenset({vote.a.system, vote.b.system}) for vote in [first, *rest]
+        } == {frozenset(ARENA_SYSTEMS)}
+        assert 'ref' in {joined.a.system, joined.b.system}
 
     def test_resumes_the_open_pair(
         self, families_dir: Path, clock: Clock, store: VoteStore
