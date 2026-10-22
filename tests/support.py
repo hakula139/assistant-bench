@@ -1,5 +1,6 @@
 """Builders and the stub endpoint shared by the tests."""
 
+import asyncio
 import json
 import textwrap
 from dataclasses import dataclass, field
@@ -8,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
+from harbor.models.job.config import JobConfig
 from harbor.models.job.lock import TaskLock, TrialLock, VerifierLock
 from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import (
@@ -19,6 +22,7 @@ from harbor.models.trial.config import (
 )
 from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
 from harbor.models.verifier.result import VerifierResult
+from harbor.trial.regrade import local_task_name
 
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import (
@@ -112,6 +116,34 @@ def write_trial(
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+def finish_job(job: JobConfig) -> Path:
+    """Write a successful trial for each trial Harbor plans, and return the job's path.
+
+    Each lock comes from Harbor's own plan, so a later job's diff can reuse the trial.
+    """
+    plan = asyncio.run(JobPlan.from_config(job))
+    job_dir = job.jobs_dir / job.job_name
+    for trial, lock in zip(plan.trial_configs, plan.trial_locks, strict=True):
+        assert trial.task.path is not None
+        trial_dir = job_dir / trial.trial_name
+        trial_dir.mkdir(parents=True)
+        result = TrialResult(
+            task_name=local_task_name(trial.task.path),
+            trial_name=trial.trial_name,
+            trial_uri=f'file://{trial_dir}',
+            task_id=LocalTaskId(path=trial.task.path),
+            task_checksum='0',
+            config=trial,
+            agent_info=AgentInfo(name='generate', version='1'),
+            finished_at=datetime(2026, 10, 21, tzinfo=UTC),
+        )
+        (trial_dir / 'result.json').write_text(result.model_dump_json())
+        (trial_dir / 'lock.json').write_text(lock.model_dump_json())
+    (job_dir / 'config.json').write_text(job.model_dump_json())
+    (job_dir / 'result.json').write_text('{}')
+    return job_dir
 
 
 # ── Stub Endpoint ──

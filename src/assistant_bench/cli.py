@@ -59,12 +59,16 @@ def check(family: str) -> None:
 @app.command()
 def run(
     family: str,
-    system: Annotated[
+    names: Annotated[
         list[str] | None,
-        typer.Option(help='Run only this listed system, and repeat for several.'),
+        typer.Option(
+            '--system',
+            help="Limit the run to this system from the family's list. "
+            'Repeat for several.',
+        ),
     ] = None,
 ) -> None:
-    """Generate the family's missing trials for every system it lists or each named."""
+    """Generate missing trials for every listed system, or only for the named ones."""
     selected = _load_family(family)
     if selected.source != 'cases':
         raise typer.BadParameter(
@@ -73,8 +77,8 @@ def run(
     systems = _family_systems(selected)
     if not systems:
         raise typer.BadParameter(f'{family} lists no systems', param_hint='FAMILY')
-    if system:
-        systems = _named_systems(selected, systems, system)
+    if names:
+        systems = _named_systems(selected, systems, names)
 
     tasks = _render_tasks(selected)
     typer.echo(f'Job written to {_run(jobs.case_job(selected, systems, tasks))}')
@@ -197,7 +201,7 @@ def _named_systems(
         raise typer.BadParameter(
             f'{family.name} does not list {", ".join(unknown)}, '
             f'so choose among {", ".join(listed)}',
-            param_hint="'--system'",
+            param_hint='--system',
         )
     return [system for system in systems if system.name in names]
 

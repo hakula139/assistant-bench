@@ -37,7 +37,7 @@ uv run bench run smoke-text
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. To regenerate a case, give it a new ID.
 
-To run only some of the listed systems, name each with `--system`, as in `uv run bench run prose-zh --system kimi-k3 --system opus-5.5`, and a later run without the option generates the other systems' trials alone. The vote page pairs only the systems that have outputs, and their votes stay in the fit after the other systems join, though `bench close` fails until votes reach the family's reference.
+To run only some of the listed systems, name each with `--system`, as in `uv run bench run prose-zh --system kimi-k3 --system opus-5.5`, and a later run without the option generates the other systems' trials alone. Voting can start once two systems have outputs, and those votes keep counting after the rest join, though `bench close` fails until the family's reference has votes.
 
 ## Collecting Outputs
 

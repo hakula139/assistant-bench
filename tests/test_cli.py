@@ -2,7 +2,6 @@ import asyncio
 import subprocess
 import textwrap
 from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,10 +9,7 @@ import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.job.config import JobConfig
-from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import AgentConfig
-from harbor.models.trial.result import AgentInfo, TrialResult
-from harbor.trial.regrade import local_task_name
 from typer.testing import CliRunner
 
 from assistant_bench import cli, jobs, report, revisions
@@ -24,6 +20,7 @@ from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
 from assistant_bench.outputs import write_outputs
 from support import (
+    finish_job,
     make_output,
     write_synthetic_round,
     write_trial,
@@ -68,31 +65,6 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
-
-
-def finish(job: JobConfig) -> Path:
-    """Write a successful trial for each trial Harbor plans and return the job dir."""
-    plan = asyncio.run(JobPlan.from_config(job))
-    job_dir = job.jobs_dir / job.job_name
-    for trial, lock in zip(plan.trial_configs, plan.trial_locks, strict=True):
-        assert trial.task.path is not None
-        trial_dir = job_dir / trial.trial_name
-        trial_dir.mkdir(parents=True)
-        result = TrialResult(
-            task_name=local_task_name(trial.task.path),
-            trial_name=trial.trial_name,
-            trial_uri=f'file://{trial_dir}',
-            task_id=LocalTaskId(path=trial.task.path),
-            task_checksum='0',
-            config=trial,
-            agent_info=AgentInfo(name='generate', version='1'),
-            finished_at=datetime(2026, 10, 21, tzinfo=UTC),
-        )
-        (trial_dir / 'result.json').write_text(result.model_dump_json())
-        (trial_dir / 'lock.json').write_text(lock.model_dump_json())
-    (job_dir / 'config.json').write_text(job.model_dump_json())
-    (job_dir / 'result.json').write_text('{}')
-    return job_dir
 
 
 class TestCheck:
@@ -241,7 +213,7 @@ class TestRun:
         args = [arg for name in named for arg in ('--system', name)]
         result = runner.invoke(app, ['run', 'smoke-text', *args])
         assert result.exit_code == 0, result.output
-        first = finish(submitted[0])
+        first = finish_job(submitted[0])
 
         result = runner.invoke(app, ['run', 'smoke-text'])
 
