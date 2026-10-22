@@ -126,7 +126,7 @@ class TestFit:
         result = fit(Matchups.build(comparisons))
 
         assert np.isfinite(result.strength).all()
-        assert result.strength[0] - result.strength[1] > 5
+        assert 6 < result.strength[0] - result.strength[1] < 8
 
     def test_raises_when_the_loss_cannot_be_minimized(self) -> None:
         matchups = Matchups.build(
