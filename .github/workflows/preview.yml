@@ -28,6 +28,9 @@ jobs:
     name: Deploy Preview
     needs: build
     runs-on: ubuntu-latest
+    environment:
+      name: preview
+      url: ${{ steps.meta.outputs.deployment_url }}
     permissions:
       contents: read
       pull-requests: write
@@ -52,29 +55,29 @@ jobs:
           name: site-dist
           path: web/dist/
 
-      - name: Upload preview version
+      - name: Deploy preview
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Wrangler appends one JSON record per command to this file, including the upload's URLs.
+          # Wrangler appends one JSON record per command to this file, including the Preview's URLs.
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         run: >-
-          nix develop -c pnpm --filter web exec wrangler versions upload
-          --preview-alias "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
+          nix develop -c pnpm --filter web exec wrangler preview
+          --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
 
       - name: Extract preview metadata
         id: meta
         env:
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         run: |
-          upload=$(jq -c 'select(.type == "version-upload")' "$WRANGLER_OUTPUT_FILE_PATH")
-          version_url=$(jq -er '.preview_url' <<<"$upload")
-          alias_url=$(jq -er '.preview_alias_url' <<<"$upload")
+          record=$(jq -c 'select(.type == "preview")' "$WRANGLER_OUTPUT_FILE_PATH")
+          preview_url=$(jq -er '.preview_urls[0]' <<<"$record")
+          deployment_url=$(jq -er '.deployment_urls[0]' <<<"$record")
           deploy_time=$(date -u +'%Y-%m-%d %H:%M UTC')
           cat >> "$GITHUB_OUTPUT" <<OUTPUT
           short_sha=${PR_SHA:0:7}
-          version_url=$version_url
-          alias_url=$alias_url
+          preview_url=$preview_url
+          deployment_url=$deployment_url
           deploy_time=$deploy_time
           OUTPUT
 
@@ -87,8 +90,8 @@ jobs:
 
             | | |
             | --- | --- |
-            | Preview | ${{ steps.meta.outputs.version_url }} |
-            | Branch preview | ${{ steps.meta.outputs.alias_url }} |
+            | Preview | ${{ steps.meta.outputs.preview_url }} |
+            | This commit | ${{ steps.meta.outputs.deployment_url }} |
             | Commit | `${{ steps.meta.outputs.short_sha }}` |
             | Updated | ${{ steps.meta.outputs.deploy_time }} |
 
