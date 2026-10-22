@@ -19,7 +19,7 @@ Every case belongs to one category, which the per-category leaderboards split on
 | `explanation`    | A concept explained to a stated reader                                         |
 | `message`        | A commit message, issue reply, handoff, announcement, or review reply          |
 
-Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content. Explanation cases leave the content to the model and fix the reader and the length. A case's `checklist` names what the owner should check beyond general quality, such as reporting what was not verified.
+Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content. Explanation cases fix the reader and the length, and most leave the content to the model. A case's `checklist` names what the owner should check beyond general quality, such as reporting what was not verified.
 
 ## Case Sourcing
 
