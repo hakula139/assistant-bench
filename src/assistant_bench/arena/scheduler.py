@@ -23,6 +23,7 @@ from assistant_bench.scoring.ranking import (
 SEED_VOTES_PER_SIDE = 2
 REPEAT_SHARE = 0.1
 REPEAT_DELAY = timedelta(days=1)
+REFIT_VOTES = 5
 
 
 @dataclass(frozen=True)
@@ -91,19 +92,55 @@ class Draw:
     repeat_of: int | None = None
 
 
+class Board:
+    """A family's ratings for the adaptive draw, which reuses them between refits.
+
+    A refit runs the full bootstrap, so the board refits only when `REFIT_VOTES`
+    votes have been cast or undone since the last fit, when it lacks a system the
+    draw weighs, or after `reset`.
+    """
+
+    def __init__(self) -> None:
+        self._ratings: Ratings | None = None
+        self._fitted: frozenset[int] = frozenset()
+
+    def reset(self) -> None:
+        """Refit on the next adaptive draw."""
+        self._ratings = None
+
+    def ratings(
+        self,
+        votes: list[MatchedVote],
+        settled: list[Comparison],
+        systems: Collection[str],
+    ) -> Ratings:
+        """Return ratings that cover `systems`, refitting them when stale."""
+        current = frozenset(m.vote.id for m in votes)
+        if (
+            self._ratings is None
+            or len(self._fitted ^ current) >= REFIT_VOTES
+            or not set(systems) <= set(self._ratings.systems)
+        ):
+            matchups = Matchups.build([m.vote.comparison() for m in votes] + settled)
+            self._ratings = rate(matchups, matchups.systems[0])
+            self._fitted = current
+        return self._ratings
+
+
 def draw(
     pool: Pool,
     votes: list[MatchedVote],
     used: set[str],
     now: datetime,
     rng: np.random.Generator,
+    board: Board,
 ) -> Draw | None:
     """Choose the next pair on a case the session has not used.
 
     `votes` are the family's votes reconciled with `pool.outputs`. A delayed
     repeat comes first, at `REPEAT_SHARE` odds while one is due. Then every
     ordered pair of systems collects `SEED_VOTES_PER_SIDE` votes, and after that
-    the scheduler favors close pairs with few votes.
+    the scheduler favors close pairs with few votes on `board`'s ratings.
     """
     repeats = _due_repeats(votes, used, now)
     if repeats and rng.random() < REPEAT_SHARE:
@@ -118,7 +155,10 @@ def draw(
         return None
     counts = Counter((m.vote.a.system, m.vote.b.system) for m in votes)
     pair = _seed_pair(open_cases, counts, rng) or _adaptive_pair(
-        open_cases, counts, [m.vote.comparison() for m in votes] + pool.settled, rng
+        open_cases,
+        counts,
+        board.ratings(votes, pool.settled, {s for pair in open_cases for s in pair}),
+        rng,
     )
     case = open_cases[pair][rng.integers(len(open_cases[pair]))]
     pairings = pool.pairings(case, *pair)
@@ -183,12 +223,10 @@ def _seed_pair(
 def _adaptive_pair(
     open_cases: dict[tuple[str, str], list[str]],
     counts: Counter[tuple[str, str]],
-    comparisons: list[Comparison],
+    ratings: Ratings,
     rng: np.random.Generator,
 ) -> tuple[str, str]:
     """Draw a pair by `pair_weights`, putting the order shown less often left."""
-    matchups = Matchups.build(comparisons)
-    ratings = rate(matchups, matchups.systems[0])
     unordered = sorted({(min(pair), max(pair)) for pair in open_cases})
     weights = pair_weights(ratings, unordered, counts)
     pairs = list(weights)

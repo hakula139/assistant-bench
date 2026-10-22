@@ -12,9 +12,11 @@ import pytest
 import trustme
 
 from assistant_bench import families
+from assistant_bench.arena import scheduler
 from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.paths import DATA_DIR_VAR
+from assistant_bench.scoring import ranking
 from support import EXPORT_FILE, Clock, Request, StubEndpoint
 
 
@@ -68,6 +70,19 @@ def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     directory = tmp_path / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
+
+
+@pytest.fixture
+def fits(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record the number of comparisons behind each refit of the scheduler's board."""
+    comparisons: list[int] = []
+
+    def rate(matchups: ranking.Matchups, reference: str) -> ranking.Ratings:
+        comparisons.append(len(matchups.score))
+        return ranking.rate(matchups, reference)
+
+    monkeypatch.setattr(scheduler, 'rate', rate)
+    return comparisons
 
 
 @pytest.fixture

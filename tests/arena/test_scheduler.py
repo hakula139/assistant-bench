@@ -8,11 +8,11 @@ from scipy import special
 
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.resolution import MatchedVote, reconcile
-from assistant_bench.arena.scheduler import Draw, Pool, draw, pair_weights
+from assistant_bench.arena.scheduler import Board, Draw, Pool, draw, pair_weights
 from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
-from assistant_bench.scoring.ranking import ELO_PER_LOGIT, Ratings
+from assistant_bench.scoring.ranking import ELO_PER_LOGIT, Comparison, Ratings
 from support import make_output
 
 
@@ -119,6 +119,70 @@ class TestPool:
             ]
 
 
+class TestBoard:
+    class TestReset:
+        def test_refits_on_the_next_draw(self, fits: list[int]) -> None:
+            pool = make_pool(systems=('large', 'small'))
+            votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
+            board = Board()
+            board.ratings(votes, [], {'large', 'small'})
+
+            board.reset()
+            board.ratings(votes, [], {'large', 'small'})
+
+            assert fits == [4, 4]
+
+    class TestRatings:
+        def test_refits_once_refit_votes_are_cast_or_undone(
+            self, fits: list[int]
+        ) -> None:
+            pool = make_pool(systems=('large', 'small'))
+            votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 9))
+            board = Board()
+
+            for count in (4, 8, 9, 5, 4):
+                board.ratings(votes[:count], [], {'large', 'small'})
+
+            assert fits == [4, 9, 4]
+
+        def test_refits_once_refit_votes_are_undone_and_recast(
+            self, fits: list[int]
+        ) -> None:
+            pool = make_pool(systems=('large', 'small'))
+            votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 7))
+            board = Board()
+            board.ratings(votes[:4], [], {'large', 'small'})
+
+            board.ratings(votes[:2] + votes[4:6], [], {'large', 'small'})
+            board.ratings(votes[:1] + votes[4:7], [], {'large', 'small'})
+
+            assert fits == [4, 4]
+
+        def test_fits_the_settled_results_with_the_votes(self, fits: list[int]) -> None:
+            pool = make_pool(systems=('large', 'small'))
+            votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
+            settled = [Comparison('large', 'small', 1.0, 'c9', 0.25, sided=False)]
+
+            Board().ratings(votes, settled, {'large', 'small'})
+
+            assert fits == [5]
+
+        def test_refits_for_a_system_it_lacks(self, fits: list[int]) -> None:
+            pool = make_pool()
+            votes = matched(
+                pool,
+                votes_between(pool, 'large', 'small', ['a'] * 4)
+                + votes_between(pool, 'medium', 'small', ['a'], start=5),
+            )
+            board = Board()
+
+            board.ratings(votes[:4], [], {'large', 'small'})
+            ratings = board.ratings(votes, [], set(SYSTEMS))
+
+            assert fits == [4, 5]
+            assert ratings.systems == SYSTEMS
+
+
 class TestDraw:
     def test_seeds_every_ordered_pair_before_adapting(self) -> None:
         pool = make_pool()
@@ -126,7 +190,7 @@ class TestDraw:
         votes: list[Vote] = []
 
         for vote_id in range(1, 13):
-            picked = draw(pool, matched(pool, votes), set(), NOW, rng)
+            picked = draw(pool, matched(pool, votes), set(), NOW, rng, Board())
             assert picked is not None
             votes.append(vote_on(picked, 'a', vote_id))
 
@@ -139,12 +203,12 @@ class TestDraw:
 
         cases = set()
         for _ in range(10):
-            picked = draw(pool, [], {'c0', 'c2'}, NOW, rng)
+            picked = draw(pool, [], {'c0', 'c2'}, NOW, rng, Board())
             assert picked is not None
             cases.add(picked.case)
 
         assert cases == {'c1'}
-        assert draw(pool, [], {'c0', 'c1', 'c2'}, NOW, rng) is None
+        assert draw(pool, [], {'c0', 'c1', 'c2'}, NOW, rng, Board()) is None
 
     def test_favors_the_close_pair_once_seeded(self) -> None:
         pool = make_pool()
@@ -157,10 +221,11 @@ class TestDraw:
             + votes_between(pool, 'small', 'medium', ['a', 'b'] * 2, start=45)
         )
         rng = np.random.default_rng(0)
+        board = Board()
 
         pairs = set()
         for _ in range(10):
-            picked = draw(pool, matched(pool, votes), set(), NOW, rng)
+            picked = draw(pool, matched(pool, votes), set(), NOW, rng, board)
             assert picked is not None
             pairs.add(frozenset((picked.a.system, picked.b.system)))
 
@@ -173,7 +238,7 @@ class TestDraw:
         )
         rng = np.random.default_rng(0)
 
-        picked = draw(pool, matched(pool, votes), set(), NOW, rng)
+        picked = draw(pool, matched(pool, votes), set(), NOW, rng, Board())
 
         assert picked is not None
         assert (picked.a.system, picked.b.system) == ('small', 'large')
@@ -205,7 +270,9 @@ class TestDraw:
                 )
             )
 
-        picked = draw(pool, matched(pool, votes), set(), NOW, np.random.default_rng(0))
+        picked = draw(
+            pool, matched(pool, votes), set(), NOW, np.random.default_rng(0), Board()
+        )
 
         assert picked is not None
         assert (picked.repeat_of == 1) is expected

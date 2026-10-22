@@ -10,7 +10,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from assistant_bench.arena.resolution import reconcile
-from assistant_bench.arena.scheduler import Draw, Pool, draw
+from assistant_bench.arena.scheduler import Board, Draw, Pool, draw
 from assistant_bench.arena.store import (
     Ballot,
     Choice,
@@ -172,6 +172,7 @@ class Arena:
         self._render_origin = render_origin
         self._clock = clock
         self._rng = rng or np.random.default_rng()
+        self._boards = {name: Board() for name in families}
         self._pairs: dict[str, _Issued] = {}
         self._current: dict[str, str] = {}
         self._documents: dict[str, str] = {}
@@ -182,6 +183,7 @@ class Arena:
     def start(self, family: str) -> SessionView:
         if family not in self._families:
             raise UnknownItem(family)
+        self._boards[family].reset()
         return self._view(self._store.start_session(family, self._clock()))
 
     def resume(self, session_id: str) -> SessionView:
@@ -271,7 +273,8 @@ class Arena:
         used = {vote.case for vote in mine}
         pool = self._families[session.family].pool
         matched = reconcile(votes, pool.outputs)
-        picked = draw(pool, matched, used, self._clock(), self._rng)
+        board = self._boards[session.family]
+        picked = draw(pool, matched, used, self._clock(), self._rng, board)
         if picked is not None:
             self._serve(session, picked)
 

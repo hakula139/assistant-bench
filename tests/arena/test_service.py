@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from assistant_bench.arena import service
+from assistant_bench.arena import scheduler, service
 from assistant_bench.arena.service import (
     Arena,
     HtmlPane,
@@ -215,6 +215,27 @@ class TestArena:
             frozenset(ARENA_SYSTEMS)
         }
         assert 'ref' in {joined.a.system, joined.b.system}
+
+    def test_refits_the_board_when_a_session_starts(
+        self,
+        families_dir: Path,
+        clock: Clock,
+        store: VoteStore,
+        monkeypatch: pytest.MonkeyPatch,
+        fits: list[int],
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        seeded = arena.start('f')
+        assert seeded.pair is not None
+        arena.vote(seeded.pair.token, 'a', frozenset(), None)
+        monkeypatch.setattr(scheduler, 'SEED_VOTES_PER_SIDE', 0)
+
+        view = arena.start('f')
+        assert view.pair is not None
+        arena.vote(view.pair.token, 'a', frozenset(), None)
+        arena.start('f')
+
+        assert fits == [1, 2]
 
     def test_resumes_the_open_pair(
         self, families_dir: Path, clock: Clock, store: VoteStore
