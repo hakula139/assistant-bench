@@ -1,6 +1,6 @@
 # Site
 
-The site under `web/` has two views built from one Astro project and one component set: the public results, built only from the committed reports, and the local vote page, which only `bench serve` hosts. [TypeScript](../conventions/typescript.md) gives the conventions for changing either.
+The site under `web/` has two views built from one Astro project and one component set: the public results, built only from the committed reports, and the local vote page, which only `bench serve` hosts. [TypeScript](../conventions/typescript.md) gives the conventions for changing either, and [CI](../conventions/ci.md#deploy) covers how the public build deploys.
 
 ## Results
 
@@ -22,7 +22,3 @@ Every chart has a table twin with the same values and a tooltip on hover, and bo
 ## Design Direction
 
 The tokens and fonts match hakula.xyz: Inter Variable, with Sarasa Gothic SC or Source Han Sans SC for Chinese where installed, and Maple Mono for code. The leaderboard spends the one bold move, with the table and its forest plot reading as one object, while everything else stays quiet, with no card grid or hero number and numbers in tabular figures. Charts use one series hue and one emphasis hue, which the hovered or current system takes.
-
-## Deploy
-
-The public build deploys to Cloudflare Workers static assets at `bench.hakula.xyz`, which `web/wrangler.toml` configures. Each PR from this repository gets a Worker Preview named `pr-<number>` under the same Worker, except Dependabot's, which receive no secrets. Its `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own, until the PR closes and the Preview is deleted. The site has no bindings or variables, so the `previews` block stays empty. [Development](../conventions/development.md#ci) lists the workflows.
