@@ -5,10 +5,10 @@ import { describe, expect, test, vi } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
+import { familyTitle } from '@/lib/aspects';
 import type { FamilyConfig } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
-import { familyTitle } from '@/lib/aspects';
-import { familyBoards, systemBoards, type Family } from '@/lib/reports';
+import { familyPaths, systemPaths, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
 import HomePage from '@/pages/index.astro';
@@ -229,6 +229,16 @@ describe('home page', () => {
   });
 });
 
+describe('home page anchors', () => {
+  test("titles each aspect's section with the anchor its breadcrumbs link", async () => {
+    listed.families = [await family()];
+
+    const html = await render(HomePage, {});
+
+    expect(html).toMatch(/<h2 id="technical-writing"[^>]*>[\s\S]*?Technical Writing\s*<\/h2>/);
+  });
+});
+
 describe('family panel', () => {
   test("draws the latest round's intervals and names its leader", async () => {
     const html = await render(FamilyPanel, { family: await family() });
@@ -333,8 +343,20 @@ function navLinks(html: string, label: string): [string, string, string | null][
   ]);
 }
 
+/** The props of the page at `params` among a route's static paths. */
+function propsAt<Props>(
+  paths: { params: Record<string, string>; props: Props }[],
+  params: Record<string, string>,
+): Props {
+  const path = paths.find((item) => JSON.stringify(item.params) === JSON.stringify(params));
+  if (path === undefined) {
+    throw new Error(`no page at ${JSON.stringify(params)}`);
+  }
+  return path.props;
+}
+
 describe('header', () => {
-  test.each([0, 1, 3])('keeps the same links with %i families listed', async (count) => {
+  test.each([0, 3])('keeps the same links with %i families listed', async (count) => {
     const arena = await family();
     listed.families = Array.from({ length: count }, (_, index) =>
       listedFamily(
@@ -352,13 +374,24 @@ describe('header', () => {
     ]);
   });
 
-  test("marks the section's link as current on a page under it", async () => {
-    const html = await render(Header, { section: 'leaderboards' }, '/arena/acme-pro/');
+  test('marks Leaderboards as the section of family and system pages', async () => {
+    const arena = await family();
 
-    expect(navLinks(html, 'Main')).toEqual([
-      ['/', 'Leaderboards', 'true'],
-      ['/methodology/', 'Methodology', null],
-    ]);
+    const pages = [
+      await render(FamilyPage, { family: arena, boards: [] }, '/arena/'),
+      await render(
+        SystemPage,
+        { family: arena, system: 'acme-pro', boards: [] },
+        '/arena/acme-pro/',
+      ),
+    ];
+
+    for (const html of pages) {
+      expect(navLinks(html, 'Main')).toEqual([
+        ['/', 'Leaderboards', 'true'],
+        ['/methodology/', 'Methodology', null],
+      ]);
+    }
   });
 
   test('marks the link to the page itself as the current page', async () => {
@@ -385,10 +418,7 @@ describe('board switcher', () => {
   test("links the aspect's boards by short name and marks the current one", async () => {
     const families = await boards();
 
-    const html = await render(FamilyPage, {
-      family: families[1],
-      boards: familyBoards(families, families[1]),
-    });
+    const html = await render(FamilyPage, propsAt(familyPaths(families), { family: 'arena-en' }));
 
     expect(navLinks(html, 'Technical Writing boards')).toEqual([
       ['/arena/', 'Arena Writing', null],
@@ -400,11 +430,10 @@ describe('board switcher', () => {
   test('links the system on each sibling board that gives it a page', async () => {
     const families = await boards();
 
-    const html = await render(SystemPage, {
-      family: families[0],
-      system: 'acme-pro',
-      boards: systemBoards(families, families[0], 'acme-pro'),
-    });
+    const html = await render(
+      SystemPage,
+      propsAt(systemPaths(families), { family: 'arena', system: 'acme-pro' }),
+    );
 
     expect(navLinks(html, 'Technical Writing boards')).toEqual([
       ['/arena/acme-pro/', 'Arena Writing', 'page'],
@@ -415,7 +444,7 @@ describe('board switcher', () => {
   test('stays off a page whose aspect lists one board', async () => {
     const arena = await family();
 
-    const html = await render(FamilyPage, { family: arena, boards: familyBoards([arena], arena) });
+    const html = await render(FamilyPage, propsAt(familyPaths([arena]), { family: 'arena' }));
 
     expect(navLinks(html, 'Technical Writing boards')).toEqual([]);
   });

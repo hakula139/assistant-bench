@@ -8,15 +8,10 @@ import { MethodStrip } from '@/components/site/Method';
 import { PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import { scorers } from '@/lib/method';
-import { familyBoards, getFamilies, type BoardLink, type Family } from '@/lib/reports';
+import { familyPaths, getFamilies, type BoardLink, type Family } from '@/lib/reports';
 
-export const getStaticPaths = (async () => {
-  const families = await getFamilies();
-  return families.map((family) => ({
-    params: { family: family.name },
-    props: { family, boards: familyBoards(families, family) },
-  }));
-}) satisfies GetStaticPaths;
+export const getStaticPaths = (async () =>
+  familyPaths(await getFamilies())) satisfies GetStaticPaths;
 
 interface Props {
   family: Family;

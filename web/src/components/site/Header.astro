@@ -5,18 +5,18 @@ import IntervalMark from '@/components/site/IntervalMark.astro';
 import { container, wideContainer } from '@/components/site/PageParts';
 import ThemeToggle from '@/components/site/ThemeToggle.astro';
 import { localBuild } from '@/integrations/local-vote';
-import { SITE_NAME, type Section } from '@/lib/site';
+import { SITE_NAME, type HeaderSection } from '@/lib/site';
 
 interface Props {
   /** The header link the page sits under, which the header marks as current. */
-  section?: Section;
+  section?: HeaderSection;
   /** Matches the vote page's wider column. */
   wide?: boolean;
 }
 
 const { section, wide = false } = Astro.props;
 const path = Astro.url.pathname;
-const links: { section: Section; href: string; label: string }[] = [
+const links: { section: HeaderSection; href: string; label: string }[] = [
   { section: 'leaderboards', href: '/', label: 'Leaderboards' },
   { section: 'methodology', href: '/methodology/', label: 'Methodology' },
   ...(localBuild ? [{ section: 'vote' as const, href: '/vote/', label: 'Vote' }] : []),

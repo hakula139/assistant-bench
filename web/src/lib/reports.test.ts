@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { byAspect, listFamilies, systemPages } from '@/lib/reports';
+import { listFamilies, systemPages } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): FamilyConfig => ({
@@ -87,11 +87,11 @@ describe('listFamilies', () => {
     ] satisfies { name: string; config: FamilyConfig }[];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose and smoke-text share the name Technical Writing · English',
+      'families prose and smoke-text share the full name Technical Writing · English',
     );
   });
 
-  test('accepts a short name that another aspect, or none, already uses', () => {
+  test('accepts a short name that a family without an aspect already uses', () => {
     const configs = [
       { name: 'prose', config: votes(true, 'English') },
       { name: 'smoke-text', config: votes(false, 'English') },
@@ -108,25 +108,6 @@ describe('listFamilies', () => {
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'public family prose has no aspect',
     );
-  });
-});
-
-describe('byAspect', () => {
-  test('groups the families under their aspect in listing order', () => {
-    const families = listFamilies(
-      [
-        { name: 'prose-zh', config: votes(true, 'Chinese') },
-        { name: 'prose-en', config: votes(true, 'English') },
-      ],
-      [],
-      FIXTURE_NAMES,
-    );
-
-    const groups = byAspect(families);
-
-    expect(
-      groups.map(({ aspect, families: members }) => [aspect, members.map((f) => f.name)]),
-    ).toEqual([['technical-writing', ['prose-en', 'prose-zh']]]);
   });
 });
 

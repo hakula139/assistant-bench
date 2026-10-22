@@ -2,12 +2,12 @@
 import { scorerViews } from '@/components/scorers';
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import { ForestLegend } from '@/components/site/Forest';
-import { AspectIcon } from '@/components/site/Method';
+import { AspectTitle } from '@/components/site/Method';
 import { groupTitle, intro } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
-import { aspects } from '@/lib/aspects';
+import { groupByAspect } from '@/lib/aspects';
 import { unionMarks } from '@/lib/forest';
-import { byAspect, getFamilies } from '@/lib/reports';
+import { getFamilies } from '@/lib/reports';
 
 const families = await getFamilies();
 const marks = unionMarks(families.map((family) => scorerViews[family.config.scorer].marks(family)));
@@ -29,11 +29,10 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
   ) : (
     <div class="space-y-6">
       {marks.length > 0 && <ForestLegend marks={marks} />}
-      {byAspect(families).map(({ aspect, families: members }) => (
+      {groupByAspect(families).map(({ aspect, members }) => (
         <section class="space-y-6" aria-labelledby={aspect}>
           <h2 id={aspect} class:list={[groupTitle, 'flex items-center gap-2']}>
-            <AspectIcon aspect={aspect} className="size-5" />
-            {aspects[aspect].title}
+            <AspectTitle aspect={aspect} />
           </h2>
           <div class="grid gap-x-12 gap-y-12 lg:grid-cols-2">
             {members.map((family) => (

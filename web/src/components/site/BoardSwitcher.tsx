@@ -4,7 +4,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { aspects, type Aspect } from '@/lib/aspects';
 import type { BoardLink } from '@/lib/reports';
 
-/** Links between an aspect's boards by their short names, drawn once the aspect has two. */
+/** Links between an aspect's boards by their short names, drawn once there are two to link. */
 export function BoardSwitcher({ aspect, boards }: { aspect: Aspect; boards: BoardLink[] }) {
   if (boards.length < 2) {
     return null;
@@ -18,8 +18,8 @@ export function BoardSwitcher({ aspect, boards }: { aspect: Aspect; boards: Boar
               href={href}
               aria-current={current ? 'page' : undefined}
               className={cn(
-                buttonVariants({ variant: current ? 'secondary' : 'outline', size: 'sm' }),
-                !current && 'text-foreground',
+                buttonVariants({ variant: 'outline', size: 'sm' }),
+                'text-foreground aria-[current=page]:border-primary aria-[current=page]:bg-primary/10',
               )}
             >
               {label}

@@ -28,25 +28,11 @@ import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import { terms } from '@/lib/glossary';
 import type { Distribution, Standing } from '@/lib/report';
-import {
-  getFamilies,
-  systemBoards,
-  systemPages,
-  votesRounds,
-  type BoardLink,
-  type Family,
-} from '@/lib/reports';
+import { getFamilies, systemPaths, votesRounds, type BoardLink, type Family } from '@/lib/reports';
 import { systemName } from '@/lib/systems';
 
-export const getStaticPaths = (async () => {
-  const families = await getFamilies();
-  return families.flatMap((family) =>
-    [...systemPages(family)].map((system) => ({
-      params: { family: family.name, system },
-      props: { family, system, boards: systemBoards(families, family, system) },
-    })),
-  );
-}) satisfies GetStaticPaths;
+export const getStaticPaths = (async () =>
+  systemPaths(await getFamilies())) satisfies GetStaticPaths;
 
 interface Props {
   family: Family;

@@ -1,6 +1,6 @@
 import { getCollection } from 'astro:content';
 
-import { aspectIds, familyTitle, type Aspect } from '@/lib/aspects';
+import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
@@ -32,8 +32,8 @@ export interface Family {
 }
 
 /**
- * Pairs each public family's config with its reports, by name, in aspect order and then by name.
- * Families without `public = true` stay off the site together with their reports.
+ * Pairs each public family's config with its reports, by name, and lists them by name. Families
+ * without `public = true` stay off the site together with their reports.
  *
  * @throws Error when two families, listed or not, share a full name, or a public family has no
  *   aspect.
@@ -48,7 +48,7 @@ export function listFamilies(
     const title = familyTitle(config);
     const owner = owners.get(title);
     if (owner !== undefined) {
-      throw new Error(`families ${owner} and ${name} share the name ${title}`);
+      throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
   }
@@ -70,10 +70,7 @@ export function listFamilies(
         systemNames,
       };
     })
-    .toSorted(
-      (a, b) =>
-        aspectIds.indexOf(a.aspect) - aspectIds.indexOf(b.aspect) || a.name.localeCompare(b.name),
-    );
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getFamilies(): Promise<Family[]> {
@@ -125,14 +122,6 @@ export function testsRounds(family: Family): TestsRound[] {
   );
 }
 
-/** Returns the listed families grouped by aspect, in `listFamilies` order. */
-export function byAspect(families: Family[]): { aspect: Aspect; families: Family[] }[] {
-  return [...Map.groupBy(families, (family) => family.aspect)].map(([aspect, members]) => ({
-    aspect,
-    families: members,
-  }));
-}
-
 /** Returns the systems with a page on a family's board: those its voted rounds placed. */
 export function systemPages(family: Family): Set<string> {
   return new Set(
@@ -149,25 +138,45 @@ export interface BoardLink {
 
 /** Returns the families listed under `family`'s aspect, itself included, in `listFamilies` order. */
 function siblings(families: Family[], family: Family): Family[] {
+  // A `filter` on the aspect fails `no-unnecessary-condition` while the registry has one aspect.
   return Map.groupBy(families, (item) => item.aspect).get(family.aspect) ?? [];
 }
 
-/** Returns links to the boards of `family`'s aspect by their short names. */
-export function familyBoards(families: Family[], family: Family): BoardLink[] {
-  return siblings(families, family).map((item) => ({
-    href: `/${item.name}/`,
-    label: item.config.display_name,
-    current: item === family,
+/** Returns each family page's params and props: the family and its aspect's boards. */
+export function familyPaths(families: Family[]) {
+  return families.map((family) => ({
+    params: { family: family.name },
+    props: {
+      family,
+      boards: siblings(families, family).map((item): BoardLink => ({
+        href: `/${item.name}/`,
+        label: item.config.display_name,
+        current: item.name === family.name,
+      })),
+    },
   }));
 }
 
-/** Returns links to `system`'s page on each board of `family`'s aspect that gives it one. */
-export function systemBoards(families: Family[], family: Family, system: string): BoardLink[] {
-  return siblings(families, family)
-    .filter((item) => systemPages(item).has(system))
-    .map((item) => ({
-      href: `/${item.name}/${system}/`,
-      label: item.config.display_name,
-      current: item === family,
-    }));
+/**
+ * Returns each system page's params and props: the family, the system, and the system's pages on
+ * the boards of the family's aspect that give it one.
+ */
+export function systemPaths(families: Family[]) {
+  const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
+  return families.flatMap((family) =>
+    [...systemPages(family)].map((system) => ({
+      params: { family: family.name, system },
+      props: {
+        family,
+        system,
+        boards: siblings(families, family)
+          .filter((item) => pages.get(item.name)?.has(system))
+          .map((item): BoardLink => ({
+            href: `/${item.name}/${system}/`,
+            label: item.config.display_name,
+            current: item.name === family.name,
+          })),
+      },
+    })),
+  );
 }

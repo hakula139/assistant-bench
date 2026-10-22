@@ -4,14 +4,14 @@ import { cn } from 'cn';
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
 import { container, stack } from '@/components/site/PageParts';
-import { REPOSITORY, SITE_NAME, type Section } from '@/lib/site';
+import { REPOSITORY, SITE_NAME, type HeaderSection } from '@/lib/site';
 
 interface Props {
   /** The page's own title, which the site name follows. */
   title?: string;
   description?: string;
   /** The header link the page sits under. */
-  section?: Section;
+  section?: HeaderSection;
 }
 
 const {
