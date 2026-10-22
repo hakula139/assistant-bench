@@ -52,7 +52,12 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         marginRight: 24,
         marginBottom: 40,
         x: { label, tickFormat: tick, grid: true, nice: true, ticks: Math.ceil(width / 160) },
-        y: { domain: rows.map((row) => row.label), label: null, tickSize: 0 },
+        y: {
+          domain: rows.map((row) => row.label),
+          label: null,
+          tickSize: 0,
+          tickPadding: LABEL_GAP,
+        },
         color: { type: 'identity' },
         marks: [
           baseline === undefined

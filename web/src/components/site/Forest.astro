@@ -1,6 +1,6 @@
 ---
-import { REFERENCE_SCORE, clip, forestTicks, type ForestRow } from '@/lib/forest';
-import { MISSING, formatInterval, formatScore } from '@/lib/format';
+import { REFERENCE_SCORE, clip, forestTicks, sparseTicks, type ForestRow } from '@/lib/forest';
+import { formatInterval, formatScore } from '@/lib/format';
 
 interface Props {
   rows: ForestRow[];
@@ -13,14 +13,38 @@ interface Props {
 
 const { rows, domain, caption, large = false } = Astro.props;
 const ticks = forestTicks(domain);
+const sparse = new Set(sparseTicks(domain));
 const position = (value: number) =>
   `${(((value - domain[0]) / (domain[1] - domain[0])) * 100).toFixed(2)}%`;
 
-function describe({ estimate, preliminary, reference }: ForestRow): string {
-  if (estimate) {
-    return `${formatInterval(estimate.interval)}${preliminary ? ', preliminary' : ''}`;
+const unplacedText = {
+  'reference': {
+    interval: 'Fixed at 1,000 as the reference',
+    score: '1,000',
+    summary: 'the reference, fixed at 1,000',
+  },
+  'unranked': {
+    interval: 'Unbounded, too few comparisons to place it',
+    score: 'unranked',
+    summary: 'unranked, too few comparisons to place it',
+  },
+  'no-votes': { interval: 'Unbounded', score: 'no votes', summary: 'no votes yet' },
+};
+
+/** The interval cell's text, which screen readers read under the "95% interval" header. */
+function intervalText(row: ForestRow): string {
+  if ('estimate' in row) {
+    return `${formatInterval(row.estimate.interval)}${row.preliminary ? ', preliminary' : ''}`;
   }
-  return reference ? 'Fixed at 1,000 as the reference' : 'Unbounded';
+  return unplacedText[row.unplaced].interval;
+}
+
+/** The row's hover text, which names the system with its score and interval. */
+function summary(row: ForestRow): string {
+  if ('estimate' in row) {
+    return `${row.system}: ${formatScore(row.estimate.score)}, 95% interval ${intervalText(row)}`;
+  }
+  return `${row.system}: ${unplacedText[row.unplaced].summary}`;
 }
 ---
 
@@ -29,7 +53,7 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
   <colgroup>
     <col class={large ? 'w-36 sm:w-48' : 'w-36'} />
     <col />
-    <col class="w-14 sm:w-20" />
+    <col class="w-16 sm:w-20" />
   </colgroup>
   <thead>
     <tr>
@@ -43,7 +67,7 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
             aria-hidden="true"
             class:list={[
               'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
-              tick !== REFERENCE_SCORE && 'max-sm:hidden',
+              !sparse.has(tick) && 'max-sm:hidden',
             ]}
             style={{ left: position(tick) }}
           >
@@ -58,15 +82,15 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
   </thead>
   <tbody>
     {rows.map((row) => {
-      const clipped = row.estimate && clip(row.estimate, domain);
-      const dash = row.preliminary ? 'border-dashed' : 'border-solid';
+      const clipped = 'estimate' in row ? clip(row.estimate, domain) : undefined;
+      const preliminary = 'estimate' in row && row.preliminary;
       return (
-        <tr>
+        <tr title={summary(row)}>
           <th scope="row" class="truncate pr-3 text-left font-normal">
             {row.href ? <a href={row.href}>{row.system}</a> : row.system}
           </th>
           <td class:list={['relative p-0', large ? 'h-11' : 'h-8']}>
-            <span class="sr-only">{describe(row)}</span>
+            <span class="sr-only">{intervalText(row)}</span>
             <span aria-hidden="true">
               {ticks.map((tick) => (
                 <span
@@ -82,7 +106,7 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
                   <span
                     class:list={[
                       'absolute top-1/2 h-0 -translate-y-1/2 border-t-[3px] border-chart-series',
-                      dash,
+                      preliminary ? 'border-dashed' : 'border-solid',
                     ]}
                     style={{
                       left: position(clipped.lower),
@@ -101,7 +125,7 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
                     <span
                       class:list={[
                         'absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2',
-                        row.preliminary
+                        preliminary
                           ? 'border-chart-series bg-background'
                           : 'border-background bg-chart-series',
                       ]}
@@ -109,7 +133,7 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
                     />
                   )}
                 </>
-              ) : row.reference ? (
+              ) : 'unplaced' in row && row.unplaced === 'reference' ? (
                 <span
                   class="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-chart-series"
                   style={{ left: position(REFERENCE_SCORE) }}
@@ -134,17 +158,12 @@ function describe({ estimate, preliminary, reference }: ForestRow): string {
             </span>
           </td>
           <td class="pl-3 text-right whitespace-nowrap tabular-nums">
-            {row.estimate ? (
+            {'estimate' in row ? (
               formatScore(row.estimate.score)
-            ) : row.reference ? (
-              '1,000'
+            ) : row.unplaced === 'reference' ? (
+              unplacedText.reference.score
             ) : (
-              <span class="text-faint">
-                <span aria-hidden="true" class="sm:hidden">
-                  {MISSING}
-                </span>
-                <span class="max-sm:sr-only">no votes</span>
-              </span>
+              <span class="text-xs text-faint">{unplacedText[row.unplaced].score}</span>
             )}
           </td>
         </tr>

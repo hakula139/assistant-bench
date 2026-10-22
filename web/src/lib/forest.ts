@@ -24,8 +24,9 @@ export const EMPTY_DOMAIN: [number, number] = [600, 1400];
 const TICKS = 5;
 
 /**
- * Returns a forest plot's x domain, shared by every row: every interval's upper end, and every
- * lower end down to `AXIS_SPAN_BELOW_TOP` below the top score, rounded outward to round ticks.
+ * Returns the x domain of one board's forest plot, shared by every row: every interval's upper
+ * end, and every lower end down to `AXIS_SPAN_BELOW_TOP` below the top score, rounded outward to
+ * round ticks.
  */
 export function forestDomain(estimates: Estimate[]): [number, number] {
   if (estimates.length === 0) {
@@ -41,12 +42,49 @@ export function forestDomain(estimates: Estimate[]): [number, number] {
   return [start, stop];
 }
 
-/** Returns round tick values across a domain. */
-export function forestTicks([start, stop]: [number, number], count = TICKS): number[] {
-  return ticks(start, stop, count);
+/**
+ * Returns one axis for several boards, such as a round's categories, covering each board's own
+ * `forestDomain` so that every board keeps its own cut below its own top score.
+ */
+export function sharedDomain(boards: Estimate[][]): [number, number] {
+  const domains = boards.filter((board) => board.length > 0).map(forestDomain);
+  if (domains.length === 0) {
+    return EMPTY_DOMAIN;
+  }
+  const [start, stop] = nice(
+    Math.min(...domains.map(([low]) => low)),
+    Math.max(...domains.map(([, high]) => high)),
+    TICKS,
+  );
+  return [start, stop];
 }
 
-/** Where an estimate falls on a domain, with what the axis cuts off. */
+/** Returns the round values a forest plot draws gridlines at, both domain ends included. */
+export function forestTicks([start, stop]: [number, number]): number[] {
+  return ticks(start, stop, TICKS);
+}
+
+/**
+ * Returns the ticks a narrow forest plot labels: both ends, and the reference when it sits far
+ * enough from both that the labels cannot overlap.
+ */
+export function sparseTicks(domain: [number, number]): number[] {
+  const all = forestTicks(domain);
+  const [start, stop] = domain;
+  const share = (REFERENCE_SCORE - start) / (stop - start);
+  const reference = all.includes(REFERENCE_SCORE) && share >= 0.25 && share <= 0.75;
+  return [all[0], ...(reference ? [REFERENCE_SCORE] : []), all[all.length - 1]];
+}
+
+/** The plot width, in CSS pixels, below which an axis labels only its sparse ticks. */
+const NARROW_AXIS = 240;
+
+/** Returns the ticks a forest plot of a given width, in CSS pixels, labels. */
+export function labelledTicks(domain: [number, number], width: number): number[] {
+  return width < NARROW_AXIS ? sparseTicks(domain) : forestTicks(domain);
+}
+
+/** Where an estimate falls on an axis, with what the axis start cuts off. */
 export interface Clipped {
   /** The score, or the axis start when the score lies below it. */
   score: number;
@@ -56,47 +94,63 @@ export interface Clipped {
   offScale: boolean;
   /** Whether the interval runs past the axis start. */
   cutLow: boolean;
-  /** Whether the interval runs past the axis end. */
-  cutHigh: boolean;
 }
 
-export function clip({ score, interval }: Estimate, [start, stop]: [number, number]): Clipped {
+/** Clips an estimate to an axis from `forestDomain`, which never cuts the top end. */
+export function clip({ score, interval }: Estimate, [start]: [number, number]): Clipped {
   return {
     score: Math.max(score, start),
     lower: Math.max(interval.lower, start),
-    upper: Math.min(Math.max(interval.upper, start), stop),
+    upper: Math.max(interval.upper, start),
     offScale: score < start,
     cutLow: interval.lower < start,
-    cutHigh: interval.upper > stop,
   };
 }
 
+/**
+ * Why a row has no estimate: the reference before any round closes, a system whose votes do not
+ * yet connect it to the reference, or a system with no votes.
+ */
+export type Unplaced = 'reference' | 'unranked' | 'no-votes';
+
 /** One system's row in a static forest plot. */
-export interface ForestRow {
-  system: string;
-  href?: string;
-  /** Missing until a closed round bounds the system, which draws its interval unbounded. */
-  estimate?: Estimate;
-  preliminary?: boolean;
-  /** Marks the family's reference, which sits at 1,000 before any round closes. */
-  reference?: boolean;
-}
+export type ForestRow = { system: string; href?: string } & (
+  { estimate: Estimate; preliminary: boolean } | { unplaced: Unplaced }
+);
+
+const byName = (a: string, b: string) => a.localeCompare(b);
 
 /** Rows for a family before its first round closes, in name order. */
 export function unmeasuredRows(systems: string[], reference: string): ForestRow[] {
-  return systems
-    .toSorted((a, b) => a.localeCompare(b))
-    .map((system) => ({ system, reference: system === reference }));
+  return systems.toSorted(byName).map((system) => ({
+    system,
+    unplaced: system === reference ? 'reference' : 'no-votes',
+  }));
 }
 
-/** Rows for a round's standings, from the highest score down, each linked to its system page. */
-export function standingRows(family: string, standings: Standing[]): ForestRow[] {
-  return standings
-    .toSorted((a, b) => b.score - a.score)
-    .map((standing) => ({
-      system: standing.system,
-      href: `/${family}/${standing.system}/`,
-      estimate: standing,
-      preliminary: standing.preliminary,
-    }));
+/**
+ * Rows for a closed round: its standings from the highest score down, each linked to its system
+ * page, then its unranked systems, then the family's systems the round has no votes on.
+ */
+export function roundRows(
+  family: string,
+  systems: string[],
+  { standings, unranked }: { standings: Standing[]; unranked: string[] },
+): ForestRow[] {
+  const placed = new Set([...standings.map((standing) => standing.system), ...unranked]);
+  return [
+    ...standings
+      .toSorted((a, b) => b.score - a.score)
+      .map((standing) => ({
+        system: standing.system,
+        href: `/${family}/${standing.system}/`,
+        estimate: standing,
+        preliminary: standing.preliminary,
+      })),
+    ...unranked.toSorted(byName).map((system) => ({ system, unplaced: 'unranked' as const })),
+    ...systems
+      .filter((system) => !placed.has(system))
+      .toSorted(byName)
+      .map((system) => ({ system, unplaced: 'no-votes' as const })),
+  ];
 }

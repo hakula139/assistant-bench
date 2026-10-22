@@ -13,7 +13,7 @@ import { cn } from 'cn';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
-import { PlotFigure } from '@/components/charts/PlotFigure';
+import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { forestMarks } from '@/components/charts/forest-marks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,7 +35,7 @@ import {
   formatScore,
   formatSeconds,
 } from '@/lib/format';
-import { clip, forestDomain } from '@/lib/forest';
+import { clip, forestDomain, forestTicks, labelledTicks } from '@/lib/forest';
 import type { Interval, Standing } from '@/lib/report';
 
 /**
@@ -83,11 +83,18 @@ function forestScale(domain: [number, number]): Plot.ScaleOptions {
 
 function ForestAxis({ domain }: { domain: [number, number] }) {
   const plot = useCallback(
-    (): Plot.PlotOptions => ({
+    ({ width }: PlotFrame): Plot.PlotOptions => ({
       height: 28,
       margin: 0,
       marginTop: 20,
-      x: { ...forestScale(domain), axis: 'top', tickSize: 0, label: null },
+      x: {
+        ...forestScale(domain),
+        axis: 'top',
+        ticks: labelledTicks(domain, width - 2 * FOREST_MARGIN),
+        tickFormat: formatScore,
+        tickSize: 0,
+        label: null,
+      },
       marks: [],
     }),
     [domain],
@@ -112,11 +119,14 @@ function ForestRow({
       y: { axis: null, domain: [0, 1] },
       color: { type: 'identity' },
       marks: [
-        Plot.gridX({ stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
+        Plot.gridX(forestTicks(domain), { stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
         reference === undefined
           ? null
           : Plot.ruleX([reference], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
-        forestMarks([{ y: 0.5, clipped: clip(row, domain), preliminary: row.preliminary }], domain),
+        forestMarks(
+          [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
+          domain,
+        ),
       ],
     }),
     [row, domain, reference],

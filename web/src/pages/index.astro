@@ -1,30 +1,12 @@
 ---
-import Forest from '@/components/site/Forest.astro';
+import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Base from '@/layouts/Base.astro';
-import { EMPTY_DOMAIN, forestDomain, standingRows, unmeasuredRows } from '@/lib/forest';
-import { MISSING, formatCountOf, formatLeaderNote, formatPercent } from '@/lib/format';
-import type { Decision } from '@/lib/report';
-import { getFamilies, latest } from '@/lib/reports';
+import { getFamilies } from '@/lib/reports';
 
-function leaderLine(decision: Decision | null): string {
-  const note = formatLeaderNote(decision);
-  if (decision === null) {
-    return note ?? MISSING;
-  }
-  return note === null ? decision.leader : `${decision.leader}, ${note}`;
-}
-
-const families = (await getFamilies()).map((family) => {
-  const report = latest(family);
-  const results = report?.results;
-  return {
-    family,
-    status: report
-      ? `Round ${report.round}${results?.scorer === 'votes' ? `, ${formatCountOf(results.votes, 'vote')}` : ''}`
-      : 'No round has closed yet',
-    results,
-  };
-});
+const families = await getFamilies();
+const unmeasured = families.some(
+  (family) => family.config.scorer === 'votes' && family.rounds.length === 0,
+);
 ---
 
 <Base>
@@ -43,60 +25,15 @@ const families = (await getFamilies()).map((family) => {
     <p class="text-muted-foreground">No family is listed yet.</p>
   ) : (
     <div class="grid gap-x-12 gap-y-12 lg:grid-cols-2">
-      {families.map(({ family, status, results }) => (
-        <section class="space-y-3" aria-labelledby={`family-${family.name}`}>
-          <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
-            <h2 id={`family-${family.name}`} class="text-lg font-semibold">
-              <a href={`/${family.name}/`} class="text-foreground hover:text-link">
-                {family.name}
-              </a>
-            </h2>
-            <p class="text-sm text-muted-foreground">{status}</p>
-          </div>
-          {family.config.scorer === 'votes' ? (
-            results?.scorer === 'votes' ? (
-              <>
-                <Forest
-                  caption={`${family.name} scores with 95% intervals`}
-                  rows={standingRows(family.name, results.standings)}
-                  domain={forestDomain(results.standings)}
-                />
-                <p class="text-sm">
-                  <span class="text-muted-foreground">Leader: </span>
-                  {leaderLine(results.decision)}
-                </p>
-              </>
-            ) : (
-              <>
-                <Forest
-                  caption={`${family.name} systems, none measured yet`}
-                  rows={unmeasuredRows(family.config.systems, family.config.reference)}
-                  domain={EMPTY_DOMAIN}
-                />
-                <p class="text-sm text-muted-foreground">
-                  Until the first round closes, every interval is unbounded, and the reference,{' '}
-                  {family.config.reference}, sits at 1,000.
-                </p>
-              </>
-            )
-          ) : results?.scorer === 'tests' ? (
-            <ul class="space-y-1 text-sm">
-              {results.standings
-                .toSorted((a, b) => b.pass_rate - a.pass_rate)
-                .map((standing) => (
-                  <li class="flex justify-between gap-4">
-                    <span>{standing.system}</span>
-                    <span class="tabular-nums">{formatPercent(standing.pass_rate)} pass</span>
-                  </li>
-                ))}
-            </ul>
-          ) : (
-            <p class="text-sm text-muted-foreground">
-              {family.config.systems.join(', ') || MISSING}
-            </p>
-          )}
-        </section>
+      {families.map((family) => (
+        <FamilyPanel family={family} />
       ))}
     </div>
+  )}
+  {unmeasured && (
+    <p class="mt-8 max-w-prose text-sm text-muted-foreground">
+      Until a family's first round closes, every interval is unbounded, and its reference sits at
+      1,000.
+    </p>
   )}
 </Base>

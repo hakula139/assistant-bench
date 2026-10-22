@@ -9,7 +9,6 @@ const votes = (listed: boolean): FamilyConfig => ({
   scorer: 'votes',
   systems: ['acme-large', 'acme-pro'],
   reference: 'acme-large',
-  categories: [],
   public: listed,
 });
 

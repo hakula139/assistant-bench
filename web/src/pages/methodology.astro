@@ -161,10 +161,10 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
             caption="Four example rows"
             domain={EMPTY_DOMAIN}
             rows={[
-              { system: 'Settled', estimate: example(1040, 990, 1090) },
+              { system: 'Settled', estimate: example(1040, 990, 1090), preliminary: false },
               { system: 'Preliminary', estimate: example(930, 780, 1110), preliminary: true },
-              { system: 'Far behind', estimate: example(380, 250, 520) },
-              { system: 'No votes yet' },
+              { system: 'Far behind', estimate: example(380, 250, 520), preliminary: false },
+              { system: 'No votes yet', unplaced: 'no-votes' },
             ]}
           />
           <figcaption class="text-sm text-muted-foreground">

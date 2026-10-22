@@ -1,4 +1,4 @@
-import type { DotRange } from '@/components/charts/DotRangePlot';
+import type { ForestPlotRow } from '@/components/charts/ForestPlot';
 import {
   Table,
   TableBody,
@@ -52,7 +52,7 @@ export function HeadToHeadTable({ headToHead }: { headToHead: HeadToHead[] }) {
   );
 }
 
-export function CategoryTable({ categories }: { categories: DotRange[] }) {
+export function CategoryTable({ categories }: { categories: ForestPlotRow[] }) {
   return (
     <Table>
       <TableHeader>
@@ -63,12 +63,12 @@ export function CategoryTable({ categories }: { categories: DotRange[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {categories.map((row) => (
-          <TableRow key={row.label}>
-            <TableCell>{row.label}</TableCell>
-            <TableCell className="text-right tabular-nums">{formatScore(row.value)}</TableCell>
+        {categories.map(({ label, refit }) => (
+          <TableRow key={label}>
+            <TableCell>{label}</TableCell>
+            <TableCell className="text-right tabular-nums">{formatScore(refit.score)}</TableCell>
             <TableCell className="text-right tabular-nums">
-              {row.range ? formatInterval(row.range) : MISSING}
+              {formatInterval(refit.interval)}
             </TableCell>
           </TableRow>
         ))}

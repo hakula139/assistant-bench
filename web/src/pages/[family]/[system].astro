@@ -9,8 +9,10 @@ import {
   RoundsTable,
 } from '@/components/boards/SystemTables';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
+import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
 import Base from '@/layouts/Base.astro';
+import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import type { Distribution, Standing } from '@/lib/report';
 import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
@@ -42,15 +44,17 @@ const appearances = rounds.flatMap(({ round, results }) => {
 });
 const { round, results, standing } = appearances[appearances.length - 1];
 const standings = results.standings;
-const reference = standings.find((item) => item.system === results.reference)?.score;
 
 const headToHead = results.head_to_head
   .filter((pair) => pair.system === system)
   .toSorted((a, b) => b.win_rate - a.win_rate);
-const categoryRows = results.categories.flatMap(({ category, standings: refits }): DotRange[] => {
-  const refit = refits.find((item) => item.system === system);
-  return refit ? [{ label: category, value: refit.score, range: refit.interval }] : [];
-});
+const categoryRows = results.categories.flatMap(
+  ({ category, standings: refits }): ForestPlotRow[] => {
+    const refit = refits.find((item) => item.system === system);
+    return refit ? [{ label: category, refit }] : [];
+  },
+);
+const categoryDomain = sharedDomain(results.categories.map((board) => board.standings));
 const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   standings.flatMap((item): DotRange[] => {
     const distribution = pick(item);
@@ -143,12 +147,11 @@ const length = results.length;
         <p class="max-w-prose text-sm text-muted-foreground">
           Scores from each category's votes alone, with 95% intervals.
         </p>
-        <DotRangePlot
+        <ForestPlot
           client:visible
           rows={categoryRows}
-          label="Score"
-          format="score"
-          baseline={reference}
+          labels={categoryRows.map((row) => row.label)}
+          domain={categoryDomain}
         />
         <TableTwin>
           <CategoryTable categories={categoryRows} />

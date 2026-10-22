@@ -1,11 +1,14 @@
 import * as Plot from '@observablehq/plot';
 
 import type { Clipped } from '@/lib/forest';
+import { formatScore } from '@/lib/format';
 
 /** One interval on a forest plot, already clipped to the plot's domain. */
 export interface ForestDatum {
   /** The row's position on the y scale. */
   y: string | number;
+  /** The score before clipping, which a plot without a score column prints off the scale. */
+  score: number;
   clipped: Clipped;
   preliminary: boolean;
 }
@@ -30,6 +33,7 @@ export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plo
         x2: (datum: ForestDatum) => datum.clipped.upper,
         stroke: SERIES,
         strokeWidth: 3,
+        ariaDescription: '95% interval',
         strokeDasharray: preliminary ? DASH : undefined,
       },
     );
@@ -52,4 +56,22 @@ export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plo
       },
     ),
   ];
+}
+
+/**
+ * Prints the score of each row whose score lies below the axis start, after whatever part of its
+ * interval the axis keeps, for forest plots without a score column.
+ */
+export function offScaleLabels(data: ForestDatum[]): Plot.Markish {
+  return Plot.text(
+    data.filter((datum) => datum.clipped.offScale),
+    {
+      x: (datum: ForestDatum) => datum.clipped.upper,
+      y: 'y',
+      text: (datum: ForestDatum) => formatScore(datum.score),
+      dx: 9,
+      textAnchor: 'start',
+      fill: 'var(--muted-foreground)',
+    },
+  );
 }

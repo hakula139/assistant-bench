@@ -6,6 +6,7 @@ import { VotesBoard } from '@/components/boards/VotesBoard';
 import Forest from '@/components/site/Forest.astro';
 import Base from '@/layouts/Base.astro';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
+import { MISSING, formatCountOf } from '@/lib/format';
 import { getFamilies, testsRounds, votesRounds, type Family } from '@/lib/reports';
 
 export const getStaticPaths = (async () => {
@@ -47,9 +48,9 @@ const { summary, guide, board } = (() => {
   {family.rounds.length === 0 ? (
     <div class="space-y-4">
       <p class="max-w-prose">
-        No round has closed yet. These {config.systems.length} systems are in the first one.
-        {board.scorer === 'votes' &&
-          ` Until it closes, every interval is unbounded, and the reference sits at 1,000.`}
+        No round has closed yet, and the first one holds{' '}
+        {formatCountOf(config.systems.length, 'system')}.
+        {board.scorer === 'votes' && ' Until it closes, every interval is unbounded.'}
       </p>
       {board.scorer === 'votes' && (
         <Forest
@@ -59,7 +60,7 @@ const { summary, guide, board } = (() => {
           large
         />
       )}
-      {board.scorer === 'tests' && <p>{config.systems.join(', ')}</p>}
+      {board.scorer === 'tests' && <p>{config.systems.join(', ') || MISSING}</p>}
     </div>
   ) : board.scorer === 'votes' ? (
     <VotesBoard client:load family={family.name} rounds={board.rounds} />
