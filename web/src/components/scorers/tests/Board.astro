@@ -1,0 +1,26 @@
+---
+import { TestsBoard } from '@/components/boards/TestsBoard';
+import { note } from '@/components/site/PageParts';
+import { MISSING } from '@/lib/format';
+import { testsRounds, type Family } from '@/lib/reports';
+import { systemName } from '@/lib/systems';
+
+interface Props {
+  family: Family;
+}
+
+const { family } = Astro.props;
+const rounds = testsRounds(family);
+---
+
+{rounds.length === 0 ? (
+  <div class="space-y-4">
+    <p class={note}>No round has closed yet.</p>
+    <p>
+      {family.config.systems.map((system) => systemName(family.systemNames, system)).join(', ') ||
+        MISSING}
+    </p>
+  </div>
+) : (
+  <TestsBoard rounds={rounds} names={family.systemNames} />
+)}

@@ -97,5 +97,5 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
     [rows, label, tick, baseline, height],
   );
 
-  return <PlotFigure plot={plot} height={height} />;
+  return <PlotFigure plot={plot} height={height} label={label} />;
 }

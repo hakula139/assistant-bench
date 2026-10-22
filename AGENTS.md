@@ -1,6 +1,6 @@
 # AGENTS.md: assistant-bench
 
-assistant-bench is a public benchmark in which every AI assistant system receives the same instruction and the owner compares outputs blind and in pairs. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
+assistant-bench is a public benchmark in which every AI assistant system in a family receives the same instruction, and the family scores the outputs by the owner's blind pairwise votes or by each task's own tests. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
 
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 

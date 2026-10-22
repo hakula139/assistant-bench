@@ -40,8 +40,8 @@ const links = [
         <li>
           <a
             href={href}
-            aria-current={path.startsWith(href) ? 'page' : undefined}
-            class="whitespace-nowrap text-muted-foreground hover:text-foreground aria-[current=page]:text-foreground"
+            aria-current={path === href ? 'page' : path.startsWith(href) ? 'true' : undefined}
+            class="whitespace-nowrap text-muted-foreground hover:text-foreground [&[aria-current]]:text-foreground"
           >
             {label}
           </a>

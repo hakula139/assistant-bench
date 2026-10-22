@@ -1,100 +1,39 @@
 ---
-import { cn } from 'cn';
-
-import { Forest } from '@/components/site/Forest';
-import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
-import { pageTitle, section } from '@/components/site/PageParts';
+import { scorerViews } from '@/components/scorers';
+import { partId } from '@/components/scorers/parts';
+import { PageHeader, Section, intro, list, stack } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
-import { EMPTY_DOMAIN } from '@/lib/forest';
+import type { Scorer } from '@/lib/family';
+import { scorers } from '@/lib/method';
 import { REPOSITORY } from '@/lib/site';
 
-const example = (score: number, lower: number, upper: number) => ({
-  score,
-  interval: { lower, upper },
-});
-
 const docs = `${REPOSITORY}/blob/main/docs/design`;
+const sections = Object.entries(scorerViews).map(([scorer, view]) => ({
+  scorer: scorer as Scorer,
+  ...view,
+}));
 
-const sections = {
-  rounds: 'How a round works',
-  scores: 'Scores and intervals',
-  leaderboard: 'Reading the leaderboard',
-  leader: 'How the leader is chosen',
-  summary: 'Round summary',
-  tests: 'Boards scored by tests',
-  limits: 'Known limits',
-} as const;
-
-const columns: GlossaryEntry[] = [
-  {
-    term: 'Rank',
-    definition:
-      'From 1 plus the systems whose interval lies wholly above this one, to 1 plus those whose interval reaches above its lower end.',
-  },
-  {
-    term: 'Preliminary',
-    badge: true,
-    definition:
-      'Fewer than 40 decisive votes, those won by either side, so the score may still move.',
-  },
-  {
-    term: 'Unranked',
-    definition:
-      'Listed below the table without a score until enough comparisons connect it to the reference.',
-  },
-  {
-    term: 'Votes',
-    definition: "The rater's votes on the system, leaving out results settled without a vote.",
-  },
-  {
-    term: 'Both bad',
-    definition: 'The share of its votes judged both bad.',
-  },
-  {
-    term: 'Gate failures',
-    definition: 'The share of its outputs that failed a gate.',
-  },
-  {
-    term: 'Cost / output and p50 latency',
-    definition: 'The mean cost at list prices and the median time to the complete response.',
-  },
+const contents = [
+  { id: 'systems', title: 'Systems and rounds', parts: [] },
+  ...sections.map(({ scorer, parts }) => ({
+    id: scorer,
+    title: scorers[scorer].title,
+    parts: Object.entries(parts).map(([part, title]) => ({ id: partId(scorer, part), title })),
+  })),
+  { id: 'limits', title: 'Known limits', parts: [] },
 ];
-
-const diagnostics: GlossaryEntry[] = [
-  {
-    term: 'Rater agreement',
-    definition:
-      'How often a side-swapped repeat matched the original vote. Below 70%, the intervals overstate how well systems separate.',
-  },
-  {
-    term: 'Separated pairs',
-    definition: 'The share of system pairs whose intervals do not overlap.',
-  },
-  {
-    term: 'Split-half τ',
-    definition:
-      "Kendall's τ between the orders fit to odd and to even sessions, where 1 means the same order.",
-  },
-  {
-    term: 'Left out of the fit',
-    definition:
-      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle.',
-  },
-];
-
-const h2 = cn(section.title, 'scroll-mt-6 target:text-link');
-const list = 'space-y-2 pl-6 marker:text-muted-foreground';
 ---
 
 <Base title="Methodology">
-  <div class="grid gap-8 lg:grid-cols-[minmax(0,42rem)_13rem] lg:justify-between lg:gap-x-16 lg:gap-y-10">
-    <header class="space-y-3 lg:col-start-1">
-      <h1 class={pageTitle}>Methodology</h1>
-      <p class="leading-relaxed text-muted-foreground">
-        Every system in a family answers the same cases with the same instruction, and one rater
-        compares their outputs in blind pairs.
-      </p>
-    </header>
+  <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_13rem] lg:gap-x-16 lg:gap-y-10">
+    <div class="lg:col-start-1">
+      <PageHeader title="Methodology">
+        <p class={intro}>
+          Every system in a family answers the same cases or tasks, and the family's scorer turns
+          the results into a leaderboard.
+        </p>
+      </PageHeader>
+    </div>
 
     <nav
       aria-label="On this page"
@@ -102,154 +41,53 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
     >
       <p class="mb-2 font-medium">On this page</p>
       <ul class="space-y-1.5">
-        {Object.entries(sections).map(([id, title]) => (
+        {contents.map(({ id, title, parts }) => (
           <li>
             <a href={`#${id}`} class="text-muted-foreground hover:text-foreground">
               {title}
             </a>
+            {parts.length > 0 && (
+              <ul class="mt-1.5 space-y-1.5 border-l pl-3">
+                {parts.map((part) => (
+                  <li>
+                    <a href={`#${part.id}`} class="text-muted-foreground hover:text-foreground">
+                      {part.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
     </nav>
 
-    <article class="space-y-10 leading-relaxed lg:col-start-1">
-      <section class="space-y-3">
-        <h2 id="rounds" class={h2}>
-          {sections.rounds}
-        </h2>
-        <ol class:list={['list-decimal', list]}>
-          <li>
-            A family is one kind of task with its own cases and leaderboard. A system is a model
-            with its effort, harness, and prompt, and changing any part makes a new system.
-          </li>
-          <li>
-            Gates check each output for problems such as truncation or the wrong script. A failing
-            output loses without a vote, and two identical outputs tie.
-          </li>
-          <li>
-            The rater picks the better output, a tie, or both bad, in sessions of up to 30 pairs,
-            with sides counterbalanced.
-          </li>
-          <li>Each round is a dated snapshot that refits every vote cast so far.</li>
-        </ol>
-      </section>
-
-      <section class="space-y-3">
-        <h2 id="scores" class={h2}>
-          {sections.scores}
-        </h2>
+    <article class:list={[stack, 'leading-relaxed lg:col-start-1']}>
+      <Section id="systems" title="Systems and rounds">
         <p>
-          A Bradley-Terry model turns the votes and the results settled without a vote into Elo-like
-          scores, counting ties and both-bad votes as half a win. Each family's reference system
-          sits at 1,000, so scores compare only within a family. A 100-point gap means the higher
-          system should take about 64% of the votes between them.
+          A system is a model with its effort, harness, and prompt, and changing any part makes a
+          new system. Each round is a dated snapshot that refits every result so far.
         </p>
-        <p>
-          The 95% intervals come from 1,000 bootstrap resamples of whole cases, since votes on one
-          case are correlated.
-        </p>
-      </section>
+      </Section>
 
-      <section class="space-y-3">
-        <h2 id="leaderboard" class={h2}>
-          {sections.leaderboard}
-        </h2>
-        <p>
-          The plot draws each 95% interval on one axis, with a line at the reference score and
-          hollow dots for preliminary systems.
-        </p>
-        <figure class="space-y-3 rounded-lg border p-4">
-          <Forest
-            caption="Four example rows"
-            domain={EMPTY_DOMAIN}
-            rows={[
-              {
-                system: 'settled',
-                name: 'Settled',
-                estimate: example(1040, 990, 1090),
-                preliminary: false,
-              },
-              {
-                system: 'preliminary',
-                name: 'Preliminary',
-                estimate: example(930, 780, 1110),
-                preliminary: true,
-              },
-              {
-                system: 'far-behind',
-                name: 'Far behind',
-                estimate: example(380, 250, 520),
-                preliminary: false,
-              },
-              { system: 'no-votes', name: 'No votes yet', unplaced: 'no-votes' },
-            ]}
-          />
-          <figcaption class="text-sm text-muted-foreground">
-            The dot is the score and the line its 95% interval, dashed while preliminary. An
-            arrowhead means the interval runs past the axis, which starts at most 600 points below
-            the top score, and a system with no votes yet runs off both ends.
-          </figcaption>
-        </figure>
-        <Glossary heading="Column" entries={columns} />
-        <p>
-          A dash marks a missing value. A category view refits that category's votes alone, so
-          intervals widen and Rank disappears, while the columns labeled "all categories" stay
-          family-wide.
-        </p>
-      </section>
+      {sections.map(({ scorer, Method }) => (
+        <Section id={scorer} title={scorers[scorer].title}>
+          <Method />
+        </Section>
+      ))}
 
-      <section class="space-y-3">
-        <h2 id="leader" class={h2}>
-          {sections.leader}
-        </h2>
-        <ol class:list={['list-decimal', list]}>
-          <li>
-            A ranked system ties for the top when the 95% interval of its score difference from the
-            top system, paired within each resample, contains 0 or is unbounded. Pairing can
-            separate two systems whose intervals overlap.
-          </li>
-          <li>
-            While any system tied for the top, the top one included, is preliminary, the round names
-            no leader.
-          </li>
-          <li>
-            Otherwise a lone top system leads, and a tie goes to the lower cost per output, then the
-            lower median latency, then the higher score, with a known value beating a missing one.
-          </li>
-        </ol>
-      </section>
-
-      <section class="space-y-3">
-        <h2 id="summary" class={h2}>
-          {sections.summary}
-        </h2>
-        <Glossary heading="Figure" entries={diagnostics} />
-      </section>
-
-      <section class="space-y-3">
-        <h2 id="tests" class={h2}>
-          {sections.tests}
-        </h2>
-        <p>
-          Some families score each trial, one run of a system on a task, by automated tests. Pass
-          rate counts errored trials as failures, and Cost / trial and p50 latency are a trial's
-          mean cost and median time.
-        </p>
-      </section>
-
-      <section class="space-y-3">
-        <h2 id="limits" class={h2}>
-          {sections.limits}
-        </h2>
+      <Section id="limits" title="Known limits">
         <ul class:list={['list-disc', list]}>
-          <li>One person casts every vote, so each board reflects that person's preferences.</li>
           <li>
-            Scores are relative, so the both-bad and gate-failure rates are the only absolute
-            signals.
+            One person casts every vote, so each voted board reflects that person's preferences.
           </li>
           <li>
-            Scores carry no length adjustment. Each system page reports whether the rater favors
-            longer or shorter outputs.
+            Voted scores are relative, so the both-bad and gate-failure rates are their only
+            absolute signals.
+          </li>
+          <li>
+            Voted scores carry no length adjustment. Each system page reports whether the rater
+            favors longer or shorter outputs.
           </li>
         </ul>
         <p class="text-muted-foreground">
@@ -257,7 +95,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           <a href={`${docs}/arena.md`}>vote arena</a>, and each{' '}
           <a href={`${REPOSITORY}/tree/main/docs/design/families`}>family</a> cover the math.
         </p>
-      </section>
+      </Section>
     </article>
   </div>
 </Base>

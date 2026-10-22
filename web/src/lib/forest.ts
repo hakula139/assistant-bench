@@ -175,3 +175,38 @@ export function roundRows(
       .map((system) => unplaced(system, 'no-votes')),
   ];
 }
+
+/** A mark a forest plot draws, which its legend names. */
+export type LegendMark = 'score' | 'preliminary' | 'cut' | 'reference' | 'unbounded';
+
+const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'reference', 'unbounded'];
+
+/**
+ * Returns the marks a forest plot of `rows` on `domain` draws, in legend order, where
+ * `referenceLine` says whether the plot rules the reference score.
+ */
+export function legendMarks(
+  rows: ForestRow[],
+  domain: [number, number],
+  referenceLine: boolean,
+): LegendMark[] {
+  const drawn = new Set<LegendMark>(referenceLine ? ['reference'] : []);
+  for (const row of rows) {
+    if ('estimate' in row) {
+      drawn.add(row.preliminary ? 'preliminary' : 'score');
+      const clipped = clip(row.estimate, domain);
+      if (clipped.cutLow || clipped.offScale) {
+        drawn.add('cut');
+      }
+    } else if (row.unplaced !== 'reference') {
+      drawn.add('unbounded');
+    }
+  }
+  return LEGEND_ORDER.filter((mark) => drawn.has(mark));
+}
+
+/** Returns the marks of several plots that share one legend, in legend order. */
+export function unionMarks(plots: LegendMark[][]): LegendMark[] {
+  const drawn = new Set(plots.flat());
+  return LEGEND_ORDER.filter((mark) => drawn.has(mark));
+}

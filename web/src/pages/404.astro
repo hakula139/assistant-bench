@@ -1,13 +1,12 @@
 ---
-import { pageTitle } from '@/components/site/PageParts';
+import { PageHeader, intro } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 ---
 
 <Base title="Page not found">
-  <div class="max-w-prose space-y-3">
-    <h1 class={pageTitle}>Page not found</h1>
-    <p class="text-muted-foreground">
+  <PageHeader title="Page not found">
+    <p class={intro}>
       Nothing lives at this address. The <a href="/">home page</a> lists every leaderboard.
     </p>
-  </div>
+  </PageHeader>
 </Base>

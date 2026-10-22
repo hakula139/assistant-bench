@@ -2,7 +2,7 @@ import { cn } from 'cn';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 
-import { wideContainer } from '@/components/site/PageParts';
+import { pageTitle, wideContainer } from '@/components/site/PageParts';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Button } from '@/components/ui/button';
@@ -57,7 +57,7 @@ function ErrorAlert({ error }: { error: string | null }) {
 function Screen({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-16">
-      <h1 className="text-2xl font-semibold">{title}</h1>
+      <h1 className={pageTitle}>{title}</h1>
       {children}
     </div>
   );

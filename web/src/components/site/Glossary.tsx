@@ -1,5 +1,6 @@
 import { cn } from 'cn';
 
+import { statusIcons, type Status } from '@/components/site/Term';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -9,12 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Term } from '@/lib/glossary';
 
-export interface GlossaryEntry {
-  term: string;
-  /** Shows the term as the outline badge the leaderboard marks it with. */
-  badge?: boolean;
-  definition: string;
+export interface GlossaryEntry extends Term {
+  /** Shows the term beside the badge the leaderboard marks it with. */
+  status?: Status;
 }
 
 interface GlossaryProps {
@@ -36,14 +36,24 @@ export function Glossary({ heading, entries }: GlossaryProps) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {entries.map(({ term, badge, definition }) => (
-          <TableRow key={term}>
-            <TableCell className={cn(wrapping, 'font-medium')}>
-              {badge ? <Badge variant="status">{term}</Badge> : term}
-            </TableCell>
-            <TableCell className={wrapping}>{definition}</TableCell>
-          </TableRow>
-        ))}
+        {entries.map(({ term, status, definition }) => {
+          const Icon = status && statusIcons[status];
+          return (
+            <TableRow key={term}>
+              <TableCell className={cn(wrapping, 'font-medium text-balance')}>
+                <span className="flex items-center gap-2">
+                  {Icon && (
+                    <Badge variant="status" className="px-1">
+                      <Icon aria-hidden="true" />
+                    </Badge>
+                  )}
+                  {term}
+                </span>
+              </TableCell>
+              <TableCell className={cn(wrapping, 'text-balance')}>{definition}</TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

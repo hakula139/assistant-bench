@@ -10,12 +10,12 @@ import {
   useTable,
 } from '@tanstack/react-table';
 import { cn } from 'cn';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleHelp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { forestMarks } from '@/components/charts/forest-marks';
-import { Badge } from '@/components/ui/badge';
+import { Hint, StatusMark } from '@/components/site/Term';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -35,7 +35,15 @@ import {
   formatScore,
   formatSeconds,
 } from '@/lib/format';
-import { clip, forestDomain, forestTicks, labelledTicks } from '@/lib/forest';
+import {
+  clip,
+  forestDomain,
+  forestTicks,
+  labelledTicks,
+  legendMarks,
+  type LegendMark,
+} from '@/lib/forest';
+import { terms, type Term } from '@/lib/glossary';
 import type { Interval, Standing } from '@/lib/report';
 
 /**
@@ -61,8 +69,8 @@ interface LeaderboardProps {
   rows: LeaderboardRow[];
   /** Whether the rows are the family board's, with its ranks, or a category's refits. */
   ranked: boolean;
-  /** The reference system's score, drawn as the axis baseline when the board holds it. */
-  reference: number | undefined;
+  /** The system the scores are relative to, marked by name and ruled on the axis at its score. */
+  referenceSystem: string;
   /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
 }
@@ -71,7 +79,7 @@ const ROW_HEIGHT = 48;
 const FOREST_MARGIN = 22;
 
 const features = tableFeatures({
-  columnMeta: metaHelper<{ numeric?: boolean; forest?: boolean; wraps?: boolean }>(),
+  columnMeta: metaHelper<{ numeric?: boolean; forest?: boolean; wraps?: boolean; term?: Term }>(),
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   sortFns: { alphanumeric: sortFn_alphanumeric, basic: sortFn_basic },
@@ -124,7 +132,7 @@ function ForestRow({
         Plot.gridX(forestTicks(domain), { stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
         reference === undefined
           ? null
-          : Plot.ruleX([reference], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
+          : Plot.ruleX([reference], { stroke: 'var(--faint)', strokeOpacity: 0.4 }),
         forestMarks(
           [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
           domain,
@@ -141,7 +149,7 @@ function ForestRow({
           role="img"
           tabIndex={0}
           aria-label={`${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
-          className="focus-visible:outline-offset-[-2px]"
+          className="focus-visible:-outline-offset-2"
         >
           <PlotFigure plot={plot} height={ROW_HEIGHT} />
         </div>
@@ -164,9 +172,27 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   return null;
 }
 
+const referenceScore = (rows: LeaderboardRow[], referenceSystem: string) =>
+  rows.find((row) => row.system === referenceSystem)?.score;
+
+/** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
+export function leaderboardMarks(rows: LeaderboardRow[], referenceSystem: string): LegendMark[] {
+  return legendMarks(
+    rows.map((row) => ({
+      system: row.system,
+      name: row.name,
+      estimate: row,
+      preliminary: row.preliminary,
+    })),
+    forestDomain(rows),
+    referenceScore(rows, referenceSystem) !== undefined,
+  );
+}
+
 /** The leaderboard table, whose interval column is a forest plot on one shared axis. */
-export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps) {
+export function Leaderboard({ rows, ranked, referenceSystem, href }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
+  const reference = referenceScore(rows, referenceSystem);
 
   const columns = useMemo(() => {
     const familyWide = (label: string) =>
@@ -183,7 +209,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
         ? [
             helper.accessor((row) => row.standing?.best_rank, {
               id: 'rank',
-              header: 'Rank',
+              header: terms.rank.term,
               sortDescFirst: false,
               cell: ({ row: { original } }) =>
                 original.standing
@@ -205,7 +231,8 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
             ) : (
               <span className="font-medium whitespace-nowrap">{original.name}</span>
             )}
-            {original.preliminary && <Badge variant="status">Preliminary</Badge>}
+            {original.system === referenceSystem && <StatusMark status="reference" />}
+            {original.preliminary && <StatusMark status="preliminary" />}
           </span>
         ),
         meta: { wraps: true },
@@ -230,13 +257,13 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
         meta: { numeric: true },
       }),
       helper.accessor('votes', {
-        header: 'Votes',
+        header: terms.votes.term,
         sortDescFirst: true,
         meta: { numeric: true },
       }),
       helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
         id: 'both-bad',
-        header: familyWide('Both bad'),
+        header: familyWide(terms.bothBad.term),
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
@@ -244,11 +271,11 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
       }),
       helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
         id: 'gate-failures',
-        header: familyWide('Gate failures'),
+        header: familyWide(terms.gateFailures.term),
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true },
+        meta: { numeric: true, term: terms.gateFailures },
       }),
       helper.accessor((row) => row.standing?.mean_cost_usd ?? undefined, {
         id: 'cost',
@@ -267,7 +294,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
         meta: { numeric: true },
       }),
     ]);
-  }, [ranked, domain, reference, href]);
+  }, [ranked, domain, reference, referenceSystem, href]);
 
   const table = useTable({
     features,
@@ -282,7 +309,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
         {table.getHeaderGroups().map((group) => (
           <TableRow key={group.id} className="hover:bg-transparent">
             {group.headers.map((header) => {
-              const { numeric, forest } = header.column.columnDef.meta ?? {};
+              const { numeric, forest, term } = header.column.columnDef.meta ?? {};
               if (forest) {
                 return (
                   <TableHead
@@ -303,15 +330,23 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
                     sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
                   }
                 >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={header.column.getToggleSortingHandler()}
-                    className={cn('-mx-2.5 text-muted-foreground', numeric && 'flex-row-reverse')}
-                  >
-                    <table.FlexRender header={header} />
-                    <SortIcon direction={sorted} />
-                  </Button>
+                  <span className="inline-flex items-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={header.column.getToggleSortingHandler()}
+                      className={cn('-mx-2.5 text-muted-foreground', numeric && 'flex-row-reverse')}
+                    >
+                      <table.FlexRender header={header} />
+                      <SortIcon direction={sorted} />
+                    </Button>
+                    {term && (
+                      <Hint term={term}>
+                        <CircleHelp className="ml-1.5 size-3.5 text-faint" aria-hidden="true" />
+                        <span className="sr-only">What {term.term} means</span>
+                      </Hint>
+                    )}
+                  </span>
                 </TableHead>
               );
             })}
@@ -320,7 +355,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
       </TableHeader>
       <TableBody>
         {table.getRowModel().rows.map((row) => (
-          <TableRow key={row.id} className="group/row h-12">
+          <TableRow key={row.id} className="h-12">
             {row.getAllCells().map((cell) => {
               const { numeric, forest, wraps } = cell.column.columnDef.meta ?? {};
               return (

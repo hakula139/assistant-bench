@@ -1,0 +1,31 @@
+---
+import { VotesBoard } from '@/components/boards/VotesBoard';
+import { Forest, ForestLegend, drawnMarks } from '@/components/site/Forest';
+import { note } from '@/components/site/PageParts';
+import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
+import { configOf, votesRounds, type Family } from '@/lib/reports';
+
+interface Props {
+  family: Family;
+}
+
+const { family } = Astro.props;
+const config = configOf(family, 'votes');
+const rounds = votesRounds(family);
+const rows = unmeasuredRows(config.systems, config.reference, family.systemNames);
+---
+
+{rounds.length === 0 ? (
+  <div class="space-y-4">
+    <p class={note}>No round has closed yet.</p>
+    <Forest
+      caption={`${config.display_name} systems, none measured yet`}
+      rows={rows}
+      domain={EMPTY_DOMAIN}
+      large
+    />
+    <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
+  </div>
+) : (
+  <VotesBoard client:load family={family.name} rounds={rounds} names={family.systemNames} />
+)}

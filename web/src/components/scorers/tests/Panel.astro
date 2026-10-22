@@ -1,0 +1,46 @@
+---
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { MISSING, formatPercent } from '@/lib/format';
+import { testsRounds, type Family } from '@/lib/reports';
+import { systemName } from '@/lib/systems';
+
+interface Props {
+  family: Family;
+}
+
+const { family } = Astro.props;
+const results = testsRounds(family).at(-1)?.results;
+const name = (system: string) => systemName(family.systemNames, system);
+---
+
+{results ? (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>System</TableHead>
+        <TableHead numeric>Pass rate</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {results.standings
+        .toSorted((a, b) => b.pass_rate - a.pass_rate)
+        .map((standing) => (
+          <TableRow>
+            <TableCell>{name(standing.system)}</TableCell>
+            <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
+          </TableRow>
+        ))}
+    </TableBody>
+  </Table>
+) : (
+  <p class="text-sm text-muted-foreground">
+    {family.config.systems.map(name).join(', ') || MISSING}
+  </p>
+)}

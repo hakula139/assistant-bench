@@ -1,6 +1,6 @@
 import { getCollection } from 'astro:content';
 
-import type { FamilyConfig } from '@/lib/family';
+import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
 
@@ -73,6 +73,22 @@ export async function getFamilies(): Promise<Family[]> {
     reports.map((entry) => entry.data),
     resolveSystemNames(systems, new Map(models.map((entry) => [entry.id, entry.data.name]))),
   );
+}
+
+/**
+ * Returns the config of a family that the caller dispatched by scorer, typed for that scorer.
+ *
+ * @throws Error when the family is scored otherwise, which breaks the dispatch's contract.
+ */
+export function configOf<S extends Scorer>(
+  family: Family,
+  scorer: S,
+): Extract<FamilyConfig, { scorer: S }> {
+  const { config } = family;
+  if (config.scorer !== scorer) {
+    throw new Error(`expected ${family.name} to be scored by ${scorer}, got ${config.scorer}`);
+  }
+  return config as Extract<FamilyConfig, { scorer: S }>;
 }
 
 /** Returns a family's latest round, or nothing before its first round closes. */

@@ -1,4 +1,5 @@
 import { cn } from 'cn';
+import type { ReactNode } from 'react';
 
 import {
   Table,
@@ -8,7 +9,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { REFERENCE_SCORE, clip, forestTicks, sparseTicks, type ForestRow } from '@/lib/forest';
+import {
+  REFERENCE_SCORE,
+  clip,
+  forestTicks,
+  legendMarks,
+  sparseTicks,
+  type ForestRow,
+  type LegendMark,
+} from '@/lib/forest';
 import { formatInterval, formatScore } from '@/lib/format';
 
 interface ForestProps {
@@ -20,11 +29,13 @@ interface ForestProps {
   large?: boolean;
 }
 
+const reference = formatScore(REFERENCE_SCORE);
+
 const unplacedText = {
   'reference': {
-    interval: 'Fixed at 1,000 as the reference',
-    score: '1,000',
-    summary: 'the reference, fixed at 1,000',
+    interval: `Fixed at ${reference} as the reference`,
+    score: reference,
+    summary: `the reference, fixed at ${reference}`,
   },
   'unranked': {
     interval: 'Unbounded, too few comparisons to place it',
@@ -54,6 +65,7 @@ const middle = 'absolute top-1/2 -translate-y-1/2';
 const dot = cn(middle, 'size-3.5 -translate-x-1/2 rounded-full border-2');
 const solidDot = 'border-background bg-chart-series';
 const hollowDot = 'border-chart-series bg-background';
+const line = cn(middle, 'h-0 border-t-3 border-chart-series');
 
 /** An arrowhead at one end of the track, pointing off the axis. */
 function Arrow({ side, className }: { side: 'left' | 'right'; className: string }) {
@@ -64,6 +76,79 @@ function Arrow({ side, className }: { side: 'left' | 'right'; className: string 
     >
       <path d={side === 'left' ? 'M6 0 0 5l6 5z' : 'M0 0l6 5-6 5z'} />
     </svg>
+  );
+}
+
+/** The dashed track with an arrowhead at both ends that a row without an estimate draws. */
+function Unbounded() {
+  return (
+    <span className="text-faint">
+      <span className={cn(middle, 'inset-x-1.5 border-t-2 border-dashed border-current')} />
+      <Arrow side="left" className="fill-current" />
+      <Arrow side="right" className="fill-current" />
+    </span>
+  );
+}
+
+/** The rule a forest plot draws at the reference score. */
+const referenceRule = 'bg-faint/40';
+
+const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
+  score: {
+    label: 'Score, 95% interval',
+    mark: (
+      <>
+        <span className={cn(line, 'inset-x-0 border-solid')} />
+        <span className={cn(dot, solidDot, 'left-1/2')} />
+      </>
+    ),
+  },
+  preliminary: {
+    label: 'Preliminary',
+    mark: (
+      <>
+        <span className={cn(line, 'inset-x-0 border-dashed')} />
+        <span className={cn(dot, hollowDot, 'left-1/2')} />
+      </>
+    ),
+  },
+  cut: {
+    label: 'Past the axis',
+    mark: (
+      <>
+        <Arrow side="left" className="fill-chart-series" />
+        <span className={cn(line, 'right-0 left-1.5 border-solid')} />
+      </>
+    ),
+  },
+  reference: {
+    label: `Reference, ${reference}`,
+    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', referenceRule)} />,
+  },
+  unbounded: { label: 'Unbounded', mark: <Unbounded /> },
+};
+
+/** Returns the marks a `Forest` of `rows` on `domain` draws, for its legend. */
+export function drawnMarks(rows: ForestRow[], domain: [number, number]): LegendMark[] {
+  return legendMarks(rows, domain, forestTicks(domain).includes(REFERENCE_SCORE));
+}
+
+/** A key to the interval marks, for the `marks` a nearby forest plot draws. */
+export function ForestLegend({ marks }: { marks: LegendMark[] }) {
+  return (
+    <ul
+      aria-label="Legend"
+      className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground"
+    >
+      {marks.map((key) => (
+        <li key={key} className="flex items-center gap-2">
+          <span aria-hidden="true" className="relative h-4 w-9 shrink-0">
+            {legendKey[key].mark}
+          </span>
+          {legendKey[key].label}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -126,7 +211,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                       key={tick}
                       className={cn(
                         'absolute inset-y-0 w-px',
-                        tick === REFERENCE_SCORE ? 'bg-faint/40' : 'bg-chart-grid',
+                        tick === REFERENCE_SCORE ? referenceRule : 'bg-chart-grid',
                       )}
                       style={{ left: position(tick) }}
                     />
@@ -134,11 +219,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                   {clipped ? (
                     <>
                       <span
-                        className={cn(
-                          middle,
-                          'h-0 border-t-3 border-chart-series',
-                          preliminary ? 'border-dashed' : 'border-solid',
-                        )}
+                        className={cn(line, preliminary ? 'border-dashed' : 'border-solid')}
                         style={{
                           left: position(clipped.lower),
                           right: `calc(100% - ${position(clipped.upper)})`,
@@ -158,16 +239,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                       style={{ left: position(REFERENCE_SCORE) }}
                     />
                   ) : (
-                    <span className="text-faint">
-                      <span
-                        className={cn(
-                          middle,
-                          'inset-x-1.5 border-t-2 border-dashed border-current',
-                        )}
-                      />
-                      <Arrow side="left" className="fill-current" />
-                      <Arrow side="right" className="fill-current" />
-                    </span>
+                    <Unbounded />
                   )}
                 </span>
               </TableCell>

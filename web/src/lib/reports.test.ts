@@ -10,6 +10,8 @@ const votes = (listed: boolean, displayName = 'Prose'): FamilyConfig => ({
   display_name: displayName,
   systems: ['acme-large', 'acme-pro'],
   reference: 'acme-large',
+  render: 'text',
+  gates: {},
   public: listed,
 });
 

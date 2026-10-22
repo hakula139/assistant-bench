@@ -3,7 +3,7 @@ import { cn } from 'cn';
 
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
-import { container } from '@/components/site/PageParts';
+import { container, stack } from '@/components/site/PageParts';
 import { REPOSITORY, SITE_NAME } from '@/lib/site';
 
 interface Props {
@@ -27,8 +27,14 @@ const {
     />
   </head>
   <body class="flex min-h-dvh flex-col">
+    <a
+      href="#main"
+      class="sr-only rounded-md bg-background px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+    >
+      Skip to content
+    </a>
     <Header />
-    <main class={cn(container, 'flex-1 pt-8 pb-16')}>
+    <main id="main" tabindex="-1" class={cn(container, 'flex-1 pt-8 pb-16 outline-none', stack)}>
       <slot />
     </main>
     <footer class="border-t">
