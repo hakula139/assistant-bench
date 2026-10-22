@@ -1,0 +1,109 @@
+---
+import { partId } from '@/components/scorers/parts';
+import { votesParts } from '@/components/scorers/votes/parts';
+import { Forest, ForestLegend, drawnMarks } from '@/components/site/Forest';
+import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
+import { MethodStrip } from '@/components/site/Method';
+import { Part, Stat, list, note, statList } from '@/components/site/PageParts';
+import { EMPTY_DOMAIN, type ForestRow } from '@/lib/forest';
+import { gates, terms } from '@/lib/glossary';
+
+const id = (part: keyof typeof votesParts) => partId('votes', part);
+
+const example = (score: number, lower: number, upper: number) => ({
+  score,
+  interval: { lower, upper },
+});
+
+const rows: ForestRow[] = [
+  { system: 'settled', name: 'Settled', estimate: example(1040, 990, 1090), preliminary: false },
+  {
+    system: 'preliminary',
+    name: 'Preliminary',
+    estimate: example(930, 780, 1110),
+    preliminary: true,
+  },
+  {
+    system: 'far-behind',
+    name: 'Far behind',
+    estimate: example(380, 250, 520),
+    preliminary: false,
+  },
+  { system: 'no-votes', name: 'No votes yet', unplaced: 'no-votes' },
+];
+
+const columns: GlossaryEntry[] = [
+  terms.rank,
+  { ...terms.reference, status: 'reference' },
+  { ...terms.preliminary, status: 'preliminary' },
+  terms.unranked,
+  terms.votes,
+  terms.bothBad,
+  terms.gateFailures,
+  terms.costLatency,
+];
+
+const diagnostics = [terms.raterAgreement, terms.separatedPairs, terms.splitHalf, terms.leftOut];
+---
+
+<MethodStrip scorer="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
+<p>
+  In sessions of up to 30 pairs with sides counterbalanced, one rater picks the better output, a
+  tie, or both bad.
+</p>
+
+<Part id={id('gates')} title={votesParts.gates}>
+  <p>A failing output loses its pairs without a vote, and two identical outputs tie.</p>
+  <Glossary heading="Gate" entries={Object.values(gates)} />
+</Part>
+
+<Part id={id('scores')} title={votesParts.scores}>
+  <p>
+    A Bradley-Terry model turns the votes and the results settled without a vote into Elo-like
+    scores, counting ties and both-bad votes as half a win, so scores compare only within a family.
+  </p>
+  <dl class={statList}>
+    <Stat label="A 100-point gap" detail="of the votes between them">
+      wins about 64%
+    </Stat>
+    <Stat label="95% intervals" detail="resampling whole cases">
+      1,000 bootstraps
+    </Stat>
+  </dl>
+</Part>
+
+<Part id={id('leaderboard')} title={votesParts.leaderboard}>
+  <figure class="space-y-4 rounded-lg border p-4">
+    <Forest caption="Four example rows" domain={EMPTY_DOMAIN} rows={rows} />
+    <figcaption class="space-y-2">
+      <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
+      <p class={note}>The axis starts at most 600 points below the top score.</p>
+    </figcaption>
+  </figure>
+  <Glossary heading="Column" entries={columns} />
+  <p>
+    A dash marks a missing value. A category view refits that category's votes alone, so intervals
+    widen and Rank disappears, while the columns labeled "all categories" stay family-wide.
+  </p>
+</Part>
+
+<Part id={id('leader')} title={votesParts.leader}>
+  <ol class:list={['list-decimal', list]}>
+    <li>
+      A ranked system ties for the top when the 95% interval of its paired score difference from the
+      top system contains 0 or is unbounded, so pairing can separate overlapping intervals.
+    </li>
+    <li>
+      While any system tied for the top, the top one included, is preliminary, the round names no
+      leader.
+    </li>
+    <li>
+      Otherwise a lone top system leads, and a tie goes to the lower cost per output, then the lower
+      median latency, then the higher score, with a known value beating a missing one.
+    </li>
+  </ol>
+</Part>
+
+<Part id={id('summary')} title={votesParts.summary}>
+  <Glossary heading="Figure" entries={diagnostics} />
+</Part>

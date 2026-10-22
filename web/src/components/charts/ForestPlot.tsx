@@ -21,6 +21,8 @@ interface ForestPlotProps {
   labels: string[];
   /** The x domain, which callers share across plots so their intervals compare. */
   domain: [number, number];
+  /** Names the chart, unless an enclosing figure's caption already does. */
+  label?: string;
 }
 
 const ROW_HEIGHT = 30;
@@ -78,10 +80,10 @@ export function forestPlotOptions(
 }
 
 /** One forest plot of category refits, labelled by system or by category. */
-export function ForestPlot({ rows, labels, domain }: ForestPlotProps) {
+export function ForestPlot({ rows, labels, domain, label }: ForestPlotProps) {
   const plot = useCallback(
     (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain }, frame),
     [rows, labels, domain],
   );
-  return <PlotFigure plot={plot} height={labels.length * ROW_HEIGHT + 36} />;
+  return <PlotFigure plot={plot} height={labels.length * ROW_HEIGHT + 36} label={label} />;
 }

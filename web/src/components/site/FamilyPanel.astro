@@ -1,85 +1,36 @@
 ---
-import { Forest } from '@/components/site/Forest';
-import { section } from '@/components/site/PageParts';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { EMPTY_DOMAIN, forestDomain, roundRows, unmeasuredRows } from '@/lib/forest';
-import { MISSING, formatCountOf, formatLeaderNote, formatPercent } from '@/lib/format';
+import { scorerViews } from '@/components/scorers';
+import { ScorerIcon } from '@/components/site/Method';
+import { sectionTitle } from '@/components/site/PageParts';
+import { formatCountOf } from '@/lib/format';
+import { scorers } from '@/lib/method';
 import { latest, type Family } from '@/lib/reports';
-import { systemName } from '@/lib/systems';
 
 interface Props {
   family: Family;
 }
 
 const { family } = Astro.props;
-const { config, systemNames } = family;
-const title = config.display_name;
-const name = (system: string) => systemName(systemNames, system);
+const { scorer } = family.config;
+const { Panel } = scorerViews[scorer];
 const report = latest(family);
 const results = report?.results;
-const status = report
+const round = report
   ? `Round ${report.round}${results?.scorer === 'votes' ? `, ${formatCountOf(results.votes, 'vote')}` : ''}`
   : 'No round has closed yet';
 ---
 
 <section class="space-y-3" aria-labelledby={`family-${family.name}`}>
   <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
-    <h2 id={`family-${family.name}`} class={section.title}>
+    <h2 id={`family-${family.name}`} class={sectionTitle}>
       <a href={`/${family.name}/`} class="text-foreground hover:text-link">
-        {title}
+        {family.config.display_name}
       </a>
     </h2>
-    <p class="text-sm text-muted-foreground">{status}</p>
+    <p class="flex items-center gap-1.5 self-center text-sm text-muted-foreground">
+      <ScorerIcon scorer={scorer} />
+      {scorers[scorer].title} · {round}
+    </p>
   </div>
-  {config.scorer === 'votes' ? (
-    results?.scorer === 'votes' ? (
-      <>
-        <Forest
-          caption={`${title} scores with 95% intervals`}
-          rows={roundRows(family.name, config.systems, results, systemNames)}
-          domain={forestDomain(results.standings)}
-        />
-        <p class="text-sm">
-          <span class="text-muted-foreground">Leader: </span>
-          {[results.decision && name(results.decision.leader), formatLeaderNote(results.decision)]
-            .filter(Boolean)
-            .join(', ')}
-        </p>
-      </>
-    ) : (
-      <Forest
-        caption={`${title} systems, none measured yet`}
-        rows={unmeasuredRows(config.systems, config.reference, systemNames)}
-        domain={EMPTY_DOMAIN}
-      />
-    )
-  ) : results?.scorer === 'tests' ? (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>System</TableHead>
-          <TableHead numeric>Pass rate</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {results.standings
-          .toSorted((a, b) => b.pass_rate - a.pass_rate)
-          .map((standing) => (
-            <TableRow>
-              <TableCell>{name(standing.system)}</TableCell>
-              <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
-            </TableRow>
-          ))}
-      </TableBody>
-    </Table>
-  ) : (
-    <p class="text-sm text-muted-foreground">{config.systems.map(name).join(', ') || MISSING}</p>
-  )}
+  <Panel family={family} />
 </section>

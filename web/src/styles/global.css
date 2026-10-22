@@ -20,6 +20,8 @@
     Consolas, 'Liberation Mono', monospace;
   --default-mono-font-feature-settings: 'calt';
   --default-transition-timing-function: ease;
+  --text-title: 1.75rem;
+  --container-measure: 85ch;
 }
 
 :root {
@@ -138,7 +140,14 @@
   }
 
   body {
-    @apply bg-background leading-normal text-foreground antialiased;
+    @apply bg-background leading-normal text-pretty text-foreground antialiased;
+  }
+
+  /* Firefox lacks `pretty`, and balancing is how it keeps a short block from ending on one word. */
+  @supports not (text-wrap: pretty) {
+    :where(p, li, dt, dd, figcaption, caption, th, td) {
+      @apply text-balance;
+    }
   }
 
   ::selection {
@@ -150,6 +159,15 @@
 
     &:hover {
       @apply text-link-hover;
+    }
+  }
+
+  /* Color alone does not mark a link inside running text (WCAG 1.4.1). */
+  :where(p, figcaption) a {
+    @apply underline decoration-link/40 underline-offset-2;
+
+    &:hover {
+      @apply decoration-current;
     }
   }
 

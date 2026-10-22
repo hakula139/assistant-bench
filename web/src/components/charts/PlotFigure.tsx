@@ -14,6 +14,11 @@ interface PlotFigureProps {
   plot: (frame: PlotFrame) => Plot.PlotOptions;
   /** Reserved before the first render so the page does not shift, in CSS pixels. */
   height: number;
+  /**
+   * Names the chart for assistive technology, which reads its values from the table twin. Omit it
+   * where an enclosing element already names the chart.
+   */
+  label?: string;
   className?: string;
 }
 
@@ -28,7 +33,7 @@ function labelMeasure(element: HTMLElement): (text: string) => number {
 }
 
 /** Renders an Observable Plot chart that fills its container's width. */
-export function PlotFigure({ plot, height, className }: PlotFigureProps) {
+export function PlotFigure({ plot, height, label, className }: PlotFigureProps) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
   const [fontsReady, setFontsReady] = useState(false);
@@ -64,6 +69,7 @@ export function PlotFigure({ plot, height, className }: PlotFigureProps) {
       ...options,
       width,
     });
+    figure.setAttribute('aria-hidden', 'true');
     element.replaceChildren(figure);
     return () => {
       figure.remove();
@@ -71,6 +77,12 @@ export function PlotFigure({ plot, height, className }: PlotFigureProps) {
   }, [plot, width, fontsReady]);
 
   return (
-    <div ref={container} className={cn('bench-plot', className)} style={{ minHeight: height }} />
+    <div
+      ref={container}
+      role={label === undefined ? undefined : 'img'}
+      aria-label={label}
+      className={cn('bench-plot', className)}
+      style={{ minHeight: height }}
+    />
   );
 }

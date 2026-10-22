@@ -1,0 +1,8 @@
+---
+import { Glossary } from '@/components/site/Glossary';
+import { MethodStrip } from '@/components/site/Method';
+import { terms } from '@/lib/glossary';
+---
+
+<MethodStrip scorer="tests" />
+<Glossary heading="Column" entries={[terms.passRate, terms.testsCostLatency]} />

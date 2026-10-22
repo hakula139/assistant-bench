@@ -11,10 +11,13 @@ import {
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
-import { Stat, note, pageTitle, section, statList } from '@/components/site/PageParts';
+import { PageHeader, Section, Stat, note, stack, statList } from '@/components/site/PageParts';
+import { statusIcons } from '@/components/site/Term';
+import { Badge } from '@/components/ui/badge';
 import Base from '@/layouts/Base.astro';
 import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
+import { terms } from '@/lib/glossary';
 import type { Distribution, Standing } from '@/lib/report';
 import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
 import { systemName, type SystemNames } from '@/lib/systems';
@@ -83,14 +86,24 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
 const length = results.length;
+const Preliminary = statusIcons.preliminary;
 ---
 
 <Base title={`${name(system)} on ${familyName}`}>
-  <header class="mb-8 space-y-3">
-    <p class="text-sm">
-      <a href={`/${family}/`}>{familyName}</a>
-    </p>
-    <h1 class={pageTitle}>{name(system)}</h1>
+  <PageHeader title={name(system)}>
+    <Fragment slot="context">
+      <p class="text-sm">
+        <a href={`/${family}/`}>{familyName}</a>
+      </p>
+    </Fragment>
+    <Fragment slot="status">
+      {standing.preliminary && (
+        <Badge variant="status" title={terms.preliminary.definition}>
+          <Preliminary aria-hidden="true" />
+          {terms.preliminary.term}
+        </Badge>
+      )}
+    </Fragment>
     <dl class={statList}>
       <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
         {formatScore(standing.score)}
@@ -106,15 +119,11 @@ const length = results.length;
         </Stat>
       )}
     </dl>
-    {standing.preliminary && (
-      <p class={note}>Preliminary: fewer than 40 decisive votes, so the score may still move.</p>
-    )}
-  </header>
+  </PageHeader>
 
-  <div class="space-y-10">
+  <div class={stack}>
     {headToHead.length > 0 && (
-      <section class={section.root}>
-        <h2 class={section.title}>Head to head</h2>
+      <Section title="Head to head">
         <p class={note}>
           Win rate against each opponent, where ties and both-bad votes count half.
         </p>
@@ -128,32 +137,36 @@ const length = results.length;
         <TableTwin>
           <HeadToHeadTable headToHead={headToHead} names={names} />
         </TableTwin>
-      </section>
+      </Section>
     )}
 
     {categoryRows.length > 0 && (
-      <section class={section.root}>
-        <h2 class={section.title}>Categories</h2>
-        <p class={note}>Scores from each category's votes alone, with 95% intervals.</p>
+      <Section title="Categories">
         <ForestPlot
           client:visible
           rows={categoryRows}
           labels={categoryRows.map((row) => row.label)}
           domain={categoryDomain}
+          label="Category scores with 95% intervals"
         />
         <TableTwin>
           <CategoryTable categories={categoryRows} />
         </TableTwin>
-      </section>
+      </Section>
     )}
 
-    <section class={section.root}>
-      <h2 class={section.title}>Output length and latency</h2>
-      <p class={note}>
-        Each system's median and 10th to 90th percentile range in this round.
-        {length !== null &&
-          ` Across the family, the rater favors the ${length >= 0 ? 'longer' : 'shorter'} output by ${Math.abs(length).toFixed(1)} score points per standard deviation of the pair's relative length difference.`}
-      </p>
+    <Section title="Output length and latency">
+      <p class={note}>Each system's median and 10th to 90th percentile range.</p>
+      {length !== null && (
+        <dl class="text-sm">
+          <Stat
+            label="Length preference"
+            detail="points per SD of the pair's relative length difference, family-wide"
+          >
+            {length >= 0 ? 'Longer' : 'Shorter'}, {Math.abs(length).toFixed(1)}
+          </Stat>
+        </dl>
+      )}
       <div class="grid gap-6 lg:grid-cols-2">
         {tokenRows.length > 0 && (
           <DotRangePlot client:visible rows={tokenRows} label="Output tokens" format="tokens" />
@@ -165,20 +178,18 @@ const length = results.length;
       <TableTwin>
         <DistributionTable standings={standings} system={system} names={names} />
       </TableTwin>
-    </section>
+    </Section>
 
-    <section class={section.root}>
-      <h2 class={section.title}>Flags</h2>
+    <Section title="Flags">
       <p class={note}>
-        Votes that flagged a problem in this system's output. A flag counts against the losing side,
-        or against both sides of a tie or a both-bad vote.
+        Votes that flagged a problem in this system's output, counted against the losing side, or
+        both sides of a tie or a both-bad vote.
       </p>
       <FlagsTable standing={standing} />
-    </section>
+    </Section>
 
-    <section class={section.root}>
-      <h2 class={section.title}>Rounds</h2>
+    <Section title="Rounds">
       <RoundsTable appearances={appearances} />
-    </section>
+    </Section>
   </div>
 </Base>

@@ -13,16 +13,17 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 
 ```text
 web/src/
-├── components/boards/                      # One board per scorer, plus the tables its pages share
+├── components/boards/                      # The hydrated boards, plus the tables their pages share
 ├── components/charts/                      # Observable Plot charts and their table twins
-├── components/site/                        # Header, wordmark, family panel, static forest, glossary, and shared page parts
+├── components/scorers/                     # The scorer registry and each scorer's board, home panel, and methodology section
+├── components/site/                        # Header, wordmark, family panel, static forest and its legend, method strip, glossary, term popovers, and shared page parts
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
-├── lib/                                    # The report and family schemas, the system names, the forest axis, the site name, the vote API client, formatters, hooks
+├── lib/                                    # The report and family schemas, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
@@ -34,12 +35,12 @@ web/src/
 - The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, `systems.toml` through the `systems` collection's `file()` loader, and the export that `BENCH_NIXOS_CONFIG` names through the `models` collection's inline loader, so `pnpm build` and `pnpm typecheck` run only inside the dev shell. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
 - `lib/family.ts` lists only the `family.toml` keys the site reads, with objects that drop the rest, since the pydantic settings model already rejects unknown keys.
 - `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so the build rejects a report with a field the schema lacks or a value of another type. Change both schemas in one PR. `pnpm test` parses both report fixtures and compares the Zod schema's JSON Schema with `tests/fixtures/report.schema.json`, which pytest writes from the pydantic models, within each results variant, over every field's types, nullability, constants and enums, and every object's required keys, allowed keys, and map key names, so a schema change on either side fails a check. Numeric bounds, formats, and descriptions are not compared.
-- A new scorer adds a results variant to the schema, a board under `components/boards/`, an arm in the scorer switches of the home and family pages, and a methodology section that the family page's arm links. The type check fails until every switch handles the new variant, and `pnpm test` fails until the linked section exists.
+- A new scorer adds a results variant to the schema, its entry in `scorerViews` in `components/scorers/index.ts` with its board, home panel, methodology section, and legend marks, its entry in `scorers` and steps in `methodSteps` in `lib/method.ts`, and its icons in `components/site/Method.tsx`. The home, family, and methodology pages dispatch only through `scorerViews`, and the family page links the section at `#<scorer>`. Icons and steps key on the scorer and the family's `render`, never on a family name. The type check fails until every record and switch handles the new variant, and `pnpm test` fails until the linked section exists.
 
 ## Components
 
 - Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state and its `choice` variant for the verdicts, `progress.tsx` for its value and track, `table.tsx` for its `numeric` cells, and `badge.tsx` for its `status` variant.
-- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component, or a shared class constant like `section` or `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
+- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component like `Section`, or a shared class constant like `note` in `components/site/PageParts.tsx`, so the class list is not repeated. Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every page's top level.
 - Hydrate a component only where the page is interactive. Tables render as static React components, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
 - Pass filter state through `useSearchParam` so each filter lands in the URL.
 

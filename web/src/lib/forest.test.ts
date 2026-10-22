@@ -6,10 +6,13 @@ import {
   forestDomain,
   forestTicks,
   labelledTicks,
+  legendMarks,
   roundRows,
   sharedDomain,
   sparseTicks,
+  unionMarks,
   unmeasuredRows,
+  type ForestRow,
 } from '@/lib/forest';
 import { reportSchema } from '@/lib/report';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
@@ -145,6 +148,53 @@ describe('unmeasuredRows', () => {
     expect(rows.map((row) => [row.system, row.name])).toEqual([
       ['acme-b', 'Apex'],
       ['acme-a', 'Zenith'],
+    ]);
+  });
+});
+
+describe('legendMarks', () => {
+  const domain: [number, number] = [400, 1100];
+  const row = (score: number, lower: number, upper: number, preliminary = false): ForestRow => ({
+    system: 'acme-pro',
+    name: 'Acme Pro',
+    estimate: estimate(score, lower, upper),
+    preliminary,
+  });
+
+  test('names a settled score and the reference rule', () => {
+    expect(legendMarks([row(1004, 955, 1065)], domain, true)).toEqual(['score', 'reference']);
+  });
+
+  test('names a preliminary score apart from a settled one', () => {
+    expect(legendMarks([row(700, 600, 800, true)], domain, false)).toEqual(['preliminary']);
+  });
+
+  test.each([
+    ['an interval', row(500, 300, 700)],
+    ['a score', row(350, 250, 450)],
+  ])('names the cut when %s runs past the axis start', (_, cut) => {
+    expect(legendMarks([cut], domain, false)).toEqual(['score', 'cut']);
+  });
+
+  test('names the unbounded track for unplaced systems but not for the reference dot', () => {
+    const reference: ForestRow = {
+      system: 'acme-large',
+      name: 'Acme Large',
+      unplaced: 'reference',
+    };
+    const unranked: ForestRow = { system: 'acme-edge', name: 'Acme Edge', unplaced: 'unranked' };
+
+    expect(legendMarks([reference], domain, true)).toEqual(['reference']);
+    expect(legendMarks([unranked], domain, false)).toEqual(['unbounded']);
+  });
+});
+
+describe('unionMarks', () => {
+  test("keeps every plot's marks once, in legend order", () => {
+    expect(unionMarks([['unbounded', 'reference'], ['score', 'reference'], []])).toEqual([
+      'score',
+      'reference',
+      'unbounded',
     ]);
   });
 });

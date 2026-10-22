@@ -1,8 +1,13 @@
 import { cn } from 'cn';
+import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
-import { Leaderboard, type LeaderboardRow } from '@/components/boards/Leaderboard';
+import {
+  Leaderboard,
+  leaderboardMarks,
+  type LeaderboardRow,
+} from '@/components/boards/Leaderboard';
 import { CategoryForests } from '@/components/charts/CategoryForests';
 import {
   ParetoScatter,
@@ -10,7 +15,9 @@ import {
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
 import { TableTwin } from '@/components/charts/TableTwin';
-import { Section, Stat, note, statList } from '@/components/site/PageParts';
+import { ForestLegend } from '@/components/site/Forest';
+import { Section, Stat, note, stack, statList } from '@/components/site/PageParts';
+import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -31,6 +38,7 @@ import {
   formatLeaderNote,
   formatTau,
 } from '@/lib/format';
+import { terms } from '@/lib/glossary';
 import type { CategoryBoard, Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { systemName, type SystemNames } from '@/lib/systems';
@@ -98,20 +106,26 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
           )}
         </Stat>
         <Stat
-          label="Votes"
+          label={terms.votes.term}
           detail={`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
         >
           {results.votes}
         </Stat>
-        <Stat label="Rater agreement" detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}>
+        <Stat
+          label={<Hint term={terms.raterAgreement} />}
+          detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}
+        >
           {formatPercent(agreement.agreement)}
         </Stat>
-        <Stat label="Separated pairs">{formatPercent(results.separability)}</Stat>
-        <Stat label="Split-half τ">{formatTau(results.split_half_tau)}</Stat>
+        <Stat label={<Hint term={terms.separatedPairs} />}>
+          {formatPercent(results.separability)}
+        </Stat>
+        <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
       </dl>
       {agreement.below_floor && (
-        <p className={note}>
-          Rater agreement is below 70%, so the intervals overstate how well systems separate.
+        <p className={cn(note, 'flex gap-2')}>
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          Agreement below 70%, so the intervals overstate separation.
         </p>
       )}
     </div>
@@ -136,7 +150,6 @@ export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
     () => leaderboardRows(results, activeCategory, names),
     [results, activeCategory, names],
   );
-  const reference = rows.find((row) => row.system === results.reference)?.score;
   const order = useMemo(() => categorySystems(results), [results]);
   const measured = useMemo(
     () =>
@@ -162,7 +175,7 @@ export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
 
   return (
     <TooltipProvider>
-      <div className="space-y-8">
+      <div className={stack}>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <Filter
             label="Round"
@@ -188,20 +201,24 @@ export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
 
         <RoundSummary results={results} names={names} />
 
-        <Leaderboard
-          rows={rows}
-          ranked={activeCategory === ALL}
-          reference={reference}
-          href={href}
-        />
-        {unranked.length > 0 && (
-          <p className={cn('-mt-4', note)}>
-            {`Unranked until more comparisons connect them to the reference: ${unranked
-              .map((system) => systemName(names, system))
-              .toSorted((a, b) => a.localeCompare(b))
-              .join(', ')}.`}
-          </p>
-        )}
+        <div className="space-y-4">
+          <Leaderboard
+            rows={rows}
+            ranked={activeCategory === ALL}
+            referenceSystem={results.reference}
+            href={href}
+          />
+          {unranked.length > 0 && (
+            <p className={note}>
+              <Hint term={terms.unranked} />
+              {` with too few comparisons to place them: ${unranked
+                .map((system) => systemName(names, system))
+                .toSorted((a, b) => a.localeCompare(b))
+                .join(', ')}`}
+            </p>
+          )}
+          <ForestLegend marks={leaderboardMarks(rows, results.reference)} />
+        </div>
 
         {categories.length > 0 && (
           <Section title="Categories">

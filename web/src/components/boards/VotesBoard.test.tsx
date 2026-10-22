@@ -41,6 +41,9 @@ function verticalRules(row: Element): number[] {
     .map((line) => Number(line.getAttribute('x1')));
 }
 
+const legend = (html: string) =>
+  text(/<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '').trim();
+
 describe('VotesBoard', () => {
   afterEach(() => {
     search.delete('category');
@@ -76,11 +79,39 @@ describe('VotesBoard', () => {
     expect(text(html)).toMatch(/Acme Tiny Preliminary [^%]*? 0 – /);
   });
 
+  test('spells out the preliminary mark and leaves the reference mark an icon', async () => {
+    const html = render(await load());
+
+    expect(html).toMatch(/<span>Preliminary<\/span>/);
+    expect(html).toMatch(/<span class="sr-only">Reference<\/span>/);
+  });
+
+  test('keys the legend to the marks the board draws', async () => {
+    const round = await load();
+    for (const standing of round.results.standings) {
+      standing.preliminary = false;
+    }
+
+    const html = render(round);
+
+    expect(legend(html)).toBe('Score, 95% interval Past the axis Reference, 1,000');
+  });
+
+  test('marks only the reference and the preliminary systems', async () => {
+    const html = render(await load());
+
+    const marked = (status: string) =>
+      [...text(html).matchAll(new RegExp(`(Acme [A-Z][a-z]+) ${status} `, 'g'))].map((m) => m[1]);
+
+    expect(marked('Reference')).toEqual(['Acme Large']);
+    expect(marked('Preliminary')).toEqual(['Acme Tiny']);
+  });
+
   test('names the unranked systems after the table, sorted by display name', async () => {
     const html = render(await load(), { ...FIXTURE_NAMES, 'acme-edge': 'Acme Zeta' });
 
     expect(text(html)).toContain(
-      'Unranked until more comparisons connect them to the reference: Acme Nano, Acme Zeta.',
+      'Unranked with too few comparisons to place them: Acme Nano, Acme Zeta',
     );
   });
 
@@ -110,9 +141,7 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain(
-      'Rater agreement is below 70%, so the intervals overstate how well systems separate.',
-    );
+    expect(text(html)).toContain('Agreement below 70%, so the intervals overstate separation.');
   });
 
   test('names no leader while a preliminary system ties with the top score', async () => {
@@ -141,7 +170,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toBe(
-      ' System 95% interval Score Votes Both bad all categories Gate failures all categories Cost / output all categories p50 latency all categories ',
+      ' System 95% interval Score Votes Both bad all categories Gate failures all categories What Gate failures means Cost / output all categories p50 latency all categories ',
     );
   });
 
