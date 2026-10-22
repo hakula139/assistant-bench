@@ -1,6 +1,10 @@
+from typing import Any
+
 import numpy as np
 import pytest
+from scipy import optimize
 from statsmodels.discrete.discrete_model import Logit
+from threadpoolctl import threadpool_info, threadpool_limits
 
 from assistant_bench.scoring.ranking import (
     ANCHOR,
@@ -35,6 +39,12 @@ def simulate(
         case = f'case-{rng.integers(cases)}'
         comparisons.append(Comparison(str(left), str(right), score, case))
     return comparisons
+
+
+def blas_threads() -> set[int]:
+    return {
+        lib['num_threads'] for lib in threadpool_info() if lib['user_api'] == 'blas'
+    }
 
 
 class TestMatchups:
@@ -196,6 +206,25 @@ class TestRate:
         assert bounded.systems == alone.systems
         assert bounded.lower == pytest.approx(alone.lower, abs=50)
         assert bounded.upper == pytest.approx(alone.upper, abs=50)
+
+    def test_fits_on_one_blas_thread_and_restores_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        threads: list[set[int]] = []
+        minimize = optimize.minimize
+
+        def recording(*args: Any, **kwargs: Any) -> Any:
+            threads.append(blas_threads())
+            return minimize(*args, **kwargs)
+
+        monkeypatch.setattr(optimize, 'minimize', recording)
+
+        with threadpool_limits(limits=2, user_api='blas'):
+            rate(Matchups.build(simulate(60)), 'large', resamples=3)
+            after = blas_threads()
+
+        assert threads == [{1}] * 5
+        assert after == {2}
 
 
 class TestTies:

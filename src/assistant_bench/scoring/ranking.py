@@ -8,6 +8,7 @@ from typing import NamedTuple
 import numpy as np
 import numpy.typing as npt
 from scipy import optimize, sparse, special, stats
+from threadpoolctl import threadpool_limits
 
 
 type Floats = npt.NDArray[np.float64]
@@ -147,7 +148,10 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     x = _design(
         matchups.left, matchups.right, matchups.sided, len(matchups.systems), columns
     )
-    theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
+    # With a thread per core, scipy's OpenBLAS burns several cores during each tiny
+    # L-BFGS-B fit, which on a loaded host slows the fit itself.
+    with threadpool_limits(limits=1, user_api='blas'):
+        theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
     return _fit(theta, len(matchups.systems))
 
 
@@ -174,23 +178,26 @@ def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) ->
     n_cases = int(matchups.cluster.max()) + 1
     draws = rng.multinomial(n_cases, np.full(n_cases, 1 / n_cases), size=resamples)
     vote_weights = draws[:, matchups.cluster] * matchups.weight
-    pair_weights = vote_weights @ membership
-    pair_wins = (vote_weights * matchups.score) @ membership
-
-    start = _minimize(
-        x, pair_wins.sum(axis=0) / pair_weights.sum(axis=0), pair_weights.sum(axis=0), k
-    )
     left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
     strengths = np.empty((resamples, k))
-    for r in range(resamples):
-        weights = pair_weights[r]
-        drawn = weights > 0
-        score = np.divide(
-            pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
+    with threadpool_limits(limits=1, user_api='blas'):
+        pair_weights = vote_weights @ membership
+        pair_wins = (vote_weights * matchups.score) @ membership
+        start = _minimize(
+            x,
+            pair_wins.sum(axis=0) / pair_weights.sum(axis=0),
+            pair_weights.sum(axis=0),
+            k,
         )
-        strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
-        connected = _connected(left[drawn], right[drawn], k, anchor)
-        strengths[r, ~connected] = np.nan
+        for r in range(resamples):
+            weights = pair_weights[r]
+            drawn = weights > 0
+            score = np.divide(
+                pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
+            )
+            strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
+            connected = _connected(left[drawn], right[drawn], k, anchor)
+            strengths[r, ~connected] = np.nan
     return strengths
 
 
