@@ -9,6 +9,7 @@ import Base from '@/layouts/Base.astro';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
 import { MISSING, formatCountOf } from '@/lib/format';
 import { getFamilies, testsRounds, votesRounds, type Family } from '@/lib/reports';
+import { systemName } from '@/lib/systems';
 
 export const getStaticPaths = (async () => {
   const families = await getFamilies();
@@ -20,12 +21,13 @@ interface Props {
 }
 
 const { family } = Astro.props;
-const { config } = family;
+const { config, systemNames } = family;
+const title = config.display_name;
 const { summary, guide, board } = (() => {
   switch (config.scorer) {
     case 'votes':
       return {
-        summary: `Ranked by blind pairwise votes, with 95% intervals and ${config.reference} as the reference at 1,000.`,
+        summary: `Ranked by blind pairwise votes, with 95% intervals and ${systemName(systemNames, config.reference)} as the reference at 1,000.`,
         guide: '/methodology/#leaderboard',
         board: { scorer: config.scorer, reference: config.reference, rounds: votesRounds(family) },
       };
@@ -39,9 +41,9 @@ const { summary, guide, board } = (() => {
 })();
 ---
 
-<Base title={family.name} description={`${family.name}: ${summary}`}>
+<Base title={title} description={`${title}: ${summary}`}>
   <header class="mb-8 space-y-2">
-    <h1 class={pageTitle}>{family.name}</h1>
+    <h1 class={pageTitle}>{title}</h1>
     <p class="max-w-prose text-muted-foreground">
       {summary} <a href={guide}>How to read this board</a>
     </p>
@@ -55,17 +57,21 @@ const { summary, guide, board } = (() => {
       </p>
       {board.scorer === 'votes' && (
         <Forest
-          caption={`${family.name} systems, none measured yet`}
-          rows={unmeasuredRows(config.systems, board.reference)}
+          caption={`${title} systems, none measured yet`}
+          rows={unmeasuredRows(config.systems, board.reference, systemNames)}
           domain={EMPTY_DOMAIN}
           large
         />
       )}
-      {board.scorer === 'tests' && <p>{config.systems.join(', ') || MISSING}</p>}
+      {board.scorer === 'tests' && (
+        <p>
+          {config.systems.map((system) => systemName(systemNames, system)).join(', ') || MISSING}
+        </p>
+      )}
     </div>
   ) : board.scorer === 'votes' ? (
-    <VotesBoard client:load family={family.name} rounds={board.rounds} />
+    <VotesBoard client:load family={family.name} rounds={board.rounds} names={systemNames} />
   ) : (
-    <TestsBoard rounds={board.rounds} />
+    <TestsBoard rounds={board.rounds} names={systemNames} />
   )}
 </Base>

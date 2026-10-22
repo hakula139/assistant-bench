@@ -15,9 +15,19 @@ describe('Forest', () => {
         caption="Example"
         domain={[400, 1100]}
         rows={[
-          { system: 'settled', estimate: estimate(1000, 950, 1050), preliminary: false },
-          { system: 'preliminary', estimate: estimate(900, 800, 1000), preliminary: true },
-          { system: 'cut', estimate: estimate(500, 300, 700), preliminary: false },
+          {
+            system: 'settled',
+            name: 'settled',
+            estimate: estimate(1000, 950, 1050),
+            preliminary: false,
+          },
+          {
+            system: 'preliminary',
+            name: 'preliminary',
+            estimate: estimate(900, 800, 1000),
+            preliminary: true,
+          },
+          { system: 'cut', name: 'cut', estimate: estimate(500, 300, 700), preliminary: false },
         ]}
       />,
     );

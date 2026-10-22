@@ -4,13 +4,13 @@ A system is one configuration under test: a model route, an effort, a harness, a
 
 ## Resolution
 
-A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its route from its single channel, its prices, and its effort rules: the system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A catalog model without exactly one channel fails to resolve, so such a system sets its `route` and `price` directly. Both a channel priced at zero and a route without a `price` report as unpriced.
+A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its route from its single channel, its prices, the default [display name](../guide/authoring.md#systems), and its effort rules: the system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A catalog model without exactly one channel fails to resolve, so such a system sets its `route` and `price` directly. Both a channel priced at zero and a route without a `price` report as unpriced.
 
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 
 ## Fingerprints
 
-A system's fingerprint hashes its resolved route, effort, harness, and the SHA-256 of its prompt text. Because the table name is excluded, renaming a table preserves the fingerprint, whereas modifying what the system sends changes it.
+A system's fingerprint hashes its resolved route, effort, harness, and the SHA-256 of its prompt text. Because the table name and the display name are excluded, renaming either preserves the fingerprint, whereas modifying what the system sends changes it.
 
 Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool. On every PR and push to `main`, the [fingerprint check](../conventions/ci.md#checks) resolves each table at the base and head, each against its own nixos-config export, and fails when a table keeps its name but not its fingerprint, which stops a dependency bump from changing a system under its old name. Every output also records the nixos-config rev it ran under.
 
@@ -27,7 +27,7 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 | Field          | Content                                                                                               |
 | -------------- | ----------------------------------------------------------------------------------------------------- |
 | `rev`          | The input's commit, recorded on every output                                                          |
-| `catalog`      | The model catalog: channels and routes, prices, and effort rules                                      |
+| `catalog`      | The model catalog: channels and routes, prices, effort rules, and display names                       |
 | `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, `omp`, and `opencode` |
 | `proseTics`    | The prose tic list that the instruction files share                                                   |
 

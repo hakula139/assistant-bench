@@ -45,9 +45,9 @@ function intervalText(row: ForestRow): string {
 /** The row's hover text, which names the system with its score and interval. */
 function summary(row: ForestRow): string {
   if ('estimate' in row) {
-    return `${row.system}: ${formatScore(row.estimate.score)}, 95% interval ${intervalText(row)}`;
+    return `${row.name}: ${formatScore(row.estimate.score)}, 95% interval ${intervalText(row)}`;
   }
-  return `${row.system}: ${unplacedText[row.unplaced].summary}`;
+  return `${row.name}: ${unplacedText[row.unplaced].summary}`;
 }
 
 const middle = 'absolute top-1/2 -translate-y-1/2';
@@ -82,7 +82,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
     <Table className="table-fixed">
       <caption className="sr-only">{caption}</caption>
       <colgroup>
-        <col className={large ? 'w-40 sm:w-48' : 'w-40 sm:w-44'} />
+        <col className="w-40 sm:w-48" />
         <col />
         <col className="w-20 sm:w-24" />
       </colgroup>
@@ -115,8 +115,8 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
           const unplaced = 'unplaced' in row ? row.unplaced : undefined;
           return (
             <TableRow key={row.system} title={summary(row)}>
-              <TableHead scope="row" className="h-auto truncate font-normal">
-                {row.href ? <a href={row.href}>{row.system}</a> : row.system}
+              <TableHead scope="row" className="h-auto font-normal whitespace-normal">
+                {row.href ? <a href={row.href}>{row.name}</a> : row.name}
               </TableHead>
               <TableCell className={cn('relative p-0', large ? 'h-11' : 'h-9')}>
                 <span className="sr-only">{intervalText(row)}</span>

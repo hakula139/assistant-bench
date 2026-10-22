@@ -12,6 +12,7 @@ from assistant_bench.scoring.gates import (
 
 ZH = VotesSettings(
     scorer='votes',
+    display_name='Family F',
     systems=['acme-large'],
     samples=1,
     max_output_tokens=300,
@@ -21,6 +22,7 @@ ZH = VotesSettings(
 )
 EN = VotesSettings(
     scorer='votes',
+    display_name='Family F',
     systems=['acme-large'],
     samples=1,
     max_output_tokens=300,

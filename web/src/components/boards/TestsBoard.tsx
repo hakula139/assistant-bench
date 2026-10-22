@@ -8,14 +8,16 @@ import {
 } from '@/components/ui/table';
 import { formatCost, formatPercent, formatSeconds } from '@/lib/format';
 import type { TestsRound } from '@/lib/reports';
+import { systemName, type SystemNames } from '@/lib/systems';
 
 interface TestsBoardProps {
   /** Closed rounds, oldest first. */
   rounds: TestsRound[];
+  names: SystemNames;
 }
 
 /** A family's pass rates on its task tests in the latest round. */
-export function TestsBoard({ rounds }: TestsBoardProps) {
+export function TestsBoard({ rounds, names }: TestsBoardProps) {
   const { round, results } = rounds[rounds.length - 1];
   const standings = results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate);
   return (
@@ -35,7 +37,7 @@ export function TestsBoard({ rounds }: TestsBoardProps) {
         <TableBody>
           {standings.map((standing) => (
             <TableRow key={standing.system}>
-              <TableCell className="font-medium">{standing.system}</TableCell>
+              <TableCell className="font-medium">{systemName(names, standing.system)}</TableCell>
               <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
               <TableCell numeric>{standing.trials}</TableCell>
               <TableCell numeric>{standing.errored}</TableCell>

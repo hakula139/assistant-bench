@@ -7,6 +7,8 @@ import { formatInterval, formatScore } from '@/lib/format';
 
 export interface ScatterPoint {
   system: string;
+  /** The display name, which labels the point. */
+  name: string;
   x: number;
   score: number;
   lower: number;
@@ -114,7 +116,7 @@ export function placeLabels(
   const placed = new Map<ScatterPoint, Placement>();
   for (const point of frontier) {
     const [x, y] = position(point.x, point.score);
-    const width = measure(point.system);
+    const width = measure(point.name);
     const box = ({ dx, dy, textAnchor }: Placement): Box => {
       const left = textAnchor === 'end' ? x + dx - width : x + dx;
       return {
@@ -215,7 +217,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
           ...PLACEMENTS.map((placement) =>
             Plot.text(
               frontier.filter((point) => placements.get(point) === placement),
-              { x: 'x', y: 'score', text: 'system', fill: 'var(--foreground)', ...placement },
+              { x: 'x', y: 'score', text: 'name', fill: 'var(--foreground)', ...placement },
             ),
           ),
           Plot.ruleX(
@@ -247,7 +249,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
               y: 'score',
               title: (point: ScatterPoint) =>
                 [
-                  point.system,
+                  point.name,
                   `Score ${formatScore(point.score)} (${formatInterval(point)})`,
                   `${label} ${format(point.x)}`,
                 ].join('\n'),

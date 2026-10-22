@@ -22,14 +22,17 @@ const pairView = z.object({
   b: pane,
 });
 
+const familyView = z.object({ name: z.string(), display_name: z.string() });
+
 const sessionView = z.object({
   id: z.string(),
-  family: z.string(),
+  family: familyView,
   votes: z.int().nonnegative(),
   size: z.int().nonnegative(),
   pair: pairView.nullable(),
 });
 
+export type FamilyView = z.infer<typeof familyView>;
 export type Pane = z.infer<typeof pane>;
 export type PairView = z.infer<typeof pairView>;
 export type SessionView = z.infer<typeof sessionView>;
@@ -69,7 +72,7 @@ async function request<T>(
   return schema.parse(await response.json());
 }
 
-export const listFamilies = () => request(z.array(z.string()), 'GET', '/families');
+export const listFamilies = () => request(z.array(familyView), 'GET', '/families');
 
 export const startSession = (family: string) =>
   request(sessionView, 'POST', '/sessions', { family });

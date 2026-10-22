@@ -3,10 +3,11 @@ import { describe, expect, test } from 'vitest';
 import type { FamilyConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
 import { listFamilies } from '@/lib/reports';
-import { readFixture } from '@/test/fixture';
+import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
-const votes = (listed: boolean): FamilyConfig => ({
+const votes = (listed: boolean, displayName = 'Prose'): FamilyConfig => ({
   scorer: 'votes',
+  display_name: displayName,
   systems: ['acme-large', 'acme-pro'],
   reference: 'acme-large',
   public: listed,
@@ -22,7 +23,11 @@ describe('listFamilies', () => {
     const later = await report('prose', '2026-10-21', '2026-10-21T18:00:00Z');
     const earlier = await report('prose', '2026-10-07', '2026-10-07T18:00:00Z');
 
-    const families = listFamilies([{ name: 'prose', config: votes(true) }], [later, earlier]);
+    const families = listFamilies(
+      [{ name: 'prose', config: votes(true) }],
+      [later, earlier],
+      FIXTURE_NAMES,
+    );
 
     expect(families.map((family) => family.rounds.map(({ round }) => round))).toEqual([
       ['2026-10-07', '2026-10-21'],
@@ -30,9 +35,11 @@ describe('listFamilies', () => {
   });
 
   test('lists a public family before its first round closes', () => {
-    const families = listFamilies([{ name: 'prose', config: votes(true) }], []);
+    const families = listFamilies([{ name: 'prose', config: votes(true) }], [], FIXTURE_NAMES);
 
-    expect(families).toEqual([{ name: 'prose', config: votes(true), rounds: [] }]);
+    expect(families).toEqual([
+      { name: 'prose', config: votes(true), rounds: [], systemNames: FIXTURE_NAMES },
+    ]);
   });
 
   test('leaves out a family that is not public, with its reports', async () => {
@@ -40,12 +47,24 @@ describe('listFamilies', () => {
 
     const families = listFamilies(
       [
-        { name: 'smoke-text', config: votes(false) },
+        { name: 'smoke-text', config: votes(false, 'Smoke') },
         { name: 'prose', config: votes(true) },
       ],
       [smoke],
+      FIXTURE_NAMES,
     );
 
     expect(families.map((family) => [family.name, family.rounds.length])).toEqual([['prose', 0]]);
+  });
+
+  test('rejects two families sharing a display name, even one that is not public', () => {
+    const configs = [
+      { name: 'prose', config: votes(true, 'Writing') },
+      { name: 'smoke-text', config: votes(false, 'Writing') },
+    ];
+
+    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
+      'families prose and smoke-text share the display name Writing',
+    );
   });
 });

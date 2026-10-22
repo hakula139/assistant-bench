@@ -17,8 +17,9 @@ model = "gemini-4-argon"
 ["gemini-3.8-flash"]
 model = "gemini-3.8-flash"
 
-["deepseek-v4.1-flash"]
+["deepseek-v4.1-flash-1017"]
 model = "deepseek-v4.1-flash"
+display_name = "DeepSeek V4.1 Flash 1017"
 
 ["kimi-k3"]
 model = "kimi-k3"

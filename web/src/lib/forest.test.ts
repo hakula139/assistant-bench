@@ -8,9 +8,10 @@ import {
   roundRows,
   sharedDomain,
   sparseTicks,
+  unmeasuredRows,
 } from '@/lib/forest';
 import { reportSchema } from '@/lib/report';
-import { readFixture } from '@/test/fixture';
+import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const estimate = (score: number, lower: number, upper: number) => ({
   score,
@@ -101,7 +102,7 @@ describe('roundRows', () => {
       throw new Error('the fixture is a votes report');
     }
 
-    const rows = roundRows('arena', ['acme-large', 'acme-new'], report.results);
+    const rows = roundRows('arena', ['acme-large', 'acme-new'], report.results, FIXTURE_NAMES);
 
     expect(rows.map((row) => [row.system, 'unplaced' in row ? row.unplaced : 'placed'])).toEqual([
       ['acme-pro', 'placed'],
@@ -113,6 +114,19 @@ describe('roundRows', () => {
       ['acme-edge', 'unranked'],
       ['acme-nano', 'unranked'],
       ['acme-new', 'no-votes'],
+    ]);
+  });
+});
+
+describe('unmeasuredRows', () => {
+  test('labels each row by display name and orders the rows by it', () => {
+    const names = { 'acme-a': 'Zenith', 'acme-b': 'Apex' };
+
+    const rows = unmeasuredRows(['acme-a', 'acme-b'], 'acme-a', names);
+
+    expect(rows.map((row) => [row.system, row.name])).toEqual([
+      ['acme-b', 'Apex'],
+      ['acme-a', 'Zenith'],
     ]);
   });
 });

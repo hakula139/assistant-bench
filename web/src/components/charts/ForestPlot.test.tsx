@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { CategoryForests } from '@/components/charts/CategoryForests';
 import { forestPlotOptions, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import type { CategoryBoard } from '@/lib/report';
+import { stubPlotFrame } from '@/test/plot';
 
 const refit = (
   system: string,
@@ -71,24 +72,7 @@ describe('forestPlotOptions', () => {
 
 describe('CategoryForests', () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        constructor(private readonly callback: ResizeObserverCallback) {}
-        observe() {
-          this.callback([{ contentRect: { width: 600 } } as ResizeObserverEntry], this as never);
-        }
-        disconnect() {}
-      },
-    );
-    Object.defineProperty(document, 'fonts', {
-      configurable: true,
-      value: { ready: Promise.resolve() },
-    });
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-      font: '',
-      measureText: (text: string) => ({ width: text.length * 7 }),
-    } as never);
+    stubPlotFrame();
   });
 
   afterEach(() => {
@@ -97,7 +81,7 @@ describe('CategoryForests', () => {
     vi.restoreAllMocks();
   });
 
-  test('draws every category on the same axis', async () => {
+  test('draws every category on the same axis, labelled by display name', async () => {
     const board = (category: string, standings: CategoryBoard['standings']): CategoryBoard => ({
       category,
       votes: 40,
@@ -109,18 +93,26 @@ describe('CategoryForests', () => {
       board('weak', [refit('a', 1000, 950, 1050), refit('b', 750, 700, 800)]),
     ];
 
-    const { container } = render(<CategoryForests categories={categories} systems={['a', 'b']} />);
+    const { container } = render(
+      <CategoryForests categories={categories} systems={['a', 'b']} names={{ a: 'A', b: 'B' }} />,
+    );
     await vi.waitFor(() => {
       expect(container.querySelectorAll('svg')).toHaveLength(2);
     });
 
-    const axes = [...container.querySelectorAll('svg')].map((svg) =>
-      [...svg.querySelectorAll('g[aria-label="x-axis tick label"] text')].map(
-        (node) => node.textContent,
-      ),
-    );
+    const ticks = (axis: 'x' | 'y') =>
+      [...container.querySelectorAll('svg')].map((svg) =>
+        [...svg.querySelectorAll(`g[aria-label="${axis}-axis tick label"] text`)].map(
+          (node) => node.textContent,
+        ),
+      );
+    const axes = ticks('x');
 
     expect(axes[0]).not.toEqual([]);
     expect(axes[1]).toEqual(axes[0]);
+    expect(ticks('y')).toEqual([
+      ['A', 'B'],
+      ['A', 'B'],
+    ]);
   });
 });

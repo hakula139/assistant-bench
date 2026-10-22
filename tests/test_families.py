@@ -41,6 +41,7 @@ def write_case_family(families_dir: Path) -> Path:
         'f',
         """\
         scorer = "votes"
+        display_name = "Family F"
         systems = ["large"]
         samples = 1
         max_output_tokens = 300
@@ -60,6 +61,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            display_name = "Family F"
             systems = ["large", "small"]
             samples = 2
             max_output_tokens = 300
@@ -78,6 +80,7 @@ class TestLoadFamily:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
+                display_name='Family F',
                 systems=['large', 'small'],
                 samples=2,
                 max_output_tokens=300,
@@ -91,7 +94,9 @@ class TestLoadFamily:
         assert load_family('smoke') == Family(
             name='smoke',
             source='tasks',
-            settings=TaskTestsSettings(scorer='tests', samples=1),
+            settings=TaskTestsSettings(
+                scorer='tests', display_name='Smoke Test · Tasks', samples=1
+            ),
         )
 
     def test_names_a_missing_family(self, families_dir: Path) -> None:
@@ -107,6 +112,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "tests"
+            display_name = "Family F"
             samples = 1
             """,
             cases=cases,
@@ -122,6 +128,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            display_name = "Family F"
             systems = ["large"]
             samples = 1
             reference = "large"
@@ -139,6 +146,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            display_name = "Family F"
             systems = ["large", "small"]
             samples = 1
             max_output_tokens = 300
@@ -157,6 +165,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            display_name = "Family F"
             samples = 1
             max_output_tokens = 300
 
@@ -179,6 +188,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
+            display_name = "Family F"
             systems = ["large"]
             samples = 1
             max_output_tokens = 300
@@ -206,6 +216,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "judges"
+            display_name = "Family F"
             samples = 1
             """,
             cases=False,
@@ -213,6 +224,21 @@ class TestLoadFamily:
         )
 
         with pytest.raises(ValidationError):
+            load_family('f')
+
+    def test_requires_a_display_name(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "tests"
+            samples = 1
+            """,
+            cases=False,
+            tasks=True,
+        )
+
+        with pytest.raises(ValidationError, match='display_name'):
             load_family('f')
 
 

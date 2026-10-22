@@ -1,6 +1,7 @@
 import { z } from 'astro/zod';
 
 const shared = {
+  display_name: z.string(),
   systems: z.array(z.string()).default([]),
   public: z.boolean().default(false),
 };

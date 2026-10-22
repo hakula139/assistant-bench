@@ -34,7 +34,7 @@ class TestLoadFamilies:
         write_votes_family(families_dir, 'f', ARENA_SYSTEMS, ARENA_CASES)
         (families_dir / 'tests').mkdir()
         (families_dir / 'tests' / 'family.toml').write_text(
-            'scorer = "tests"\nsamples = 1\n'
+            'scorer = "tests"\ndisplay_name = "Tests"\nsamples = 1\n'
         )
         (families_dir / 'tests' / 'tasks').mkdir()
         write_outputs(

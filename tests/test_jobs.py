@@ -30,6 +30,7 @@ VOTES = Family(
     source='cases',
     settings=VotesSettings(
         scorer='votes',
+        display_name='Family F',
         systems=['acme-large'],
         samples=2,
         max_output_tokens=300,
@@ -37,7 +38,9 @@ VOTES = Family(
     ),
 )
 TESTS = Family(
-    name='g', source='tasks', settings=TaskTestsSettings(scorer='tests', samples=1)
+    name='g',
+    source='tasks',
+    settings=TaskTestsSettings(scorer='tests', display_name='Family G', samples=1),
 )
 
 
@@ -281,6 +284,7 @@ class TestIngest:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
+                display_name='Family F',
                 systems=['acme-large'],
                 samples=1,
                 max_output_tokens=300,
@@ -306,6 +310,7 @@ class TestIngest:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
+                display_name='Family F',
                 systems=['acme-large'],
                 samples=1,
                 max_output_tokens=300,
@@ -335,6 +340,7 @@ class TestIngest:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
+                display_name='Family F',
                 systems=['acme-large'],
                 samples=1,
                 max_output_tokens=300,
@@ -371,6 +377,7 @@ class TestIngest:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
+                display_name='Family F',
                 systems=['acme-large'],
                 samples=1,
                 max_output_tokens=300,

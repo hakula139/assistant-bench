@@ -44,6 +44,8 @@ import type { Interval, Standing } from '@/lib/report';
  */
 export interface LeaderboardRow {
   system: string;
+  /** The system's display name, which the row shows and sorts by. */
+  name: string;
   /**
    * The system's standing on the family board, which also holds its family-wide rates, cost, and
    * latency. A category can rank a system that the family board leaves unranked.
@@ -138,7 +140,7 @@ function ForestRow({
         <div
           role="img"
           tabIndex={0}
-          aria-label={`${row.system}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
+          aria-label={`${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
           className="focus-visible:outline-offset-[-2px]"
         >
           <PlotFigure plot={plot} height={ROW_HEIGHT} />
@@ -191,17 +193,17 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
             }),
           ]
         : []),
-      helper.accessor('system', {
+      helper.accessor('name', {
         header: 'System',
         sortFn: 'alphanumeric',
         cell: ({ row: { original } }) => (
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {original.standing ? (
               <a href={href(original.system)} className="font-medium whitespace-nowrap">
-                {original.system}
+                {original.name}
               </a>
             ) : (
-              <span className="font-medium whitespace-nowrap">{original.system}</span>
+              <span className="font-medium whitespace-nowrap">{original.name}</span>
             )}
             {original.preliminary && <Badge variant="status">Preliminary</Badge>}
           </span>
