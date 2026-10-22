@@ -60,7 +60,30 @@ jobs:
         run: nix develop -c pnpm test
 
   build:
-    uses: ./.github/workflows/build.yml
+    name: Build Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install
+
+      - name: Build site
+        run: nix develop -c pnpm build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-dist
+          path: web/dist/
+          retention-days: 7
+          if-no-files-found: error
 
   python-check:
     name: Python Check
@@ -143,3 +166,157 @@ jobs:
       - name: Check results
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
+
+  preview:
+    name: Deploy Preview
+    # Pull requests from forks and Dependabot receive no deploy secrets.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    environment:
+      name: preview
+      url: ${{ steps.meta.outputs.deployment_url }}
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # A PR closed before this job joins the group has already run Preview Cleanup.
+      - name: Check the PR is open
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)
+          if [[ $state == open ]]; then
+            echo "open=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "Skipping the preview, since the PR is $state."
+          fi
+
+      - name: Checkout
+        if: steps.pr.outputs.open
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        if: steps.pr.outputs.open
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        if: steps.pr.outputs.open
+        run: nix develop -c pnpm install
+
+      - name: Download site artifact
+        if: steps.pr.outputs.open
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: web/dist/
+
+      - name: Deploy preview
+        if: steps.pr.outputs.open
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Wrangler appends one JSON record per command to this file, including the Preview's URLs.
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
+        run: >-
+          nix develop -c pnpm --filter web exec wrangler preview
+          --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
+
+      - name: Extract preview metadata
+        id: meta
+        if: steps.pr.outputs.open
+        env:
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
+        run: |
+          record=$(jq -c 'select(.type == "preview")' "$WRANGLER_OUTPUT_FILE_PATH")
+          preview_url=$(jq -er '.preview_urls[0]' <<<"$record")
+          deployment_url=$(jq -er '.deployment_urls[0]' <<<"$record")
+          deploy_time=$(date -u +'%Y-%m-%d %H:%M UTC')
+          cat >> "$GITHUB_OUTPUT" <<OUTPUT
+          short_sha=${PR_SHA:0:7}
+          preview_url=$preview_url
+          deployment_url=$deployment_url
+          deploy_time=$deploy_time
+          OUTPUT
+
+      - name: Comment preview
+        if: steps.pr.outputs.open
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: preview-url
+          message: |
+            ## Cloudflare Workers preview
+
+            | | |
+            | --- | --- |
+            | Preview | ${{ steps.meta.outputs.preview_url }} |
+            | This commit | ${{ steps.meta.outputs.deployment_url }} |
+            | Commit | `${{ steps.meta.outputs.short_sha }}` |
+            | Updated | ${{ steps.meta.outputs.deploy_time }} |
+
+            [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  deploy:
+    name: Deploy Site
+    if: github.ref == 'refs/heads/main'
+    needs: result
+    runs-on: ubuntu-latest
+    # Deploys queue in the order their checks finish, so cancelling one could stop a newer deploy.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://bench.hakula.xyz
+    steps:
+      - name: Check main's head
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ $head == "$GITHUB_SHA" ]]; then
+            echo "current=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "Skipping the deploy, since main has moved on to $head."
+          fi
+
+      - name: Checkout
+        if: steps.head.outputs.current
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        if: steps.head.outputs.current
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        if: steps.head.outputs.current
+        run: nix develop -c pnpm install
+
+      - name: Download site artifact
+        if: steps.head.outputs.current
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: web/dist/
+
+      - name: Deploy to Cloudflare Workers
+        if: steps.head.outputs.current
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: nix develop -c pnpm --filter web exec wrangler deploy
