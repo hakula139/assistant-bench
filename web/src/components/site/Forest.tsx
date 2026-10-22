@@ -82,7 +82,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
     <Table className="table-fixed">
       <caption className="sr-only">{caption}</caption>
       <colgroup>
-        <col className={large ? 'w-36 sm:w-48' : 'w-36 sm:w-44'} />
+        <col className={large ? 'w-40 sm:w-48' : 'w-40 sm:w-44'} />
         <col />
         <col className="w-20 sm:w-24" />
       </colgroup>
