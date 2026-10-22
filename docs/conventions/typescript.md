@@ -6,7 +6,7 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 
 - `web/tsconfig.json` extends Astro's strict config, and `pnpm typecheck` runs `astro check` over every `.astro`, `.ts`, and `.tsx` file.
 - `web/eslint.config.js` applies typescript-eslint's `strictTypeChecked` rules and the React hooks rules to TypeScript, and the Astro plugin's recommended rules to `.astro` files.
-- The root `.prettierrc` formats `web/` with the Astro and Tailwind plugins, which sort class names, including those inside `cn()` and `cva()`.
+- The root `.prettierrc.json` formats `web/` with the Astro and Tailwind plugins, which sort class names, including those inside `cn()` and `cva()`.
 - TypeScript stays on 6.x because typescript-eslint and `@astrojs/check` do not yet accept 7.
 
 ## Layout

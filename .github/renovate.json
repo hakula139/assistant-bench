@@ -1,4 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>hakula139/nixos-config//.github/renovate-preset"]
+  "extends": ["github>hakula139/nixos-config//.github/renovate-preset"],
+  "packageRules": [
+    {
+      "description": "typescript-eslint and @astrojs/check do not yet accept TypeScript 7",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    }
+  ]
 }
