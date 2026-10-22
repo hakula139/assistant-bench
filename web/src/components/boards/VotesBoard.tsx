@@ -211,7 +211,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
-            {`Unranked until more comparisons reach the reference: ${unranked.join(', ')}.`}
+            {`Unranked until more comparisons connect them to the reference: ${unranked.join(', ')}.`}
           </p>
         )}
 

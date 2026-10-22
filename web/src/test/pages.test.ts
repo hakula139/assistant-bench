@@ -7,6 +7,7 @@ import { reportSchema } from '@/lib/report';
 import { votesRounds, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
+import MethodologyPage from '@/pages/methodology.astro';
 import { readFixture } from '@/test/fixture';
 
 /** The fixture's round, after an earlier one in which every system scored 900. */
@@ -36,13 +37,60 @@ async function render(
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
+/** A family scored by tests, with one round. */
+function testsFamily(): Family {
+  const report = reportSchema.parse({
+    family: 'smoke',
+    round: '2026-10-21',
+    closed_at: '2026-10-21T18:00:00Z',
+    results: {
+      scorer: 'tests',
+      standings: [
+        {
+          system: 'acme-pro',
+          fingerprint: null,
+          trials: 4,
+          errored: 1,
+          pass_rate: 0.75,
+          mean_cost_usd: null,
+          p50_latency_sec: null,
+        },
+      ],
+    },
+  });
+  return { name: 'smoke', rounds: [report] };
+}
+
+/** The methodology section a family page's "How to read this board" link names. */
+function guide(html: string): string {
+  const match = /href="\/methodology\/#([\w-]+)"/.exec(html);
+  if (!match) {
+    throw new Error('the family page links no methodology section');
+  }
+  return match[1];
+}
+
 describe('family page', () => {
   test('renders the votes board with the round summary', async () => {
     const html = await render(FamilyPage, { family: await family() });
 
     expect(text(html)).toContain(
+      'Ranked by blind pairwise votes, with 95% intervals and acme-large as the reference at 1,000.',
+    );
+    expect(text(html)).toContain(
       'Leader acme-large tied with the top score, chosen by the lower cost',
     );
+  });
+
+  test.each([
+    ['votes', family],
+    ['tests', () => Promise.resolve(testsFamily())],
+  ])('links the %s board to a methodology section that exists', async (_, load) => {
+    const methodology = await render(MethodologyPage, {});
+
+    const html = await render(FamilyPage, { family: await load() });
+
+    expect(methodology).toContain(`id="${guide(html)}"`);
   });
 });
 
@@ -54,6 +102,16 @@ describe('system page', () => {
 
     expect(text(html)).toContain(
       'acme-pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
+    );
+  });
+
+  test('names which output length the rater favors', async () => {
+    const rounds = votesRounds(await family());
+
+    const html = await render(SystemPage, { family: 'arena', system: 'acme-pro', rounds });
+
+    expect(text(html)).toContain(
+      'the rater favors the shorter output by 6.5 score points per standard deviation',
     );
   });
 

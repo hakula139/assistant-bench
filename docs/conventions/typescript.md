@@ -33,7 +33,7 @@ web/src/
 
 - The site reads only `reports/*/*.json`, through the `reports` collection's `glob()` loader. Nothing under the data directory reaches a build.
 - `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so the build rejects a report with a field the schema lacks or a value of another type. Change both schemas in one PR. `pnpm test` parses both report fixtures and compares the Zod schema's JSON Schema with `tests/fixtures/report.schema.json`, which pytest writes from the pydantic models, within each results variant, over every field's types, nullability, constants and enums, and every object's required keys, allowed keys, and map key names, so a schema change on either side fails a check. Numeric bounds, formats, and descriptions are not compared.
-- A new scorer adds a results variant to the schema, a board under `components/boards/`, an entry in the family page's per-scorer summaries, and an arm in the scorer switches of the home and family pages. Each of these fails the type check until it handles the new variant.
+- A new scorer adds a results variant to the schema, a board under `components/boards/`, an arm in the scorer switches of the home and family pages, and a methodology section that the family page's arm links. The type check fails until every switch handles the new variant, and `pnpm test` fails until the linked section exists.
 
 ## Components
 

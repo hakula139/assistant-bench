@@ -16,33 +16,30 @@ interface Props {
 }
 
 const { family } = Astro.props;
-const { scorer } = latest(family).results;
-const summaries = {
-  votes: {
-    text: 'Ranked by blind pairwise votes, with 95% intervals and the reference system at 1,000.',
-    guide: '/methodology/#leaderboard',
-  },
-  tests: {
-    text: 'Ranked by the share of trials that pass the task tests.',
-    guide: '/methodology/#tests',
-  },
-} satisfies Record<typeof scorer, { text: string; guide: string }>;
-const summary = summaries[scorer];
-const board = (() => {
-  switch (scorer) {
+const { results } = latest(family);
+const { summary, guide, board } = (() => {
+  switch (results.scorer) {
     case 'votes':
-      return { scorer, rounds: votesRounds(family) };
+      return {
+        summary: `Ranked by blind pairwise votes, with 95% intervals and ${results.reference} as the reference at 1,000.`,
+        guide: '/methodology/#leaderboard',
+        board: { scorer: results.scorer, rounds: votesRounds(family) },
+      };
     case 'tests':
-      return { scorer, rounds: testsRounds(family) };
+      return {
+        summary: 'Ranked by the share of trials that pass the task tests.',
+        guide: '/methodology/#tests',
+        board: { scorer: results.scorer, rounds: testsRounds(family) },
+      };
   }
 })();
 ---
 
-<Base title={family.name} description={`${family.name}: ${summary.text}`}>
+<Base title={family.name} description={`${family.name}: ${summary}`}>
   <header class="mb-8 space-y-2">
     <h1 class="text-[1.75rem] leading-tight font-semibold">{family.name}</h1>
     <p class="max-w-prose text-muted-foreground">
-      {summary.text} <a href={summary.guide}>How to read this board</a>
+      {summary} <a href={guide}>How to read this board</a>
     </p>
   </header>
   {board.scorer === 'votes' ? (

@@ -161,7 +161,7 @@ const length = results.length;
       <p class="max-w-prose text-sm text-muted-foreground">
         Each system's median and 10th to 90th percentile range in this round.
         {length !== null &&
-          ` Across the family, an output one standard deviation longer than its opponent moves a score by ${length.toFixed(1)} points.`}
+          ` Across the family, the rater favors the ${length >= 0 ? 'longer' : 'shorter'} output by ${Math.abs(length).toFixed(1)} score points per standard deviation of the pair's relative length difference.`}
       </p>
       <div class="grid gap-6 lg:grid-cols-2">
         {tokenRows.length > 0 && (
