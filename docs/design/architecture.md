@@ -25,7 +25,7 @@ src/assistant_bench/
 │   └── ranking.py                          # Bradley-Terry fit, clustered bootstrap, rank spread
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
-└── paths.py                                # Repo and data directory locations
+└── paths.py                                # Repo and data directory locations, and atomic file writes
 ```
 
 ## Import Layers

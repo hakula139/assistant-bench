@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant_bench.paths import DATA_DIR_VAR, data_dir
+from assistant_bench.paths import DATA_DIR_VAR, data_dir, write_atomically
 
 
 class TestDataDir:
@@ -36,3 +36,15 @@ class TestDataDir:
         path = data_dir()
 
         assert path == tmp_path / '.local' / 'share' / 'assistant-bench'
+
+
+class TestWriteAtomically:
+    def test_keeps_the_old_file_when_the_write_fails(self, tmp_path: Path) -> None:
+        path = tmp_path / 'f.jsonl'
+        path.write_text('old\n')
+
+        with pytest.raises(UnicodeEncodeError):
+            write_atomically(path, 'new\n\ud800')
+
+        assert path.read_text() == 'old\n'
+        assert list(tmp_path.iterdir()) == [path]

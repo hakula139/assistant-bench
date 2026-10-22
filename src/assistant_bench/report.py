@@ -24,7 +24,7 @@ from assistant_bench.families import (
     load_cases,
 )
 from assistant_bench.outputs import Output, read_outputs
-from assistant_bench.paths import REPORTS_DIR
+from assistant_bench.paths import REPORTS_DIR, write_atomically
 from assistant_bench.scoring import ranking
 
 
@@ -246,8 +246,7 @@ def close(
 
 def write_report(report: Report) -> Path:
     path = REPORTS_DIR / report.family / f'{report.round}.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'{report.model_dump_json(indent=2)}\n')
+    write_atomically(path, f'{report.model_dump_json(indent=2)}\n')
     return path
 
 
