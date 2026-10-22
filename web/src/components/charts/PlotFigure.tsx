@@ -56,7 +56,8 @@ export function PlotFigure({ plot, height, className }: PlotFigureProps) {
       return;
     }
     const options = plot({ width, measure: labelMeasure(element) });
-    // Plot injects --plot-background: white outside any cascade layer, so only an inline style outranks it.
+    // Plot's injected :where(.bench-plot) { --plot-background: white } sits outside any cascade
+    // layer, so it beats every layered rule in global.css.
     const figure = Plot.plot({
       className: 'bench-plot',
       style: '--plot-background: var(--popover)',
