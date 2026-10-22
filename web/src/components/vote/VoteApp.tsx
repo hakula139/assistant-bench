@@ -105,13 +105,20 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   );
 }
 
-/** The case's brief and checklist, with the session's status in its band. */
-function Brief({ pair, status }: { pair: PairView; status: ReactNode }) {
+/**
+ * The case's brief and checklist, with the session's status in its band. It spans the top of the
+ * pair while `stacked`, and otherwise takes a column beside the outputs from `xl` up.
+ */
+function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
   return (
     <Collapsible defaultOpen asChild>
       <Card
         size="sm"
-        className={cn(panel, 'data-[state=closed]:self-start md:col-span-2 xl:col-span-1')}
+        className={cn(
+          panel,
+          'data-[state=closed]:self-start md:col-span-2',
+          !stacked && 'xl:col-span-1',
+        )}
       >
         <div className={cn(band, 'group-data-[state=open]/card:border-b')}>
           <CollapsibleTrigger asChild>
@@ -126,7 +133,13 @@ function Brief({ pair, status }: { pair: PairView; status: ReactNode }) {
           {status}
         </div>
         <CollapsibleContent asChild>
-          <CardContent className={cn(scroll, 'space-y-3 text-base max-xl:max-h-[25dvh]')}>
+          <CardContent
+            className={cn(
+              scroll,
+              'space-y-3 text-base',
+              stacked ? 'max-h-[25dvh]' : 'max-xl:max-h-[25dvh]',
+            )}
+          >
             <p className="leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
             {pair.checklist.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
@@ -345,7 +358,7 @@ export function VoteApp() {
       <Progress
         value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
         aria-label="Session progress"
-        className="w-32 max-sm:hidden xl:hidden"
+        className={cn('w-32 max-sm:hidden', !hasFrames && 'xl:hidden')}
       />
 
       {hasText && (
@@ -386,8 +399,13 @@ export function VoteApp() {
       aria-label={`Pair ${session.votes + 1} of ${session.size}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
-      <div className="grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
-        <Brief key={pair.token} pair={pair} status={status} />
+      <div
+        className={cn(
+          'grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]',
+          !hasFrames && 'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1',
+        )}
+      >
+        <Brief key={pair.token} pair={pair} status={status} stacked={hasFrames} />
         <OutputPane
           key={`a-${pair.token}`}
           side="A"
