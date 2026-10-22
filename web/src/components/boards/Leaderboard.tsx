@@ -14,6 +14,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
 import { PlotFigure } from '@/components/charts/PlotFigure';
+import { forestMarks } from '@/components/charts/forest-marks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +35,7 @@ import {
   formatScore,
   formatSeconds,
 } from '@/lib/format';
+import { clip, forestDomain } from '@/lib/forest';
 import type { Interval, Standing } from '@/lib/report';
 
 /**
@@ -63,7 +65,7 @@ interface LeaderboardProps {
   href: (system: string) => string;
 }
 
-const ROW_HEIGHT = 44;
+const ROW_HEIGHT = 48;
 const FOREST_MARGIN = 22;
 
 const features = tableFeatures({
@@ -74,15 +76,9 @@ const features = tableFeatures({
 });
 const helper = createColumnHelper<typeof features, LeaderboardRow>();
 
-function scoreDomain(rows: LeaderboardRow[]): [number, number] {
-  const lows = rows.map((row) => row.interval.lower);
-  const highs = rows.map((row) => row.interval.upper);
-  return [Math.min(...lows), Math.max(...highs)];
-}
-
 /** The shared x scale, so the header axis and every row's interval line up. */
 function forestScale(domain: [number, number]): Plot.ScaleOptions {
-  return { domain, nice: true, insetLeft: FOREST_MARGIN, insetRight: FOREST_MARGIN };
+  return { domain, insetLeft: FOREST_MARGIN, insetRight: FOREST_MARGIN };
 }
 
 function ForestAxis({ domain }: { domain: [number, number] }) {
@@ -114,29 +110,13 @@ function ForestRow({
       margin: 0,
       x: { ...forestScale(domain), axis: null },
       y: { axis: null, domain: [0, 1] },
+      color: { type: 'identity' },
       marks: [
         Plot.gridX({ stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
         reference === undefined
           ? null
           : Plot.ruleX([reference], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
-        Plot.ruleY([row], {
-          x1: (d: LeaderboardRow) => d.interval.lower,
-          x2: (d: LeaderboardRow) => d.interval.upper,
-          y: 0.5,
-          stroke: 'var(--chart-series)',
-          strokeWidth: 2,
-          strokeLinecap: 'round',
-          className: 'forest-mark',
-        }),
-        Plot.dot([row], {
-          x: 'score',
-          y: 0.5,
-          r: 5,
-          fill: row.preliminary ? 'var(--background)' : 'var(--chart-series)',
-          stroke: row.preliminary ? 'var(--chart-series)' : 'var(--background)',
-          strokeWidth: 2,
-          className: 'forest-mark',
-        }),
+        forestMarks([{ y: 0.5, clipped: clip(row, domain), preliminary: row.preliminary }], domain),
       ],
     }),
     [row, domain, reference],
@@ -174,7 +154,7 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
 
 /** The leaderboard table, whose interval column is a forest plot on one shared axis. */
 export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps) {
-  const domain = useMemo(() => scoreDomain(rows), [rows]);
+  const domain = useMemo(() => forestDomain(rows), [rows]);
 
   const columns = useMemo(() => {
     const familyWide = (label: string) =>
@@ -299,7 +279,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
                 return (
                   <TableHead
                     key={header.id}
-                    className="w-[32%] min-w-40 p-0 align-bottom sm:min-w-56"
+                    className="w-[38%] min-w-48 p-0 align-bottom sm:min-w-72"
                   >
                     <span className="sr-only">95% interval</span>
                     <table.FlexRender header={header} />
@@ -332,7 +312,7 @@ export function Leaderboard({ rows, ranked, reference, href }: LeaderboardProps)
       </TableHeader>
       <TableBody>
         {table.getRowModel().rows.map((row) => (
-          <TableRow key={row.id} className="group/row h-11">
+          <TableRow key={row.id} className="group/row h-12">
             {row.getAllCells().map((cell) => {
               const { numeric, forest, wraps } = cell.column.columnDef.meta ?? {};
               return (

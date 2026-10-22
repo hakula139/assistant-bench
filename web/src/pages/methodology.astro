@@ -1,6 +1,13 @@
 ---
+import Forest from '@/components/site/Forest.astro';
 import { Badge } from '@/components/ui/badge';
 import Base from '@/layouts/Base.astro';
+import { EMPTY_DOMAIN } from '@/lib/forest';
+
+const example = (score: number, lower: number, upper: number) => ({
+  score,
+  interval: { lower, upper },
+});
 
 const repo = 'https://github.com/hakula139/assistant-bench';
 const docs = `${repo}/blob/main/docs/design`;
@@ -149,6 +156,23 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           The plot draws each 95% interval on one axis, with a line at the reference score and
           hollow dots for preliminary systems.
         </p>
+        <figure class="space-y-3 rounded-lg bg-muted p-4">
+          <Forest
+            caption="Four example rows"
+            domain={EMPTY_DOMAIN}
+            rows={[
+              { system: 'Settled', estimate: example(1040, 990, 1090) },
+              { system: 'Preliminary', estimate: example(930, 780, 1110), preliminary: true },
+              { system: 'Far behind', estimate: example(380, 250, 520) },
+              { system: 'No votes yet' },
+            ]}
+          />
+          <figcaption class="text-sm text-muted-foreground">
+            The dot is the score and the line its 95% interval, dashed while preliminary. An
+            arrowhead means the interval runs past the axis, which starts at most 600 points below
+            the top score, and a system with no votes yet runs off both ends.
+          </figcaption>
+        </figure>
         <dl class={dl}>
           {columns.map(({ term, badge, definition }) => (
             <div class="sm:contents">

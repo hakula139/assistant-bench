@@ -1,41 +1,38 @@
 ---
-import { FamiliesTable, type FamilySummary } from '@/components/site/FamiliesTable';
+import Forest from '@/components/site/Forest.astro';
 import Base from '@/layouts/Base.astro';
-import { formatCountOf, formatLeaderNote } from '@/lib/format';
-import type { Report } from '@/lib/report';
+import { EMPTY_DOMAIN, forestDomain, standingRows, unmeasuredRows } from '@/lib/forest';
+import { MISSING, formatCountOf, formatLeaderNote, formatPercent } from '@/lib/format';
+import type { Decision } from '@/lib/report';
 import { getFamilies, latest } from '@/lib/reports';
 
-function standing(
-  results: Report['results'],
-): Pick<FamilySummary, 'systems' | 'leader' | 'leaderNote' | 'measure'> {
-  switch (results.scorer) {
-    case 'votes':
-      return {
-        systems: results.standings.length + results.unranked.length,
-        leader: results.decision?.leader,
-        leaderNote: formatLeaderNote(results.decision),
-        measure: formatCountOf(results.votes, 'vote'),
-      };
-    case 'tests':
-      return {
-        systems: results.standings.length,
-        leader: results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate)[0]?.system,
-        leaderNote: null,
-        measure: 'Task tests',
-      };
+function leaderLine(decision: Decision | null): string {
+  const note = formatLeaderNote(decision);
+  if (decision === null) {
+    return note ?? MISSING;
   }
+  return note === null ? decision.leader : `${decision.leader}, ${note}`;
 }
 
-const families = (await getFamilies()).map((family): FamilySummary => {
-  const { round, results } = latest(family);
-  return { name: family.name, round, rounds: family.rounds.length, ...standing(results) };
+const families = (await getFamilies()).map((family) => {
+  const report = latest(family);
+  const results = report?.results;
+  return {
+    family,
+    status: report
+      ? `Round ${report.round}${results?.scorer === 'votes' ? `, ${formatCountOf(results.votes, 'vote')}` : ''}`
+      : 'No round has closed yet',
+    results,
+  };
 });
 ---
 
 <Base>
-  <section class="mb-10 max-w-prose space-y-3">
-    <h1 class="text-[1.75rem] leading-tight font-semibold">assistant-bench</h1>
-    <p class="text-muted-foreground">
+  <section class="mb-12 max-w-3xl space-y-4">
+    <h1 class="text-4xl leading-[1.1] font-semibold tracking-tight text-balance sm:text-5xl">
+      AI assistants ranked blind, with 95% intervals
+    </h1>
+    <p class="max-w-prose text-lg text-muted-foreground">
       Leaderboards of AI assistant systems, one per family of everyday tasks, ranked by one rater's
       blind pairwise votes or by automated tests. The <a href="/methodology/">methodology</a>{' '}
       explains how to read them.
@@ -43,8 +40,63 @@ const families = (await getFamilies()).map((family): FamilySummary => {
   </section>
 
   {families.length === 0 ? (
-    <p class="text-muted-foreground">No round has closed yet.</p>
+    <p class="text-muted-foreground">No family is listed yet.</p>
   ) : (
-    <FamiliesTable families={families} />
+    <div class="grid gap-x-12 gap-y-12 lg:grid-cols-2">
+      {families.map(({ family, status, results }) => (
+        <section class="space-y-3" aria-labelledby={`family-${family.name}`}>
+          <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
+            <h2 id={`family-${family.name}`} class="text-lg font-semibold">
+              <a href={`/${family.name}/`} class="text-foreground hover:text-link">
+                {family.name}
+              </a>
+            </h2>
+            <p class="text-sm text-muted-foreground">{status}</p>
+          </div>
+          {family.config.scorer === 'votes' ? (
+            results?.scorer === 'votes' ? (
+              <>
+                <Forest
+                  caption={`${family.name} scores with 95% intervals`}
+                  rows={standingRows(family.name, results.standings)}
+                  domain={forestDomain(results.standings)}
+                />
+                <p class="text-sm">
+                  <span class="text-muted-foreground">Leader: </span>
+                  {leaderLine(results.decision)}
+                </p>
+              </>
+            ) : (
+              <>
+                <Forest
+                  caption={`${family.name} systems, none measured yet`}
+                  rows={unmeasuredRows(family.config.systems, family.config.reference)}
+                  domain={EMPTY_DOMAIN}
+                />
+                <p class="text-sm text-muted-foreground">
+                  Until the first round closes, every interval is unbounded, and the reference,{' '}
+                  {family.config.reference}, sits at 1,000.
+                </p>
+              </>
+            )
+          ) : results?.scorer === 'tests' ? (
+            <ul class="space-y-1 text-sm">
+              {results.standings
+                .toSorted((a, b) => b.pass_rate - a.pass_rate)
+                .map((standing) => (
+                  <li class="flex justify-between gap-4">
+                    <span>{standing.system}</span>
+                    <span class="tabular-nums">{formatPercent(standing.pass_rate)} pass</span>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p class="text-sm text-muted-foreground">
+              {family.config.systems.join(', ') || MISSING}
+            </p>
+          )}
+        </section>
+      ))}
+    </div>
   )}
 </Base>

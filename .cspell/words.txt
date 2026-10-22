@@ -38,6 +38,7 @@ nixfmt
 nixos
 Nixpkgs
 npmjs
+nums
 numpy
 numtide
 nvmrc

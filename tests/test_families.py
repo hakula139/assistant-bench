@@ -65,6 +65,7 @@ class TestLoadFamily:
             max_output_tokens = 300
             reference = "large"
             render = "html"
+            public = true
             """,
             cases=True,
             tasks=False,
@@ -82,6 +83,7 @@ class TestLoadFamily:
                 max_output_tokens=300,
                 reference='large',
                 render='html',
+                public=True,
             ),
         )
 

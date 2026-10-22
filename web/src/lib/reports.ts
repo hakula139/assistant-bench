@@ -1,5 +1,6 @@
 import { getCollection } from 'astro:content';
 
+import type { FamilyConfig } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 
 export interface VotesRound {
@@ -14,27 +15,49 @@ export interface TestsRound {
 
 export interface Family {
   name: string;
-  /** Closed rounds, oldest first, so the last one carries the cumulative board. */
+  config: FamilyConfig;
+  /**
+   * Closed rounds, oldest first, so the last one carries the cumulative board. Empty until the
+   * first round closes.
+   */
   rounds: Report[];
 }
 
-export async function getFamilies(): Promise<Family[]> {
-  const reports = await getCollection('reports');
-  const families = Map.groupBy(
-    reports.map((entry) => entry.data),
-    (report) => report.family,
-  );
-  return [...families]
-    .map(([name, rounds]) => ({
+/**
+ * Pairs each public family's config with its reports, by name. Families without `public = true`
+ * stay off the site together with their reports.
+ */
+export function listFamilies(
+  configs: { name: string; config: FamilyConfig }[],
+  reports: Report[],
+): Family[] {
+  const rounds = Map.groupBy(reports, (report) => report.family);
+  return configs
+    .filter(({ config }) => config.public)
+    .map(({ name, config }) => ({
       name,
-      rounds: rounds.toSorted((a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at)),
+      config,
+      rounds: (rounds.get(name) ?? []).toSorted(
+        (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
+      ),
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Returns a family's latest round, which every family has. */
-export function latest(family: Family): Report {
-  return family.rounds[family.rounds.length - 1];
+export async function getFamilies(): Promise<Family[]> {
+  const [configs, reports] = await Promise.all([
+    getCollection('families'),
+    getCollection('reports'),
+  ]);
+  return listFamilies(
+    configs.map((entry) => ({ name: entry.id, config: entry.data })),
+    reports.map((entry) => entry.data),
+  );
+}
+
+/** Returns a family's latest round, or nothing before its first round closes. */
+export function latest(family: Family): Report | undefined {
+  return family.rounds.at(-1);
 }
 
 /** Returns the rounds of a family scored by votes, oldest first. */

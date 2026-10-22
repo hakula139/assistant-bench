@@ -23,6 +23,7 @@ categories = ["message"]
 | `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
 | `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
 | `categories`        | The categories the family's cases may carry, which reports publish. Every case's category must appear here                                |
+| `public`            | Whether the public site lists the family, its systems, and its reports. `false` by default, so test families stay off the site            |
 | `reference`         | For `votes`, one of `systems`, whose score anchors the board at 1000. Required                                                            |
 | `render`            | For `votes`, how the vote page shows outputs: `text`, the default, or `html` in a sandboxed frame                                         |
 | `language`          | For `votes`, `zh` or `en`, the language the `language` gate requires. Optional                                                            |

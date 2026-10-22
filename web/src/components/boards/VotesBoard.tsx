@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
 import { Leaderboard, type LeaderboardRow } from '@/components/boards/Leaderboard';
-import { CategoryHeatmap } from '@/components/charts/CategoryHeatmap';
+import { CategoryForests } from '@/components/charts/CategoryForests';
 import {
   ParetoScatter,
   paretoFrontier,
@@ -61,7 +61,7 @@ function leaderboardRows(results: VotesResults, category: string): LeaderboardRo
 }
 
 /** The family board's systems by score, then the systems only some category board ranks. */
-function heatmapSystems(results: VotesResults): string[] {
+function categorySystems(results: VotesResults): string[] {
   const ranked = results.standings.toSorted((a, b) => b.score - a.score);
   const refits = results.categories.flatMap((board) => board.standings);
   return [...new Set([...ranked, ...refits].map((item) => item.system))];
@@ -136,7 +136,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/** A family's leaderboard, category heatmap, and cost and latency scatters for one round. */
+/** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
 export function VotesBoard({ family, rounds }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
@@ -152,7 +152,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
 
   const rows = useMemo(() => leaderboardRows(results, activeCategory), [results, activeCategory]);
   const reference = rows.find((row) => row.system === results.reference)?.score;
-  const order = useMemo(() => heatmapSystems(results), [results]);
+  const order = useMemo(() => categorySystems(results), [results]);
   const measured = useMemo(
     () =>
       rows
@@ -217,7 +217,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
 
         {categories.length > 0 && (
           <Section title="Categories">
-            <CategoryHeatmap categories={results.categories} systems={order} />
+            <CategoryForests categories={results.categories} systems={order} />
             <TableTwin>
               <Table>
                 <TableHeader>

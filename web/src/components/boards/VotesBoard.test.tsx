@@ -100,7 +100,7 @@ describe('VotesBoard', () => {
     expect(html).toContain('Median latency');
   });
 
-  test('keeps every heatmap row and the systems only the category ranks', async () => {
+  test('keeps every category row and the systems only the category ranks', async () => {
     const round = await load();
     const message = round.results.categories.find((board) => board.category === 'message');
     const refit = message?.standings.find((item) => item.system === 'acme-mini');

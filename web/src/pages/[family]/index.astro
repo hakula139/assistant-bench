@@ -3,8 +3,10 @@ import type { GetStaticPaths } from 'astro';
 
 import { TestsBoard } from '@/components/boards/TestsBoard';
 import { VotesBoard } from '@/components/boards/VotesBoard';
+import Forest from '@/components/site/Forest.astro';
 import Base from '@/layouts/Base.astro';
-import { getFamilies, latest, testsRounds, votesRounds, type Family } from '@/lib/reports';
+import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
+import { getFamilies, testsRounds, votesRounds, type Family } from '@/lib/reports';
 
 export const getStaticPaths = (async () => {
   const families = await getFamilies();
@@ -16,20 +18,20 @@ interface Props {
 }
 
 const { family } = Astro.props;
-const { results } = latest(family);
+const { config } = family;
 const { summary, guide, board } = (() => {
-  switch (results.scorer) {
+  switch (config.scorer) {
     case 'votes':
       return {
-        summary: `Ranked by blind pairwise votes, with 95% intervals and ${results.reference} as the reference at 1,000.`,
+        summary: `Ranked by blind pairwise votes, with 95% intervals and ${config.reference} as the reference at 1,000.`,
         guide: '/methodology/#leaderboard',
-        board: { scorer: results.scorer, rounds: votesRounds(family) },
+        board: { scorer: config.scorer, reference: config.reference, rounds: votesRounds(family) },
       };
     case 'tests':
       return {
         summary: 'Ranked by the share of trials that pass the task tests.',
         guide: '/methodology/#tests',
-        board: { scorer: results.scorer, rounds: testsRounds(family) },
+        board: { scorer: config.scorer, rounds: testsRounds(family) },
       };
   }
 })();
@@ -42,7 +44,24 @@ const { summary, guide, board } = (() => {
       {summary} <a href={guide}>How to read this board</a>
     </p>
   </header>
-  {board.scorer === 'votes' ? (
+  {family.rounds.length === 0 ? (
+    <div class="space-y-4">
+      <p class="max-w-prose">
+        No round has closed yet. These {config.systems.length} systems are in the first one.
+        {board.scorer === 'votes' &&
+          ` Until it closes, every interval is unbounded, and the reference sits at 1,000.`}
+      </p>
+      {board.scorer === 'votes' && (
+        <Forest
+          caption={`${family.name} systems, none measured yet`}
+          rows={unmeasuredRows(config.systems, board.reference)}
+          domain={EMPTY_DOMAIN}
+          large
+        />
+      )}
+      {board.scorer === 'tests' && <p>{config.systems.join(', ')}</p>}
+    </div>
+  ) : board.scorer === 'votes' ? (
     <VotesBoard client:load family={family.name} rounds={board.rounds} />
   ) : (
     <TestsBoard rounds={board.rounds} />

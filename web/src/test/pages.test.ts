@@ -3,12 +3,21 @@ import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { loadRenderers } from 'astro:container';
 import { describe, expect, test } from 'vitest';
 
+import type { FamilyConfig } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
 import { votesRounds, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { readFixture } from '@/test/fixture';
+
+const arenaConfig: FamilyConfig = {
+  scorer: 'votes',
+  systems: ['acme-large', 'acme-pro', 'acme-small'],
+  reference: 'acme-large',
+  categories: ['docs', 'message', 'reply'],
+  public: true,
+};
 
 /** The fixture's round, after an earlier one in which every system scored 900. */
 async function family(): Promise<Family> {
@@ -22,7 +31,7 @@ async function family(): Promise<Family> {
   for (const standing of earlier.results.standings) {
     standing.score = 900;
   }
-  return { name: 'arena', rounds: [earlier, latest] };
+  return { name: 'arena', config: arenaConfig, rounds: [earlier, latest] };
 }
 
 async function render(
@@ -58,7 +67,11 @@ function testsFamily(): Family {
       ],
     },
   });
-  return { name: 'smoke', rounds: [report] };
+  return {
+    name: 'smoke',
+    config: { scorer: 'tests', systems: ['acme-pro'], categories: [], public: true },
+    rounds: [report],
+  };
 }
 
 /** The methodology section a family page's "How to read this board" link names. */
@@ -80,6 +93,17 @@ describe('family page', () => {
     expect(text(html)).toContain(
       'Leader acme-large tied with the top score, chosen by the lower cost',
     );
+  });
+
+  test('lists the systems with unbounded intervals before the first round closes', async () => {
+    const empty: Family = { name: 'arena', config: arenaConfig, rounds: [] };
+
+    const html = await render(FamilyPage, { family: empty });
+
+    expect(text(html)).toContain('No round has closed yet. These 3 systems are in the first one.');
+    expect(text(html)).toContain('acme-large Fixed at 1,000 as the reference 1,000');
+    expect(text(html)).toContain('acme-pro Unbounded no votes');
+    expect(html).not.toContain('Leader');
   });
 
   test.each([
