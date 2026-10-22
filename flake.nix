@@ -85,6 +85,20 @@
           check-added-large-files.enable = true;
           check-yaml.enable = true;
           taplo.enable = true;
+          actionlint.enable = true;
+
+          # lychee builds its HTTP client even offline and fails without CA roots, which the Nix
+          # sandbox lacks until cacert's setup hook exports SSL_CERT_FILE.
+          lychee = {
+            enable = true;
+            extraPackages = [ pkgs.cacert ];
+          };
+
+          sort-file-contents = {
+            enable = true;
+            files = "^\\.cspell/words\\.txt$";
+            settings.ignore-case = true;
+          };
 
           nixfmt.enable = true;
           deadnix.enable = true;
