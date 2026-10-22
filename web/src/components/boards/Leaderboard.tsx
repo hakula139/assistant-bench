@@ -25,7 +25,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   MISSING,
   formatCost,
@@ -142,23 +141,11 @@ function ForestRow({
     [row, domain, reference],
   );
 
+  const summary = `${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          role="img"
-          tabIndex={0}
-          aria-label={`${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`}
-          className="focus-visible:-outline-offset-2"
-        >
-          <PlotFigure plot={plot} height={ROW_HEIGHT} />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <span className="font-semibold">{formatScore(row.score)}</span>
-        <span>95% interval {formatInterval(row.interval)}</span>
-      </TooltipContent>
-    </Tooltip>
+    <div role="img" aria-label={summary} title={summary}>
+      <PlotFigure plot={plot} height={ROW_HEIGHT} />
+    </div>
   );
 }
 
