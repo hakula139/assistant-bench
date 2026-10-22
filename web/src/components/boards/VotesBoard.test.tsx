@@ -51,7 +51,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Leader acme-large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, 20 more left out',
+      'Leader acme-large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, plus 20 left out of the fit',
     );
   });
 
@@ -65,7 +65,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Unranked: acme-edge, acme-nano. Too few comparisons connect them to the reference system',
+      'Unranked until more comparisons reach the reference: acme-edge, acme-nano.',
     );
   });
 
@@ -73,7 +73,7 @@ describe('VotesBoard', () => {
     const html = render(await load('report-early'));
 
     expect(text(html)).toContain(
-      'Leader – none while a preliminary system ties with the top score Votes 34 over 1 session, 2 more left out',
+      'Leader – none while a preliminary system ties with the top score Votes 34 over 1 session, plus 2 left out of the fit',
     );
   });
 

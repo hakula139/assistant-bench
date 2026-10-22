@@ -141,7 +141,7 @@ const length = results.length;
       <section class="space-y-3 border-t pt-6">
         <h2 class="text-lg font-semibold">Categories</h2>
         <p class="max-w-prose text-sm text-muted-foreground">
-          Scores refit on each category's votes, with 95% intervals.
+          Scores from each category's votes alone, with 95% intervals.
         </p>
         <DotRangePlot
           client:visible
@@ -159,9 +159,9 @@ const length = results.length;
     <section class="space-y-3 border-t pt-6">
       <h2 class="text-lg font-semibold">Output length and latency</h2>
       <p class="max-w-prose text-sm text-muted-foreground">
-        Medians with the 10th to 90th percentile range, beside the other systems in the round.
+        Each system's median and 10th to 90th percentile range in this round.
         {length !== null &&
-          ` Across the family, one standard deviation of relative length moves a score by ${length.toFixed(1)} points.`}
+          ` Across the family, an output one standard deviation longer than its opponent moves a score by ${length.toFixed(1)} points.`}
       </p>
       <div class="grid gap-6 lg:grid-cols-2">
         {tokenRows.length > 0 && (
@@ -179,8 +179,8 @@ const length = results.length;
     <section class="space-y-3 border-t pt-6">
       <h2 class="text-lg font-semibold">Flags</h2>
       <p class="max-w-prose text-sm text-muted-foreground">
-        How many votes flagged this system's output. A flag counts against the side a vote did not
-        prefer, and against both sides of a tie or a both-bad vote.
+        Votes that flagged a problem in this system's output. A flag counts against the losing side,
+        or against both sides of a tie or a both-bad vote.
       </p>
       <FlagsTable standing={standing} />
     </section>
