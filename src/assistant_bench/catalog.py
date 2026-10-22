@@ -72,7 +72,6 @@ class NixosConfigExport(BaseModel):
     rev: str
     catalog: Catalog
     instructions: dict[str, str]
-    prose_tics: str = Field(alias='proseTics')
 
 
 def load_export() -> NixosConfigExport:

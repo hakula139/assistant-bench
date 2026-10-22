@@ -63,8 +63,6 @@
             instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
               inherit (import promptFragments) readPrompt;
             };
-
-            proseTics = builtins.readFile "${promptFragments}/prose-tics.md";
           }
         );
 

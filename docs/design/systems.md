@@ -29,7 +29,6 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 | `rev`          | The input's commit, recorded on every output                                                          |
 | `catalog`      | The model catalog: channels and routes, prices, effort rules, and display names                       |
 | `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, `omp`, and `opencode` |
-| `proseTics`    | The prose tic list that the instruction files share                                                   |
 
 ## Concurrency
 
