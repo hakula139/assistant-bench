@@ -5,7 +5,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 
@@ -140,7 +147,8 @@ def load_family(name: str) -> Family:
     ------
     ValueError
         No family has the name, the family holds both or neither of
-        `cases.jsonl` and `tasks/`, or a case family sets no `max_output_tokens`.
+        `cases.jsonl` and `tasks/`, a case family sets no `max_output_tokens`, or
+        a family scored by tests holds cases, which have no tests to run.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -155,6 +163,11 @@ def load_family(name: str) -> Family:
         settings = _SETTINGS.validate_python(tomllib.load(file))
     if has_cases and settings.max_output_tokens is None:
         raise ValueError(f'family {name!r}: case families need max_output_tokens')
+    if has_cases and isinstance(settings, TaskTestsSettings):
+        raise ValueError(
+            f'family {name!r}: scorer "tests" needs tasks/ with their own tests, '
+            'so score cases.jsonl by "votes"'
+        )
     return Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
     )
@@ -166,8 +179,9 @@ def load_cases(family: Family) -> list[Case]:
     Raises
     ------
     ValueError
-        Two cases share an ID, within one file or across both, or a case's
-        category is missing from the family's `categories`.
+        A line is not a valid case, two cases share an ID, within one file or
+        across both, or a case's category is missing from the family's
+        `categories`.
     """
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',
@@ -181,8 +195,13 @@ def load_cases(family: Family) -> list[Case]:
         for number, line in enumerate(path.read_text().splitlines(), start=1):
             if not line.strip():
                 continue
-            case = Case.model_validate_json(line)
             source = f'{path}:{number}'
+            try:
+                case = Case.model_validate_json(line)
+            except ValidationError as error:
+                raise ValueError(
+                    f'family {family.name!r}: {source} is not a valid case: {error}'
+                ) from error
             if case.id in cases:
                 raise ValueError(
                     f'family {family.name!r}: case {case.id!r} appears at '

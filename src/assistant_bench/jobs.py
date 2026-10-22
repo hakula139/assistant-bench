@@ -155,7 +155,22 @@ def oracle_job(family: Family) -> JobConfig:
     """Build a job that runs Harbor's oracle on every task directory of the family.
 
     Its trials go under `checks/`, apart from the jobs that ingest reads.
+
+    Raises
+    ------
+    ValueError
+        A task's `[task] name` is not `<family>/<directory>`, which trials report.
     """
+    tasks = sorted((FAMILIES_DIR / family.name / 'tasks').iterdir())
+    misnamed = [
+        f'"{family.name}/{task.name}" in tasks/{task.name}/task.toml'
+        for task in tasks
+        if _task_name(task) != f'{family.name}/{task.name}'
+    ]
+    if misnamed:
+        raise ValueError(
+            f'family {family.name!r}: set [task] name to {", ".join(misnamed)}'
+        )
     return _job(
         family,
         data_dir() / 'checks' / family.name,
@@ -168,6 +183,13 @@ def oracle_job(family: Family) -> JobConfig:
         sorted((FAMILIES_DIR / family.name / 'tasks').iterdir()),
         [],
     )
+
+
+def _task_name(task_dir: Path) -> str | None:
+    config = task_config.TaskConfig.model_validate_toml(
+        (task_dir / 'task.toml').read_text()
+    )
+    return config.task.name if config.task else None
 
 
 def _family_jobs(family: Family) -> list[Path]:

@@ -42,16 +42,23 @@ def check(family: str) -> None:
         typer.echo(f'{family}: {len(_render_tasks(selected))} valid cases')
         return
 
-    job_dir = _run(jobs.oracle_job(selected))
+    try:
+        job = jobs.oracle_job(selected)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+    outputs = jobs.read_trials(selected, _run(job), {})
     failed = sorted(
-        {
-            output.case
-            for output in jobs.read_trials(selected, job_dir, {})
-            if output.error or output.reward != 1
-        }
+        {output.case for output in outputs if output.error or output.reward != 1}
     )
+    tasks = {task.get_task_id().get_name() for task in job.tasks}
+    missing = sorted(tasks - {output.case for output in outputs})
     if failed:
         typer.echo(f'{family}: the oracle failed on {", ".join(failed)}', err=True)
+    if missing:
+        typer.echo(
+            f'{family}: the oracle left no trial of {", ".join(missing)}', err=True
+        )
+    if failed or missing:
         raise typer.Exit(1)
     typer.echo(f'{family}: the oracle passed every task')
 
@@ -75,8 +82,6 @@ def run(
             'single-call systems run only case families', param_hint='FAMILY'
         )
     systems = _family_systems(selected)
-    if not systems:
-        raise typer.BadParameter(f'{family} lists no systems', param_hint='FAMILY')
     if names:
         systems = _named_systems(selected, systems, names)
 
@@ -87,7 +92,7 @@ def run(
 @app.command()
 def ingest(family: str) -> None:
     """Collect every trial of a family into `outputs/<family>.jsonl`."""
-    outputs = jobs.ingest(_load_family(family), load_systems(load_export()))
+    outputs = jobs.ingest(_load_family(family), _load_systems())
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
     for error, count in errors.most_common():
@@ -152,7 +157,7 @@ def close(family: str) -> None:
 def fingerprints(base: str) -> None:
     """Fail when a system keeps its name but its fingerprint differs from BASE."""
     changed = revisions.changed_fingerprints(
-        revisions.systems_at(base), load_systems(load_export())
+        revisions.systems_at(base), _load_systems()
     )
     for name in changed:
         typer.echo(
@@ -172,6 +177,13 @@ def _load_family(name: str) -> Family:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
 
 
+def _load_systems() -> dict[str, System]:
+    try:
+        return load_systems(load_export())
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='systems.toml') from error
+
+
 def _render_tasks(family: Family) -> list[Path]:
     try:
         return jobs.render_tasks(family, load_cases(family))
@@ -182,7 +194,7 @@ def _render_tasks(family: Family) -> list[Path]:
 def _family_systems(family: Family) -> list[System]:
     if not family.settings.systems:
         return []
-    known = load_systems(load_export())
+    known = _load_systems()
     unknown = [name for name in family.settings.systems if name not in known]
     if unknown:
         raise typer.BadParameter(

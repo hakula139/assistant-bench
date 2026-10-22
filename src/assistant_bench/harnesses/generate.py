@@ -3,9 +3,8 @@
 import os
 import ssl
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from importlib import metadata
-from pathlib import Path
 from typing import Any, override
 
 import httpx
@@ -15,7 +14,15 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from pydantic import TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FilePath,
+    HttpUrl,
+    IPvAnyAddress,
+    Json,
+)
 
 from assistant_bench.catalog import EXPORT_VAR, load_export
 
@@ -28,7 +35,42 @@ CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
 LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
 
-_HEADERS = TypeAdapter(dict[str, str])
+
+class Endpoint(BaseModel):
+    """The endpoint variables, where an empty value counts as unset."""
+
+    model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
+
+    base_url: HttpUrl = Field(validation_alias=BASE_URL_VAR)
+    key_file: FilePath = Field(validation_alias=KEY_FILE_VAR)
+    ca_file: FilePath | None = Field(default=None, validation_alias=CA_FILE_VAR)
+    headers: Json[dict[str, str]] | None = Field(
+        default=None, validation_alias=HEADERS_VAR
+    )
+    local_address: IPvAnyAddress | None = Field(
+        default=None, validation_alias=LOCAL_ADDRESS_VAR
+    )
+
+    @classmethod
+    def read(cls, env: Callable[[str], str | None]) -> Endpoint:
+        """Validate the value `env` returns for each endpoint variable."""
+        names = (
+            BASE_URL_VAR,
+            KEY_FILE_VAR,
+            CA_FILE_VAR,
+            HEADERS_VAR,
+            LOCAL_ADDRESS_VAR,
+        )
+        return cls.model_validate(
+            {name: value for name in names if (value := env(name))}
+        )
+
+    def api_key(self) -> str:
+        return self.key_file.read_text().strip()
+
+    def verify(self) -> ssl.SSLContext | bool:
+        """Trust the CA bundle when one is set, else the system's."""
+        return ssl.create_default_context(cafile=self.ca_file) if self.ca_file else True
 
 
 class GenerateOptions(AgentOptions):
@@ -75,9 +117,7 @@ class Generate(BaseAgent):
                 f'{", ".join(missing)} unset. '
                 'Copy .env.example to .env, and run inside `nix develop`.'
             )
-        _api_key(merged[KEY_FILE_VAR])
-        _headers(merged.get(HEADERS_VAR))
-        _verify(merged.get(CA_FILE_VAR))
+        Endpoint.read(merged.get).verify()
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -141,32 +181,19 @@ class Generate(BaseAgent):
         return [{'role': 'system', 'content': self.options.system_prompt}, user]
 
     def _client(self) -> AsyncOpenAI:
-        base_url = self._get_env(BASE_URL_VAR)
-        key_file = self._get_env(KEY_FILE_VAR)
-        assert base_url and key_file
-        verify = _verify(self._get_env(CA_FILE_VAR))
-        local_address = self._get_env(LOCAL_ADDRESS_VAR)
+        endpoint = Endpoint.read(self._get_env)
+        verify = endpoint.verify()
         transport = (
-            httpx.AsyncHTTPTransport(local_address=local_address, verify=verify)
-            if local_address
+            httpx.AsyncHTTPTransport(
+                local_address=str(endpoint.local_address), verify=verify
+            )
+            if endpoint.local_address
             else None
         )
         return AsyncOpenAI(
-            base_url=base_url,
-            api_key=_api_key(key_file),
-            default_headers=_headers(self._get_env(HEADERS_VAR)),
+            base_url=str(endpoint.base_url),
+            api_key=endpoint.api_key(),
+            default_headers=endpoint.headers,
             max_retries=0,
             http_client=httpx.AsyncClient(transport=transport, verify=verify),
         )
-
-
-def _api_key(key_file: str) -> str:
-    return Path(key_file).read_text().strip()
-
-
-def _headers(headers: str | None) -> dict[str, str] | None:
-    return _HEADERS.validate_json(headers) if headers else None
-
-
-def _verify(ca_file: str | None) -> ssl.SSLContext | bool:
-    return ssl.create_default_context(cafile=ca_file) if ca_file else True
