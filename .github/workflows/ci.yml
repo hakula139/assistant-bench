@@ -32,6 +32,9 @@ jobs:
   node-check:
     name: Node Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -eo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -42,26 +45,29 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: pnpm install
 
       - name: Format
-        run: nix develop -c pnpm format
+        run: pnpm format
 
       - name: Lint
-        run: nix develop -c pnpm lint
+        run: pnpm lint
 
       - name: Spell check
-        run: nix develop -c pnpm spellcheck
+        run: pnpm spellcheck
 
       - name: Type check
-        run: nix develop -c pnpm typecheck
+        run: pnpm typecheck
 
       - name: Test
-        run: nix develop -c pnpm test
+        run: pnpm test
 
   build:
     name: Build Site
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -eo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -72,10 +78,10 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: pnpm install
 
       - name: Build site
-        run: nix develop -c pnpm build
+        run: pnpm build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -88,6 +94,9 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop .#python -c bash -eo pipefail {0}
     permissions:
       contents: read
       id-token: write
@@ -103,23 +112,23 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: nix develop .#python -c uv sync --locked
+        run: uv sync --locked
 
       - name: Lint
-        run: nix develop .#python -c uv run ruff check
+        run: uv run ruff check
 
       - name: Format
-        run: nix develop .#python -c uv run ruff format --check
+        run: uv run ruff format --check
 
       - name: Type check
-        run: nix develop .#python -c uv run mypy
+        run: uv run mypy
 
       - name: Test
-        run: nix develop .#python -c uv run pytest
+        run: uv run pytest
 
       - name: Check fingerprints
         if: github.event_name == 'pull_request' || github.event_name == 'push'
-        run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
+        run: uv run bench fingerprints "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
@@ -133,6 +142,9 @@ jobs:
   harbor-smoke:
     name: Harbor Smoke
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop .#python -c bash -eo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -143,13 +155,10 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: nix develop .#python -c uv sync --locked
-
-      - name: Check smoke tasks
-        run: nix develop .#python -c uv run bench check smoke
+        run: uv sync --locked
 
       - name: Run trials under Docker
-        run: nix develop .#python -c uv run pytest -m docker
+        run: uv run pytest -m docker
 
   result:
     name: CI Result
@@ -176,6 +185,9 @@ jobs:
       github.event.pull_request.user.login != 'dependabot[bot]'
     needs: build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -eo pipefail {0}
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -192,6 +204,7 @@ jobs:
       # A PR closed before this job joins the group has already run Preview Cleanup.
       - name: Check the PR is open
         id: pr
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -214,7 +227,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.pr.outputs.open
-        run: nix develop -c pnpm install
+        run: pnpm install
 
       - name: Download site artifact
         if: steps.pr.outputs.open
@@ -231,12 +244,13 @@ jobs:
           # Wrangler appends one JSON record per command to this file, including the Preview's URLs.
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         run: >-
-          nix develop -c pnpm --filter web exec wrangler preview
+          pnpm --filter web exec wrangler preview
           --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
 
       - name: Extract preview metadata
         id: meta
         if: steps.pr.outputs.open
+        shell: bash
         env:
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         run: |
@@ -273,6 +287,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: result
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop -c bash -eo pipefail {0}
     # Deploys queue in the order their checks finish, so cancelling one could stop a newer deploy.
     concurrency:
       group: production
@@ -283,6 +300,7 @@ jobs:
     steps:
       - name: Check main's head
         id: head
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -305,7 +323,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.head.outputs.current
-        run: nix develop -c pnpm install
+        run: pnpm install
 
       - name: Download site artifact
         if: steps.head.outputs.current
@@ -319,4 +337,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: nix develop -c pnpm --filter web exec wrangler deploy
+        run: pnpm --filter web exec wrangler deploy

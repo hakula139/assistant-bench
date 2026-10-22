@@ -12,7 +12,7 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test`                                                   |
 | Build Site      | `pnpm build`, uploading `web/dist` as the `site-dist` artifact that the deploy jobs publish                                        |
 | Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check |
-| Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                                              |
+| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle job that `bench check smoke` runs                                     |
 | CI Result       | Fails when any job above fails or is cancelled, so the `main` ruleset requires only this job and Codecov's `codecov/patch`         |
 
 The fingerprint check enforces the rule in [Systems](../design/systems.md#fingerprints) by running `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. Python Check checks out the full history with `fetch-depth: 0`, since the check builds the base commit's nixos-config export.
@@ -33,4 +33,4 @@ Deploy Site, Deploy Preview, and Preview Cleanup read the repository's `CLOUDFLA
 
 ## Workflow Steps
 
-Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
+Each job that needs the dev shell sets `defaults.run.shell` to run bash inside `nix develop`, or `nix develop .#python` for the Python jobs, so its `run:` steps hold bare commands. actionlint runs shellcheck only on steps whose shell is plain `bash`, so every multiline script sets `shell: bash` and prefixes the commands that need the dev shell with `nix develop -c`. Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
