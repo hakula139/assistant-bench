@@ -42,6 +42,7 @@ Commands stay minimal, and settings live in config files:
 | Prettier, markdownlint, cspell, Taplo, and shfmt                              | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
 | The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
+| Codecov's project and patch status targets                                    | `codecov.yml`                                                                                                         |
 
 Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and `BENCH_LOCAL`, which `bench serve` sets for its own build of the vote page. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
 

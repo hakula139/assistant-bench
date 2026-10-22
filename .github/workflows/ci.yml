@@ -70,6 +70,9 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -98,17 +101,18 @@ jobs:
       - name: Test
         run: nix develop .#python -c uv run pytest
 
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.xml
-
       - name: Check fingerprints
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          fail_ci_if_error: true
+          files: coverage.xml
+          use_oidc: true
 
   harbor-smoke:
     name: Harbor Smoke

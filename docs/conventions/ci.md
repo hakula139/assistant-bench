@@ -17,7 +17,9 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 
 The fingerprint check enforces the rule in [Systems](../design/systems.md#fingerprints) by running `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. Python Check checks out the full history with `fetch-depth: 0`, since the check builds the base commit's nixos-config export.
 
-No job in the CI workflow reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
+Python Check authenticates its Codecov upload with a GitHub OIDC token, so it alone holds `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing `codecov/patch` check shows the cause in CI.
+
+No job in the CI workflow reads any secret other than the Cachix token. List each new job in CI Result's `needs`.
 
 ## Deploy
 
