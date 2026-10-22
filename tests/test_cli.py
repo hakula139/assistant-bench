@@ -44,6 +44,7 @@ def write_cases_family(families_dir: Path, systems: str, scorer: str = 'votes') 
         textwrap.dedent(
             f"""\
             scorer = "{scorer}"
+            display_name = "Family F"
             systems = {systems}
             samples = 1
             max_output_tokens = 64
@@ -360,7 +361,11 @@ class TestServe:
         monkeypatch.setattr(cli, 'SITE_DIR', site)
         monkeypatch.setattr(subprocess, 'run', build)
         monkeypatch.setattr(
-            api, 'serve', lambda arena, site: served.append((arena.families(), site))
+            api,
+            'serve',
+            lambda arena, site: served.append(
+                ([family.name for family in arena.families()], site)
+            ),
         )
 
         exit_code, message = invoke('serve')

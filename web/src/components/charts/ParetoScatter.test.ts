@@ -4,6 +4,7 @@ import { paretoFrontier, placeLabels, type ScatterPoint } from '@/components/cha
 
 const point = (system: string, x: number, score: number): ScatterPoint => ({
   system,
+  name: system,
   x,
   score,
   lower: score - 10,

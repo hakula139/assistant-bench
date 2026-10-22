@@ -8,6 +8,7 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 
 ```toml
 scorer = "votes"
+display_name = "Smoke Test · Text"
 systems = ["opus-5.5", "gpt-6.1-sol"]
 reference = "gpt-6.1-sol"
 samples = 1
@@ -18,6 +19,7 @@ categories = ["message"]
 | Field               | Meaning                                                                                                                                   |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `scorer`            | `votes` for outputs ranked by the owner's blind pairwise votes, or `tests` for the reward of each task's own tests                        |
+| `display_name`      | The name the site and the vote page show, unique across families, such as `Technical Writing · English`. Required                         |
 | `systems`           | The `systems.toml` tables that `bench run` sends the family to. Optional, and empty by default                                            |
 | `samples`           | Harbor attempts per task and system, at least 1                                                                                           |
 | `max_output_tokens` | The completion bound, including reasoning tokens. Required for a `cases.jsonl` family                                                     |
@@ -53,7 +55,7 @@ Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[
 
 ## Systems
 
-[`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant:
+[`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key ends in the snapshot, as in `deepseek-v4.1-flash-1017`:
 
 ```toml
 ["opus-5.5"]
@@ -62,14 +64,18 @@ model = "claude-opus-5-5"
 ["opus-5.5-nixos"]
 model = "claude-opus-5-5"
 prompt = "nixos-config:claudeCode"
+display_name = "Claude Opus 5.5 · nixos-config"
 ```
 
-| Key      | Meaning                                                                                                       |
-| -------- | ------------------------------------------------------------------------------------------------------------- |
-| `model`  | A nixos-config catalog model, which supplies the route, the default effort, and prices                        |
-| `route`  | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
-| `price`  | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
-| `effort` | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
-| `prompt` | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
+| Key            | Meaning                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| `model`        | A nixos-config catalog model, which supplies the route, the default effort, and prices                        |
+| `route`        | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
+| `price`        | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
+| `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
+| `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
+| `display_name` | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
+
+Every page names a system by its display name, which defaults to the catalog model's `name`, while URLs, outputs, and reports keep the table name. Display names must be unique across `systems.toml`, so a variant or a snapshot sets a `display_name` that tells it apart.
 
 Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.

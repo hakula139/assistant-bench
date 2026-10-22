@@ -50,6 +50,7 @@ REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 def make_system(**overrides: Any) -> System:
     fields: dict[str, Any] = {
         'name': 'acme-large',
+        'display_name': 'Acme Large',
         'route': 'acme/large',
         'effort': 'medium',
         'prompt': None,
@@ -231,6 +232,7 @@ def write_votes_family(
         textwrap.dedent(
             f"""\
             scorer = "votes"
+            display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 2
             max_output_tokens = 64

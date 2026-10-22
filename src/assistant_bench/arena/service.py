@@ -73,6 +73,13 @@ class PairView(BaseModel):
     b: Pane
 
 
+class FamilyView(BaseModel):
+    """A family the vote page can start a session on, where `name` is its ID."""
+
+    name: str
+    display_name: str
+
+
 class SessionView(BaseModel):
     """A session's progress and the pair to show, absent once the session ends.
 
@@ -80,7 +87,7 @@ class SessionView(BaseModel):
     """
 
     id: str
-    family: str
+    family: FamilyView
     votes: int
     size: int
     pair: PairView | None
@@ -97,6 +104,7 @@ class ArenaFamily:
     """
 
     name: str
+    display_name: str
     render: Literal['text', 'html']
     instructions: dict[str, str]
     checklists: dict[str, list[str]]
@@ -124,6 +132,7 @@ def load_families() -> dict[str, ArenaFamily]:
                     pool = Pool.build(family.settings.systems, cases, outputs)
                     families[name] = ArenaFamily(
                         name=name,
+                        display_name=family.settings.display_name,
                         render=family.settings.render,
                         instructions={
                             case: (
@@ -167,8 +176,8 @@ class Arena:
         self._current: dict[str, str] = {}
         self._documents: dict[str, str] = {}
 
-    def families(self) -> list[str]:
-        return sorted(self._families)
+    def families(self) -> list[FamilyView]:
+        return [self._family_view(name) for name in sorted(self._families)]
 
     def start(self, family: str) -> SessionView:
         if family not in self._families:
@@ -245,11 +254,14 @@ class Arena:
         token = self._current.get(session.id)
         return SessionView(
             id=session.id,
-            family=session.family,
+            family=self._family_view(session.family),
             votes=len(votes),
             size=min(SESSION_VOTES, len(votes) + len(open_cases)),
             pair=None if token is None else self._pairs[token].view,
         )
+
+    def _family_view(self, name: str) -> FamilyView:
+        return FamilyView(name=name, display_name=self._families[name].display_name)
 
     def _next(self, session: Session) -> None:
         votes = self._store.votes(session.family)

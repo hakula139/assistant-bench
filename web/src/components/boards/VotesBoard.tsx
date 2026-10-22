@@ -33,21 +33,28 @@ import {
 } from '@/lib/format';
 import type { CategoryBoard, Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
+import { systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
 
 interface VotesBoardProps {
   family: string;
   /** Closed rounds, oldest first. */
   rounds: VotesRound[];
+  names: SystemNames;
 }
 
 const ALL = 'all';
 
 type Refit = CategoryBoard['standings'][number];
 
-function leaderboardRows(results: VotesResults, category: string): LeaderboardRow[] {
+function leaderboardRows(
+  results: VotesResults,
+  category: string,
+  names: SystemNames,
+): LeaderboardRow[] {
   const row = (fit: Refit, standing: Standing | undefined): LeaderboardRow => ({
     system: fit.system,
+    name: systemName(names, fit.system),
     standing,
     score: fit.score,
     interval: fit.interval,
@@ -74,18 +81,18 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
     const value = row.standing ? x(row.standing) : null;
     return value === null
       ? []
-      : [{ system: row.system, x: value, score: row.score, ...row.interval }];
+      : [{ system: row.system, name: row.name, x: value, score: row.score, ...row.interval }];
   });
 }
 
-function RoundSummary({ results }: { results: VotesResults }) {
+function RoundSummary({ results, names }: { results: VotesResults; names: SystemNames }) {
   const { decision, rater_agreement: agreement } = results;
   const leaderNote = formatLeaderNote(decision);
   return (
     <div className="space-y-3">
       <dl className={statList}>
         <Stat label="Leader">
-          {decision?.leader ?? MISSING}
+          {decision ? systemName(names, decision.leader) : MISSING}
           {leaderNote !== null && (
             <span className="block text-xs font-normal text-muted-foreground">{leaderNote}</span>
           )}
@@ -112,7 +119,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ family, rounds }: VotesBoardProps) {
+export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', ALL);
@@ -125,7 +132,10 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
       ? results.unranked
       : (results.categories.find((board) => board.category === activeCategory)?.unranked ?? []);
 
-  const rows = useMemo(() => leaderboardRows(results, activeCategory), [results, activeCategory]);
+  const rows = useMemo(
+    () => leaderboardRows(results, activeCategory, names),
+    [results, activeCategory, names],
+  );
   const reference = rows.find((row) => row.system === results.reference)?.score;
   const order = useMemo(() => categorySystems(results), [results]);
   const measured = useMemo(
@@ -145,7 +155,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
   );
   const unpriced = measured
     .filter((row) => row.standing.mean_cost_usd === null)
-    .map((row) => row.system);
+    .map((row) => row.name);
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
   const href = (system: string) => `/${family}/${system}/`;
@@ -176,7 +186,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
           )}
         </div>
 
-        <RoundSummary results={results} />
+        <RoundSummary results={results} names={names} />
 
         <Leaderboard
           rows={rows}
@@ -186,13 +196,13 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className={cn('-mt-4', note)}>
-            {`Unranked until more comparisons connect them to the reference: ${unranked.join(', ')}.`}
+            {`Unranked until more comparisons connect them to the reference: ${unranked.map((system) => systemName(names, system)).join(', ')}.`}
           </p>
         )}
 
         {categories.length > 0 && (
           <Section title="Categories">
-            <CategoryForests categories={results.categories} systems={order} />
+            <CategoryForests categories={results.categories} systems={order} names={names} />
             <TableTwin>
               <Table>
                 <TableHeader>
@@ -208,7 +218,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                 <TableBody>
                   {order.map((system) => (
                     <TableRow key={system}>
-                      <TableCell>{system}</TableCell>
+                      <TableCell>{systemName(names, system)}</TableCell>
                       {results.categories.map((board) => {
                         const refit = board.standings.find((item) => item.system === system);
                         return (
@@ -277,7 +287,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                     ].filter(Boolean);
                     return (
                       <TableRow key={system}>
-                        <TableCell>{system}</TableCell>
+                        <TableCell>{row.name}</TableCell>
                         <TableCell numeric>
                           {formatScore(row.score)} ({formatInterval(row.interval)})
                         </TableCell>

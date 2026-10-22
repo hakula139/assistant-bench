@@ -28,11 +28,13 @@ def client(arena: Arena) -> TestClient:
 
 class TestCreateApp:
     def test_runs_a_session_from_start_to_undo(self, client: TestClient) -> None:
-        assert client.get('/api/families').json() == ['f']
+        family = {'name': 'f', 'display_name': 'Family f'}
+        assert client.get('/api/families').json() == [family]
 
         started = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)
         assert started.status_code == 201
         session = started.json()
+        assert session['family'] == family
         token = session['pair']['token']
 
         voted = client.post(

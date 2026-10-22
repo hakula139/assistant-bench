@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
-import type { SessionView } from '@/lib/arena';
+import type { FamilyView, SessionView } from '@/lib/arena';
+
+const FAMILY: FamilyView = { name: 'prose-zh', display_name: 'Technical Writing · Chinese' };
 
 interface Cast {
   token: string;
@@ -15,9 +17,10 @@ interface Cast {
 
 /**
  * A stand-in for the arena API that serves numbered pairs until a session of `size` votes is
- * complete, and records each vote and undo.
+ * complete, and records each session start, vote, and undo.
  */
 function stubApi(size = 30) {
+  const starts: unknown[] = [];
   const casts: Cast[] = [];
   let undos = 0;
   let served = 0;
@@ -26,7 +29,7 @@ function stubApi(size = 30) {
     const votes = casts.length - undos;
     return {
       id: 's1',
-      family: 'prose-zh',
+      family: FAMILY,
       votes,
       size,
       pair:
@@ -46,9 +49,10 @@ function stubApi(size = 30) {
 
   vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
     if (path === '/api/families') {
-      return respond(['prose-zh']);
+      return respond([FAMILY]);
     }
     if (path === '/api/sessions') {
+      starts.push(JSON.parse(init?.body as string));
       return respond(view(), 201);
     }
     if (path === '/api/sessions/s1/undo') {
@@ -62,13 +66,13 @@ function stubApi(size = 30) {
     }
     return respond({ detail: `unexpected ${path}` }, 404);
   });
-  return { casts, undos: () => undos };
+  return { starts, casts, undos: () => undos };
 }
 
 async function startSession(page = <VoteApp />) {
   const user = userEvent.setup();
   render(page);
-  await user.click(await screen.findByRole('button', { name: 'prose-zh' }));
+  await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
   await screen.findByText('Output A1');
   return user;
 }
@@ -134,6 +138,19 @@ describe('VoteApp', () => {
     expect(api.undos()).toBe(1);
   });
 
+  test('starts the family it shows by display name, and names it when the session ends', async () => {
+    const api = stubApi(1);
+    const user = await startSession();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('1 vote recorded on Technical Writing · Chinese.');
+    await user.click(screen.getByRole('button', { name: 'Start another session' }));
+
+    await vi.waitFor(() => {
+      expect(api.starts).toEqual([{ family: 'prose-zh' }, { family: 'prose-zh' }]);
+    });
+  });
+
   test('opens the next pair at the top of the page in fresh output panes', async () => {
     stubApi();
     const user = await startSession();
@@ -195,14 +212,14 @@ describe('VoteApp', () => {
     vi.stubGlobal('fetch', (path: string) =>
       Promise.resolve(
         path === '/api/families'
-          ? new Response(JSON.stringify(['prose-zh']))
+          ? new Response(JSON.stringify([FAMILY]))
           : new Response(JSON.stringify({ detail: 'no outputs to pair' }), { status: 409 }),
       ),
     );
     const user = userEvent.setup();
     render(<VoteApp />);
 
-    await user.click(await screen.findByRole('button', { name: 'prose-zh' }));
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
 
     expect((await screen.findByRole('alert')).textContent).toBe('no outputs to pair');
   });

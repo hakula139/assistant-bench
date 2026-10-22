@@ -48,6 +48,7 @@ class TestSystemConfig:
         [
             {},
             {'model': 'acme-large', 'route': 'acme/large'},
+            {'route': 'acme/large'},
             {
                 'model': 'acme-large',
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
@@ -105,17 +106,42 @@ class TestLoadSystems:
             'small': 'acme/small',
         }
 
+    def test_rejects_two_systems_sharing_a_display_name(
+        self, export: NixosConfigExport, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'systems.toml'
+        path.write_text(
+            textwrap.dedent(
+                """\
+                [large]
+                model = "acme-large"
+
+                [large-codex]
+                model = "acme-large"
+                prompt = "nixos-config:codex"
+                """
+            )
+        )
+
+        with pytest.raises(ValueError) as error:
+            load_systems(export, path)
+
+        assert str(error.value) == (
+            "systems 'large' and 'large-codex' share the display name 'Acme Large', "
+            'so set a distinct `display_name`'
+        )
+
     def test_committed_systems_resolve_against_the_pinned_catalog(self) -> None:
         systems = load_systems(load_export())
 
-        assert set(systems) == {
-            'opus-5.5',
-            'gpt-6-astra',
-            'gpt-6.1-sol',
-            'gemini-4-argon',
-            'gemini-3.8-flash',
-            'deepseek-v4.1-flash',
-            'kimi-k3',
+        assert {name: system.display_name for name, system in systems.items()} == {
+            'opus-5.5': 'Claude Opus 5.5',
+            'gpt-6-astra': 'GPT-6 Astra',
+            'gpt-6.1-sol': 'GPT-6.1 Sol',
+            'gemini-4-argon': 'Gemini 4 Argon',
+            'gemini-3.8-flash': 'Gemini 3.8 Flash',
+            'deepseek-v4.1-flash-1017': 'DeepSeek V4.1 Flash 1017',
+            'kimi-k3': 'Kimi K3',
         }
 
 
@@ -154,14 +180,30 @@ class TestResolveSystem:
         price = Price(input=1.0, output=4.0, cache_read=0.1)
 
         system = resolve_system(
-            'x', SystemConfig(route='router/acme/x', effort='max', price=price), export
+            'x',
+            SystemConfig(
+                route='router/acme/x', effort='max', price=price, display_name='Acme X'
+            ),
+            export,
         )
 
-        assert (system.route, system.effort, system.price) == (
+        assert (system.display_name, system.route, system.effort, system.price) == (
+            'Acme X',
             'router/acme/x',
             'max',
             price,
         )
+
+    def test_takes_a_display_name_over_the_catalog_name(
+        self, export: NixosConfigExport
+    ) -> None:
+        system = resolve_system(
+            'large',
+            SystemConfig(model='acme-large', display_name='Acme Large 0901'),
+            export,
+        )
+
+        assert system.display_name == 'Acme Large 0901'
 
     def test_reads_a_nixos_config_system_prompt(
         self, export: NixosConfigExport

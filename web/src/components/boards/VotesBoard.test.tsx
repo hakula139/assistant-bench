@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { VotesBoard } from '@/components/boards/VotesBoard';
 import { reportSchema } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
-import { readFixture } from '@/test/fixture';
+import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
 
 const search = vi.hoisted(() => new URLSearchParams());
 vi.mock('@/lib/use-search-param', () => ({
@@ -22,7 +22,9 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
 function render({ round, results }: VotesRound): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
   const reversed = { ...results, standings: results.standings.toReversed() };
-  return renderToString(<VotesBoard family="arena" rounds={[{ round, results: reversed }]} />);
+  return renderToString(
+    <VotesBoard family="arena" rounds={[{ round, results: reversed }]} names={FIXTURE_NAMES} />,
+  );
 }
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
@@ -51,23 +53,37 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Leader acme-large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, plus 20 left out of the fit',
+      'Leader Acme Large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, plus 20 left out of the fit',
     );
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
     const html = render(await load());
 
-    expect(text(html)).toMatch(/acme-tiny Preliminary [^%]*? 0 – /);
+    expect(text(html)).toMatch(/Acme Tiny Preliminary [^%]*? 0 – /);
   });
 
   test('names the unranked systems after the table', async () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Unranked until more comparisons connect them to the reference: acme-edge, acme-nano.',
+      'Unranked until more comparisons connect them to the reference: Acme Edge, Acme Nano.',
     );
   });
+
+  test.each(['all', 'message'])(
+    'shows display names wherever the %s board names a system',
+    async (category) => {
+      const round = await load();
+      round.results.standings[0].mean_cost_usd = null;
+      search.set('category', category);
+
+      const html = render(round);
+
+      expect(text(html)).toContain(`leaving out the unpriced ${FIXTURE_NAMES['acme-pro']}`);
+      expect(shownSlugs(html)).toEqual([]);
+    },
+  );
 
   test('warns when rater agreement falls below the floor', async () => {
     const round = await load();
@@ -113,9 +129,9 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('acme-edge Preliminary 890 798–1,044 41 – – – –');
+    expect(text(html)).toContain('Acme Edge Preliminary 890 798–1,044 41 – – – –');
     expect(html).not.toContain('href="/arena/acme-edge/"');
-    expect(text(html)).toContain('acme-mini 769 (696–867), 38 votes, preliminary – 789');
-    expect(text(html)).toContain('acme-edge – 890 (798–1,044), 41 votes, preliminary – Score');
+    expect(text(html)).toContain('Acme Mini 769 (696–867), 38 votes, preliminary – 789');
+    expect(text(html)).toContain('Acme Edge – 890 (798–1,044), 41 votes, preliminary – Score');
   });
 });

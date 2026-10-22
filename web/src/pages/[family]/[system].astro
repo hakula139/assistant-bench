@@ -17,6 +17,7 @@ import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import type { Distribution, Standing } from '@/lib/report';
 import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
+import { systemName, type SystemNames } from '@/lib/systems';
 
 export const getStaticPaths = (async () => {
   const families = await getFamilies();
@@ -27,18 +28,27 @@ export const getStaticPaths = (async () => {
     );
     return [...systems].map((system) => ({
       params: { family: family.name, system },
-      props: { family: family.name, system, rounds },
+      props: {
+        family: family.name,
+        familyName: family.config.display_name,
+        system,
+        rounds,
+        names: family.systemNames,
+      },
     }));
   });
 }) satisfies GetStaticPaths;
 
 interface Props {
   family: string;
+  familyName: string;
   system: string;
   rounds: VotesRound[];
+  names: SystemNames;
 }
 
-const { family, system, rounds } = Astro.props;
+const { family, familyName, system, rounds, names } = Astro.props;
+const name = (item: string) => systemName(names, item);
 const appearances = rounds.flatMap(({ round, results }) => {
   const standing = results.standings.find((item) => item.system === system);
   return standing ? [{ round, results, standing }] : [];
@@ -62,7 +72,7 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
     return distribution
       ? [
           {
-            label: item.system,
+            label: name(item.system),
             value: distribution.p50,
             range: { lower: distribution.p10, upper: distribution.p90 },
             emphasis: item.system === system,
@@ -75,12 +85,12 @@ const latencyRows = distributionRows((item) => item.latency_sec);
 const length = results.length;
 ---
 
-<Base title={`${system} on ${family}`}>
+<Base title={`${name(system)} on ${familyName}`}>
   <header class="mb-8 space-y-3">
     <p class="text-sm">
-      <a href={`/${family}/`}>{family}</a>
+      <a href={`/${family}/`}>{familyName}</a>
     </p>
-    <h1 class={pageTitle}>{system}</h1>
+    <h1 class={pageTitle}>{name(system)}</h1>
     <dl class={statList}>
       <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
         {formatScore(standing.score)}
@@ -110,13 +120,13 @@ const length = results.length;
         </p>
         <DotRangePlot
           client:visible
-          rows={headToHead.map((pair) => ({ label: pair.opponent, value: pair.win_rate }))}
+          rows={headToHead.map((pair) => ({ label: name(pair.opponent), value: pair.win_rate }))}
           label="Win rate"
           format="percent"
           baseline={0.5}
         />
         <TableTwin>
-          <HeadToHeadTable headToHead={headToHead} />
+          <HeadToHeadTable headToHead={headToHead} names={names} />
         </TableTwin>
       </section>
     )}
@@ -153,7 +163,7 @@ const length = results.length;
         )}
       </div>
       <TableTwin>
-        <DistributionTable standings={standings} system={system} />
+        <DistributionTable standings={standings} system={system} names={names} />
       </TableTwin>
     </section>
 

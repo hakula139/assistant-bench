@@ -4,7 +4,7 @@ The site under `web/` has two views built from one Astro project and one compone
 
 ## Results
 
-The site lists the families whose `family.toml` sets `public = true`, which [Authoring](../guide/authoring.md#families) defines, together with their reports, so test families stay off it. A listed family appears before its first round closes, showing its systems with unbounded intervals and its reference at 1,000.
+The site lists the families whose `family.toml` sets `public = true`, which [Authoring](../guide/authoring.md#families) defines, together with their reports, so test families stay off it. A listed family appears before its first round closes, showing its systems with unbounded intervals and its reference at 1,000. Pages, titles, and meta tags name families and systems by the display names that [Authoring](../guide/authoring.md) defines, which the site resolves from `family.toml`, `systems.toml`, and the nixos-config catalog, while URLs keep the directory and table names. The build fails when a family or report names a system without a table.
 
 Each family scored by votes gets a page at `/<family>/` showing one round, with the round and category filters kept in the URL:
 

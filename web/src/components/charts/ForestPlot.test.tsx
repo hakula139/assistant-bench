@@ -109,7 +109,9 @@ describe('CategoryForests', () => {
       board('weak', [refit('a', 1000, 950, 1050), refit('b', 750, 700, 800)]),
     ];
 
-    const { container } = render(<CategoryForests categories={categories} systems={['a', 'b']} />);
+    const { container } = render(
+      <CategoryForests categories={categories} systems={['a', 'b']} names={{ a: 'A', b: 'B' }} />,
+    );
     await vi.waitFor(() => {
       expect(container.querySelectorAll('svg')).toHaveLength(2);
     });

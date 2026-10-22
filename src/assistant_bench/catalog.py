@@ -52,6 +52,7 @@ class Thinking(BaseModel):
 class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
+    name: str
     channel_id: dict[str, str] = Field(alias='channelId')
     channel_cost: dict[str, ChannelCost] = Field(alias='channelCost', default={})
     thinking: Thinking | None = None
@@ -95,7 +96,8 @@ class SystemConfig(BaseModel):
     """One table of `systems.toml`, naming either a catalog model or a bare route.
 
     `prompt` is `nixos-config:<client>`, a rendered instruction file that becomes
-    the system message.
+    the system message. `display_name` overrides the catalog model's name, and a
+    `route` requires it.
     """
 
     model_config = ConfigDict(extra='forbid')
@@ -105,6 +107,7 @@ class SystemConfig(BaseModel):
     effort: str | None = None
     price: Price | None = None
     prompt: str | None = None
+    display_name: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode='after')
     def _check_source(self) -> Self:
@@ -112,15 +115,22 @@ class SystemConfig(BaseModel):
             raise ValueError('set exactly one of `model` and `route`')
         if self.model is not None and self.price is not None:
             raise ValueError('`price` applies only to a `route`')
+        if self.route is not None and self.display_name is None:
+            raise ValueError('a `route` needs a `display_name`')
         return self
 
 
 class System(BaseModel):
-    """A system resolved to the route, effort, prompt, and price of every call."""
+    """A system resolved to the route, effort, prompt, and price of every call.
+
+    `name` is the table name, which data and URLs use, while the site shows
+    `display_name`. Neither enters the fingerprint.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     name: str
+    display_name: str
     route: str
     effort: str | None
     prompt: str | None
@@ -151,10 +161,26 @@ def load_systems(
 
 
 def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]:
-    return {
+    """Resolve every table of a `systems.toml` document.
+
+    Raises
+    ------
+    ValueError
+        A table fails to resolve, or two systems share a display name.
+    """
+    systems = {
         name: resolve_system(name, SystemConfig.model_validate(table), export)
         for name, table in tomllib.loads(document).items()
     }
+    owners: dict[str, str] = {}
+    for name, system in systems.items():
+        owner = owners.setdefault(system.display_name, name)
+        if owner != name:
+            raise ValueError(
+                f'systems {owner!r} and {name!r} share the display name '
+                f'{system.display_name!r}, so set a distinct `display_name`'
+            )
+    return systems
 
 
 def resolve_system(
@@ -169,8 +195,10 @@ def resolve_system(
     """
     prompt = _prompt(name, config.prompt, export)
     if config.route is not None:
+        assert config.display_name is not None
         return System(
             name=name,
+            display_name=config.display_name,
             route=config.route,
             effort=config.effort,
             prompt=prompt,
@@ -195,6 +223,7 @@ def resolve_system(
     ((channel, route),) = entry.channel_id.items()
     return System(
         name=name,
+        display_name=config.display_name or entry.name,
         route=route,
         effort=_resolve_effort(name, config.effort, entry.thinking),
         prompt=prompt,

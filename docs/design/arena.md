@@ -28,7 +28,7 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 
 | Route                          | Does                                                                      |
 | ------------------------------ | ------------------------------------------------------------------------- |
-| `GET /api/families`            | Lists the families with outputs                                           |
+| `GET /api/families`            | Lists the families with outputs, each as `{"name", "display_name"}`       |
 | `POST /api/sessions`           | Starts a session on `{"family": ...}` and returns it with its first pair  |
 | `POST /api/sessions/{id}/pair` | Returns the session's open pair, drawing one if none is open              |
 | `POST /api/pairs/{token}/vote` | Records `{"choice", "flags", "note"}` and returns the session's next pair |

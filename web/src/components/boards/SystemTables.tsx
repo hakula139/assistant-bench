@@ -16,10 +16,17 @@ import {
   formatSeconds,
 } from '@/lib/format';
 import { flagLabels, flags, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
+import { systemName, type SystemNames } from '@/lib/systems';
 
 // ── System Page Tables ──
 
-export function HeadToHeadTable({ headToHead }: { headToHead: HeadToHead[] }) {
+export function HeadToHeadTable({
+  headToHead,
+  names,
+}: {
+  headToHead: HeadToHead[];
+  names: SystemNames;
+}) {
   return (
     <Table>
       <TableHeader>
@@ -36,7 +43,7 @@ export function HeadToHeadTable({ headToHead }: { headToHead: HeadToHead[] }) {
       <TableBody>
         {headToHead.map((pair) => (
           <TableRow key={pair.opponent}>
-            <TableCell>{pair.opponent}</TableCell>
+            <TableCell>{systemName(names, pair.opponent)}</TableCell>
             <TableCell numeric>{pair.votes}</TableCell>
             <TableCell numeric>{pair.wins}</TableCell>
             <TableCell numeric>{pair.losses}</TableCell>
@@ -83,9 +90,11 @@ function formatDistribution(distribution: Distribution | null, format: (value: n
 export function DistributionTable({
   standings,
   system,
+  names,
 }: {
   standings: Standing[];
   system: string;
+  names: SystemNames;
 }) {
   return (
     <Table>
@@ -99,7 +108,7 @@ export function DistributionTable({
       <TableBody>
         {standings.map((item) => (
           <TableRow key={item.system} className={item.system === system ? 'font-medium' : ''}>
-            <TableCell>{item.system}</TableCell>
+            <TableCell>{systemName(names, item.system)}</TableCell>
             <TableCell numeric>{formatDistribution(item.output_tokens, formatCount)}</TableCell>
             <TableCell numeric>{formatDistribution(item.latency_sec, formatSeconds)}</TableCell>
           </TableRow>

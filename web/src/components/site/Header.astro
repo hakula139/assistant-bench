@@ -17,7 +17,7 @@ const { wide = false } = Astro.props;
 const families = await getFamilies();
 const path = Astro.url.pathname;
 const links = [
-  ...families.map((family) => ({ href: `/${family.name}/`, label: family.name })),
+  ...families.map((family) => ({ href: `/${family.name}/`, label: family.config.display_name })),
   { href: '/methodology/', label: 'Methodology' },
   ...(localBuild ? [{ href: '/vote/', label: 'Vote' }] : []),
 ];

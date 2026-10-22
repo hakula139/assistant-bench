@@ -1,6 +1,7 @@
 import { nice, tickStep, ticks } from 'd3-array';
 
 import type { Interval, Standing } from '@/lib/report';
+import { systemName, type SystemNames } from '@/lib/systems';
 
 /** A score with its 95% interval, as a forest plot draws it. */
 export interface Estimate {
@@ -120,17 +121,23 @@ export function clip({ score, interval }: Estimate, [start]: [number, number]): 
  */
 export type Unplaced = 'reference' | 'unranked' | 'no-votes';
 
-/** One system's row in a static forest plot. */
-export type ForestRow = { system: string; href?: string } & (
+/** One system's row in a static forest plot, labelled by its display `name`. */
+export type ForestRow = { system: string; name: string; href?: string } & (
   { estimate: Estimate; preliminary: boolean } | { unplaced: Unplaced }
 );
 
-const byName = (a: string, b: string) => a.localeCompare(b);
+const byName = (names: SystemNames) => (a: string, b: string) =>
+  systemName(names, a).localeCompare(systemName(names, b));
 
-/** Rows for a family before its first round closes, in name order. */
-export function unmeasuredRows(systems: string[], reference: string): ForestRow[] {
-  return systems.toSorted(byName).map((system) => ({
+/** Rows for a family before its first round closes, in display name order. */
+export function unmeasuredRows(
+  systems: string[],
+  reference: string,
+  names: SystemNames,
+): ForestRow[] {
+  return systems.toSorted(byName(names)).map((system) => ({
     system,
+    name: systemName(names, system),
     unplaced: system === reference ? 'reference' : 'no-votes',
   }));
 }
@@ -143,21 +150,28 @@ export function roundRows(
   family: string,
   systems: string[],
   { standings, unranked }: { standings: Standing[]; unranked: string[] },
+  names: SystemNames,
 ): ForestRow[] {
   const placed = new Set([...standings.map((standing) => standing.system), ...unranked]);
+  const unplaced = (system: string, reason: Unplaced) => ({
+    system,
+    name: systemName(names, system),
+    unplaced: reason,
+  });
   return [
     ...standings
       .toSorted((a, b) => b.score - a.score)
       .map((standing) => ({
         system: standing.system,
+        name: systemName(names, standing.system),
         href: `/${family}/${standing.system}/`,
         estimate: standing,
         preliminary: standing.preliminary,
       })),
-    ...unranked.toSorted(byName).map((system) => ({ system, unplaced: 'unranked' as const })),
+    ...unranked.toSorted(byName(names)).map((system) => unplaced(system, 'unranked')),
     ...systems
       .filter((system) => !placed.has(system))
-      .toSorted(byName)
-      .map((system) => ({ system, unplaced: 'no-votes' as const })),
+      .toSorted(byName(names))
+      .map((system) => unplaced(system, 'no-votes')),
   ];
 }

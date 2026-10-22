@@ -15,6 +15,7 @@ from starlette.types import Scope
 
 from assistant_bench.arena.service import (
     Arena,
+    FamilyView,
     NothingToUndo,
     SessionView,
     UnknownItem,
@@ -92,7 +93,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     writes = APIRouter(dependencies=[Depends(same_origin)])
 
     @router.get('/families')
-    async def families() -> list[str]:
+    async def families() -> list[FamilyView]:
         """List the families with outputs to vote on."""
         return arena.families()
 

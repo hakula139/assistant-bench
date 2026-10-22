@@ -1,11 +1,12 @@
 scorer = "votes"
+display_name = "Smoke Test · Text"
 systems = [
   "opus-5.5",
   "gpt-6-astra",
   "gpt-6.1-sol",
   "gemini-4-argon",
   "gemini-3.8-flash",
-  "deepseek-v4.1-flash",
+  "deepseek-v4.1-flash-1017",
   "kimi-k3",
 ]
 reference = "gemini-3.8-flash"

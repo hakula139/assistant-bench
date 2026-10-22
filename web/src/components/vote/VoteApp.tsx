@@ -21,6 +21,7 @@ import {
   startSession,
   undoVote,
   type Choice,
+  type FamilyView,
   type PairView,
   type SessionView,
 } from '@/lib/arena';
@@ -69,7 +70,7 @@ interface StartScreenProps {
 }
 
 function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
-  const [families, setFamilies] = useState<string[] | null>(null);
+  const [families, setFamilies] = useState<FamilyView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,15 +89,15 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
       )}
       <ul className="flex flex-wrap gap-2">
         {families?.map((family) => (
-          <li key={family}>
+          <li key={family.name}>
             <Button
               variant="outline"
               disabled={busy}
               onClick={() => {
-                onStart(family);
+                onStart(family.name);
               }}
             >
-              {family}
+              {family.display_name}
             </Button>
           </li>
         ))}
@@ -330,14 +331,14 @@ export function VoteApp() {
     return (
       <Screen title="Session complete">
         <p className="text-muted-foreground">
-          {formatCountOf(session.votes, 'vote')} recorded on {session.family}.
+          {formatCountOf(session.votes, 'vote')} recorded on {session.family.display_name}.
         </p>
         <ErrorAlert error={error} />
         <div className="flex gap-2">
           <Button
             disabled={busy}
             onClick={() => {
-              void run(() => startSession(session.family));
+              void run(() => startSession(session.family.name));
             }}
           >
             Start another session
@@ -353,7 +354,7 @@ export function VoteApp() {
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
       <span className="whitespace-nowrap tabular-nums">
-        {session.family}, pair {session.votes + 1} of {session.size}
+        {session.family.display_name}, pair {session.votes + 1} of {session.size}
       </span>
       <Progress
         value={session.size === 0 ? 0 : (100 * session.votes) / session.size}

@@ -2,6 +2,7 @@ import { getCollection } from 'astro:content';
 
 import type { FamilyConfig } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
+import { resolveSystemNames, type SystemNames } from '@/lib/systems';
 
 export interface VotesRound {
   round: string;
@@ -21,16 +22,31 @@ export interface Family {
    * first round closes.
    */
   rounds: Report[];
+  /** Every system's display name, which pages show wherever the reports name a system. */
+  systemNames: SystemNames;
 }
 
 /**
  * Pairs each public family's config with its reports, by name. Families without `public = true`
  * stay off the site together with their reports.
+ *
+ * @throws Error when two families, listed or not, share a display name.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
   reports: Report[],
+  systemNames: SystemNames,
 ): Family[] {
+  const owners = new Map<string, string>();
+  for (const { name, config } of configs) {
+    const owner = owners.get(config.display_name);
+    if (owner !== undefined) {
+      throw new Error(
+        `families ${owner} and ${name} share the display name ${config.display_name}`,
+      );
+    }
+    owners.set(config.display_name, name);
+  }
   const rounds = Map.groupBy(reports, (report) => report.family);
   return configs
     .filter(({ config }) => config.public)
@@ -40,18 +56,22 @@ export function listFamilies(
       rounds: (rounds.get(name) ?? []).toSorted(
         (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
       ),
+      systemNames,
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getFamilies(): Promise<Family[]> {
-  const [configs, reports] = await Promise.all([
+  const [configs, reports, systems, models] = await Promise.all([
     getCollection('families'),
     getCollection('reports'),
+    getCollection('systems'),
+    getCollection('models'),
   ]);
   return listFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
+    resolveSystemNames(systems, new Map(models.map((entry) => [entry.id, entry.data.name]))),
   );
 }
 
