@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react';
 
+/** The classes of a page's `<h1>`, except the home page's hero. */
+export const pageTitle = 'text-[1.75rem] leading-tight font-semibold';
+
+/** The classes of a muted note that explains the figure or table beside it. */
+export const note = 'max-w-prose text-sm text-muted-foreground';
+
 /** The classes of a titled part of a board or system page, ruled off from the part above it. */
 export const section = { root: 'space-y-3 border-t pt-6', title: 'text-lg font-semibold' };
 

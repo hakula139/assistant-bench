@@ -4,6 +4,7 @@ import type { GetStaticPaths } from 'astro';
 import { TestsBoard } from '@/components/boards/TestsBoard';
 import { VotesBoard } from '@/components/boards/VotesBoard';
 import { Forest } from '@/components/site/Forest';
+import { pageTitle } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
 import { MISSING, formatCountOf } from '@/lib/format';
@@ -40,7 +41,7 @@ const { summary, guide, board } = (() => {
 
 <Base title={family.name} description={`${family.name}: ${summary}`}>
   <header class="mb-8 space-y-2">
-    <h1 class="text-[1.75rem] leading-tight font-semibold">{family.name}</h1>
+    <h1 class={pageTitle}>{family.name}</h1>
     <p class="max-w-prose text-muted-foreground">
       {summary} <a href={guide}>How to read this board</a>
     </p>

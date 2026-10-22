@@ -1,8 +1,8 @@
+import { cn } from 'cn';
 import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
 import { Leaderboard, type LeaderboardRow } from '@/components/boards/Leaderboard';
-import { Section, Stat, statList } from '@/components/site/Summary';
 import { CategoryForests } from '@/components/charts/CategoryForests';
 import {
   ParetoScatter,
@@ -10,6 +10,7 @@ import {
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { Section, Stat, note, statList } from '@/components/site/PageParts';
 import {
   Table,
   TableBody,
@@ -79,14 +80,14 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
 
 function RoundSummary({ results }: { results: VotesResults }) {
   const { decision, rater_agreement: agreement } = results;
-  const note = formatLeaderNote(decision);
+  const leaderNote = formatLeaderNote(decision);
   return (
     <div className="space-y-3">
       <dl className={statList}>
         <Stat label="Leader">
           {decision?.leader ?? MISSING}
-          {note !== null && (
-            <span className="block text-xs font-normal text-muted-foreground">{note}</span>
+          {leaderNote !== null && (
+            <span className="block text-xs font-normal text-muted-foreground">{leaderNote}</span>
           )}
         </Stat>
         <Stat
@@ -102,7 +103,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
         <Stat label="Split-half τ">{formatTau(results.split_half_tau)}</Stat>
       </dl>
       {agreement.below_floor && (
-        <p className="max-w-prose text-sm text-muted-foreground">
+        <p className={note}>
           Rater agreement is below 70%, so the intervals overstate how well systems separate.
         </p>
       )}
@@ -184,7 +185,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
           href={href}
         />
         {unranked.length > 0 && (
-          <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
+          <p className={cn('-mt-4', note)}>
             {`Unranked until more comparisons connect them to the reference: ${unranked.join(', ')}.`}
           </p>
         )}

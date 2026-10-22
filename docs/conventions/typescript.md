@@ -15,7 +15,7 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 web/src/
 ├── components/boards/                      # One board per scorer, plus the tables its pages share
 ├── components/charts/                      # Observable Plot charts and their table twins
-├── components/site/                        # Header, wordmark, family panel, static forest, glossary, and summary parts
+├── components/site/                        # Header, wordmark, family panel, static forest, glossary, and shared page parts
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The families and reports collections
@@ -39,7 +39,7 @@ web/src/
 ## Components
 
 - Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state, `progress.tsx` for its value and track, `table.tsx` for its `numeric` cells, and `badge.tsx` for its `status` variant.
-- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component, or a shared class constant like `section` in `components/site/Summary.tsx`, so the class list is not repeated.
+- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component, or a shared class constant like `section` or `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
 - Hydrate a component only where the page is interactive. Tables render as static React components, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
 - Pass filter state through `useSearchParam` so each filter lands in the URL.
 

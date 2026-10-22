@@ -8,10 +8,10 @@ import {
   HeadToHeadTable,
   RoundsTable,
 } from '@/components/boards/SystemTables';
-import { Stat, section, statList } from '@/components/site/Summary';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { Stat, note, pageTitle, section, statList } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
@@ -80,7 +80,7 @@ const length = results.length;
     <p class="text-sm">
       <a href={`/${family}/`}>{family}</a>
     </p>
-    <h1 class="text-[1.75rem] leading-tight font-semibold">{system}</h1>
+    <h1 class={pageTitle}>{system}</h1>
     <dl class={statList}>
       <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
         {formatScore(standing.score)}
@@ -97,9 +97,7 @@ const length = results.length;
       )}
     </dl>
     {standing.preliminary && (
-      <p class="max-w-prose text-sm text-muted-foreground">
-        Preliminary: fewer than 40 decisive votes, so the score may still move.
-      </p>
+      <p class={note}>Preliminary: fewer than 40 decisive votes, so the score may still move.</p>
     )}
   </header>
 
@@ -107,7 +105,7 @@ const length = results.length;
     {headToHead.length > 0 && (
       <section class={section.root}>
         <h2 class={section.title}>Head to head</h2>
-        <p class="max-w-prose text-sm text-muted-foreground">
+        <p class={note}>
           Win rate against each opponent, where ties and both-bad votes count half.
         </p>
         <DotRangePlot
@@ -126,9 +124,7 @@ const length = results.length;
     {categoryRows.length > 0 && (
       <section class={section.root}>
         <h2 class={section.title}>Categories</h2>
-        <p class="max-w-prose text-sm text-muted-foreground">
-          Scores from each category's votes alone, with 95% intervals.
-        </p>
+        <p class={note}>Scores from each category's votes alone, with 95% intervals.</p>
         <ForestPlot
           client:visible
           rows={categoryRows}
@@ -143,7 +139,7 @@ const length = results.length;
 
     <section class={section.root}>
       <h2 class={section.title}>Output length and latency</h2>
-      <p class="max-w-prose text-sm text-muted-foreground">
+      <p class={note}>
         Each system's median and 10th to 90th percentile range in this round.
         {length !== null &&
           ` Across the family, the rater favors the ${length >= 0 ? 'longer' : 'shorter'} output by ${Math.abs(length).toFixed(1)} score points per standard deviation of the pair's relative length difference.`}
@@ -163,7 +159,7 @@ const length = results.length;
 
     <section class={section.root}>
       <h2 class={section.title}>Flags</h2>
-      <p class="max-w-prose text-sm text-muted-foreground">
+      <p class={note}>
         Votes that flagged a problem in this system's output. A flag counts against the losing side,
         or against both sides of a tie or a both-bad vote.
       </p>
