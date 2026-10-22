@@ -1,5 +1,6 @@
 Atoi
 BFGS
+blas
 Cachix
 cafile
 cedict
@@ -60,6 +61,7 @@ SSIM
 statix
 strconv
 taplo
+threadpoolctl
 tokei
 triu
 trixie

@@ -8,6 +8,7 @@ from typing import NamedTuple
 import numpy as np
 import numpy.typing as npt
 from scipy import optimize, sparse, special, stats
+from threadpoolctl import threadpool_limits
 
 
 type Floats = npt.NDArray[np.float64]
@@ -182,15 +183,18 @@ def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) ->
     )
     left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
     strengths = np.empty((resamples, k))
-    for r in range(resamples):
-        weights = pair_weights[r]
-        drawn = weights > 0
-        score = np.divide(
-            pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
-        )
-        strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
-        connected = _connected(left[drawn], right[drawn], k, anchor)
-        strengths[r, ~connected] = np.nan
+    # A refit's products are too small to split across threads, and on a loaded
+    # host the idle BLAS workers spin against each other for longer than the work.
+    with threadpool_limits(limits=1, user_api='blas'):
+        for r in range(resamples):
+            weights = pair_weights[r]
+            drawn = weights > 0
+            score = np.divide(
+                pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
+            )
+            strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
+            connected = _connected(left[drawn], right[drawn], k, anchor)
+            strengths[r, ~connected] = np.nan
     return strengths
 
 
