@@ -23,7 +23,7 @@ Entering the dev shell installs a [pre-commit](https://pre-commit.com) hook gene
 
 The hook runs the fast subset of the [verification](../../AGENTS.md#verification) checks on staged files: file hygiene, Nix formatting and lints, Ruff, shfmt, Prettier and Taplo formatting, `markdownlint`, and `cspell`, while mypy and pytest stay out of the hook because they take longer. Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run the tools pinned in `node_modules` and the Ruff hooks run the Ruff pinned in `uv.lock`. `nix flake check` runs only the other hooks because its sandbox has neither, while CI's Node Check and Python Check jobs run those tools.
+Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run the tools pinned in `node_modules` and the Ruff hooks run the Ruff pinned in `uv.lock`. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 
 ## Where Settings Live
 
@@ -61,7 +61,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and the fingerprint check fails until the changed system takes a new name in `systems.toml`.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, which then needs a new table name, as [Systems](../design/systems.md#fingerprints) describes.
 
 ## Nix Style
 

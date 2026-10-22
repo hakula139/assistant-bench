@@ -14,7 +14,7 @@ Early development. The first families, `prose-zh` and `prose-en`, rank how syste
 
 ## Usage
 
-Requires Nix with flakes, a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists:
+Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists:
 
 ```bash
 nix develop                                 # Dev shell with every tool

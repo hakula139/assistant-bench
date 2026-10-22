@@ -15,19 +15,19 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                                              |
 | CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone                                    |
 
-The fingerprint check runs `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. It resolves every `systems.toml` table at both commits, each against its own nixos-config export, and fails when a table keeps its name but its fingerprint changes, so a changed system takes a new name and the old one keeps its results.
+The fingerprint check enforces the rule in [Systems](../design/systems.md#fingerprints) by running `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. Python Check checks out the full history with `fetch-depth: 0`, since the check builds the base commit's nixos-config export.
 
-No job sends a paid request, and no CI job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
+No job in the CI workflow reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
 
 ## Deploy
 
-The site deploys to Cloudflare Workers static assets, which `web/wrangler.toml` configures, and each deploy workflow publishes the `web/dist` artifact that its own `build.yml` run uploads:
+The site deploys to Cloudflare Workers static assets, which `web/wrangler.toml` configures, through three workflows:
 
-- **Deploy** runs on each push to `main` and deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to.
-- **Preview Deploy** runs `wrangler preview` for each PR in the `preview` environment, creating a Worker Preview named `pr-<number>` under the same Worker, and comments its URLs on the PR. The Preview's `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own.
-- **Preview Cleanup** deletes the Preview once the PR closes, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged.
+- **Deploy:** runs on each push to `main` and on manual dispatch from `main`, and deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to.
+- **Preview Deploy:** runs `wrangler preview` for each PR in the `preview` environment, creating a Worker Preview named `pr-<number>` under the same Worker, and comments its URLs on the PR. The Preview's `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own. It shares the concurrency group `preview-<number>` with Preview Cleanup, so closing a PR cancels its in-flight deploy.
+- **Preview Cleanup:** deletes the Preview once the PR closes, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged. Because that event carries the deploy secrets, the job checks out only `main` and never checks out or runs the PR's code.
 
-All three read the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, so a missing secret fails the run. Previews skip PRs from forks and Dependabot, which receive no secrets. The site has no bindings or variables, so the `previews` block stays empty.
+Deploy and Preview Deploy each publish the `web/dist` artifact that their own `build.yml` run uploads. All three read the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, so a missing secret fails the run. Previews skip PRs from forks and Dependabot, which receive no secrets. The site has no bindings or variables, so the `previews` block stays empty.
 
 ## Workflow Steps
 
