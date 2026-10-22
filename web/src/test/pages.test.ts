@@ -7,14 +7,15 @@ import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
 import type { FamilyConfig } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
-import { votesRounds, type Family, type VotesRound } from '@/lib/reports';
+import { familyTitle } from '@/lib/aspects';
+import { familyBoards, systemBoards, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[family]/index.astro';
 import SystemPage from '@/pages/[family]/[system].astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
 
-/** The families the header lists, since the content collections stay empty under Vitest. */
+/** The families pages list, since the content collections stay empty under Vitest. */
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
 vi.mock(import('@/lib/reports'), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -26,6 +27,7 @@ const SLUGS = { ...FIXTURE_NAMES, arena: 'Arena Writing' };
 
 const arenaConfig: FamilyConfig = {
   scorer: 'votes',
+  aspect: 'technical-writing',
   display_name: 'Arena Writing',
   systems: ['acme-large', 'acme-new', 'acme-pro', 'acme-small'],
   reference: 'acme-large',
@@ -47,21 +49,18 @@ async function family(): Promise<Family> {
   for (const standing of earlier.results.standings) {
     standing.score = 900;
   }
-  return {
-    name: 'arena',
-    config: arenaConfig,
-    rounds: [earlier, latest],
-    systemNames: FIXTURE_NAMES,
-  };
+  return listedFamily('arena', arenaConfig, [earlier, latest]);
 }
 
-function systemProps(system: string, rounds: VotesRound[]) {
+/** A family as `listFamilies` lists it under the technical writing aspect. */
+function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
   return {
-    family: 'arena',
-    familyName: arenaConfig.display_name,
-    system,
+    name,
+    title: familyTitle(config),
+    aspect: 'technical-writing',
+    config,
     rounds,
-    names: FIXTURE_NAMES,
+    systemNames: FIXTURE_NAMES,
   };
 }
 
@@ -115,17 +114,17 @@ function testsFamily(): Family {
       ],
     },
   });
-  return {
-    name: 'smoke',
-    config: {
+  return listedFamily(
+    'smoke',
+    {
       scorer: 'tests',
+      aspect: 'technical-writing',
       display_name: 'Smoke Tasks',
       systems: ['acme-pro', 'acme-small'],
       public: true,
     },
-    rounds: [report],
-    systemNames: FIXTURE_NAMES,
-  };
+    [report],
+  );
 }
 
 /** The methodology section a family page's "How to read this board" link names. */
@@ -139,7 +138,7 @@ function guide(html: string): string {
 
 describe('family page', () => {
   test("draws the family's gates and reference, then the round summary", async () => {
-    const html = await render(FamilyPage, { family: await family() });
+    const html = await render(FamilyPage, { family: await family(), boards: [] });
 
     expect(text(html)).toContain(
       'Gates finished, not blank, 40–6,000 characters, in Chinese, Simplified script',
@@ -154,18 +153,18 @@ describe('family page', () => {
   test('lists the systems with unbounded intervals before the first round closes', async () => {
     const empty: Family = { ...(await family()), rounds: [] };
 
-    const html = await render(FamilyPage, { family: empty });
+    const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(text(html)).toContain('No round has closed yet.');
     expect(text(html)).toContain('Acme Large Fixed at 1,000 as the reference 1,000');
     expect(text(html)).toContain('Acme Pro Unbounded no votes');
-    expect(html).not.toContain('Leader');
+    expect(text(html)).not.toMatch(/\bLeader\b/);
   });
 
   test('keys the empty board to the marks it draws', async () => {
     const empty: Family = { ...(await family()), rounds: [] };
 
-    const html = await render(FamilyPage, { family: empty });
+    const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(text(html)).toContain('Reference, 1,000 Unbounded');
     expect(html).not.toContain('Score, 95% interval');
@@ -178,13 +177,13 @@ describe('family page', () => {
       rounds: [],
     };
 
-    const html = await render(FamilyPage, { family: pages });
+    const html = await render(FamilyPage, { family: pages, boards: [] });
 
     expect(text(html)).toContain('Run an HTML page per case');
   });
 
   test("draws a tests family's steps and its pass rates", async () => {
-    const html = await render(FamilyPage, { family: testsFamily() });
+    const html = await render(FamilyPage, { family: testsFamily(), boards: [] });
 
     expect(text(html)).toContain(
       "Run one trial per task Tests the task's own tests Pass rate errored trials fail",
@@ -199,10 +198,10 @@ describe('family page', () => {
   ])('names the family and its systems by display name %s', async (_, load) => {
     const loaded = await load();
 
-    const html = await render(FamilyPage, { family: loaded });
+    const html = await render(FamilyPage, { family: loaded, boards: [] });
 
-    expect(html).toContain(`<title>${loaded.config.display_name} | HAKULA†BENCH</title>`);
-    expect(text(html)).toContain(`${loaded.config.display_name} Run `);
+    expect(html).toContain(`<title>${loaded.title} | HAKULA†BENCH</title>`);
+    expect(text(html)).toContain(`${loaded.title} Run `);
     expect(shownSlugs(html, { ...SLUGS, smoke: 'Smoke Tasks' })).toEqual([]);
   });
 
@@ -212,7 +211,7 @@ describe('family page', () => {
   ])("links the %s board to its scorer's methodology section", async (scorer, load) => {
     const methodology = await render(MethodologyPage, {});
 
-    const html = await render(FamilyPage, { family: await load() });
+    const html = await render(FamilyPage, { family: await load(), boards: [] });
 
     expect(guide(html)).toBe(scorer);
     expect(methodology).toContain(`id="${scorer}"`);
@@ -269,28 +268,36 @@ describe('family panel', () => {
 
 describe('system page', () => {
   test("summarizes the system's own standing in its latest round", async () => {
-    const rounds = votesRounds(await family());
-
-    const html = await render(SystemPage, systemProps('acme-pro', rounds));
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
 
     expect(text(html)).toContain(
-      'Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
+      'Technical Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
     );
   });
 
   test('names the system, its family, and every other system by display name', async () => {
-    const rounds = votesRounds(await family());
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
 
-    const html = await render(SystemPage, systemProps('acme-pro', rounds));
-
-    expect(html).toContain('<title>Acme Pro on Arena Writing | HAKULA†BENCH</title>');
+    expect(html).toContain(
+      '<title>Acme Pro on Technical Writing · Arena Writing | HAKULA†BENCH</title>',
+    );
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
   test('names which output length the rater favors', async () => {
-    const rounds = votesRounds(await family());
-
-    const html = await render(SystemPage, systemProps('acme-pro', rounds));
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
 
     expect(text(html)).toContain(
       "Length preference Shorter, 6.5 points per SD of the pair's relative length difference",
@@ -298,9 +305,11 @@ describe('system page', () => {
   });
 
   test('leaves out the head-to-head chart for a system without votes', async () => {
-    const rounds = votesRounds(await family());
-
-    const html = await render(SystemPage, systemProps('acme-tiny', rounds));
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-tiny',
+      boards: [],
+    });
 
     expect(text(html)).toContain(
       'Acme Tiny Preliminary Score 233 (81–321) Rank 6 Votes 0 (0 decisive)',
@@ -309,33 +318,120 @@ describe('system page', () => {
   });
 });
 
+/** The `[href, label, aria-current]` of each link in the nav that `label` names. */
+function navLinks(html: string, label: string): [string, string, string | null][] {
+  const nav = new RegExp(`<nav\\b[^>]*aria-label="${label}"[^>]*>([\\s\\S]*?)</nav>`).exec(
+    html,
+  )?.[1];
+  if (nav === undefined) {
+    return [];
+  }
+  return [...nav.matchAll(/<a\b([^>]*)>([^<]*)<\/a>/g)].map(([, attributes, label]) => [
+    /href="([^"]+)"/.exec(attributes)?.[1] ?? '',
+    label.trim(),
+    /aria-current="([^"]+)"/.exec(attributes)?.[1] ?? null,
+  ]);
+}
+
 describe('header', () => {
-  test('links each listed family by its display name', async () => {
-    listed.families = [await family()];
-
-    const html = await render(MethodologyPage, {});
-
-    const nav = /<nav\b[^>]*aria-label="Main"[^>]*>([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? '';
-    const links = [...nav.matchAll(/<li><a href="([^"]+)"[^>]*>([^<]*)<\/a>/g)].map(
-      ([, href, label]) => [href, label.trim()],
+  test.each([0, 1, 3])('keeps the same links with %i families listed', async (count) => {
+    const arena = await family();
+    listed.families = Array.from({ length: count }, (_, index) =>
+      listedFamily(
+        `arena-${index}`,
+        { ...arenaConfig, display_name: `Arena ${index}` },
+        arena.rounds,
+      ),
     );
 
-    expect(links).toEqual([
-      ['/arena/', 'Arena Writing'],
-      ['/methodology/', 'Methodology'],
+    const html = await render(HomePage, {});
+
+    expect(navLinks(html, 'Main')).toEqual([
+      ['/', 'Leaderboards', 'page'],
+      ['/methodology/', 'Methodology', null],
     ]);
   });
 
-  test('marks a link to an ancestor of the current page as current, not as the page', async () => {
-    const html = await render(Header, {}, '/methodology/votes/');
+  test("marks the section's link as current on a page under it", async () => {
+    const html = await render(Header, { section: 'leaderboards' }, '/arena/acme-pro/');
 
-    expect(html).toMatch(/<a href="\/methodology\/" aria-current="true"/);
-    expect(html).not.toContain('aria-current="page"');
+    expect(navLinks(html, 'Main')).toEqual([
+      ['/', 'Leaderboards', 'true'],
+      ['/methodology/', 'Methodology', null],
+    ]);
   });
 
   test('marks the link to the page itself as the current page', async () => {
-    const html = await render(Header, {}, '/methodology/');
+    const html = await render(Header, { section: 'methodology' }, '/methodology/');
 
-    expect(html).toMatch(/<a href="\/methodology\/" aria-current="page"/);
+    expect(navLinks(html, 'Main')).toEqual([
+      ['/', 'Leaderboards', null],
+      ['/methodology/', 'Methodology', 'page'],
+    ]);
+  });
+});
+
+describe('board switcher', () => {
+  /** Three boards of one aspect, where the empty one has no system pages yet. */
+  async function boards(): Promise<Family[]> {
+    const arena = await family();
+    return [
+      arena,
+      listedFamily('arena-en', { ...arenaConfig, display_name: 'Arena English' }, arena.rounds),
+      listedFamily('arena-ja', { ...arenaConfig, display_name: 'Arena Japanese' }, []),
+    ];
+  }
+
+  test("links the aspect's boards by short name and marks the current one", async () => {
+    const families = await boards();
+
+    const html = await render(FamilyPage, {
+      family: families[1],
+      boards: familyBoards(families, families[1]),
+    });
+
+    expect(navLinks(html, 'Technical Writing boards')).toEqual([
+      ['/arena/', 'Arena Writing', null],
+      ['/arena-en/', 'Arena English', 'page'],
+      ['/arena-ja/', 'Arena Japanese', null],
+    ]);
+  });
+
+  test('links the system on each sibling board that gives it a page', async () => {
+    const families = await boards();
+
+    const html = await render(SystemPage, {
+      family: families[0],
+      system: 'acme-pro',
+      boards: systemBoards(families, families[0], 'acme-pro'),
+    });
+
+    expect(navLinks(html, 'Technical Writing boards')).toEqual([
+      ['/arena/acme-pro/', 'Arena Writing', 'page'],
+      ['/arena-en/acme-pro/', 'Arena English', null],
+    ]);
+  });
+
+  test('stays off a page whose aspect lists one board', async () => {
+    const arena = await family();
+
+    const html = await render(FamilyPage, { family: arena, boards: familyBoards([arena], arena) });
+
+    expect(navLinks(html, 'Technical Writing boards')).toEqual([]);
+  });
+});
+
+describe('system page breadcrumb', () => {
+  test("links the family's aspect on the home page, then the family's board", async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    expect(navLinks(html, 'breadcrumb')).toEqual([
+      ['/#technical-writing', 'Technical Writing', null],
+      ['/arena/', 'Arena Writing', null],
+    ]);
   });
 });

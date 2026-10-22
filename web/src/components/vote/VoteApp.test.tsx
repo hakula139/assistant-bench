@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
 import type { FamilyView, SessionView } from '@/lib/arena';
 
-const FAMILY: FamilyView = { name: 'prose-zh', display_name: 'Technical Writing · Chinese' };
+const FAMILY: FamilyView = {
+  name: 'prose-zh',
+  aspect: 'technical-writing',
+  display_name: 'Chinese',
+};
 
 interface Cast {
   token: string;
@@ -134,7 +138,7 @@ describe('VoteApp', () => {
     expect(api.undos()).toBe(1);
   });
 
-  test('starts the family it shows by display name, and names it in the session', async () => {
+  test('starts the family it shows by short name, and names it in full in the session', async () => {
     const api = stubApi(1);
     const user = await startSession();
     expect(screen.getByText('Technical Writing · Chinese, pair 1 of 1')).toBeDefined();
@@ -203,6 +207,30 @@ describe('VoteApp', () => {
 
     expect(api.casts).toEqual([]);
     expect(screen.getByText('Output A1')).toBeDefined();
+  });
+
+  test('groups the families by aspect, with those without one last', async () => {
+    const families: FamilyView[] = [
+      { name: 'smoke-text', aspect: null, display_name: 'Smoke' },
+      FAMILY,
+      { name: 'prose-en', aspect: 'technical-writing', display_name: 'English' },
+    ];
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(families))));
+
+    render(<VoteApp />);
+    const groups = await screen.findAllByRole('region');
+
+    expect(
+      groups.map((group) => [
+        within(group).getByRole('heading').textContent,
+        within(group)
+          .getAllByRole('button')
+          .map((button) => button.textContent),
+      ]),
+    ).toEqual([
+      ['Technical Writing', ['Chinese', 'English']],
+      ['Unlisted', ['Smoke']],
+    ]);
   });
 
   test('shows an error from starting a session on the start screen', async () => {

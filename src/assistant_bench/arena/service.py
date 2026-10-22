@@ -74,9 +74,13 @@ class PairView(BaseModel):
 
 
 class FamilyView(BaseModel):
-    """A family the vote page can start a session on, where `name` is its ID."""
+    """A family the vote page can start a session on, where `name` is its ID.
+
+    The vote page composes the family's full name from `aspect` and `display_name`.
+    """
 
     name: str
+    aspect: str | None
     display_name: str
 
 
@@ -104,6 +108,7 @@ class ArenaFamily:
     """
 
     name: str
+    aspect: str | None
     display_name: str
     render: Literal['text', 'html']
     instructions: dict[str, str]
@@ -132,6 +137,7 @@ def load_families() -> dict[str, ArenaFamily]:
                     pool = Pool.build(family.settings.systems, cases, outputs)
                     families[name] = ArenaFamily(
                         name=name,
+                        aspect=family.settings.aspect,
                         display_name=family.settings.display_name,
                         render=family.settings.render,
                         instructions={
@@ -263,7 +269,10 @@ class Arena:
         )
 
     def _family_view(self, name: str) -> FamilyView:
-        return FamilyView(name=name, display_name=self._families[name].display_name)
+        family = self._families[name]
+        return FamilyView(
+            name=name, aspect=family.aspect, display_name=family.display_name
+        )
 
     def _next(self, session: Session) -> None:
         votes = self._store.votes(session.family)

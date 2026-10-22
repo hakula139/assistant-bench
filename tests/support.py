@@ -232,6 +232,7 @@ def write_votes_family(
         textwrap.dedent(
             f"""\
             scorer = "votes"
+            aspect = "technical-writing"
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 2

@@ -22,11 +22,11 @@ const round = report
 
 <section class="space-y-3" aria-labelledby={`family-${family.name}`}>
   <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
-    <h2 id={`family-${family.name}`} class={sectionTitle}>
+    <h3 id={`family-${family.name}`} class={sectionTitle}>
       <a href={`/${family.name}/`} class="text-foreground hover:text-link">
         {family.config.display_name}
       </a>
-    </h2>
+    </h3>
     <p class="flex items-center gap-1.5 self-center text-sm text-muted-foreground">
       <ScorerIcon scorer={scorer} />
       {scorers[scorer].title} · {round}

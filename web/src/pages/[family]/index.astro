@@ -3,29 +3,39 @@ import type { GetStaticPaths } from 'astro';
 import { BookOpen } from 'lucide-react';
 
 import { scorerViews } from '@/components/scorers';
+import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { MethodStrip } from '@/components/site/Method';
 import { PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import { scorers } from '@/lib/method';
-import { getFamilies, type Family } from '@/lib/reports';
+import { familyBoards, getFamilies, type BoardLink, type Family } from '@/lib/reports';
 
 export const getStaticPaths = (async () => {
   const families = await getFamilies();
-  return families.map((family) => ({ params: { family: family.name }, props: { family } }));
+  return families.map((family) => ({
+    params: { family: family.name },
+    props: { family, boards: familyBoards(families, family) },
+  }));
 }) satisfies GetStaticPaths;
 
 interface Props {
   family: Family;
+  /** The boards of the family's aspect, itself included. */
+  boards: BoardLink[];
 }
 
-const { family } = Astro.props;
-const { config } = family;
-const title = config.display_name;
+const { family, boards } = Astro.props;
+const { config, title } = family;
 const { Board } = scorerViews[config.scorer];
 ---
 
-<Base title={title} description={`${title}: ${scorers[config.scorer].summary}.`}>
+<Base
+  title={title}
+  description={`${title}: ${scorers[config.scorer].summary}.`}
+  section="leaderboards"
+>
   <PageHeader title={title}>
+    <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip scorer={config.scorer} config={config.scorer === 'votes' ? config : undefined} />
     <a href={`/methodology/#${config.scorer}`} class="inline-flex items-center gap-2 text-sm">
       <BookOpen className="size-4" aria-hidden="true" />

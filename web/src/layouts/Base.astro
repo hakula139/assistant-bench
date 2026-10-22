@@ -4,16 +4,19 @@ import { cn } from 'cn';
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
 import { container, stack } from '@/components/site/PageParts';
-import { REPOSITORY, SITE_NAME } from '@/lib/site';
+import { REPOSITORY, SITE_NAME, type Section } from '@/lib/site';
 
 interface Props {
   /** The page's own title, which the site name follows. */
   title?: string;
   description?: string;
+  /** The header link the page sits under. */
+  section?: Section;
 }
 
 const {
   title,
+  section,
   description = "Leaderboards of AI assistant systems, ranked by one rater's blind pairwise votes or by automated tests.",
 } = Astro.props;
 ---
@@ -33,7 +36,7 @@ const {
     >
       Skip to content
     </a>
-    <Header />
+    <Header section={section} />
     <main id="main" tabindex="-1" class={cn(container, 'flex-1 pt-8 pb-16 outline-none', stack)}>
       <slot />
     </main>

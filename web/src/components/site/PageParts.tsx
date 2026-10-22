@@ -17,8 +17,11 @@ export const pageTitle = 'text-title leading-tight font-semibold text-balance';
 
 const heading = 'scroll-mt-6 font-semibold text-balance target:text-link';
 
-/** The classes of an `<h2>`, which turns the link color while a link targets it. */
+/** The classes of a section's heading, which turns the link color while a link targets it. */
 export const sectionTitle = `${heading} text-lg`;
+
+/** The classes of the heading over a group of sections, such as an aspect's families. */
+export const groupTitle = `${heading} text-2xl`;
 
 /** The classes of the paragraph that introduces a page, under its title. */
 export const intro = `${measure} text-lg text-muted-foreground`;

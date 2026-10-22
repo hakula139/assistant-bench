@@ -11,46 +11,53 @@ import {
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { PageHeader, Section, Stat, note, stack, statList } from '@/components/site/PageParts';
 import { statusIcons } from '@/components/site/Term';
 import { Badge } from '@/components/ui/badge';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 import Base from '@/layouts/Base.astro';
+import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import { terms } from '@/lib/glossary';
 import type { Distribution, Standing } from '@/lib/report';
-import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
-import { systemName, type SystemNames } from '@/lib/systems';
+import {
+  getFamilies,
+  systemBoards,
+  systemPages,
+  votesRounds,
+  type BoardLink,
+  type Family,
+} from '@/lib/reports';
+import { systemName } from '@/lib/systems';
 
 export const getStaticPaths = (async () => {
   const families = await getFamilies();
-  return families.flatMap((family) => {
-    const rounds = votesRounds(family);
-    const systems = new Set(
-      rounds.flatMap(({ results }) => results.standings.map((s) => s.system)),
-    );
-    return [...systems].map((system) => ({
+  return families.flatMap((family) =>
+    [...systemPages(family)].map((system) => ({
       params: { family: family.name, system },
-      props: {
-        family: family.name,
-        familyName: family.config.display_name,
-        system,
-        rounds,
-        names: family.systemNames,
-      },
-    }));
-  });
+      props: { family, system, boards: systemBoards(families, family, system) },
+    })),
+  );
 }) satisfies GetStaticPaths;
 
 interface Props {
-  family: string;
-  familyName: string;
+  family: Family;
   system: string;
-  rounds: VotesRound[];
-  names: SystemNames;
+  /** The system's pages on the boards of the family's aspect, this one included. */
+  boards: BoardLink[];
 }
 
-const { family, familyName, system, rounds, names } = Astro.props;
+const { family, system, boards } = Astro.props;
+const rounds = votesRounds(family);
+const names = family.systemNames;
 const name = (item: string) => systemName(names, item);
 const appearances = rounds.flatMap(({ round, results }) => {
   const standing = results.standings.find((item) => item.system === system);
@@ -89,12 +96,22 @@ const length = results.length;
 const Preliminary = statusIcons.preliminary;
 ---
 
-<Base title={`${name(system)} on ${familyName}`}>
+<Base title={`${name(system)} on ${family.title}`} section="leaderboards">
   <PageHeader title={name(system)}>
     <Fragment slot="context">
-      <p class="text-sm">
-        <a href={`/${family}/`}>{familyName}</a>
-      </p>
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href={`/#${family.aspect}`}>
+              {aspects[family.aspect].title}
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink href={`/${family.name}/`}>{family.config.display_name}</BreadcrumbLink>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
     </Fragment>
     <Fragment slot="status">
       {standing.preliminary && (
@@ -104,6 +121,7 @@ const Preliminary = statusIcons.preliminary;
         </Badge>
       )}
     </Fragment>
+    <BoardSwitcher aspect={family.aspect} boards={boards} />
     <dl class={statList}>
       <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
         {formatScore(standing.score)}

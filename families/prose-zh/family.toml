@@ -1,5 +1,6 @@
 scorer = "votes"
-display_name = "Technical Writing · Chinese"
+aspect = "technical-writing"
+display_name = "Chinese"
 public = true
 systems = [
   "opus-5.5",

@@ -13,7 +13,7 @@ interface Props {
 
 const { family } = Astro.props;
 const { rows, domain } = panelForest(family);
-const title = family.config.display_name;
+const { title } = family;
 const results = latest(family)?.results;
 ---
 
