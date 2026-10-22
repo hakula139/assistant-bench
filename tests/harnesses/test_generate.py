@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -74,18 +75,43 @@ class TestPreflight:
             )
 
     @pytest.mark.parametrize(
-        ('setting', 'error'),
+        ('variable', 'value'),
         [
-            ({'BENCH_API_KEY_FILE': 'missing-key'}, FileNotFoundError),
-            ({'BENCH_API_HEADERS': '{"x-trace": 1}'}, ValidationError),
-            ({'BENCH_API_CA_FILE': 'missing-ca.pem'}, FileNotFoundError),
+            ('BENCH_API_BASE_URL', 'api.example.com/v1'),
+            ('BENCH_API_KEY_FILE', 'missing-key'),
+            ('BENCH_API_HEADERS', '{"x-trace": 1}'),
+            ('BENCH_API_CA_FILE', 'missing-ca.pem'),
+            ('BENCH_API_LOCAL_ADDRESS', 'eth0'),
         ],
     )
     def test_rejects_an_unusable_endpoint_setting(
-        self, endpoint: StubEndpoint, setting: dict[str, str], error: type[Exception]
+        self, endpoint: StubEndpoint, variable: str, value: str
     ) -> None:
-        with pytest.raises(error):
-            Generate.preflight(self.OPTIONS, endpoint.env | setting)
+        with pytest.raises(ValidationError) as error:
+            Generate.preflight(self.OPTIONS, endpoint.env | {variable: value})
+
+        assert [e['loc'][0] for e in error.value.errors()] == [variable]
+        assert value not in str(error.value)
+
+    def test_rejects_a_ca_bundle_that_is_not_pem(
+        self, endpoint: StubEndpoint, tmp_path: Path
+    ) -> None:
+        ca_file = tmp_path / 'ca.pem'
+        ca_file.write_text('not a certificate\n')
+
+        with pytest.raises(ssl.SSLError):
+            Generate.preflight(
+                self.OPTIONS, endpoint.env | {'BENCH_API_CA_FILE': str(ca_file)}
+            )
+
+    def test_treats_an_empty_optional_setting_as_unset(
+        self, endpoint: StubEndpoint
+    ) -> None:
+        empty = dict.fromkeys(
+            ('BENCH_API_CA_FILE', 'BENCH_API_HEADERS', 'BENCH_API_LOCAL_ADDRESS'), ''
+        )
+
+        Generate.preflight(self.OPTIONS, endpoint.env | empty)
 
 
 class TestRun:

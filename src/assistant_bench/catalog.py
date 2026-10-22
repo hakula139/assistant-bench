@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from assistant_bench.paths import REPO_ROOT
 
@@ -119,6 +119,9 @@ class SystemConfig(BaseModel):
         return self
 
 
+_CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems.toml'))
+
+
 class System(BaseModel):
     """A system resolved to the route, effort, prompt, and price of every call.
 
@@ -168,8 +171,8 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
         A table fails to resolve, or two systems share a display name.
     """
     systems = {
-        name: resolve_system(name, SystemConfig.model_validate(table), export)
-        for name, table in tomllib.loads(document).items()
+        name: resolve_system(name, config, export)
+        for name, config in _CONFIGS.validate_python(tomllib.loads(document)).items()
     }
     owners: dict[str, str] = {}
     for name, system in systems.items():

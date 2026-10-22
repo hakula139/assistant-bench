@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 import subprocess
 import textwrap
 from collections import defaultdict
@@ -12,13 +13,14 @@ from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
 
-from assistant_bench import cli, jobs, report, revisions
+from assistant_bench import catalog, cli, jobs, report, revisions
 from assistant_bench.arena import api
 from assistant_bench.arena.store import VoteStore
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
 from assistant_bench.outputs import write_outputs
+from assistant_bench.paths import FAMILIES_DIR
 from support import (
     finish_job,
     make_output,
@@ -36,21 +38,20 @@ def invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-def write_cases_family(families_dir: Path, systems: str, scorer: str = 'votes') -> None:
+def write_cases_family(families_dir: Path, systems: str) -> None:
     directory = families_dir / 'f'
     directory.mkdir(parents=True)
-    reference = 'reference = "opus-5.5"\n' if scorer == 'votes' else ''
     (directory / 'family.toml').write_text(
         textwrap.dedent(
             f"""\
-            scorer = "{scorer}"
+            scorer = "votes"
             display_name = "Family F"
             systems = {systems}
             samples = 1
             max_output_tokens = 64
+            reference = "opus-5.5"
             """
         )
-        + reference
     )
     (directory / 'cases.jsonl').write_text('')
 
@@ -79,24 +80,27 @@ class TestCheck:
         assert submitted == []
 
     @pytest.mark.parametrize(
-        ('reward', 'exit_code', 'message'),
+        ('rewards', 'exit_code', 'message'),
         [
-            (1.0, 0, 'smoke: the oracle passed every task\n'),
-            (0.0, 1, 'smoke: the oracle failed on echo\n'),
+            ([1.0], 0, 'smoke: the oracle passed every task\n'),
+            ([0.0], 1, 'smoke: the oracle failed on echo\n'),
+            ([], 1, 'smoke: the oracle left no trial of echo\n'),
         ],
     )
     def test_runs_the_oracle_on_task_directories(
         self,
         submitted: list[JobConfig],
         monkeypatch: pytest.MonkeyPatch,
-        reward: float,
+        rewards: list[float],
         exit_code: int,
         message: str,
     ) -> None:
         monkeypatch.setattr(
             jobs,
             'read_trials',
-            lambda family, job_dir, systems: [make_output(case='echo', reward=reward)],
+            lambda family, job_dir, systems: [
+                make_output(case='echo', reward=reward) for reward in rewards
+            ],
         )
 
         result = runner.invoke(app, ['check', 'smoke'])
@@ -104,6 +108,25 @@ class TestCheck:
         assert (result.exit_code, result.output) == (exit_code, message)
         (job,) = submitted
         assert [agent.name for agent in job.agents] == ['oracle']
+
+    def test_rejects_a_task_named_apart_from_its_directory(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
+        config = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
+        config.write_text(config.read_text().replace('smoke/echo', 'smoke/repeat'))
+        monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
+
+        exit_code, message = invoke('check', 'smoke')
+
+        assert exit_code == 2
+        assert (
+            'family \'smoke\': set [task] name to "smoke/echo" in tasks/echo/task.toml'
+        ) in message
+        assert submitted == []
 
     def test_rejects_a_missing_family(self) -> None:
         exit_code, message = invoke('check', 'nope')
@@ -162,6 +185,21 @@ class TestCheck:
 
         assert exit_code == 2
         assert 'f lists unknown systems: ghost' in message
+
+    def test_rejects_a_systems_table_that_fails_to_validate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / 'systems.toml'
+        path.write_text('[broken]\neffort = "low"\n')
+        monkeypatch.setattr(
+            cli, 'load_systems', lambda export: catalog.load_systems(export, path)
+        )
+
+        exit_code, message = invoke('check', 'smoke-text')
+
+        assert exit_code == 2
+        assert 'Invalid value for systems.toml: 1 validation error' in message
+        assert 'broken' in message
 
 
 class TestRun:
@@ -237,17 +275,6 @@ class TestRun:
 
         assert exit_code == 2
         assert 'single-call systems run only case families' in message
-        assert submitted == []
-
-    def test_rejects_a_family_listing_no_systems(
-        self, families_dir: Path, submitted: list[JobConfig]
-    ) -> None:
-        write_cases_family(families_dir, '[]', scorer='tests')
-
-        exit_code, message = invoke('run', 'f')
-
-        assert exit_code == 2
-        assert 'f lists no systems' in message
         assert submitted == []
 
     def test_exits_with_the_code_of_a_failed_harbor_run(

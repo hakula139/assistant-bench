@@ -140,6 +140,28 @@ class TestLoadFamily:
         with pytest.raises(ValueError, match='case families need max_output_tokens'):
             load_family('f')
 
+    def test_rejects_cases_scored_by_tests(self, families_dir: Path) -> None:
+        write_family(
+            families_dir,
+            'f',
+            """\
+            scorer = "tests"
+            display_name = "Family F"
+            samples = 1
+            max_output_tokens = 300
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        with pytest.raises(ValueError) as error:
+            load_family('f')
+
+        assert str(error.value) == (
+            'family \'f\': scorer "tests" needs tasks/ with their own tests, '
+            'so score cases.jsonl by "votes"'
+        )
+
     def test_requires_the_reference_among_the_systems(self, families_dir: Path) -> None:
         write_family(
             families_dir,
@@ -278,6 +300,17 @@ class TestLoadCases:
 
         assert str(error.value) == (
             f"family 'f': case 'a' appears at {path}:1 and {path}:3"
+        )
+
+    def test_names_the_line_of_an_invalid_case(self, families_dir: Path) -> None:
+        path = write_case_family(families_dir)
+        path.write_text(case_line('a') + case_line('B'))
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value).startswith(
+            f"family 'f': {path}:2 is not a valid case: 1 validation error for Case\nid"
         )
 
     def test_rejects_a_category_the_family_does_not_list(

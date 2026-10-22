@@ -132,6 +132,30 @@ class TestLoadSystems:
             'so set a distinct `display_name`'
         )
 
+    def test_names_the_table_that_fails_to_validate(
+        self, export: NixosConfigExport, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'systems.toml'
+        path.write_text(
+            textwrap.dedent(
+                """\
+                [large]
+                model = "acme-large"
+
+                [broken]
+                effort = "low"
+                """
+            )
+        )
+
+        with pytest.raises(ValueError) as error:
+            load_systems(export, path)
+
+        assert str(error.value).startswith(
+            '1 validation error for systems.toml\nbroken\n'
+            '  Value error, set exactly one of `model` and `route`'
+        )
+
     def test_committed_systems_resolve_against_the_pinned_catalog(self) -> None:
         systems = load_systems(load_export())
 
