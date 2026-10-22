@@ -139,7 +139,7 @@
             enable = true;
             name = "prettier";
             entry = nodeHook "prettier-write" "prettier --write --ignore-unknown";
-            files = "\\.(astro|css|js|json|jsonc|md|ts|tsx|ya?ml)$";
+            types = [ "text" ];
           };
 
           cspell = {
