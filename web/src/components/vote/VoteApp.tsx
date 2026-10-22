@@ -30,7 +30,7 @@ import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 const SESSION_KEY = 'bench-session';
 const VIEWPORTS = [375, 768, 1280] as const;
 
-/** The verdicts in key order. On phones, two to a row, A and B share the first. */
+/** The verdicts from left to right. On phones, two to a row, A and B share the first. */
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
   { value: 'a', label: 'A is better', key: 'a' },
   { value: 'tie', label: 'Tie', key: 't', className: 'max-sm:order-1' },
@@ -126,7 +126,7 @@ function Brief({ pair, status }: { pair: PairView; status: ReactNode }) {
           {status}
         </div>
         <CollapsibleContent asChild>
-          <CardContent className={cn(scroll, 'space-y-3 text-base max-xl:max-h-[30dvh]')}>
+          <CardContent className={cn(scroll, 'space-y-3 text-base max-xl:max-h-[25dvh]')}>
             <p className="leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
             {pair.checklist.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
@@ -162,9 +162,11 @@ export function VoteApp() {
   const hasFrames = pair !== null && (pair.a.render === 'html' || pair.b.render === 'html');
   const hasText = pair !== null && (pair.a.render === 'text' || pair.b.render === 'text');
 
-  // A new pair takes focus from the control that loaded it, so the next key is a shortcut again.
+  // A new pair takes focus from the control that loaded it, so the next key is a shortcut again,
+  // and opens at the top of the page on phones, where the page scrolls.
   useEffect(() => {
     pairView.current?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
   }, [pair]);
 
   const show = (next: SessionView) => {
@@ -382,12 +384,24 @@ export function VoteApp() {
       tabIndex={-1}
       role="group"
       aria-label={`Pair ${session.votes + 1} of ${session.size}`}
-      className={cn(wideContainer, 'flex flex-col gap-3 py-4 outline-none md:min-h-0 md:flex-1')}
+      className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
-      <div className="grid gap-4 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
+      <div className="grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
         <Brief key={pair.token} pair={pair} status={status} />
-        <OutputPane side="A" pane={pair.a} asMarkdown={asMarkdown} viewport={viewport} />
-        <OutputPane side="B" pane={pair.b} asMarkdown={asMarkdown} viewport={viewport} />
+        <OutputPane
+          key={`a-${pair.token}`}
+          side="A"
+          pane={pair.a}
+          asMarkdown={asMarkdown}
+          viewport={viewport}
+        />
+        <OutputPane
+          key={`b-${pair.token}`}
+          side="B"
+          pane={pair.b}
+          asMarkdown={asMarkdown}
+          viewport={viewport}
+        />
       </div>
 
       <div className="space-y-3">
@@ -431,15 +445,6 @@ export function VoteApp() {
             }}
             className="min-h-9 min-w-64 flex-1"
           />
-
-          <Button
-            variant="outline"
-            onClick={undo}
-            disabled={session.votes === 0 || busy}
-            aria-keyshortcuts="U"
-          >
-            Undo <Kbd aria-hidden="true">U</Kbd>
-          </Button>
         </div>
       </div>
 
@@ -474,17 +479,29 @@ export function VoteApp() {
           ))}
         </ToggleGroup>
 
-        <Button
-          size="lg"
-          onClick={submit}
-          disabled={choice === null || busy}
-          aria-keyshortcuts="Enter"
-        >
-          Submit vote{' '}
-          <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
-            ↵
-          </Kbd>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={undo}
+            disabled={session.votes === 0 || busy}
+            aria-keyshortcuts="U"
+          >
+            Undo <Kbd aria-hidden="true">U</Kbd>
+          </Button>
+          <Button
+            size="lg"
+            onClick={submit}
+            disabled={choice === null || busy}
+            aria-keyshortcuts="Enter"
+            className="max-sm:flex-1"
+          >
+            Submit vote{' '}
+            <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
+              ↵
+            </Kbd>
+          </Button>
+        </div>
       </div>
     </div>
   );

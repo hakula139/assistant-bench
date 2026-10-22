@@ -76,11 +76,13 @@ async function startSession(page = <VoteApp />) {
 describe('VoteApp', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   test('submits from the note by chord, then takes the next key as a shortcut', async () => {
@@ -130,6 +132,20 @@ describe('VoteApp', () => {
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(api.undos()).toBe(1);
+  });
+
+  test('opens the next pair at the top of the page in fresh output panes', async () => {
+    stubApi();
+    const user = await startSession();
+    const scrollTo = vi.spyOn(window, 'scrollTo');
+    scrollTo.mockClear();
+    const firstPane = screen.getByRole('region', { name: 'Output A' });
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+    expect(screen.getByRole('region', { name: 'Output A' })).not.toBe(firstPane);
   });
 
   test('maps each digit to its flag and each flag button to its own flag', async () => {
