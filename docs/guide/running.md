@@ -65,7 +65,7 @@ uv run bench close prose-zh
 
 ## The Data Directory
 
-Everything a run produces stays out of Git under `$XDG_DATA_HOME/assistant-bench/`, which defaults to `~/.local/share/assistant-bench/`:
+Everything a run produces stays out of Git in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`:
 
 ```text
 assistant-bench/
