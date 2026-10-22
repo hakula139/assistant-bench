@@ -1,11 +1,19 @@
+import asyncio
 import subprocess
 import textwrap
+from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
+from harbor.job_plan import JobPlan
 from harbor.models.job.config import JobConfig
+from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.result import AgentInfo, TrialResult
+from harbor.trial.regrade import local_task_name
 from typer.testing import CliRunner
 
 from assistant_bench import cli, jobs, report, revisions
@@ -60,6 +68,31 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
+
+
+def finish(job: JobConfig) -> Path:
+    """Write a successful trial for each trial Harbor plans and return the job dir."""
+    plan = asyncio.run(JobPlan.from_config(job))
+    job_dir = job.jobs_dir / job.job_name
+    for trial, lock in zip(plan.trial_configs, plan.trial_locks, strict=True):
+        assert trial.task.path is not None
+        trial_dir = job_dir / trial.trial_name
+        trial_dir.mkdir(parents=True)
+        result = TrialResult(
+            task_name=local_task_name(trial.task.path),
+            trial_name=trial.trial_name,
+            trial_uri=f'file://{trial_dir}',
+            task_id=LocalTaskId(path=trial.task.path),
+            task_checksum='0',
+            config=trial,
+            agent_info=AgentInfo(name='generate', version='1'),
+            finished_at=datetime(2026, 10, 21, tzinfo=UTC),
+        )
+        (trial_dir / 'result.json').write_text(result.model_dump_json())
+        (trial_dir / 'lock.json').write_text(lock.model_dump_json())
+    (job_dir / 'config.json').write_text(job.model_dump_json())
+    (job_dir / 'result.json').write_text('{}')
+    return job_dir
 
 
 class TestCheck:
@@ -173,6 +206,58 @@ class TestRun:
         assert [task.path.name for task in job.tasks if task.path] == [
             case.id for case in load_cases(family)
         ]
+
+    def test_generates_only_the_named_systems_in_family_order(
+        self, submitted: list[JobConfig]
+    ) -> None:
+        result = runner.invoke(
+            app, ['run', 'smoke-text', '--system', 'kimi-k3', '--system', 'opus-5.5']
+        )
+
+        assert result.exit_code == 0, result.output
+        (job,) = submitted
+        assert [agent.kwargs['system'] for agent in job.agents] == [
+            'opus-5.5',
+            'kimi-k3',
+        ]
+
+    def test_rejects_a_named_system_the_family_does_not_list(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]')
+
+        exit_code, message = invoke(
+            'run', 'f', '--system', 'gpt-6-astra', '--system', 'opus-5.5'
+        )
+
+        assert exit_code == 2
+        assert 'f does not list gpt-6-astra, so choose among opus-5.5' in message
+        assert submitted == []
+
+    def test_generates_after_a_named_run_only_the_systems_it_left_out(
+        self, submitted: list[JobConfig]
+    ) -> None:
+        named = ['gpt-6.1-sol', 'kimi-k3']
+        args = [arg for name in named for arg in ('--system', name)]
+        result = runner.invoke(app, ['run', 'smoke-text', *args])
+        assert result.exit_code == 0, result.output
+        first = finish(submitted[0])
+
+        result = runner.invoke(app, ['run', 'smoke-text'])
+
+        assert result.exit_code == 0, result.output
+        job = submitted[1]
+        plan = asyncio.run(JobPlan.from_config(job))
+        (source,) = job.source_jobs
+        assert source.path == first
+        diff = compare_job_trials(plan, load_source_trials([(source, first)]))
+        actions: defaultdict[str, set[DiffAction]] = defaultdict(set)
+        for trial, trial_diff in zip(plan.trial_configs, diff.trials, strict=True):
+            actions[trial.agent.kwargs['system']].add(trial_diff.action)
+        assert actions == {
+            system: {DiffAction.REUSE if system in named else DiffAction.RERUN}
+            for system in load_family('smoke-text').settings.systems
+        }
 
     def test_rejects_a_task_family(self, submitted: list[JobConfig]) -> None:
         exit_code, message = invoke('run', 'smoke')
