@@ -7,7 +7,6 @@ Learn how to add a family, write its cases or tasks, and declare a system under 
 A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.jsonl`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are.
 
 ```toml
-# families/smoke-text/family.toml
 scorer = "votes"
 systems = ["opus-5.5", "gpt-6.1-sol"]
 reference = "gpt-6.1-sol"

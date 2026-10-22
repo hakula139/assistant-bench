@@ -4,7 +4,7 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 
 ## Placement
 
-- Tests mirror the package: `tests/test_<module>.py` for each module and `tests/<subpackage>/test_<module>.py` for each subpackage member, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
+- Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
 - The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment.
 - `test_repository.py` checks committed data and lockfiles, and `test_harbor_smoke.py` holds the trials that need Docker.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
