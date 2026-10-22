@@ -16,7 +16,7 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 - An autouse fixture points `XDG_DATA_HOME` at a scratch directory and runs each test from it, so no test reads the real data directory or a local `.env`.
 - Tests reach models only through the `endpoint` fixture, a chat-completions server on 127.0.0.1 that records each request and returns a configurable response, or `tls_endpoint`, the same server behind a test CA.
 - The `export` fixture points `BENCH_NIXOS_CONFIG` at `tests/fixtures/nixos-config.json`. The CLI tests and the test of the committed `systems.toml` read the dev shell's real export, so the suite runs inside `nix develop`.
-- CLI tests replace `jobs.run_job` with a recorder to check the submitted job config without starting Harbor, and `write_trial` writes the trial records Harbor would, including the `lock.json` its diff reads.
+- CLI tests replace `jobs.run_job` with a recorder to check the submitted job config without starting Harbor, and `write_trial` writes the trial records Harbor would, including the `lock.json` its diff reads. `finish_job` writes a successful trial for each trial Harbor plans for a submitted job, with the locks from Harbor's own plan, so a test can check what a later job's diff reuses.
 
 ## Cross-Checks and the Report Fixture
 

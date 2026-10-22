@@ -209,11 +209,11 @@ class TestArena:
         assert joining.pair is not None
         arena.vote(joining.pair.token, 'a', frozenset(), None)
 
-        first, *rest, joined = store.votes('f')
-        assert len(rest) == len(cases) - 1
-        assert {
-            frozenset({vote.a.system, vote.b.system}) for vote in [first, *rest]
-        } == {frozenset(ARENA_SYSTEMS)}
+        *earlier, joined = store.votes('f')
+        assert len(earlier) == len(cases)
+        assert {frozenset({vote.a.system, vote.b.system}) for vote in earlier} == {
+            frozenset(ARENA_SYSTEMS)
+        }
         assert 'ref' in {joined.a.system, joined.b.system}
 
     def test_resumes_the_open_pair(

@@ -58,7 +58,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix for a variant. Routes and channel IDs stay in `systems.toml` and the data directory.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
-- Keep commands minimal and settings in config files: `bench` reads `systems.toml` and `family.toml` while taking at most a family name and, for `bench run`, the listed systems to limit it to, and environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
+- Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 
 ## Verification
