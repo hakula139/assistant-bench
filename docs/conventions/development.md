@@ -61,7 +61,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, which then needs a new table name, as [Systems](../design/systems.md#fingerprints) describes.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, so the system needs a new table name, as [Systems](../design/systems.md#fingerprints) describes.
 
 ## Nix Style
 
