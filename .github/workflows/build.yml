@@ -11,9 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  CACHIX_NAME: hakula
-
 jobs:
   build:
     name: Build Site

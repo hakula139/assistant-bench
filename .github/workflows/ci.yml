@@ -13,9 +13,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-env:
-  CACHIX_NAME: hakula
-
 jobs:
   flake-check:
     name: Nix Flake Check
@@ -43,8 +40,6 @@ jobs:
 
       - name: Set up Nix
         uses: ./.github/actions/setup-nix
-        with:
-          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -83,8 +78,6 @@ jobs:
 
       - name: Set up Nix
         uses: ./.github/actions/setup-nix
-        with:
-          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -125,8 +118,6 @@ jobs:
 
       - name: Set up Nix
         uses: ./.github/actions/setup-nix
-        with:
-          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked

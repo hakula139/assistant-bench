@@ -1,11 +1,5 @@
 name: Set up Nix
-description: >-
-  Install Nix and configure the Cachix substituter
-  named by the caller's CACHIX_NAME environment variable
-
-inputs:
-  cachix_auth_token:
-    description: Upload token for main and maintainer runs (omit for read-only cache access)
+description: Install Nix with a sandbox that a build cannot fall back from
 
 runs:
   using: composite
@@ -18,12 +12,3 @@ runs:
         extra_nix_config: |
           sandbox = true
           sandbox-fallback = false
-
-    - name: Set up Cachix
-      uses: cachix/cachix-action@v17
-      with:
-        name: ${{ env.CACHIX_NAME }}
-        authToken: ${{ inputs.cachix_auth_token }}
-        skipPush: >-
-          ${{ !inputs.cachix_auth_token ||
-          !(github.ref == 'refs/heads/main' || github.actor == 'hakula139') }}
