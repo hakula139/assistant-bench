@@ -96,7 +96,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
           <dd className="font-medium tabular-nums">
             {results.votes}{' '}
             <span className="font-normal text-muted-foreground">
-              {`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, ${results.dropped_votes} more left out` : ''}`}
+              {`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
             </span>
           </dd>
         </div>
@@ -120,8 +120,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
       </dl>
       {agreement.below_floor && (
         <p className="max-w-prose text-sm text-muted-foreground">
-          Rater agreement is below the floor, so the separations are weaker than the intervals
-          suggest.
+          Rater agreement is below 70%, so the intervals overstate how well systems separate.
         </p>
       )}
     </div>
@@ -212,7 +211,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
-            {`Unranked: ${unranked.join(', ')}. Too few comparisons connect ${unranked.length === 1 ? 'it' : 'them'} to the reference system to bound a score yet.`}
+            {`Unranked until more comparisons connect them to the reference: ${unranked.join(', ')}.`}
           </p>
         )}
 

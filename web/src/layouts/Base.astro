@@ -8,8 +8,10 @@ interface Props {
   description?: string;
 }
 
-const { title, description = 'Blind pairwise comparisons of AI assistants by one rater.' } =
-  Astro.props;
+const {
+  title,
+  description = "Leaderboards of AI assistant systems, ranked by one rater's blind pairwise votes or by automated tests.",
+} = Astro.props;
 ---
 
 <!doctype html>

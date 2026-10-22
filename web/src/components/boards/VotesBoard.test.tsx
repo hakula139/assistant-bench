@@ -51,7 +51,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Leader acme-large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, 20 more left out',
+      'Leader acme-large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, plus 20 left out of the fit',
     );
   });
 
@@ -65,7 +65,18 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(html)).toContain(
-      'Unranked: acme-edge, acme-nano. Too few comparisons connect them to the reference system',
+      'Unranked until more comparisons connect them to the reference: acme-edge, acme-nano.',
+    );
+  });
+
+  test('warns when rater agreement falls below the floor', async () => {
+    const round = await load();
+    round.results.rater_agreement.below_floor = true;
+
+    const html = render(round);
+
+    expect(text(html)).toContain(
+      'Rater agreement is below 70%, so the intervals overstate how well systems separate.',
     );
   });
 
@@ -73,7 +84,7 @@ describe('VotesBoard', () => {
     const html = render(await load('report-early'));
 
     expect(text(html)).toContain(
-      'Leader – none while a preliminary system ties with the top score Votes 34 over 1 session, 2 more left out',
+      'Leader – none until every system tied for the top has 40 decisive votes Votes 34 over 1 session, plus 2 left out of the fit',
     );
   });
 

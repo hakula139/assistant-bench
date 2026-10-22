@@ -46,7 +46,7 @@ const tieBreaks: Record<Decision['tie_break'], string> = {
  */
 export const formatLeaderNote = (decision: Decision | null) =>
   decision === null
-    ? 'none while a preliminary system ties with the top score'
+    ? 'none until every system tied for the top has 40 decisive votes'
     : decision.separated
       ? null
       : `tied with the top score, chosen by ${tieBreaks[decision.tie_break]}`;

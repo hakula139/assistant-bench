@@ -170,8 +170,8 @@ export function CategoryHeatmap({ categories, systems }: CategoryHeatmapProps) {
               channels: {
                 Score: (cell: Cell) => formatScore(cell.score),
                 Interval: (cell: Cell) => formatInterval(cell),
-                Votes: 'votes',
-                Status: (cell: Cell) => (cell.preliminary ? 'Preliminary' : 'Settled'),
+                Votes: (cell: Cell) =>
+                  cell.preliminary ? `${cell.votes}, preliminary` : `${cell.votes}`,
               },
               format: { x: true, y: true },
               fontFamily: 'inherit',
