@@ -78,3 +78,5 @@ assistant-bench/
 ```
 
 Run `harbor view` on a family's job directory to browse its trials.
+
+The data directory holds the only copy of private cases, Harbor jobs, and votes, so an hourly job backs it up to an encrypted restic repository and never deletes a snapshot. The job copies `votes.sqlite` through SQLite's online backup, because a plain copy taken during a vote can tear, and stores that copy in the snapshot outside the directory. To restore, stop `bench serve`, run `restic restore latest --target <empty directory>`, copy the restored data directory back into place, and move the snapshot's copy of the database into it as `votes.sqlite`.
