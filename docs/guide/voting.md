@@ -8,7 +8,7 @@ Learn how to vote on pairs by keyboard, read outputs as Markdown, and keep HTML 
 
 ## Casting a Vote
 
-Each pair shows the case's brief and checklist above two outputs, or beside them on a wide screen, with A on the left and B on the right, and never names their systems. Nothing is selected until you choose:
+Each pair shows the case's brief and checklist above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Nothing is selected until you choose:
 
 | Key        | Action                                                                                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
