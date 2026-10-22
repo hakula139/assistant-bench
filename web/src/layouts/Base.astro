@@ -1,6 +1,9 @@
 ---
+import { cn } from 'cn';
+
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
+import { container } from '@/components/site/PageParts';
 import { REPOSITORY, SITE_NAME } from '@/lib/site';
 
 interface Props {
@@ -25,11 +28,11 @@ const {
   </head>
   <body class="flex min-h-dvh flex-col">
     <Header />
-    <main class="mx-auto w-full max-w-6xl flex-1 px-4 pt-8 pb-16 sm:px-6">
+    <main class={cn(container, 'flex-1 pt-8 pb-16')}>
       <slot />
     </main>
     <footer class="border-t">
-      <p class="mx-auto max-w-6xl px-4 py-6 text-sm text-muted-foreground sm:px-6">
+      <p class={cn(container, 'py-6 text-sm text-muted-foreground')}>
         {SITE_NAME} is a <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code, cases,
         and reports on <a href={REPOSITORY}>GitHub</a>.
       </p>

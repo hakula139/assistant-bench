@@ -1,5 +1,6 @@
 ---
 import Head from '@/components/site/Head.astro';
+import Header from '@/components/site/Header.astro';
 import { VoteApp } from '@/components/vote/VoteApp';
 import { SITE_NAME } from '@/lib/site';
 ---
@@ -10,7 +11,10 @@ import { SITE_NAME } from '@/lib/site';
     <Head title={`Vote | ${SITE_NAME}`} description="Blind pairwise voting on local outputs." />
     <meta name="robots" content="noindex" />
   </head>
-  <body>
-    <VoteApp client:only="react" />
+  <body class="flex min-h-dvh flex-col md:h-dvh">
+    <Header wide />
+    <main class="flex flex-1 flex-col md:min-h-0">
+      <VoteApp client:only="react" />
+    </main>
   </body>
 </html>

@@ -1,10 +1,19 @@
 ---
+import { cn } from 'cn';
+
 import IntervalMark from '@/components/site/IntervalMark.astro';
+import { container, wideContainer } from '@/components/site/PageParts';
 import ThemeToggle from '@/components/site/ThemeToggle.astro';
 import { localBuild } from '@/integrations/local-vote';
 import { getFamilies } from '@/lib/reports';
 import { SITE_NAME } from '@/lib/site';
 
+interface Props {
+  /** Matches the vote page's wider column. */
+  wide?: boolean;
+}
+
+const { wide = false } = Astro.props;
 const families = await getFamilies();
 const path = Astro.url.pathname;
 const links = [
@@ -16,7 +25,10 @@ const links = [
 
 <header class="border-b">
   <nav
-    class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:h-14 sm:flex-nowrap sm:px-6 sm:py-0"
+    class={cn(
+      wide ? wideContainer : container,
+      'flex flex-wrap items-center gap-x-6 gap-y-2 py-3 sm:h-14 sm:flex-nowrap sm:py-0',
+    )}
     aria-label="Main"
   >
     <a href="/" class="flex items-center gap-2 font-semibold text-foreground hover:text-foreground">

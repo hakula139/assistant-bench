@@ -65,9 +65,9 @@ function stubApi(size = 30) {
   return { casts, undos: () => undos };
 }
 
-async function startSession() {
+async function startSession(page = <VoteApp />) {
   const user = userEvent.setup();
-  render(<VoteApp />);
+  render(page);
   await user.click(await screen.findByRole('button', { name: 'prose-zh' }));
   await screen.findByText('Output A1');
   return user;
@@ -76,11 +76,13 @@ async function startSession() {
 describe('VoteApp', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   test('submits from the note by chord, then takes the next key as a shortcut', async () => {
@@ -130,6 +132,63 @@ describe('VoteApp', () => {
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(api.undos()).toBe(1);
+  });
+
+  test('opens the next pair at the top of the page in fresh output panes', async () => {
+    stubApi();
+    const user = await startSession();
+    const scrollTo = vi.spyOn(window, 'scrollTo');
+    scrollTo.mockClear();
+    const firstPane = screen.getByRole('region', { name: 'Output A' });
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+    expect(screen.getByRole('region', { name: 'Output A' })).not.toBe(firstPane);
+  });
+
+  test('maps each digit to its flag and each flag button to its own flag', async () => {
+    const api = stubApi();
+    const user = await startSession();
+
+    await user.keyboard('2');
+    await user.click(screen.getByRole('button', { name: 'Register' }));
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.flags)).toEqual([['punctuation', 'register']]);
+  });
+
+  test('leaves the note on Escape, so the next key is a shortcut again', async () => {
+    const api = stubApi();
+    const user = await startSession();
+
+    await user.keyboard('n');
+    await user.keyboard('x{Escape}b{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts).toEqual([{ token: 't1', choice: 'b', flags: [], note: 'x' }]);
+  });
+
+  test('leaves Enter on a focused link or button outside the pair to that control', async () => {
+    const api = stubApi();
+    const user = await startSession(
+      <>
+        <a href="#methodology">Methodology</a>
+        <button type="button">Theme</button>
+        <VoteApp />
+      </>,
+    );
+
+    await user.keyboard('a');
+    screen.getByRole('link', { name: 'Methodology' }).focus();
+    await user.keyboard('{Enter}');
+    screen.getByRole('button', { name: 'Theme' }).focus();
+    await user.keyboard('{Enter}');
+
+    expect(api.casts).toEqual([]);
+    expect(screen.getByText('Output A1')).toBeDefined();
   });
 
   test('shows an error from starting a session on the start screen', async () => {

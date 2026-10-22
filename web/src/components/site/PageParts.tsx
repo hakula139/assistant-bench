@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react';
 
+/** The classes of the column that the header, every page, and the footer share. */
+export const container = 'mx-auto w-full max-w-6xl px-4 sm:px-6';
+
+/** The column of the vote page and its header, wide enough at `xl` for the brief beside both outputs. */
+export const wideContainer = `${container} xl:max-w-7xl`;
+
 /** The classes of a page's `<h1>`, except the home page's hero. */
 export const pageTitle = 'text-[1.75rem] leading-tight font-semibold';
 
