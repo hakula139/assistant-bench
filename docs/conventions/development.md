@@ -1,6 +1,6 @@
 # Development
 
-Learn how to set up the development environment, what the pre-commit hooks check, where each setting lives, how the toolchain and the nixos-config input are pinned, how Nix and config files are styled, and what CI runs.
+Learn how to set up the development environment, what the pre-commit hooks check, where each setting lives, how the toolchain and the nixos-config input are pinned, and how Nix and config files are styled, with [CI](ci.md) covering the workflows.
 
 ## Dev Shell
 
@@ -23,7 +23,7 @@ Entering the dev shell installs a [pre-commit](https://pre-commit.com) hook gene
 
 The hook runs the fast subset of the [verification](../../AGENTS.md#verification) checks on staged files: file hygiene, Nix formatting and lints, Ruff, shfmt, Prettier and Taplo formatting, `markdownlint`, and `cspell`, while mypy and pytest stay out of the hook because they take longer. Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run the tools pinned in `node_modules` and the Ruff hooks run the Ruff pinned in `uv.lock`. `nix flake check` runs only the other hooks because its sandbox has neither, while CI's Node Check and Python Check jobs run those tools.
+Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run the tools pinned in `node_modules` and the Ruff hooks run the Ruff pinned in `uv.lock`. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 
 ## Where Settings Live
 
@@ -48,7 +48,7 @@ Environment variables carry only secrets and per-environment values: the `BENCH_
 ## Toolchain and Pins
 
 - The flake pins the stable Nixpkgs channel, which supplies Node.js and the hooks, and takes uv from the unstable channel so that each flake lock update refreshes uv's list of Python releases. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`. On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
-- Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](#ci) fails such a PR when the bump changes a system's fingerprint.
+- Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](ci.md#checks) fails such a PR when the bump changes a system's fingerprint.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 - `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.
 
@@ -61,7 +61,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and the fingerprint check fails until the changed system takes a new name in `systems.toml`.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, so the system needs a new table name, as [Systems](../design/systems.md#fingerprints) describes.
 
 ## Nix Style
 
@@ -73,24 +73,3 @@ A bump that changes a system's resolved prompt, route, or effort changes its fin
 ## Config Style
 
 Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wrap YAML, TOML, and shell files by hand. Keep comments within 100 columns and other lines within about 100, counting the indent, unless a line holds an unbreakable token such as a URL. The flake leaves every shfmt setting null because passing any formatting flag makes shfmt ignore `.editorconfig`, where it reads its layout.
-
-## CI
-
-CI runs on pushes to `main`, pull requests, and manual dispatch:
-
-| Job             | Checks                                                                                                                             |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                  |
-| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test`                                                   |
-| Build Site      | `pnpm build`, from the reusable `build.yml` that the deploy workflows also call                                                    |
-| Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check |
-| Harbor Smoke    | `uv run bench check smoke` and `uv run pytest -m docker` under Docker                                                              |
-| CI Result       | Fails when any job above fails or is cancelled, so branch protection can require this job alone                                    |
-
-The fingerprint check runs `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. It resolves every `systems.toml` table at both commits, each against its own nixos-config export, and fails when a table keeps its name but its fingerprint changes, so a changed system takes a new name and the old one keeps its results.
-
-No job sends a paid request, and no CI job reads any secret other than the Cachix and Codecov tokens. List each new job in CI Result's `needs`.
-
-Two more workflows publish the site to Cloudflare Workers, each deploying the `web/dist` artifact that its own `build.yml` run uploads. Deploy runs on each push to `main` and deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to. Preview Deploy runs `wrangler preview` for each PR in the `preview` environment and comments its URLs on the PR. Once the PR closes, Preview Cleanup deletes the Preview, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged. Deploy, Preview Deploy, and Preview Cleanup all read the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, so a missing secret fails the run. Previews skip PRs from forks and Dependabot, which receive no secrets.
-
-Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls. When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.

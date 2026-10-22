@@ -32,18 +32,19 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Read Before You Edit
 
-| When the change touches                              | Read                                                                                                       |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Python code                                          | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
-| The site under `web/`                                | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                               |
-| Tests                                                | [Testing](docs/conventions/testing.md)                                                                     |
-| A case, a family, or `systems.toml`                  | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
-| Cases, outputs, fixtures, or log lines               | [Data](docs/conventions/data.md)                                                                           |
-| Fingerprints, harnesses, or the nixos-config export  | [Systems](docs/design/systems.md)                                                                          |
-| The scheduler, the vote store, or the vote API       | [Arena](docs/design/arena.md)                                                                              |
-| Ranking or the report schema                         | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                    |
-| PRs or issues                                        | [GitHub](docs/conventions/github.md)                                                                       |
-| The dev shell, hooks, toolchain, CI, or config files | [Development](docs/conventions/development.md)                                                             |
+| When the change touches                             | Read                                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Python code                                         | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
+| The site under `web/`                               | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                               |
+| Tests                                               | [Testing](docs/conventions/testing.md)                                                                     |
+| A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
+| Cases, outputs, fixtures, or log lines              | [Data](docs/conventions/data.md)                                                                           |
+| Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                          |
+| The scheduler, the vote store, or the vote API      | [Arena](docs/design/arena.md)                                                                              |
+| Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                    |
+| PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                       |
+| The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                             |
+| A workflow, a failing check, or the deploy          | [CI](docs/conventions/ci.md)                                                                               |
 
 ## Rules for Every Change
 
@@ -79,7 +80,7 @@ pnpm build                                  # Build the site from reports/
 nix flake check                             # After a flake change, run the hooks in the Nix sandbox
 ```
 
-[Development](docs/conventions/development.md#ci) lists which CI job runs each check.
+[CI](docs/conventions/ci.md#checks) lists which job runs each check.
 
 ## Code Review
 
