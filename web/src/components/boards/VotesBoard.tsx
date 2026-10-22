@@ -1,14 +1,16 @@
+import { cn } from 'cn';
 import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
 import { Leaderboard, type LeaderboardRow } from '@/components/boards/Leaderboard';
-import { CategoryHeatmap } from '@/components/charts/CategoryHeatmap';
+import { CategoryForests } from '@/components/charts/CategoryForests';
 import {
   ParetoScatter,
   paretoFrontier,
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { Section, Stat, note, statList } from '@/components/site/PageParts';
 import {
   Table,
   TableBody,
@@ -61,7 +63,7 @@ function leaderboardRows(results: VotesResults, category: string): LeaderboardRo
 }
 
 /** The family board's systems by score, then the systems only some category board ranks. */
-function heatmapSystems(results: VotesResults): string[] {
+function categorySystems(results: VotesResults): string[] {
   const ranked = results.standings.toSorted((a, b) => b.score - a.score);
   const refits = results.categories.flatMap((board) => board.standings);
   return [...new Set([...ranked, ...refits].map((item) => item.system))];
@@ -78,48 +80,30 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
 
 function RoundSummary({ results }: { results: VotesResults }) {
   const { decision, rater_agreement: agreement } = results;
-  const note = formatLeaderNote(decision);
+  const leaderNote = formatLeaderNote(decision);
   return (
     <div className="space-y-3">
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:flex sm:flex-wrap">
-        <div>
-          <dt className="text-muted-foreground">Leader</dt>
-          <dd className="font-medium">
-            {decision?.leader ?? MISSING}
-            {note !== null && (
-              <span className="block text-xs font-normal text-muted-foreground">{note}</span>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Votes</dt>
-          <dd className="font-medium tabular-nums">
-            {results.votes}{' '}
-            <span className="font-normal text-muted-foreground">
-              {`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Rater agreement</dt>
-          <dd className="font-medium tabular-nums">
-            {formatPercent(agreement.agreement)}{' '}
-            <span className="font-normal text-muted-foreground">
-              on {formatCountOf(agreement.repeats, 'repeat')}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Separated pairs</dt>
-          <dd className="font-medium tabular-nums">{formatPercent(results.separability)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Split-half τ</dt>
-          <dd className="font-medium tabular-nums">{formatTau(results.split_half_tau)}</dd>
-        </div>
+      <dl className={statList}>
+        <Stat label="Leader">
+          {decision?.leader ?? MISSING}
+          {leaderNote !== null && (
+            <span className="block text-xs font-normal text-muted-foreground">{leaderNote}</span>
+          )}
+        </Stat>
+        <Stat
+          label="Votes"
+          detail={`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
+        >
+          {results.votes}
+        </Stat>
+        <Stat label="Rater agreement" detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}>
+          {formatPercent(agreement.agreement)}
+        </Stat>
+        <Stat label="Separated pairs">{formatPercent(results.separability)}</Stat>
+        <Stat label="Split-half τ">{formatTau(results.split_half_tau)}</Stat>
       </dl>
       {agreement.below_floor && (
-        <p className="max-w-prose text-sm text-muted-foreground">
+        <p className={note}>
           Rater agreement is below 70%, so the intervals overstate how well systems separate.
         </p>
       )}
@@ -127,16 +111,7 @@ function RoundSummary({ results }: { results: VotesResults }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-3 border-t pt-6">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-/** A family's leaderboard, category heatmap, and cost and latency scatters for one round. */
+/** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
 export function VotesBoard({ family, rounds }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
@@ -152,7 +127,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
 
   const rows = useMemo(() => leaderboardRows(results, activeCategory), [results, activeCategory]);
   const reference = rows.find((row) => row.system === results.reference)?.score;
-  const order = useMemo(() => heatmapSystems(results), [results]);
+  const order = useMemo(() => categorySystems(results), [results]);
   const measured = useMemo(
     () =>
       rows
@@ -210,21 +185,21 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
           href={href}
         />
         {unranked.length > 0 && (
-          <p className="-mt-4 max-w-prose text-sm text-muted-foreground">
+          <p className={cn('-mt-4', note)}>
             {`Unranked until more comparisons connect them to the reference: ${unranked.join(', ')}.`}
           </p>
         )}
 
         {categories.length > 0 && (
           <Section title="Categories">
-            <CategoryHeatmap categories={results.categories} systems={order} />
+            <CategoryForests categories={results.categories} systems={order} />
             <TableTwin>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>System</TableHead>
                     {categories.map((name) => (
-                      <TableHead key={name} className="text-right">
+                      <TableHead key={name} numeric>
                         {name}
                       </TableHead>
                     ))}
@@ -237,7 +212,7 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                       {results.categories.map((board) => {
                         const refit = board.standings.find((item) => item.system === system);
                         return (
-                          <TableCell key={board.category} className="text-right">
+                          <TableCell key={board.category} numeric>
                             {refit
                               ? `${formatScore(refit.score)} (${formatInterval(refit.interval)}), ${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`
                               : MISSING}
@@ -287,9 +262,9 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>System</TableHead>
-                    <TableHead className="text-right">Score</TableHead>
-                    <TableHead className="text-right">Cost / output</TableHead>
-                    <TableHead className="text-right">p50 latency</TableHead>
+                    <TableHead numeric>Score</TableHead>
+                    <TableHead numeric>Cost / output</TableHead>
+                    <TableHead numeric>p50 latency</TableHead>
                     <TableHead>On the frontier for</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -303,15 +278,11 @@ export function VotesBoard({ family, rounds }: VotesBoardProps) {
                     return (
                       <TableRow key={system}>
                         <TableCell>{system}</TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell numeric>
                           {formatScore(row.score)} ({formatInterval(row.interval)})
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCost(row.standing.mean_cost_usd)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatSeconds(row.standing.p50_latency_sec)}
-                        </TableCell>
+                        <TableCell numeric>{formatCost(row.standing.mean_cost_usd)}</TableCell>
+                        <TableCell numeric>{formatSeconds(row.standing.p50_latency_sec)}</TableCell>
                         <TableCell>{frontiers.join(' and ') || MISSING}</TableCell>
                       </TableRow>
                     );

@@ -1,0 +1,87 @@
+import * as Plot from '@observablehq/plot';
+import { useCallback } from 'react';
+
+import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
+import { REFERENCE_SCORE, clip, forestTicks, labelledTicks } from '@/lib/forest';
+import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
+import type { CategoryBoard } from '@/lib/report';
+
+/** A category refit, which carries its votes and preliminary status. */
+export type Refit = CategoryBoard['standings'][number];
+
+export interface ForestPlotRow {
+  label: string;
+  refit: Refit;
+}
+
+interface ForestPlotProps {
+  rows: ForestPlotRow[];
+  /** Every row label from top to bottom, including labels without a row. */
+  labels: string[];
+  /** The x domain, which callers share across plots so their intervals compare. */
+  domain: [number, number];
+}
+
+const ROW_HEIGHT = 30;
+/** Room between a row label and the plot, in CSS pixels. */
+const LABEL_GAP = 12;
+/** Room between the plot's left edge and the axis start, where an arrowhead points. */
+const ARROW_INSET = 8;
+
+/** Builds the plot for a measured frame. */
+export function forestPlotOptions(
+  { rows, labels, domain }: ForestPlotProps,
+  { width, measure }: PlotFrame,
+): Plot.PlotOptions {
+  const data = rows.map(({ label, refit }): ForestDatum & { refit: Refit } => ({
+    y: label,
+    score: refit.score,
+    clipped: clip(refit, domain),
+    preliminary: refit.preliminary,
+    refit,
+  }));
+  const marginLeft = Math.max(...labels.map(measure)) + LABEL_GAP;
+  const ticks = forestTicks(domain);
+  const labelled = new Set(labelledTicks(domain, width - marginLeft - ARROW_INSET));
+  return {
+    height: labels.length * ROW_HEIGHT + 36,
+    marginLeft,
+    marginRight: 16,
+    marginBottom: 28,
+    x: {
+      domain,
+      ticks,
+      tickFormat: (tick: number) => (labelled.has(tick) ? formatScore(tick) : ''),
+      insetLeft: ARROW_INSET,
+      label: null,
+      grid: true,
+    },
+    y: { domain: labels, label: null, tickSize: 0, tickPadding: LABEL_GAP },
+    color: { type: 'identity' },
+    marks: [
+      Plot.ruleX([REFERENCE_SCORE], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
+      forestMarks(data, domain),
+      offScaleLabels(data),
+      Plot.tip(
+        data,
+        Plot.pointerY({
+          x: (datum: (typeof data)[number]) => datum.clipped.score,
+          y: 'y',
+          title: ({ y, refit }: (typeof data)[number]) =>
+            `${String(y)}\n${formatScore(refit.score)} (${formatInterval(refit.interval)})\n${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`,
+          fontFamily: 'inherit',
+        }),
+      ),
+    ],
+  };
+}
+
+/** One forest plot of category refits, labelled by system or by category. */
+export function ForestPlot({ rows, labels, domain }: ForestPlotProps) {
+  const plot = useCallback(
+    (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain }, frame),
+    [rows, labels, domain],
+  );
+  return <PlotFigure plot={plot} height={labels.length * ROW_HEIGHT + 36} />;
+}

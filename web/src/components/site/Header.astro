@@ -1,7 +1,9 @@
 ---
+import IntervalMark from '@/components/site/IntervalMark.astro';
 import ThemeToggle from '@/components/site/ThemeToggle.astro';
 import { localBuild } from '@/integrations/local-vote';
 import { getFamilies } from '@/lib/reports';
+import { SITE_NAME } from '@/lib/site';
 
 const families = await getFamilies();
 const path = Astro.url.pathname;
@@ -17,10 +19,11 @@ const links = [
     class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:h-14 sm:flex-nowrap sm:px-6 sm:py-0"
     aria-label="Main"
   >
-    <a href="/" class="font-semibold text-foreground hover:text-link-hover">
-      assistant-bench
+    <a href="/" class="flex items-center gap-2 font-semibold text-foreground hover:text-foreground">
+      <IntervalMark class="h-3.5 w-8" />
+      {SITE_NAME}
     </a>
-    <ul class="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-1 text-sm sm:order-none sm:w-auto sm:flex-1">
+    <ul class="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-1 text-sm sm:order-none sm:w-auto sm:flex-1 sm:justify-end">
       {links.map(({ href, label }) => (
         <li>
           <a

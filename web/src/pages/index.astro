@@ -1,41 +1,23 @@
 ---
-import { FamiliesTable, type FamilySummary } from '@/components/site/FamiliesTable';
+import { cn } from 'cn';
+
+import FamilyPanel from '@/components/site/FamilyPanel.astro';
+import { note } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
-import { formatCountOf, formatLeaderNote } from '@/lib/format';
-import type { Report } from '@/lib/report';
-import { getFamilies, latest } from '@/lib/reports';
+import { getFamilies } from '@/lib/reports';
 
-function standing(
-  results: Report['results'],
-): Pick<FamilySummary, 'systems' | 'leader' | 'leaderNote' | 'measure'> {
-  switch (results.scorer) {
-    case 'votes':
-      return {
-        systems: results.standings.length + results.unranked.length,
-        leader: results.decision?.leader,
-        leaderNote: formatLeaderNote(results.decision),
-        measure: formatCountOf(results.votes, 'vote'),
-      };
-    case 'tests':
-      return {
-        systems: results.standings.length,
-        leader: results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate)[0]?.system,
-        leaderNote: null,
-        measure: 'Task tests',
-      };
-  }
-}
-
-const families = (await getFamilies()).map((family): FamilySummary => {
-  const { round, results } = latest(family);
-  return { name: family.name, round, rounds: family.rounds.length, ...standing(results) };
-});
+const families = await getFamilies();
+const unmeasured = families.some(
+  (family) => family.config.scorer === 'votes' && family.rounds.length === 0,
+);
 ---
 
 <Base>
-  <section class="mb-10 max-w-prose space-y-3">
-    <h1 class="text-[1.75rem] leading-tight font-semibold">assistant-bench</h1>
-    <p class="text-muted-foreground">
+  <section class="mb-12 max-w-3xl space-y-4">
+    <h1 class="text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
+      AI assistants ranked blind, with 95% intervals
+    </h1>
+    <p class="max-w-prose text-lg text-muted-foreground">
       Leaderboards of AI assistant systems, one per family of everyday tasks, ranked by one rater's
       blind pairwise votes or by automated tests. The <a href="/methodology/">methodology</a>{' '}
       explains how to read them.
@@ -43,8 +25,18 @@ const families = (await getFamilies()).map((family): FamilySummary => {
   </section>
 
   {families.length === 0 ? (
-    <p class="text-muted-foreground">No round has closed yet.</p>
+    <p class="text-muted-foreground">No family is listed yet.</p>
   ) : (
-    <FamiliesTable families={families} />
+    <div class="grid gap-x-12 gap-y-12 lg:grid-cols-2">
+      {families.map((family) => (
+        <FamilyPanel family={family} />
+      ))}
+    </div>
+  )}
+  {unmeasured && (
+    <p class={cn('mt-8', note)}>
+      Until a family's first round closes, every interval is unbounded, and its reference sits at
+      1,000.
+    </p>
   )}
 </Base>

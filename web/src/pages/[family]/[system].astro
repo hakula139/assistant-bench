@@ -9,8 +9,11 @@ import {
   RoundsTable,
 } from '@/components/boards/SystemTables';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
+import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { Stat, note, pageTitle, section, statList } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
+import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import type { Distribution, Standing } from '@/lib/report';
 import { getFamilies, votesRounds, type VotesRound } from '@/lib/reports';
@@ -42,15 +45,17 @@ const appearances = rounds.flatMap(({ round, results }) => {
 });
 const { round, results, standing } = appearances[appearances.length - 1];
 const standings = results.standings;
-const reference = standings.find((item) => item.system === results.reference)?.score;
 
 const headToHead = results.head_to_head
   .filter((pair) => pair.system === system)
   .toSorted((a, b) => b.win_rate - a.win_rate);
-const categoryRows = results.categories.flatMap(({ category, standings: refits }): DotRange[] => {
-  const refit = refits.find((item) => item.system === system);
-  return refit ? [{ label: category, value: refit.score, range: refit.interval }] : [];
-});
+const categoryRows = results.categories.flatMap(
+  ({ category, standings: refits }): ForestPlotRow[] => {
+    const refit = refits.find((item) => item.system === system);
+    return refit ? [{ label: category, refit }] : [];
+  },
+);
+const categoryDomain = sharedDomain(results.categories.map((board) => board.standings));
 const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   standings.flatMap((item): DotRange[] => {
     const distribution = pick(item);
@@ -75,53 +80,32 @@ const length = results.length;
     <p class="text-sm">
       <a href={`/${family}/`}>{family}</a>
     </p>
-    <h1 class="text-[1.75rem] leading-tight font-semibold">{system}</h1>
-    <dl class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-      <div>
-        <dt class="text-muted-foreground">Score</dt>
-        <dd class="font-medium">
-          {formatScore(standing.score)}{' '}
-          <span class="font-normal text-muted-foreground">
-            ({formatInterval(standing.interval)})
-          </span>
-        </dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Rank</dt>
-        <dd class="font-medium">{formatRank(standing.best_rank, standing.worst_rank)}</dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Votes</dt>
-        <dd class="font-medium">
-          {standing.votes}{' '}
-          <span class="font-normal text-muted-foreground">
-            ({standing.decisive_votes} decisive)
-          </span>
-        </dd>
-      </div>
-      <div>
-        <dt class="text-muted-foreground">Round</dt>
-        <dd class="font-medium">{round}</dd>
-      </div>
+    <h1 class={pageTitle}>{system}</h1>
+    <dl class={statList}>
+      <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
+        {formatScore(standing.score)}
+      </Stat>
+      <Stat label="Rank">{formatRank(standing.best_rank, standing.worst_rank)}</Stat>
+      <Stat label="Votes" detail={`(${standing.decisive_votes} decisive)`}>
+        {standing.votes}
+      </Stat>
+      <Stat label="Round">{round}</Stat>
       {standing.fingerprint !== null && (
-        <div>
-          <dt class="text-muted-foreground">Fingerprint</dt>
-          <dd class="font-mono text-xs leading-5">{standing.fingerprint}</dd>
-        </div>
+        <Stat label="Fingerprint">
+          <code class="font-mono text-xs font-normal">{standing.fingerprint}</code>
+        </Stat>
       )}
     </dl>
     {standing.preliminary && (
-      <p class="max-w-prose text-sm text-muted-foreground">
-        Preliminary: fewer than 40 decisive votes, so the score may still move.
-      </p>
+      <p class={note}>Preliminary: fewer than 40 decisive votes, so the score may still move.</p>
     )}
   </header>
 
   <div class="space-y-10">
     {headToHead.length > 0 && (
-      <section class="space-y-3 border-t pt-6">
-        <h2 class="text-lg font-semibold">Head to head</h2>
-        <p class="max-w-prose text-sm text-muted-foreground">
+      <section class={section.root}>
+        <h2 class={section.title}>Head to head</h2>
+        <p class={note}>
           Win rate against each opponent, where ties and both-bad votes count half.
         </p>
         <DotRangePlot
@@ -138,17 +122,14 @@ const length = results.length;
     )}
 
     {categoryRows.length > 0 && (
-      <section class="space-y-3 border-t pt-6">
-        <h2 class="text-lg font-semibold">Categories</h2>
-        <p class="max-w-prose text-sm text-muted-foreground">
-          Scores from each category's votes alone, with 95% intervals.
-        </p>
-        <DotRangePlot
+      <section class={section.root}>
+        <h2 class={section.title}>Categories</h2>
+        <p class={note}>Scores from each category's votes alone, with 95% intervals.</p>
+        <ForestPlot
           client:visible
           rows={categoryRows}
-          label="Score"
-          format="score"
-          baseline={reference}
+          labels={categoryRows.map((row) => row.label)}
+          domain={categoryDomain}
         />
         <TableTwin>
           <CategoryTable categories={categoryRows} />
@@ -156,9 +137,9 @@ const length = results.length;
       </section>
     )}
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Output length and latency</h2>
-      <p class="max-w-prose text-sm text-muted-foreground">
+    <section class={section.root}>
+      <h2 class={section.title}>Output length and latency</h2>
+      <p class={note}>
         Each system's median and 10th to 90th percentile range in this round.
         {length !== null &&
           ` Across the family, the rater favors the ${length >= 0 ? 'longer' : 'shorter'} output by ${Math.abs(length).toFixed(1)} score points per standard deviation of the pair's relative length difference.`}
@@ -176,17 +157,17 @@ const length = results.length;
       </TableTwin>
     </section>
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Flags</h2>
-      <p class="max-w-prose text-sm text-muted-foreground">
+    <section class={section.root}>
+      <h2 class={section.title}>Flags</h2>
+      <p class={note}>
         Votes that flagged a problem in this system's output. A flag counts against the losing side,
         or against both sides of a tie or a both-bad vote.
       </p>
       <FlagsTable standing={standing} />
     </section>
 
-    <section class="space-y-3 border-t pt-6">
-      <h2 class="text-lg font-semibold">Rounds</h2>
+    <section class={section.root}>
+      <h2 class={section.title}>Rounds</h2>
       <RoundsTable appearances={appearances} />
     </section>
   </div>

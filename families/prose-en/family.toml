@@ -1,4 +1,5 @@
 scorer = "votes"
+public = true
 systems = [
   "opus-5.5",
   "gpt-6-astra",

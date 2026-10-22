@@ -1,9 +1,19 @@
 ---
-import { Badge } from '@/components/ui/badge';
-import Base from '@/layouts/Base.astro';
+import { cn } from 'cn';
 
-const repo = 'https://github.com/hakula139/assistant-bench';
-const docs = `${repo}/blob/main/docs/design`;
+import { Forest } from '@/components/site/Forest';
+import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
+import { pageTitle, section } from '@/components/site/PageParts';
+import Base from '@/layouts/Base.astro';
+import { EMPTY_DOMAIN } from '@/lib/forest';
+import { REPOSITORY } from '@/lib/site';
+
+const example = (score: number, lower: number, upper: number) => ({
+  score,
+  interval: { lower, upper },
+});
+
+const docs = `${REPOSITORY}/blob/main/docs/design`;
 
 const sections = {
   rounds: 'How a round works',
@@ -15,7 +25,7 @@ const sections = {
   limits: 'Known limits',
 } as const;
 
-const columns = [
+const columns: GlossaryEntry[] = [
   {
     term: 'Rank',
     definition:
@@ -50,7 +60,7 @@ const columns = [
   },
 ];
 
-const diagnostics = [
+const diagnostics: GlossaryEntry[] = [
   {
     term: 'Rater agreement',
     definition:
@@ -72,15 +82,14 @@ const diagnostics = [
   },
 ];
 
-const h2 = 'scroll-mt-6 text-lg font-semibold target:text-link';
-const dl = 'grid gap-y-4 sm:grid-cols-[9rem_1fr] sm:gap-x-6 sm:gap-y-2';
+const h2 = cn(section.title, 'scroll-mt-6 target:text-link');
 const list = 'space-y-2 pl-6 marker:text-muted-foreground';
 ---
 
 <Base title="Methodology">
   <div class="grid gap-8 lg:grid-cols-[minmax(0,42rem)_13rem] lg:justify-between lg:gap-x-16 lg:gap-y-10">
     <header class="space-y-3 lg:col-start-1">
-      <h1 class="text-[1.75rem] leading-tight font-semibold">Methodology</h1>
+      <h1 class={pageTitle}>Methodology</h1>
       <p class="leading-relaxed text-muted-foreground">
         Every system in a family answers the same cases with the same instruction, and one rater
         compares their outputs in blind pairs.
@@ -149,22 +158,24 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
           The plot draws each 95% interval on one axis, with a line at the reference score and
           hollow dots for preliminary systems.
         </p>
-        <dl class={dl}>
-          {columns.map(({ term, badge, definition }) => (
-            <div class="sm:contents">
-              <dt class="font-medium">
-                {badge ? (
-                  <Badge variant="outline" className="font-normal text-muted-foreground">
-                    {term}
-                  </Badge>
-                ) : (
-                  term
-                )}
-              </dt>
-              <dd>{definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <figure class="space-y-3 rounded-lg border p-4">
+          <Forest
+            caption="Four example rows"
+            domain={EMPTY_DOMAIN}
+            rows={[
+              { system: 'Settled', estimate: example(1040, 990, 1090), preliminary: false },
+              { system: 'Preliminary', estimate: example(930, 780, 1110), preliminary: true },
+              { system: 'Far behind', estimate: example(380, 250, 520), preliminary: false },
+              { system: 'No votes yet', unplaced: 'no-votes' },
+            ]}
+          />
+          <figcaption class="text-sm text-muted-foreground">
+            The dot is the score and the line its 95% interval, dashed while preliminary. An
+            arrowhead means the interval runs past the axis, which starts at most 600 points below
+            the top score, and a system with no votes yet runs off both ends.
+          </figcaption>
+        </figure>
+        <Glossary heading="Column" entries={columns} />
         <p>
           A dash marks a missing value. A category view refits that category's votes alone, so
           intervals widen and Rank disappears, while the columns labeled "all categories" stay
@@ -197,14 +208,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         <h2 id="summary" class={h2}>
           {sections.summary}
         </h2>
-        <dl class={dl}>
-          {diagnostics.map(({ term, definition }) => (
-            <div class="sm:contents">
-              <dt class="font-medium">{term}</dt>
-              <dd>{definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <Glossary heading="Figure" entries={diagnostics} />
       </section>
 
       <section class="space-y-3">
@@ -236,7 +240,7 @@ const list = 'space-y-2 pl-6 marker:text-muted-foreground';
         <p class="text-muted-foreground">
           The design notes on <a href={`${docs}/ranking.md`}>ranking</a>, the{' '}
           <a href={`${docs}/arena.md`}>vote arena</a>, and each{' '}
-          <a href={`${repo}/tree/main/docs/design/families`}>family</a> cover the math.
+          <a href={`${REPOSITORY}/tree/main/docs/design/families`}>family</a> cover the math.
         </p>
       </section>
     </article>

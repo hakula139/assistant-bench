@@ -25,28 +25,22 @@ export function TestsBoard({ rounds }: TestsBoardProps) {
         <TableHeader>
           <TableRow>
             <TableHead>System</TableHead>
-            <TableHead className="text-right">Pass rate</TableHead>
-            <TableHead className="text-right">Trials</TableHead>
-            <TableHead className="text-right">Errored</TableHead>
-            <TableHead className="text-right">Cost / trial</TableHead>
-            <TableHead className="text-right">p50 latency</TableHead>
+            <TableHead numeric>Pass rate</TableHead>
+            <TableHead numeric>Trials</TableHead>
+            <TableHead numeric>Errored</TableHead>
+            <TableHead numeric>Cost / trial</TableHead>
+            <TableHead numeric>p50 latency</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {standings.map((standing) => (
             <TableRow key={standing.system}>
               <TableCell className="font-medium">{standing.system}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatPercent(standing.pass_rate)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{standing.trials}</TableCell>
-              <TableCell className="text-right tabular-nums">{standing.errored}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatCost(standing.mean_cost_usd)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatSeconds(standing.p50_latency_sec)}
-              </TableCell>
+              <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
+              <TableCell numeric>{standing.trials}</TableCell>
+              <TableCell numeric>{standing.errored}</TableCell>
+              <TableCell numeric>{formatCost(standing.mean_cost_usd)}</TableCell>
+              <TableCell numeric>{formatSeconds(standing.p50_latency_sec)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

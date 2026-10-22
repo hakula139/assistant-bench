@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
-@import '@fontsource-variable/inter';
+@import '@fontsource-variable/ibm-plex-sans';
 @import '@fontsource/maple-mono/400.css';
 
 @plugin '@tailwindcss/typography';
@@ -12,7 +12,7 @@
 
 @theme {
   --font-sans:
-    'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Sarasa Gothic SC',
+    'IBM Plex Sans Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Sarasa Gothic SC',
     'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', 'Microsoft YaHei',
     Emoji, 'Helvetica Neue', Arial, sans-serif;
   --font-mono:
@@ -27,91 +27,71 @@
 
   /* Surfaces and ink */
   --background: #fff;
-  --foreground: #161209;
+  --foreground: #172033;
   --card: #fff;
-  --card-foreground: #161209;
+  --card-foreground: #172033;
   --popover: #fff;
-  --popover-foreground: #161209;
-  --muted: #f5f5f7;
-  --muted-foreground: #55555f;
-  --faint: #75757e;
-  --secondary: #f5f5f7;
-  --secondary-foreground: #161209;
-  --accent: #f5f5f7;
-  --accent-foreground: #161209;
-  --border: #e8e8ed;
-  --input: #e8e8ed;
-  --selection: rgba(53, 166, 247, 0.25);
+  --popover-foreground: #172033;
+  --muted: #f2f4f8;
+  --muted-foreground: #526074;
+  --faint: #6b7690;
+  --secondary: #f2f4f8;
+  --secondary-foreground: #172033;
+  --accent: #eef1fb;
+  --accent-foreground: #172033;
+  --border: #e1e5ec;
+  --input: #d5dae4;
+  --selection: rgba(53, 80, 214, 0.18);
 
   /* Actions */
-  --primary: #14799a;
+  --primary: #3550d6;
   --primary-foreground: #fff;
-  --link: #14799a;
-  --link-hover: #07516b;
-  --ring: #14799a;
-  --destructive: #b31412;
+  --link: #2f47c4;
+  --link-hover: #1d2f8f;
+  --ring: #3550d6;
+  --destructive: #b42318;
 
   /* Charts */
-  --chart-series: #0b7aa6;
-  --chart-emphasis: #b45f06;
-  --chart-grid: #e8e8ed;
-  --chart-seq-1: #cfe9f4;
-  --chart-seq-2: #8ccbe6;
-  --chart-seq-3: #3f9fc8;
-  --chart-seq-4: #0b7aa6;
-  --chart-seq-5: #075676;
-  --chart-seq-ink-1: #161209;
-  --chart-seq-ink-2: #161209;
-  --chart-seq-ink-3: #161209;
-  --chart-seq-ink-4: #fff;
-  --chart-seq-ink-5: #fff;
+  --chart-series: #3550d6;
+  --chart-emphasis: #c25e0c;
+  --chart-grid: #e8ebf1;
 
-  --radius: 0.5rem;
+  --radius: 0.375rem;
 }
 
 [data-theme='dark'] {
   color-scheme: dark;
 
   /* Surfaces and ink */
-  --background: #292a2d;
-  --foreground: #c8c8d0;
-  --card: #292a2d;
-  --card-foreground: #c8c8d0;
-  --popover: #1e1e22;
-  --popover-foreground: #c8c8d0;
-  --muted: #1e1e22;
-  --muted-foreground: #a5a5af;
-  --faint: #909099;
-  --secondary: #1e1e22;
-  --secondary-foreground: #c8c8d0;
-  --accent: #1e1e22;
-  --accent-foreground: #c8c8d0;
-  --border: #3a3a42;
-  --input: #3a3a42;
-  --selection: rgba(50, 112, 194, 0.4);
+  --background: #1b2130;
+  --foreground: #e1e6f0;
+  --card: #212838;
+  --card-foreground: #e1e6f0;
+  --popover: #283043;
+  --popover-foreground: #e1e6f0;
+  --muted: #252c3d;
+  --muted-foreground: #a6afc2;
+  --faint: #8a93a8;
+  --secondary: #252c3d;
+  --secondary-foreground: #e1e6f0;
+  --accent: #283252;
+  --accent-foreground: #e1e6f0;
+  --border: #323b50;
+  --input: #3a4459;
+  --selection: rgba(139, 157, 255, 0.3);
 
   /* Actions */
-  --primary: #55bde2;
-  --primary-foreground: #1a1a1e;
-  --link: #55bde2;
-  --link-hover: #bdebfc;
-  --ring: #55bde2;
+  --primary: #8b9dff;
+  --primary-foreground: #141a28;
+  --link: #9aaaff;
+  --link-hover: #cdd5ff;
+  --ring: #8b9dff;
   --destructive: #ff8a80;
 
   /* Charts */
-  --chart-series: #2b9fd0;
-  --chart-emphasis: #c47f28;
-  --chart-grid: #3a3a42;
-  --chart-seq-1: #1d4a5e;
-  --chart-seq-2: #1f6b8a;
-  --chart-seq-3: #2b9fd0;
-  --chart-seq-4: #6cc0e6;
-  --chart-seq-5: #b4e1f5;
-  --chart-seq-ink-1: #fff;
-  --chart-seq-ink-2: #fff;
-  --chart-seq-ink-3: #161209;
-  --chart-seq-ink-4: #161209;
-  --chart-seq-ink-5: #161209;
+  --chart-series: #7587f3;
+  --chart-emphasis: #ce7c22;
+  --chart-grid: #2c3446;
 }
 
 @theme inline {
@@ -139,6 +119,7 @@
   --color-destructive: var(--destructive);
   --color-chart-series: var(--chart-series);
   --color-chart-emphasis: var(--chart-emphasis);
+  --color-chart-grid: var(--chart-grid);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

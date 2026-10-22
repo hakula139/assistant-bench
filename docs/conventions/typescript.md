@@ -15,14 +15,14 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 web/src/
 ├── components/boards/                      # One board per scorer, plus the tables its pages share
 ├── components/charts/                      # Observable Plot charts and their table twins
-├── components/site/                        # Header, theme toggle, and the home page's family table
+├── components/site/                        # Header, wordmark, family panel, static forest, glossary, and shared page parts
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
-├── content.config.ts                       # The reports collection
+├── content.config.ts                       # The families and reports collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
-├── lib/                                    # The report schema, the vote API client, formatters, hooks
+├── lib/                                    # The report and family schemas, the forest axis, the site name, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture and JSON Schema helpers and the page tests
@@ -31,13 +31,15 @@ web/src/
 
 ## Reports
 
-- The site reads only `reports/*/*.json`, through the `reports` collection's `glob()` loader. Nothing under the data directory reaches a build.
+- The site reads only `families/*/family.toml` and `reports/*/*.json`, through the `families` and `reports` collections' `glob()` loaders, and drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
+- `lib/family.ts` lists only the `family.toml` keys the site reads, with objects that drop the rest, since the pydantic settings model already rejects unknown keys.
 - `lib/report.ts` mirrors the pydantic `Report` model field for field with strict Zod objects, so the build rejects a report with a field the schema lacks or a value of another type. Change both schemas in one PR. `pnpm test` parses both report fixtures and compares the Zod schema's JSON Schema with `tests/fixtures/report.schema.json`, which pytest writes from the pydantic models, within each results variant, over every field's types, nullability, constants and enums, and every object's required keys, allowed keys, and map key names, so a schema change on either side fails a check. Numeric bounds, formats, and descriptions are not compared.
 - A new scorer adds a results variant to the schema, a board under `components/boards/`, an arm in the scorer switches of the home and family pages, and a methodology section that the family page's arm links. The type check fails until every switch handles the new variant, and `pnpm test` fails until the linked section exists.
 
 ## Components
 
-- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state and `progress.tsx` for its value and track.
+- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state, `progress.tsx` for its value and track, `table.tsx` for its `numeric` cells, and `badge.tsx` for its `status` variant.
+- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component, or a shared class constant like `section` or `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
 - Hydrate a component only where the page is interactive. Tables render as static React components, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
 - Pass filter state through `useSearchParam` so each filter lands in the URL.
 
@@ -45,8 +47,9 @@ web/src/
 
 - Render every chart through `PlotFigure`, which sizes it to its container and measures labels in the chart's font. Size label margins from those measurements, never from a fixed width.
 - Pick log-axis ticks with `logTicks` and label them through the axis mark's `text` option, because Plot's log tick format blanks labels on spans under a decade.
-- Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series, emphasis, and sequential steps were checked as a set for lightness, chroma, color-vision separation, and contrast against the surface in both themes, and each step's `--chart-seq-ink-*` token for at least 4.5:1 text contrast on that step, so recheck the whole set before changing any of them.
-- Give every chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows.
+- Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series and emphasis hues were checked as a pair for lightness, chroma, color-vision separation, and contrast against the surface in both themes, so recheck both before changing either.
+- Give every Plot chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows. The static `Forest` is a table whose rows carry their values as text and in a hover title, so it is its own twin.
+- Draw score intervals through `forestMarks` on a domain from `forestDomain`, or from `sharedDomain` for several boards on one axis, so every forest plot cuts and marks outliers by the same rule.
 
 ## The Vote Page
 

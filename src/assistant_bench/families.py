@@ -13,7 +13,8 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir
 class _Settings(BaseModel):
     """Settings every family shares.
 
-    `categories` lists the categories its cases may carry, which reports publish.
+    `categories` lists the categories its cases may carry, which reports publish,
+    and `public` says whether the public site lists the family.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
@@ -22,6 +23,7 @@ class _Settings(BaseModel):
     samples: int = Field(ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
     categories: list[str] = []
+    public: bool = False
 
 
 type Language = Literal['en', 'zh']
