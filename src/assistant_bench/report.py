@@ -158,7 +158,8 @@ class VotesResults(_Model):
     the voted systems that no comparison connects to the reference, or that so
     many resamples leave unconnected that their interval is unbounded. `position` is
     the left pane's advantage, and `length` the score change per standard
-    deviation of the relative length difference, both in score points.
+    deviation of the relative length difference, both in score points, where
+    `length` is absent when no connected vote varies that difference.
     `split_half_tau` compares the orders fit to odd and even sessions, and
     `decision` is absent while a system tied with the top one is preliminary.
     """
@@ -228,12 +229,15 @@ def close(
         The family has nothing to report, or a system has several fingerprints.
     """
     outputs = read_outputs(family.name)
+    fingerprints = _fingerprints(outputs)
     results: Results
     match family.settings:
         case VotesSettings():
-            results = _votes_results(family, family.settings, store, outputs)
+            results = _votes_results(
+                family, family.settings, store, outputs, fingerprints
+            )
         case TaskTestsSettings():
-            results = _tests_results(family, outputs)
+            results = _tests_results(family, outputs, fingerprints)
         case _:
             assert_never(family.settings)
     return Report(
@@ -250,6 +254,25 @@ def write_report(report: Report) -> Path:
     return path
 
 
+def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:
+    """Map each system with outputs to the one fingerprint they all carry.
+
+    Raises
+    ------
+    ValueError
+        A system has outputs under several fingerprints.
+    """
+    by_system: defaultdict[str, set[str | None]] = defaultdict(set)
+    for output in outputs:
+        by_system[output.system].add(output.fingerprint)
+    for system, fingerprints in sorted(by_system.items()):
+        if len(fingerprints) > 1:
+            raise ValueError(
+                f'system {system!r} has outputs under several fingerprints'
+            )
+    return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
+
+
 # ── Votes Results ──
 
 
@@ -258,6 +281,7 @@ def _votes_results(
     settings: VotesSettings,
     store: VoteStore,
     outputs: list[Output],
+    fingerprints: dict[str, str | None],
 ) -> VotesResults:
     """Fit the current case set, where votes and outputs on retired cases drop out.
 
@@ -293,18 +317,20 @@ def _votes_results(
     ranked = set(ratings.systems)
     best, worst = ranking.rank_spread(ratings.lower, ratings.upper)
     connected = [m for m in votes if _systems([m]) <= ranked]
+    feature = _length_feature(connected)
     length = (
-        ranking.fit(
+        None
+        if feature is None
+        else ranking.fit(
             ranking.Matchups.build([m.vote.comparison() for m in connected]),
-            _length_feature(connected),
+            feature,
         ).covariate
-        if connected
-        else None
     )
 
     standings = [
         _standing(
             system,
+            fingerprints[system],
             float(ratings.score[i]),
             Interval(lower=float(ratings.lower[i]), upper=float(ratings.upper[i])),
             int((ratings.score > ratings.score[i]).sum()) + 1,
@@ -341,6 +367,7 @@ def _systems(votes: Iterable[MatchedVote]) -> set[str]:
 
 def _standing(
     system: str,
+    fingerprint: str | None,
     score: float,
     interval: Interval,
     rank: int,
@@ -348,9 +375,6 @@ def _standing(
     votes: list[Vote],
     outputs: list[Output],
 ) -> Standing:
-    fingerprints = {output.fingerprint for output in outputs}
-    if len(fingerprints) > 1:
-        raise ValueError(f'system {system!r} has outputs under several fingerprints')
     choices = Counter(vote.choice for vote in votes)
     flags = Counter(
         flag for vote in votes for flag in vote.flags if _flagged(vote, system)
@@ -360,7 +384,7 @@ def _standing(
     decisive = choices['a'] + choices['b']
     return Standing(
         system=system,
-        fingerprint=fingerprints.pop(),
+        fingerprint=fingerprint,
         score=score,
         interval=interval,
         rank=rank,
@@ -467,15 +491,18 @@ def _categories(
     return boards
 
 
-def _length_feature(votes: list[MatchedVote]) -> ranking.Floats:
-    """Return the z-scored (A − B) / (A + B) of each vote's output lengths."""
+def _length_feature(votes: list[MatchedVote]) -> ranking.Floats | None:
+    """Return the z-scored (A − B) / (A + B) of each vote's output lengths.
+
+    Returns None when every vote has the same relative length difference.
+    """
     a = np.array([text_length(m.a.text or '') for m in votes])
     b = np.array([text_length(m.b.text or '') for m in votes])
     total = a + b
     relative = np.divide(a - b, total, out=np.zeros(len(votes)), where=total > 0)
-    centered = relative - relative.mean()
-    spread = relative.std()
-    feature: ranking.Floats = centered / spread if spread > 0 else centered
+    if not votes or np.ptp(relative) == 0:
+        return None
+    feature: ranking.Floats = (relative - relative.mean()) / relative.std()
     return feature
 
 
@@ -564,7 +591,9 @@ def _lowest(
 # ── Tests Results ──
 
 
-def _tests_results(family: Family, outputs: list[Output]) -> TestsResults:
+def _tests_results(
+    family: Family, outputs: list[Output], fingerprints: dict[str, str | None]
+) -> TestsResults:
     if not outputs:
         raise ValueError(f'family {family.name!r} has no outputs')
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
@@ -572,15 +601,10 @@ def _tests_results(family: Family, outputs: list[Output]) -> TestsResults:
         by_system[output.system].append(output)
     standings = []
     for system, trials in sorted(by_system.items()):
-        fingerprints = {output.fingerprint for output in trials}
-        if len(fingerprints) > 1:
-            raise ValueError(
-                f'system {system!r} has outputs under several fingerprints'
-            )
         standings.append(
             TestsStanding(
                 system=system,
-                fingerprint=fingerprints.pop(),
+                fingerprint=fingerprints[system],
                 trials=len(trials),
                 errored=sum(output.error is not None for output in trials),
                 pass_rate=sum(output.reward or 0.0 for output in trials) / len(trials),
