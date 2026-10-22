@@ -1,0 +1,3 @@
+# The hook runs in the Nix sandbox, which has no network, so only local paths and anchors are checked.
+offline = true
+include_fragments = "full"

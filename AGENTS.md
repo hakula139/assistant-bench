@@ -50,7 +50,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 - Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv.
 - Run the [verification](#verification) block before review.
-- Add new words to `.cspell/words.txt` in alphabetical order, as `cspell` scans Python sources too.
+- Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases. As [Data](docs/conventions/data.md) describes, transcript-derived and held-out cases, their outputs, and Harbor jobs live in the data directory, and a test fails if a committed case file holds a private source.
 - Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of the repository, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
 - Keep the lockfiles on public registries, as a test fails if `uv.lock` or `pnpm-lock.yaml` names a host other than PyPI or npm.

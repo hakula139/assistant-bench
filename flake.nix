@@ -85,6 +85,14 @@
           check-added-large-files.enable = true;
           check-yaml.enable = true;
           taplo.enable = true;
+          actionlint.enable = true;
+          lychee.enable = true;
+
+          sort-file-contents = {
+            enable = true;
+            files = "^\\.cspell/words\\.txt$";
+            settings.ignore-case = true;
+          };
 
           nixfmt.enable = true;
           deadnix.enable = true;
@@ -171,9 +179,16 @@
           hooks = hooks // nodeHooks // uvHooks;
         };
 
+        # lychee builds its HTTP client even offline and fails without CA roots, which the Nix
+        # sandbox lacks until cacert's setup hook exports SSL_CERT_FILE. The dev shell keeps the
+        # host's CA settings, so only the check gets cacert.
         preCommitCheck = git-hooks-nix.lib.${system}.run {
-          inherit hooks;
           src = ./.;
+          hooks = hooks // {
+            lychee = hooks.lychee // {
+              extraPackages = [ pkgs.cacert ];
+            };
+          };
         };
 
         cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
