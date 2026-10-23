@@ -86,10 +86,10 @@ export const startSession = (family: string) =>
 export const resumeSession = (id: string) =>
   request(sessionView, 'POST', `/sessions/${encodeURIComponent(id)}/pair`);
 
-export const undoVote = (id: string) =>
-  request(sessionView, 'POST', `/sessions/${encodeURIComponent(id)}/undo`);
-
 export const castVote = (
   token: string,
   vote: { choice: Choice; defects: TaggedDefects; note: string | null },
 ) => request(sessionView, 'POST', `/pairs/${encodeURIComponent(token)}/vote`, vote);
+
+export const undoVote = (id: string) =>
+  request(sessionView, 'POST', `/sessions/${encodeURIComponent(id)}/undo`);
