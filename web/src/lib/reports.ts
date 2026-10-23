@@ -1,6 +1,6 @@
 import { getCollection } from 'astro:content';
 
-import { familyTitle, type Aspect } from '@/lib/aspects';
+import { aspectIds, familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
@@ -31,21 +31,31 @@ export interface Family {
   systemNames: SystemNames;
 }
 
-/** A family's path segment under its aspect: its language code, else its short name in kebab case. */
-export function boardSlug(config: FamilyConfig): string {
-  const language = 'language' in config ? config.language : undefined;
-  return (
-    language ??
-    config.display_name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-  );
+/**
+ * A family's path segment under its aspect: its short name in kebab case, with accents dropped.
+ *
+ * @throws Error when the short name has no ASCII letter or digit to build the segment from.
+ */
+export function boardSlug({ display_name: name }: FamilyConfig): string {
+  const slug = name
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!slug) {
+    throw new Error(`the short name ${name} has no ASCII letter or digit for its board path`);
+  }
+  return slug;
+}
+
+function boardParams(family: Family): { aspect: Aspect; board: string } {
+  return { aspect: family.aspect, board: boardSlug(family.config) };
 }
 
 /** A family's board path, which every link to the board and its system pages starts with. */
 export function boardPath(family: Family): string {
-  return `/${family.aspect}/${boardSlug(family.config)}/`;
+  const { aspect, board } = boardParams(family);
+  return `/${aspect}/${board}/`;
 }
 
 /** A system's page path on a family's board. */
@@ -53,25 +63,16 @@ export function systemPath(family: Family, system: string): string {
   return `${boardPath(family)}${system}/`;
 }
 
-/**
- * The `_redirects` rules that keep each family's old ID path working after it moved under its
- * aspect, where the old path could lead to the board or to any system's page on it.
- */
-export function redirectLines(families: Family[]): string {
-  const lines = families.flatMap((family) => {
-    const from = `/${family.name}`;
-    const to = boardPath(family);
-    return [`${from} ${to} 301`, `${from}/ ${to} 301`, `${from}/* ${to}:splat 301`];
-  });
-  return `${lines.join('\n')}\n`;
-}
+/** The site's top-level path segments, which a family ID may not take. */
+const reservedNames = new Set<string>([...aspectIds, 'methodology', 'vote']);
 
 /**
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, when a public family has no
- *   aspect, or when two public families share a board path.
+ * @throws Error when two families, listed or not, share a full name, when a family ID names an
+ *   aspect or a top-level page, when a public family has no aspect, or when two public families
+ *   share a board path.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -79,7 +80,6 @@ export function listFamilies(
   systemNames: SystemNames,
 ): Family[] {
   const owners = new Map<string, string>();
-  const paths = new Map<string, string>();
   for (const { name, config } of configs) {
     const title = familyTitle(config);
     const owner = owners.get(title);
@@ -87,17 +87,12 @@ export function listFamilies(
       throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
-    if (config.public && config.aspect !== undefined) {
-      const path = `${config.aspect}/${boardSlug(config)}`;
-      const holder = paths.get(path);
-      if (holder !== undefined) {
-        throw new Error(`families ${holder} and ${name} share the board path /${path}/`);
-      }
-      paths.set(path, name);
+    if (reservedNames.has(name)) {
+      throw new Error(`family ${name} takes the name of a top-level path`);
     }
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
-  return configs
+  const families = configs
     .filter(({ config }) => config.public)
     .map(({ name, config }) => {
       if (config.aspect === undefined) {
@@ -115,6 +110,16 @@ export function listFamilies(
       };
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
+  const holders = new Map<string, string>();
+  for (const family of families) {
+    const path = boardPath(family);
+    const holder = holders.get(path);
+    if (holder !== undefined) {
+      throw new Error(`families ${holder} and ${family.name} share the board path ${path}`);
+    }
+    holders.set(path, family.name);
+  }
+  return families;
 }
 
 export async function getFamilies(): Promise<Family[]> {
@@ -189,7 +194,7 @@ function siblings(families: Family[], family: Family): Family[] {
 /** Returns each family page's params and props: the family and its aspect's boards. */
 export function familyPaths(families: Family[]) {
   return families.map((family) => ({
-    params: { aspect: family.aspect, board: boardSlug(family.config) },
+    params: boardParams(family),
     props: {
       family,
       boards: siblings(families, family).map((item): BoardLink => ({
@@ -209,7 +214,7 @@ export function systemPaths(families: Family[]) {
   const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
   return families.flatMap((family) =>
     [...systemPages(family)].map((system) => ({
-      params: { aspect: family.aspect, board: boardSlug(family.config), system },
+      params: { ...boardParams(family), system },
       props: {
         family,
         system,

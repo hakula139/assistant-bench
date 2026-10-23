@@ -1,0 +1,4 @@
+/prose-en /writing/english/ 301
+/prose-zh /writing/chinese/ 301
+/prose-en/* /writing/english/:splat 301
+/prose-zh/* /writing/chinese/:splat 301

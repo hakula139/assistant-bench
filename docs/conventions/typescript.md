@@ -22,11 +22,9 @@ web/src/
 ├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
-├── integrations/redirects.ts               # Injects the redirects route, which no page file may name
 ├── layouts/                                # The page shell
 ├── lib/                                    # The report and family schemas, the aspects, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, formatters, hooks
 ├── pages/                                  # Public routes only
-├── redirects.ts                            # Writes the `_redirects` file from the families
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
 └── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it

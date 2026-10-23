@@ -2,14 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import {
-  boardPath,
-  boardSlug,
-  listFamilies,
-  redirectLines,
-  systemPages,
-  systemPath,
-} from '@/lib/reports';
+import { boardSlug, listFamilies, systemPages } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
@@ -27,6 +20,22 @@ async function report(family: string, round: string, closedAt: string): Promise<
   const parsed = reportSchema.parse(await readFixture());
   return { ...parsed, family, round, closed_at: closedAt };
 }
+
+describe('boardSlug', () => {
+  test.each([
+    ['Chinese', 'chinese'],
+    ['C++ / Rust (beta)', 'c-rust-beta'],
+    ['Café Essays', 'cafe-essays'],
+  ])('names the board of %s by its short name in kebab case', (name, slug) => {
+    expect(boardSlug(votes(true, name))).toBe(slug);
+  });
+
+  test('rejects a short name with no ASCII letter or digit', () => {
+    expect(() => boardSlug(votes(true, '日本語'))).toThrow(
+      'the short name 日本語 has no ASCII letter or digit for its board path',
+    );
+  });
+});
 
 describe('listFamilies', () => {
   test('pairs each public family with its rounds, oldest first', async () => {
@@ -116,50 +125,32 @@ describe('listFamilies', () => {
       'public family prose has no aspect',
     );
   });
-});
-
-describe('board paths', () => {
-  test('uses the language code under the aspect, and the short name without one', () => {
-    expect(boardSlug({ ...votes(true), language: 'zh' })).toBe('zh');
-    expect(boardSlug(votes(true, 'Smoke Tasks'))).toBe('smoke-tasks');
-  });
-
-  test('builds a board and a system path from the aspect and the slug', () => {
-    const [family] = listFamilies(
-      [{ name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } }],
-      [],
-      FIXTURE_NAMES,
-    );
-
-    expect(boardPath(family)).toBe('/writing/zh/');
-    expect(systemPath(family, 'acme-pro')).toBe('/writing/zh/acme-pro/');
-  });
-
-  test('redirects the old family path to the board, at any depth', () => {
-    const [family] = listFamilies(
-      [{ name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } }],
-      [],
-      FIXTURE_NAMES,
-    );
-
-    expect(redirectLines([family])).toBe(
-      [
-        '/prose-zh /writing/zh/ 301',
-        '/prose-zh/ /writing/zh/ 301',
-        '/prose-zh/* /writing/zh/:splat 301',
-        '',
-      ].join('\n'),
-    );
-  });
 
   test('rejects two public families sharing a board path', () => {
     const configs = [
-      { name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } },
-      { name: 'prose-zh-two', config: { ...votes(true, 'Chinese Two'), language: 'zh' } },
-    ] satisfies { name: string; config: FamilyConfig }[];
+      { name: 'cpp', config: votes(true, 'C++') },
+      { name: 'csharp', config: votes(true, 'C#') },
+    ];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose-zh and prose-zh-two share the board path /writing/zh/',
+      'families cpp and csharp share the board path /writing/c/',
+    );
+  });
+
+  test('accepts a hidden family on a public board path', () => {
+    const configs = [
+      { name: 'cpp', config: votes(true, 'C++') },
+      { name: 'csharp', config: { ...votes(false, 'C#'), aspect: 'writing' } },
+    ] satisfies { name: string; config: FamilyConfig }[];
+
+    const families = listFamilies(configs, [], FIXTURE_NAMES);
+
+    expect(families.map((family) => family.name)).toEqual(['cpp']);
+  });
+
+  test.each(['writing', 'methodology', 'vote'])('rejects a family named %s', (name) => {
+    expect(() => listFamilies([{ name, config: votes(false) }], [], FIXTURE_NAMES)).toThrow(
+      `family ${name} takes the name of a top-level path`,
     );
   });
 });

@@ -22,7 +22,7 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
   return { round: report.round, results: report.results };
 }
 
-const BOARD = '/writing/zh/';
+const BOARD = '/writing/chinese/';
 
 function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
@@ -55,7 +55,9 @@ describe('VotesBoard', () => {
   test('lists the ranked systems by score, best first', async () => {
     const html = render(await load());
 
-    const systems = [...html.matchAll(/href="\/writing\/zh\/([^/]+)\/"/g)].map((match) => match[1]);
+    const systems = [...html.matchAll(/href="\/writing\/chinese\/([^/]+)\/"/g)].map(
+      (match) => match[1],
+    );
 
     expect(systems).toEqual([
       'acme-pro',

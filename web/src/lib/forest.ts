@@ -144,10 +144,10 @@ export function unmeasuredRows(
 
 /**
  * Rows for a closed round: its standings from the highest score down, each linked to its system
- * page, then its unranked systems, then the family's systems the round has no votes on.
+ * page at `href`, then its unranked systems, then the family's systems the round has no votes on.
  */
 export function roundRows(
-  family: string,
+  href: (system: string) => string,
   systems: string[],
   { standings, unranked }: { standings: Standing[]; unranked: string[] },
   names: SystemNames,
@@ -164,7 +164,7 @@ export function roundRows(
       .map((standing) => ({
         system: standing.system,
         name: systemName(names, standing.system),
-        href: `/${family}/${standing.system}/`,
+        href: href(standing.system),
         estimate: standing,
         preliminary: standing.preliminary,
       })),
