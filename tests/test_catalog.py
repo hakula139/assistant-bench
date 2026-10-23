@@ -54,6 +54,7 @@ class TestSystemConfig:
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
             },
         ],
+        ids=['no-source', 'both-sources', 'route-without-price', 'model-with-price'],
     )
     def test_rejects_an_ambiguous_source_or_price(
         self, table: dict[str, object]
@@ -76,6 +77,7 @@ class TestSystem:
                 {'effort': 'high'},
                 {'prompt': 'Be brief.'},
             ],
+            ids=['route', 'effort', 'prompt'],
         )
         def test_changes_with_what_shapes_the_outputs(
             self, change: dict[str, str]
@@ -274,6 +276,15 @@ class TestResolveSystem:
                 SystemConfig(model='acme-large', prompt='prompts/brief.md'),
                 "system 'x': prompt 'prompts/brief.md' is not nixos-config:<client>",
             ),
+        ],
+        ids=[
+            'unknown-model',
+            'unoffered-effort',
+            'effort-for-a-model-without-one',
+            'no-channel',
+            'several-channels',
+            'unknown-prompt-client',
+            'prompt-outside-nixos-config',
         ],
     )
     def test_rejects_what_the_catalog_does_not_offer(

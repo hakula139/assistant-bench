@@ -283,7 +283,9 @@ class TestSeparability:
 
 class TestRankAgreement:
     @pytest.mark.parametrize(
-        ('second', 'expected'), [([3.0, 2.0, 1.0], 1.0), ([1.0, 2.0, 3.0], -1.0)]
+        ('second', 'expected'),
+        [([3.0, 2.0, 1.0], 1.0), ([1.0, 2.0, 3.0], -1.0)],
+        ids=['same', 'reversed'],
     )
     def test_compares_two_orders(self, second: list[float], expected: float) -> None:
         tau = rank_agreement(np.array([3.0, 2.0, 1.0]), np.array(second))

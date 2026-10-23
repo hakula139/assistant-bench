@@ -95,9 +95,15 @@ def test_committed_families_and_reports_name_only_tabled_systems() -> None:
     } == set()
 
 
-def test_uv_lock_names_only_pypi() -> None:
-    assert hosts(REPO_ROOT / 'uv.lock') <= {'pypi.org', 'files.pythonhosted.org'}
-
-
-def test_pnpm_lock_names_only_the_npm_registry() -> None:
-    assert hosts(REPO_ROOT / 'pnpm-lock.yaml') <= {'registry.npmjs.org'}
+@pytest.mark.parametrize(
+    ('lockfile', 'registry'),
+    [
+        ('uv.lock', {'pypi.org', 'files.pythonhosted.org'}),
+        ('pnpm-lock.yaml', {'registry.npmjs.org'}),
+    ],
+    ids=['uv', 'pnpm'],
+)
+def test_lockfiles_name_only_their_public_registry(
+    lockfile: str, registry: set[str]
+) -> None:
+    assert hosts(REPO_ROOT / lockfile) <= registry

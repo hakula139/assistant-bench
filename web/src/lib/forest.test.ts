@@ -12,7 +12,10 @@ import {
   sparseTicks,
   unionMarks,
   unmeasuredRows,
+  type Clipped,
+  type Estimate,
   type ForestRow,
+  type LegendMark,
 } from '@/lib/forest';
 import { reportSchema } from '@/lib/report';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
@@ -23,37 +26,44 @@ const estimate = (score: number, lower: number, upper: number) => ({
 });
 
 describe('forestDomain', () => {
-  test('covers every interval, rounded out to round ticks', () => {
-    const domain = forestDomain([estimate(1004, 955, 1065), estimate(825, 773, 890)]);
+  test.each<[string, Estimate[], [number, number]]>([
+    [
+      'an axis over every interval, rounded out to round ticks',
+      [estimate(1004, 955, 1065), estimate(825, 773, 890)],
+      [750, 1100],
+    ],
+    [
+      'an axis that starts no lower than the span below the top score',
+      [estimate(1004, 955, 1065), estimate(233, 81, 321)],
+      [400, 1100],
+    ],
+    ['the empty axis without estimates', [], EMPTY_DOMAIN],
+  ])('returns %s', (_, estimates, expected) => {
+    const domain = forestDomain(estimates);
 
-    expect(domain).toEqual([750, 1100]);
-  });
-
-  test('starts no lower than the span below the top score', () => {
-    const domain = forestDomain([estimate(1004, 955, 1065), estimate(233, 81, 321)]);
-
-    expect(domain).toEqual([400, 1100]);
-  });
-
-  test('falls back to the empty axis without estimates', () => {
-    expect(forestDomain([])).toEqual(EMPTY_DOMAIN);
+    expect(domain).toEqual(expected);
   });
 });
 
 describe('sharedDomain', () => {
-  test("cuts each board below its own top score, not the highest board's", () => {
-    const strong = [estimate(1400, 1300, 1500), estimate(1000, 950, 1050)];
-    const weak = [estimate(1000, 950, 1050), estimate(200, 100, 300)];
+  test.each<[string, Estimate[][], [number, number]]>([
+    [
+      "an axis that cuts each board below its own top score, not the highest board's",
+      [
+        [estimate(1400, 1300, 1500), estimate(1000, 950, 1050)],
+        [estimate(1000, 950, 1050), estimate(200, 100, 300)],
+      ],
+      [400, 1500],
+    ],
+    [
+      'the axis of the boards with estimates alone',
+      [[], [estimate(1004, 955, 1065), estimate(825, 773, 890)]],
+      [750, 1100],
+    ],
+  ])('returns %s', (_, boards, expected) => {
+    const domain = sharedDomain(boards);
 
-    const domain = sharedDomain([strong, weak]);
-
-    expect(domain).toEqual([400, 1500]);
-  });
-
-  test('ignores boards without estimates', () => {
-    const domain = sharedDomain([[], [estimate(1004, 955, 1065), estimate(825, 773, 890)]]);
-
-    expect(domain).toEqual([750, 1100]);
+    expect(domain).toEqual(expected);
   });
 });
 
@@ -64,12 +74,11 @@ describe('forestTicks', () => {
 });
 
 describe('sparseTicks', () => {
-  test('labels both ends and an anchor far from them', () => {
-    expect(sparseTicks([600, 1400])).toEqual([600, 1000, 1400]);
-  });
-
-  test('leaves out an anchor next to an end', () => {
-    expect(sparseTicks([400, 1100])).toEqual([400, 1100]);
+  test.each<[string, [number, number], number[]]>([
+    ['both ends and an anchor far from them', [600, 1400], [600, 1000, 1400]],
+    ['both ends alone when the anchor sits next to one', [400, 1100], [400, 1100]],
+  ])('labels %s', (_, domain, ticks) => {
+    expect(sparseTicks(domain)).toEqual(ticks);
   });
 });
 
@@ -84,28 +93,23 @@ describe('labelledTicks', () => {
 });
 
 describe('clip', () => {
-  test('moves a score below the axis to its start and marks the cut', () => {
-    const clipped = clip(estimate(233, 81, 321), [400, 1100]);
+  test.each<[string, Estimate, [number, number], Clipped]>([
+    [
+      'a score below the axis to its start and marks the cut',
+      estimate(233, 81, 321),
+      [400, 1100],
+      { score: 400, lower: 400, upper: 400, offScale: true, cutLow: true },
+    ],
+    [
+      'only the end of an interval that crosses the axis start',
+      estimate(666, 441, 796),
+      [500, 1300],
+      { score: 666, lower: 500, upper: 796, offScale: false, cutLow: true },
+    ],
+  ])('clips %s', (_, value, domain, expected) => {
+    const clipped = clip(value, domain);
 
-    expect(clipped).toEqual({
-      score: 400,
-      lower: 400,
-      upper: 400,
-      offScale: true,
-      cutLow: true,
-    });
-  });
-
-  test('cuts only the end of an interval that crosses the axis start', () => {
-    const clipped = clip(estimate(666, 441, 796), [500, 1300]);
-
-    expect(clipped).toEqual({
-      score: 666,
-      lower: 500,
-      upper: 796,
-      offScale: false,
-      cutLow: true,
-    });
+    expect(clipped).toEqual(expected);
   });
 });
 
@@ -161,31 +165,35 @@ describe('legendMarks', () => {
     preliminary,
   });
 
-  test('names a settled score and the anchor rule', () => {
-    expect(legendMarks([row(1004, 955, 1065)], domain, true)).toEqual(['score', 'anchor']);
-  });
-
-  test('names a preliminary score apart from a settled one', () => {
-    expect(legendMarks([row(700, 600, 800, true)], domain, false)).toEqual(['preliminary']);
-  });
-
-  test.each([
-    ['an interval', row(500, 300, 700)],
-    ['a score', row(350, 250, 450)],
-  ])('names the cut when %s runs past the axis start', (_, cut) => {
-    expect(legendMarks([cut], domain, false)).toEqual(['score', 'cut']);
-  });
-
-  test('names the unbounded track for unplaced systems but not for the anchor dot', () => {
-    const anchor: ForestRow = {
-      system: 'acme-large',
-      name: 'Acme Large',
-      unplaced: 'anchor',
-    };
-    const unranked: ForestRow = { system: 'acme-edge', name: 'Acme Edge', unplaced: 'unranked' };
-
-    expect(legendMarks([anchor], domain, true)).toEqual(['anchor']);
-    expect(legendMarks([unranked], domain, false)).toEqual(['unbounded']);
+  test.each<[string, ForestRow, boolean, LegendMark[]]>([
+    ['a settled score and the anchor rule', row(1004, 955, 1065), true, ['score', 'anchor']],
+    [
+      'a preliminary score apart from a settled one',
+      row(700, 600, 800, true),
+      false,
+      ['preliminary'],
+    ],
+    [
+      'the cut when an interval runs past the axis start',
+      row(500, 300, 700),
+      false,
+      ['score', 'cut'],
+    ],
+    ['the cut when a score runs past the axis start', row(350, 250, 450), false, ['score', 'cut']],
+    [
+      'the anchor dot without an unbounded track',
+      { system: 'acme-large', name: 'Acme Large', unplaced: 'anchor' },
+      true,
+      ['anchor'],
+    ],
+    [
+      'the unbounded track of an unranked system',
+      { system: 'acme-edge', name: 'Acme Edge', unplaced: 'unranked' },
+      false,
+      ['unbounded'],
+    ],
+  ])('names %s', (_, drawn, anchorLine, marks) => {
+    expect(legendMarks([drawn], domain, anchorLine)).toEqual(marks);
   });
 });
 

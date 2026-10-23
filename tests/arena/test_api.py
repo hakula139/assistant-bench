@@ -57,7 +57,9 @@ class TestCreateApp:
         assert resumed.json() == undone.json()
 
     @pytest.mark.parametrize(
-        'headers', [{}, {'Origin': 'http://127.0.0.1:1'}, {'Origin': 'null'}]
+        'headers',
+        [{}, {'Origin': 'http://127.0.0.1:1'}, {'Origin': 'null'}],
+        ids=['no-origin', 'another-port', 'null-origin'],
     )
     def test_rejects_a_write_from_another_origin(
         self, client: TestClient, headers: dict[str, str]
@@ -72,22 +74,39 @@ class TestCreateApp:
         assert client.get('/api/families').status_code == 400
 
     @pytest.mark.parametrize(
-        ('path', 'body', 'status'),
+        ('path', 'body'),
         [
-            ('/api/sessions', {'family': 'nope'}, 404),
-            ('/api/pairs/nope/vote', {'choice': 'a'}, 404),
-            ('/api/sessions/nope/undo', None, 404),
-            ('/api/pairs/nope/vote', {'choice': 'left'}, 422),
+            ('/api/sessions', {'family': 'nope'}),
+            ('/api/pairs/nope/vote', {'choice': 'a'}),
+            ('/api/sessions/nope/undo', None),
         ],
+        ids=['unknown-family', 'unknown-pair', 'unknown-session'],
     )
     def test_answers_bad_writes_without_detail(
-        self, client: TestClient, path: str, body: Any, status: int
+        self, client: TestClient, path: str, body: Any
     ) -> None:
         response = client.post(path, json=body, headers=ORIGIN)
 
-        assert response.status_code == status
-        if status == 404:
-            assert response.json() == {'detail': 'not found'}
+        assert response.status_code == 404
+        assert response.json() == {'detail': 'not found'}
+
+    def test_rejects_an_unknown_choice(self, client: TestClient) -> None:
+        response = client.post(
+            '/api/pairs/nope/vote', json={'choice': 'left'}, headers=ORIGIN
+        )
+
+        assert response.status_code == 422
+        assert response.json() == {
+            'detail': [
+                {
+                    'type': 'literal_error',
+                    'loc': ['body', 'choice'],
+                    'msg': "Input should be 'a', 'b', 'tie' or 'both_bad'",
+                    'input': 'left',
+                    'ctx': {'expected': "'a', 'b', 'tie' or 'both_bad'"},
+                }
+            ]
+        }
 
     def test_refuses_to_undo_an_empty_session(self, client: TestClient) -> None:
         session = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)
