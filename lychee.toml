@@ -1,3 +1,3 @@
-# The hook runs in the Nix sandbox, which has no network, so only local paths and anchors are checked.
+# The flake check's Nix sandbox has no network, so lychee checks only local paths and anchors.
 offline = true
 include_fragments = "full"

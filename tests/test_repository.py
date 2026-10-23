@@ -2,8 +2,11 @@ import json
 import re
 import tomllib
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
+import tomli_w
 from typer.testing import CliRunner
 
 from assistant_bench.cli import app
@@ -13,9 +16,11 @@ from assistant_bench.paths import REPO_ROOT
 
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
+URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
 
-def hosts(path: Path) -> set[str]:
-    return set(re.findall(r'https?://([^/"\'\s]+)', path.read_text()))
+
+def hosts(path: Path) -> set[str | None]:
+    return {urlsplit(url).hostname for url in URL.findall(path.read_text())}
 
 
 @pytest.mark.parametrize(
@@ -50,60 +55,49 @@ def test_committed_case_families_pass_check(name: str) -> None:
     assert result.exit_code == 0, result.output
 
 
-def named_systems(value: object) -> set[str]:
-    """Collect every system a report names, in any results variant."""
-    match value:
-        case dict():
-            names = {
-                name
-                for key, name in value.items()
-                if key in {'system', 'opponent', 'leader', 'reference'}
-            }
-            names |= set(value.get('unranked', []))
-            return names.union(*(named_systems(item) for item in value.values()))
-        case list():
-            return set().union(*(named_systems(item) for item in value))
-        case _:
-            return set()
+def family_systems(config: dict[str, Any]) -> set[str]:
+    """Return every system that a family's config names."""
+    systems = {str(system) for system in config.get('systems', [])}
+    reference = config.get('reference')
+    return systems | ({str(reference)} if reference else set())
 
 
-def test_named_systems_reads_every_key_that_names_a_system() -> None:
-    results = {
-        'reference': 'reference',
-        'standings': [{'system': 'ranked'}],
-        'unranked': ['unranked'],
-        'head_to_head': [{'system': 'ranked', 'opponent': 'opponent'}],
-        'categories': [{'standings': [{'system': 'category'}]}],
-        'decision': {'leader': 'leader'},
-    }
-
-    names = named_systems({'family': 'f', 'results': results})
-
-    assert names == {
-        'reference',
-        'ranked',
-        'unranked',
-        'opponent',
-        'category',
-        'leader',
-    }
-
-
-def test_committed_families_and_reports_name_only_tabled_systems() -> None:
-    tabled = set(tomllib.loads((REPO_ROOT / 'systems.toml').read_text()))
-    named = {
+def untabled(root: Path) -> set[tuple[str, str]]:
+    """Return each family and system whose system lacks a `systems.toml` table."""
+    tabled = set(tomllib.loads((root / 'systems.toml').read_text()))
+    return {
         (path.parent.name, system)
-        for path in (REPO_ROOT / 'families').glob('*/family.toml')
-        for system in tomllib.loads(path.read_text()).get('systems', [])
-    } | {
-        (str(path.relative_to(REPO_ROOT)), system)
-        for path in (REPO_ROOT / 'reports').glob('*/*.json')
-        for system in named_systems(json.loads(path.read_text()))
+        for path in (root / 'families').glob('*/family.toml')
+        for system in family_systems(tomllib.loads(path.read_text()))
+        if system not in tabled
     }
 
-    assert {
-        (source, system) for source, system in named if system not in tabled
-    } == set()
+
+def test_committed_families_name_only_tabled_systems() -> None:
+    assert untabled(REPO_ROOT) == set()
+
+
+@pytest.mark.parametrize(
+    ('family', 'report', 'expected'),
+    [
+        ({'systems': ['tabled']}, {'results': {'reference': 'retired'}}, set()),
+        ({'systems': ['untabled']}, {}, {('f', 'untabled')}),
+        ({'reference': 'untabled'}, {}, {('f', 'untabled')}),
+    ],
+)
+def test_a_family_system_needs_a_systems_toml_table(
+    family: dict[str, Any],
+    report: dict[str, Any],
+    expected: set[tuple[str, str]],
+    tmp_path: Path,
+) -> None:
+    (tmp_path / 'systems.toml').write_text(tomli_w.dumps({'tabled': {}}))
+    (tmp_path / 'families' / 'f').mkdir(parents=True)
+    (tmp_path / 'families' / 'f' / 'family.toml').write_text(tomli_w.dumps(family))
+    (tmp_path / 'reports' / 'f').mkdir(parents=True)
+    (tmp_path / 'reports' / 'f' / 'round.json').write_text(json.dumps(report))
+
+    assert untabled(tmp_path) == expected
 
 
 def lockfiles() -> list[Path]:
@@ -122,6 +116,27 @@ def registry(name: str) -> set[str]:
     if name == 'pnpm-lock.yaml':
         return {'registry.npmjs.org'}
     return {'pypi.org', 'files.pythonhosted.org'}
+
+
+@pytest.mark.parametrize(
+    ('url', 'host'),
+    [
+        ('https://internal.corp?@pypi.org/x', 'internal.corp'),
+        ('https://internal.corp#@pypi.org/x', 'internal.corp'),
+        ('HTTPS://internal.corp/x', 'internal.corp'),
+        ('Git+SSH://git@internal.corp/x', 'internal.corp'),
+        ('https://internal.corp:8080/x', 'internal.corp'),
+        ('https://user:pass@internal.corp/x', 'internal.corp'),
+        ('file:///etc/passwd', None),
+    ],
+)
+def test_hosts_reads_the_url_authority(
+    url: str, host: str | None, tmp_path: Path
+) -> None:
+    path = tmp_path / 'lockfile'
+    path.write_text(url)
+
+    assert hosts(path) == {host}
 
 
 @pytest.mark.parametrize(

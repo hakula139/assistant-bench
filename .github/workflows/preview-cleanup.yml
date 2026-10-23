@@ -29,7 +29,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -67,7 +67,7 @@ jobs:
           done
 
       - name: Comment preview
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: preview-url
           only_update: true

@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -40,7 +40,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -66,7 +66,7 @@ jobs:
         run: pnpm test
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           fail_ci_if_error: true
           files: web/coverage/lcov.info
@@ -81,7 +81,7 @@ jobs:
         shell: nix develop -c bash -eo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -95,7 +95,7 @@ jobs:
         run: pnpm build
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: site-dist
           path: web/dist/
@@ -113,7 +113,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The fingerprint check builds the base revision's nixos-config export.
           fetch-depth: 0
@@ -144,7 +144,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           fail_ci_if_error: true
           files: coverage.xml
@@ -159,7 +159,7 @@ jobs:
         shell: nix develop .#python -c bash -eo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -200,9 +200,12 @@ jobs:
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}
+    # A preview that arrives during Preview Cleanup must wait, since cancelling the cleanup would
+    # leave the previous Preview and its deployments behind. The workflow group already cancels
+    # a superseded run on each push.
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     environment:
       name: preview
       url: ${{ steps.meta.outputs.deployment_url }}
@@ -229,7 +232,7 @@ jobs:
 
       - name: Checkout
         if: steps.pr.outputs.open
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -243,7 +246,7 @@ jobs:
 
       - name: Download site artifact
         if: steps.pr.outputs.open
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: site-dist
           path: web/dist/
@@ -279,7 +282,7 @@ jobs:
 
       - name: Comment preview
         if: steps.pr.outputs.open
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: preview-url
           message: |
@@ -325,7 +328,7 @@ jobs:
 
       - name: Checkout
         if: steps.head.outputs.current
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -339,7 +342,7 @@ jobs:
 
       - name: Download site artifact
         if: steps.head.outputs.current
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: site-dist
           path: web/dist/
