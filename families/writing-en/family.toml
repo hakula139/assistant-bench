@@ -19,4 +19,4 @@ categories = ["docs", "essay", "fiction", "message", "reply", "review"]
 
 [gates]
 min_chars = 80
-max_chars = 10000
+max_chars = 20000
