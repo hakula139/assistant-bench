@@ -1,12 +1,10 @@
-import MarkdownIt from 'markdown-it';
 import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
 
+import { Markdown } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import type { Pane } from '@/lib/arena';
-
-const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image');
 
 interface OutputPaneProps {
   side: 'A' | 'B';
@@ -73,14 +71,9 @@ export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps
           <FramedOutput url={pane.url} viewport={viewport} side={side} />
         </CardContent>
       ) : asMarkdown ? (
-        <CardContent
-          className={cn(
-            scroll,
-            'prose max-w-none text-foreground dark:prose-invert prose-code:before:content-none prose-code:after:content-none',
-          )}
-          // With `html` off markdown-it escapes raw HTML, and with the image rule off it never loads an image.
-          dangerouslySetInnerHTML={{ __html: markdown.render(pane.text) }}
-        />
+        <CardContent className={scroll}>
+          <Markdown text={pane.text} />
+        </CardContent>
       ) : (
         <CardContent className={cn(scroll, 'leading-relaxed whitespace-pre-wrap')}>
           {pane.text}

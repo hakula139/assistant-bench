@@ -20,10 +20,10 @@ interface Cast {
 }
 
 /**
- * A stand-in for the arena API that serves numbered pairs until a session of `size` votes is
- * complete, and records each session start, vote, and undo.
+ * A stand-in for the arena API that serves numbered pairs, each with `brief` when it is given,
+ * until a session of `size` votes is complete, and records each session start, vote, and undo.
  */
-function stubApi(size = 30) {
+function stubApi(size = 30, brief?: { instruction: string; checklist: string[] }) {
   const starts: unknown[] = [];
   const casts: Cast[] = [];
   let undos = 0;
@@ -43,6 +43,7 @@ function stubApi(size = 30) {
               token: `t${served}`,
               instruction: `Instruction ${served}`,
               checklist: [],
+              ...brief,
               a: { render: 'text', text: `Output A${served}` },
               b: { render: 'text', text: `Output B${served}` },
             },
@@ -150,6 +151,23 @@ describe('VoteApp', () => {
     await vi.waitFor(() => {
       expect(api.starts).toEqual([{ family: 'prose-zh' }, { family: 'prose-zh' }]);
     });
+  });
+
+  test('renders the prompt as Markdown and sets the checklist apart under its own heading', async () => {
+    stubApi(30, {
+      instruction: 'Use only these facts:\n\n- The build passed.\n- `make test` ran.',
+      checklist: ['States both facts'],
+    });
+
+    await startSession();
+
+    const checklist = screen.getByRole('region', { name: 'What to check' });
+    const facts = screen
+      .getAllByRole('listitem')
+      .filter((item) => !checklist.contains(item))
+      .map((item) => item.textContent);
+    expect(facts).toEqual(['The build passed.', 'make test ran.']);
+    expect(within(checklist).getByRole('listitem').textContent).toBe('States both facts');
   });
 
   test('opens the next pair at the top of the page in fresh output panes', async () => {
