@@ -1,6 +1,4 @@
-# Each table is one system under test, with its keys described in docs/guide/authoring.md. Changing
-# a system's route, effort, or prompt changes its fingerprint, so give it a new table name and let
-# the old name keep its frozen scores.
+# Each table is one system under test, as docs/guide/authoring.md#systems describes.
 
 ["opus-5.5"]
 model = "claude-opus-5-5"

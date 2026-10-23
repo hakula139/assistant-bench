@@ -1,6 +1,6 @@
 # Python
 
-Conventions for Python code under `src/` and `tests/` that the tooling and the module map don't already state.
+Conventions for Python code under `src/` and `tests/`, covering the tooling configuration and what it leaves open.
 
 ## Enforced by Tooling
 

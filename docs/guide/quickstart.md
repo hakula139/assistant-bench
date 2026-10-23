@@ -12,9 +12,10 @@ Set up a checkout and run the two smoke families.
 ## Setup
 
 ```bash
-nix develop                                 # Dev shell with uv, Node.js, and the hooks
-uv sync                                     # Virtualenv with Harbor and the bench
-cp .env.example .env                        # Then fill in the endpoint variables
+nix develop                                     # Dev shell with uv, Node.js, and the hooks
+uv sync                                         # Virtualenv with Harbor and the bench
+pnpm install                                    # Site and vote page dependencies
+cp .env.example .env                            # Then fill in the endpoint variables
 ```
 
 [Running](running.md#the-model-endpoint) describes each variable in `.env`.
@@ -29,4 +30,6 @@ uv run bench run smoke-text --system <name>     # Send each smoke case to one li
 uv run bench serve                              # Vote on the outputs the run collected
 ```
 
-`bench run smoke-text --system <name>` makes one request per case for that system, verifying that it answers and reports usage, then collects the replies into `outputs/smoke-text.jsonl`. A second run sends nothing until a case or system is added, though it retries every trial that errored.
+Pick `<name>` from `systems` in [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml). Each committed system resolves to a model ID from the nixos-config catalog, so on an endpoint that names models differently, add a `route` table to `systems.toml` as [Authoring](authoring.md#systems) describes and list it in the family.
+
+`bench run smoke-text --system <name>` makes one request per case for that system, which shows whether it answers and reports usage, then collects the replies into `outputs/smoke-text.jsonl`. A second run sends nothing until a case or system is added, though it retries every trial that errored.

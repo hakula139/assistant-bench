@@ -2,12 +2,12 @@
 
 Conventions specific to assistant-bench's code, data, tests, and tooling, with [`AGENTS.md`](../../AGENTS.md) holding the rules for every change and linking each area here.
 
-| Document                      | Description                                                                                         |
-| ----------------------------- | --------------------------------------------------------------------------------------------------- |
-| [Python](python.md)           | Enforced by tooling, architecture, errors, modules, dependencies                                    |
-| [TypeScript](typescript.md)   | Enforced by tooling, layout, reports, components, charts, the vote page                             |
-| [Data](data.md)               | Data classes, the data directory, what may be committed or published, public names, secrets         |
-| [Testing](testing.md)         | Placement, models and Harbor, Docker trials, coverage                                               |
-| [GitHub](github.md)           | Pull requests, issues                                                                               |
-| [Development](development.md) | Dev shell, pre-commit hooks, where settings live, toolchain and pins, the nixos-config input, style |
-| [CI](ci.md)                   | Checks, the deploy and its previews, workflow steps                                                 |
+| Document                      | Description                                                               |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| [Python](python.md)           | Conventions for Python code, and the tooling that enforces them           |
+| [TypeScript](typescript.md)   | Conventions for the site under `web/`, and the tooling that enforces them |
+| [Data](data.md)               | Data classes and the data directory                                       |
+| [Testing](testing.md)         | Where tests live, when they merge, and how they reach models and Harbor   |
+| [GitHub](github.md)           | Pull requests and issues                                                  |
+| [Development](development.md) | The dev shell, hooks, settings, toolchain pins, and style                 |
+| [CI](ci.md)                   | Checks, previews, and the deploy                                          |

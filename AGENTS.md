@@ -51,14 +51,14 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases. As [Data](docs/conventions/data.md) describes, transcript-derived and held-out cases, their outputs, and Harbor jobs live in the data directory, and a test fails if a committed case file holds a private source.
-- Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of the repository, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
-- Keep the lockfiles and requirements files on public registries, as a test fails if any lockfile or requirements file in the repository or under `families/` names a host other than PyPI or npm.
-- Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config, since Harbor writes each agent's `kwargs` and `env` into the job's `config.json`.
-- In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix for a variant. Routes and channel IDs stay in `systems.toml` and the data directory.
+- Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
+- Keep the lockfiles and requirements files on public registries, with `pyproject.toml` naming PyPI and `.npmrc` naming npm, as a test fails if any lockfile or requirements file in the repository or under `families/` names another host.
+- Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config, since Harbor writes each agent's `kwargs` and `env` into the job's `config.json`, so a secret reaches an agent only through a file one of those values names.
+- In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and the data directory.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
-- In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
+- In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, the shared Renovate preset, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 
 ## Verification
 

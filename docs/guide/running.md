@@ -4,7 +4,7 @@ Learn how to point the bench at a model endpoint, check and run a family, collec
 
 ## The Model Endpoint
 
-Single-call systems send OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
+Every system sends OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
 
 | Variable                  | Value                                                                                                                                                                  |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -25,7 +25,7 @@ uv run bench check
 uv run bench check smoke-text
 ```
 
-`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it checks each task's settings, then runs Harbor's oracle and nop agents three times on every task, and fails unless each reference solution earns reward 1 every time and the repository as committed earns 0 every time, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs the oracle and nop check that [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
 
 ## Running a Family
 
@@ -37,7 +37,7 @@ uv run bench run --system <name>
 
 `bench run` renders each case into a Harbor task, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI. A run without a family sends every family that lists systems, naming families limits it to those, and `--system` alone sends the named systems to every family that lists them, failing only when no family lists one. Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial.
 
-When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary below, also when Harbor fails, so finished trials land before the command exits.
+When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails, so finished trials land before the command exits.
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. Editing a case reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
 
@@ -52,7 +52,25 @@ uv run bench ingest
 uv run bench ingest smoke-text
 ```
 
-`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Within a slot it prefers a successful trial whose recorded request matches the family's current settings, then the oldest, so a changed request replaces what an earlier job produced while a rerun of the same request keeps the outputs its votes refer to. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
+`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
+
+It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Within a slot it prefers a successful trial whose recorded request matches the family's current settings, then the oldest, as [Architecture](../design/architecture.md#reruns) describes. The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one.
+
+Each record holds:
+
+| Field                                                                | Holds                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `trial`, `job`                                                       | The Harbor trial and job the record came from                                  |
+| `case`, `system`                                                     | The case, and the system's `systems.toml` name                                 |
+| `fingerprint`, `nixos_config_rev`                                    | The system's fingerprint and the export revision it ran under                  |
+| `text`, `reward`                                                     | The output text, or the verifier's reward for a `tests` family                 |
+| `gate_failures`                                                      | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed |
+| `error`                                                              | The error type of a failed trial, whose `text` is null                         |
+| `finish_reason`                                                      | The endpoint's finish reason                                                   |
+| `input_tokens`, `cached_tokens`, `output_tokens`, `reasoning_tokens` | Token counts, where the endpoint reports them                                  |
+| `cost_usd`                                                           | The cost at catalog prices, null when the catalog channel has no price         |
+| `latency_sec`                                                        | The end-to-end latency                                                         |
+| `response_model`, `request_id`                                       | The model that answered and the endpoint's request ID                          |
 
 ## Voting
 
