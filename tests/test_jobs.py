@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import os
 import subprocess
 import sys
 import textwrap
@@ -32,7 +33,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import options
 from assistant_bench.outputs import Output
-from assistant_bench.paths import FAMILIES_DIR
+from assistant_bench.paths import FAMILIES_DIR, REPO_ROOT
 from support import finish_job, make_system, write_task_family, write_trial
 
 
@@ -575,6 +576,51 @@ class TestRunJob:
             jobs.run_job(job)
 
         assert error.value.returncode == 3
+
+    def test_keeps_the_environment_out_of_a_failing_test_report(
+        self, tmp_path: Path
+    ) -> None:
+        secret = 'sentinel-secret-value'
+        test = tmp_path / 'test_failing_harbor.py'
+        test.write_text(
+            textwrap.dedent(
+                """\
+                import sys
+                from pathlib import Path
+
+                import pytest
+                from harbor.models.job.config import JobConfig
+
+                from assistant_bench import jobs
+
+
+                def test_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+                    harbor = tmp_path / 'harbor'
+                    harbor.write_text('#!/bin/sh\\nexit 3\\n')
+                    harbor.chmod(0o755)
+                    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'python'))
+                    jobs.run_job(JobConfig())
+                """
+            )
+        )
+
+        report = subprocess.run(
+            [
+                *(sys.executable, '-m', 'pytest', '-p', 'no:cacheprovider'),
+                *('-c', REPO_ROOT / 'pyproject.toml', '--rootdir', tmp_path),
+                *('--no-cov', test),
+            ],
+            capture_output=True,
+            env={
+                'BENCH_TEST_SECRET': secret,
+                'LITELLM_MODE': 'PRODUCTION',
+                'PATH': os.environ['PATH'],
+            },
+            text=True,
+        )
+        assert 'CalledProcessError' in report.stdout, report.stdout
+
+        assert secret not in report.stdout + report.stderr
 
 
 class TestIngest:

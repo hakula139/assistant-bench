@@ -84,6 +84,7 @@ testpaths = ["tests"]
 addopts = [
   "--import-mode=importlib",
   "--quiet",
+  "--tb=short",
   "-m",
   "not docker",
   "--cov",
