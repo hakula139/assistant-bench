@@ -17,7 +17,15 @@ describe('OutputPane', () => {
     );
     const url = 'http://127.0.0.1:8791/render/t1/a';
 
-    render(<OutputPane side="A" pane={{ render: 'html', url }} asMarkdown viewport={1280} />);
+    render(
+      <OutputPane
+        side="A"
+        pane={{ render: 'html', url }}
+        asMarkdown
+        viewport={1280}
+        controls={null}
+      />,
+    );
 
     const frame = screen.getByTitle('Output A');
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
@@ -29,7 +37,13 @@ describe('OutputPane', () => {
     const text = '<b>bold</b> ![logo](http://example.com/logo.png)';
 
     const { container } = render(
-      <OutputPane side="B" pane={{ render: 'text', text }} asMarkdown viewport={1280} />,
+      <OutputPane
+        side="B"
+        pane={{ render: 'text', text }}
+        asMarkdown
+        viewport={1280}
+        controls={null}
+      />,
     );
 
     expect(container.querySelector('b, img')).toBeNull();
@@ -40,7 +54,13 @@ describe('OutputPane', () => {
     const text = 'Spaced  out\n\n原因是磁盘写满，导致查询超时。';
 
     render(
-      <OutputPane side="A" pane={{ render: 'text', text }} asMarkdown={false} viewport={1280} />,
+      <OutputPane
+        side="A"
+        pane={{ render: 'text', text }}
+        asMarkdown={false}
+        viewport={1280}
+        controls={null}
+      />,
     );
 
     const pane = screen.getByRole('region', { name: 'Output A' });

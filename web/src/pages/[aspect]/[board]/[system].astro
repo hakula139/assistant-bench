@@ -3,8 +3,8 @@ import type { GetStaticPaths } from 'astro';
 
 import {
   CategoryTable,
+  DefectsTable,
   DistributionTable,
-  FlagsTable,
   HeadToHeadTable,
   RoundsTable,
 } from '@/components/boards/SystemTables';
@@ -193,12 +193,9 @@ const Preliminary = statusIcons.preliminary;
       </TableTwin>
     </Section>
 
-    <Section title="Flags">
-      <p class={note}>
-        Votes that flagged a problem in this system's output, counted against the losing side, or
-        both sides of a tie or a both-bad vote.
-      </p>
-      <FlagsTable standing={standing} />
+    <Section title="Issues">
+      <p class={note}>Votes that tagged this system's output with each issue.</p>
+      <DefectsTable standing={standing} />
     </Section>
 
     <Section title="Rounds">

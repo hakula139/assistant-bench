@@ -1,5 +1,6 @@
 import { ANCHOR_SCORE } from '@/lib/anchor';
 import { formatScore } from '@/lib/format';
+import type { Defect } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {
@@ -70,6 +71,30 @@ export const terms = {
     definition: "A trial's mean cost at list prices and its median time.",
   },
 } satisfies Record<string, Term>;
+
+/** The defects the rater can tag an output with, as the vote page and the system page name them. */
+export const defectTerms: Record<Defect, Term> = {
+  facts: {
+    term: 'Wrong facts',
+    definition: "Gets a fact wrong, or adds one the prompt doesn't give.",
+  },
+  punctuation: {
+    term: 'Punctuation',
+    definition: "Marks that don't suit the language or the style.",
+  },
+  tone: {
+    term: 'Wrong tone',
+    definition: 'Too formal, too casual, or wrong for its reader.',
+  },
+  script: {
+    term: 'Wrong script',
+    definition: 'Characters in another script, such as Traditional for Simplified.',
+  },
+  length: {
+    term: 'Too long',
+    definition: 'Says more than its reader needs.',
+  },
+};
 
 /** The anchor's definition in a round that cannot rank the reference, naming what it stands in for. */
 export function fallbackAnchor(referenceName: string): Term {

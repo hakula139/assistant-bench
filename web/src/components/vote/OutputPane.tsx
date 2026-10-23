@@ -1,5 +1,5 @@
 import { cn } from 'cn';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Markdown, PlainText } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
@@ -13,6 +13,8 @@ interface OutputPaneProps {
   asMarkdown: boolean;
   /** The width an HTML output lays out at, scaled down to fit the pane, in CSS pixels. */
   viewport: number;
+  /** Controls shown at the end of the title band, such as the output's Issues button. */
+  controls: ReactNode;
 }
 
 function FramedOutput({ url, viewport, side }: { url: string; viewport: number; side: string }) {
@@ -53,7 +55,7 @@ function FramedOutput({ url, viewport, side }: { url: string; viewport: number; 
 }
 
 /** One side of a pair, shown exactly as written unless the Markdown view is on. */
-export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps) {
+export function OutputPane({ side, pane, asMarkdown, viewport, controls }: OutputPaneProps) {
   return (
     <Card
       size="sm"
@@ -65,6 +67,7 @@ export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps
         <CardTitle role="heading" aria-level={2}>
           Output {side}
         </CardTitle>
+        <div className="ml-auto">{controls}</div>
       </div>
       {pane.render === 'html' ? (
         <CardContent className="min-h-0 flex-1 p-0">

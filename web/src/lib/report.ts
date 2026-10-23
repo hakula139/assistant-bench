@@ -2,15 +2,7 @@ import { z } from 'astro/zod';
 
 // ── Shared ──
 
-export const flags = ['meaning', 'punctuation', 'register', 'script', 'length'] as const;
-
-export const flagLabels: Record<Flag, string> = {
-  meaning: 'Meaning changed',
-  punctuation: 'Punctuation',
-  register: 'Register',
-  script: 'Wrong script',
-  length: 'Too long',
-};
+export const defects = ['facts', 'punctuation', 'tone', 'script', 'length'] as const;
 
 const interval = z.strictObject({
   lower: z.number(),
@@ -43,7 +35,7 @@ const standing = z.strictObject({
   p50_latency_sec: z.number().nullable(),
   output_tokens: distribution.nullable(),
   latency_sec: distribution.nullable(),
-  flags: z.partialRecord(z.enum(flags), z.int()),
+  defects: z.partialRecord(z.enum(defects), z.int()),
 });
 
 const headToHead = z.strictObject({
@@ -131,7 +123,7 @@ export const reportSchema = z.strictObject({
 });
 
 export type Report = z.infer<typeof reportSchema>;
-export type Flag = (typeof flags)[number];
+export type Defect = (typeof defects)[number];
 export type Interval = z.infer<typeof interval>;
 export type Distribution = z.infer<typeof distribution>;
 export type VotesResults = z.infer<typeof votesResults>;

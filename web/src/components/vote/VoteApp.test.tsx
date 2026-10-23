@@ -15,7 +15,7 @@ const FAMILY: FamilyView = {
 interface Cast {
   token: string;
   choice: string;
-  flags: string[];
+  defects: { a: string[]; b: string[] };
   note: string | null;
 }
 
@@ -114,7 +114,12 @@ function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
     undos: () => undos,
     // Votes the open pair in another tab, which retires it for this one.
     elsewhere: () => {
-      casts.push({ token: open as string, choice: 'tie', flags: [], note: null });
+      casts.push({
+        token: open as string,
+        choice: 'tie',
+        defects: { a: [], b: [] },
+        note: null,
+      });
       open = null;
       draw();
     },
@@ -155,7 +160,9 @@ describe('VoteApp', () => {
     await screen.findByText('Output A2');
     await user.keyboard('b');
 
-    expect(api.casts).toEqual([{ token: 't1', choice: 'a', flags: [], note: '第一行\n第二行' }]);
+    expect(api.casts).toEqual([
+      { token: 't1', choice: 'a', defects: { a: [], b: [] }, note: '第一行\n第二行' },
+    ]);
     expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
       'ariaChecked',
       'true',
@@ -359,16 +366,27 @@ describe('VoteApp', () => {
     expect(screen.getByRole('region', { name: 'Output A' })).not.toBe(firstPane);
   });
 
-  test('maps each digit to its flag and each flag button to its own flag', async () => {
+  test('tags issues on each output by digit or from its Issues button', async () => {
     const api = stubApi();
     const user = await startSession();
 
     await user.keyboard('2');
-    await user.click(screen.getByRole('button', { name: 'Register' }));
+    await user.keyboard('0');
+    const outputA = screen.getByRole('region', { name: 'Output A' });
+    const outputB = screen.getByRole('region', { name: 'Output B' });
+    expect(within(outputA).getByRole('button', { name: 'Issues 1' })).toBeDefined();
+    await user.click(within(outputB).getByRole('button', { name: 'Issues 1' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Wrong tone' }));
+    await user.keyboard('{Escape}');
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
+    await user.keyboard('b{Enter}');
+    await screen.findByText('Output A3');
 
-    expect(api.casts.map((cast) => cast.flags)).toEqual([['punctuation', 'register']]);
+    expect(api.casts.map((cast) => cast.defects)).toEqual([
+      { a: ['punctuation'], b: ['tone', 'length'] },
+      { a: [], b: [] },
+    ]);
   });
 
   test('leaves the note on Escape, so the next key is a shortcut again', async () => {
@@ -379,7 +397,7 @@ describe('VoteApp', () => {
     await user.keyboard('x{Escape}b{Enter}');
     await screen.findByText('Output A2');
 
-    expect(api.casts).toEqual([{ token: 't1', choice: 'b', flags: [], note: 'x' }]);
+    expect(api.casts).toEqual([{ token: 't1', choice: 'b', defects: { a: [], b: [] }, note: 'x' }]);
   });
 
   test('leaves Enter on a focused link or button outside the pair to that control', async () => {
