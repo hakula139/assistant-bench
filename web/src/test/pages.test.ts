@@ -9,7 +9,7 @@ import Header from '@/components/site/Header.astro';
 import { familyTitle } from '@/lib/aspects';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { defectTerms, terms } from '@/lib/glossary';
-import { defects, reportSchema } from '@/lib/report';
+import { reportSchema, type Defect } from '@/lib/report';
 import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
 import { REPOSITORY } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
@@ -531,6 +531,7 @@ describe('system page', () => {
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
+    const prose: Defect[] = ['facts', 'punctuation', 'tone', 'formulaic', 'length'];
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-mini',
@@ -541,7 +542,7 @@ describe('system page', () => {
       "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
     );
     expect(islandHints(html, 'DefectsTable')).toEqual(
-      defects.map((defect) => defectTerms[defect].term),
+      prose.map((defect) => defectTerms[defect].term),
     );
   });
 

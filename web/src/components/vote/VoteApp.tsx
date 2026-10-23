@@ -12,7 +12,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { DefectPicker, type DefectKeys } from '@/components/vote/DefectPicker';
+import { DefectPicker } from '@/components/vote/DefectPicker';
 import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
@@ -32,7 +32,7 @@ import {
 } from '@/lib/arena';
 import { familyTitle, groupByAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
-import { defects, type Defect } from '@/lib/report';
+import type { Defect } from '@/lib/report';
 
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
@@ -60,18 +60,23 @@ const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
 
 const UNTAGGED: TaggedDefects = { a: [], b: [] };
 
-/** The digits that tag each defect, the left half on output A and the right half on B. */
-const DEFECT_KEYS: Record<keyof TaggedDefects, DefectKeys> = {
+/**
+ * The digits that tag each of the family's defects in order, the left half on output A and the
+ * right half on B, which covers the five defects a family lists at most.
+ */
+const DEFECT_KEYS: Record<keyof TaggedDefects, readonly string[]> = {
   a: ['1', '2', '3', '4', '5'],
   b: ['6', '7', '8', '9', '0'],
 };
 
-/** The defect each digit toggles, on the side that owns it. */
-const KEYED_DEFECTS = new Map(
-  SIDES.flatMap(({ key }) =>
-    DEFECT_KEYS[key].map((digit, index) => [digit, { key, defect: defects[index] }] as const),
-  ),
-);
+/** The defect each digit toggles for a family's defects, on the side that owns it. */
+function keyedDefects(defects: readonly Defect[]) {
+  return new Map(
+    SIDES.flatMap(({ key }) =>
+      defects.map((defect, index) => [DEFECT_KEYS[key][index], { key, defect }] as const),
+    ),
+  );
+}
 
 const sessionKey = (family: string) => `bench-session:${family}`;
 
@@ -294,6 +299,7 @@ export function VoteApp() {
   const pairView = useRef<HTMLDivElement>(null);
 
   const pair = session?.pair ?? null;
+  const familyDefects = session?.family.defects ?? [];
   const hasFrames = pair !== null && (pair.a.render === 'html' || pair.b.render === 'html');
   const hasText = pair !== null && (pair.a.render === 'text' || pair.b.render === 'text');
 
@@ -413,7 +419,7 @@ export function VoteApp() {
   const toggleDefect = (side: keyof TaggedDefects, defect: Defect) => {
     setTagged((current) => ({
       ...current,
-      [side]: defects.filter((item) => (item === defect) !== current[side].includes(item)),
+      [side]: familyDefects.filter((item) => (item === defect) !== current[side].includes(item)),
     }));
   };
 
@@ -455,7 +461,7 @@ export function VoteApp() {
       return;
     }
     const picked = CHOICES.find((item) => item.key === key);
-    const keyed = KEYED_DEFECTS.get(event.key);
+    const keyed = keyedDefects(familyDefects).get(event.key);
     if (picked) {
       setChoice(picked.value);
     } else if (keyed !== undefined) {
@@ -580,11 +586,11 @@ export function VoteApp() {
       <div
         className={cn(
           'grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]',
-          !hasFrames &&
+          hasText &&
             'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-y-0 xl:*:row-span-2 xl:*:grid xl:*:grid-rows-subgrid',
         )}
       >
-        <Brief pair={pair} status={status} stacked={hasFrames} />
+        <Brief pair={pair} status={status} stacked={!hasText} />
         {SIDES.map(({ side, key }) => (
           <OutputPane
             key={`${key}-${pair.token}`}
@@ -593,14 +599,17 @@ export function VoteApp() {
             asMarkdown={asMarkdown}
             viewport={viewport}
             controls={
-              <DefectPicker
-                side={side}
-                tagged={tagged[key]}
-                keys={DEFECT_KEYS[key]}
-                onToggle={(defect) => {
-                  toggleDefect(key, defect);
-                }}
-              />
+              familyDefects.length > 0 && (
+                <DefectPicker
+                  side={side}
+                  defects={familyDefects}
+                  tagged={tagged[key]}
+                  keys={DEFECT_KEYS[key]}
+                  onToggle={(defect) => {
+                    toggleDefect(key, defect);
+                  }}
+                />
+              )
             }
           />
         ))}

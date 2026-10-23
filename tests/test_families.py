@@ -15,7 +15,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
-from support import write_case_family, write_task_family
+from support import CODE_DEFECTS, write_case_family, write_task_family
 
 
 def write_family(
@@ -130,6 +130,8 @@ class TestLoadFamily:
                 display_name='Family f',
                 systems=['large', 'small'],
                 reference='large',
+                render='diff',
+                defects=list(CODE_DEFECTS),
                 samples=1,
                 harness='terminus-2',
                 max_turns=4,
@@ -265,15 +267,15 @@ class TestLoadFamily:
                 reference = "large"
                 harness = "terminus-2"
                 max_turns = 10
-                render = "text"
+                render = "diff"
                 language = "en"
 
                 [gates]
                 """,
                 False,
                 True,
-                "Family `f`: a `tasks/` family's tests are its only gate and its "
-                'outputs are diffs, so remove `render`, `language`, `gates`.',
+                "Family `f`: a `tasks/` family's tests are its only gate, so remove "
+                '`language`, `gates`.',
                 id='tasks-with-case-gates',
             ),
             pytest.param(
@@ -283,7 +285,94 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
+                max_output_tokens = 300
                 reference = "large"
+                harness = "terminus-2"
+                max_turns = 10
+                """,
+                False,
+                True,
+                'Family `f`: a `tasks/` family scored by `votes` yields diffs, so set '
+                '`render = "diff"`.',
+                id='tasks-without-diffs',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                render = "diff"
+                """,
+                True,
+                False,
+                'Family `f`: a `cases.jsonl` family yields replies, so set `render` '
+                'to `"text"` or `"html"`.',
+                id='cases-with-diffs',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                defects = ["tone", "scope", "tone"]
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects` repeats `tone`.',
+                id='repeated-defects',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                defects = [
+                  "facts", "punctuation", "tone", "formulaic", "length", "scope"
+                ]
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects`: List should have at most 5 '
+                'items after validation, not 6.',
+                id='too-many-defects',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                defects = ["typos"]
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects.0`: Input should be',
+                id='unknown-defect',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
+                render = "diff"
                 harness = "terminus-2"
                 """,
                 False,

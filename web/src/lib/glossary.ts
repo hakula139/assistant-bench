@@ -126,6 +126,26 @@ export const defectTerms: Record<Defect, Term> = {
     term: 'Too long',
     definition: 'Says more than its reader needs.',
   },
+  scope: {
+    term: 'Off-scope',
+    definition: "Changes what the request didn't ask for, or leaves stray files.",
+  },
+  conventions: {
+    term: 'Conventions',
+    definition: "Ignores the repository's style, layout, or AGENTS.md.",
+  },
+  complexity: {
+    term: 'Overbuilt',
+    definition: 'More code, abstraction, or configuration than the change needs.',
+  },
+  testing: {
+    term: 'Weak tests',
+    definition: "Its tests miss the change's cases or pin its implementation.",
+  },
+  clarity: {
+    term: 'Hard to read',
+    definition: 'Unclear names, comments, or control flow.',
+  },
 };
 
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */

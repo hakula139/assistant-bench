@@ -7,24 +7,21 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Kbd } from '@/components/ui/kbd';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { defectTerms } from '@/lib/glossary';
-import { defects, type Defect } from '@/lib/report';
-
-type KeysFor<T extends readonly unknown[]> = { readonly [K in keyof T]: string };
-
-/** The key that toggles each defect, in `defects` order. */
-export type DefectKeys = KeysFor<typeof defects>;
+import type { Defect } from '@/lib/report';
 
 interface DefectPickerProps {
   side: 'A' | 'B';
-  /** The defects tagged on this output, in `defects` order. */
+  /** The family's defects, in its order. */
+  defects: readonly Defect[];
+  /** The defects tagged on this output. */
   tagged: readonly Defect[];
   /** The key that toggles each defect on this output, in `defects` order. */
-  keys: DefectKeys;
+  keys: readonly string[];
   onToggle: (defect: Defect) => void;
 }
 
 /** One output's Issues button and the issues it can be tagged with, each with what it means. */
-export function DefectPicker({ side, tagged, keys, onToggle }: DefectPickerProps) {
+export function DefectPicker({ side, defects, tagged, keys, onToggle }: DefectPickerProps) {
   const id = useId();
   return (
     <Popover>

@@ -41,7 +41,6 @@ from harbor.trial.regrade import local_task_name
 
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import (
-    DEFECTS,
     SWAPPED,
     Ballot,
     Choice,
@@ -51,7 +50,7 @@ from assistant_bench.arena.store import (
     VoteStore,
 )
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import Gate, TaskTestsSettings
+from assistant_bench.families import Defect, Gate, TaskTestsSettings
 from assistant_bench.harnesses.endpoint import BASE_URL_VAR, HEADERS_VAR, KEY_FILE_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
@@ -68,6 +67,21 @@ REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
 # ── Families ──
 
+
+PROSE_DEFECTS: tuple[Defect, ...] = (
+    'facts',
+    'punctuation',
+    'tone',
+    'formulaic',
+    'length',
+)
+CODE_DEFECTS: tuple[Defect, ...] = (
+    'scope',
+    'conventions',
+    'complexity',
+    'testing',
+    'clarity',
+)
 
 TASK_SETTINGS = TaskTestsSettings(
     scorer='tests',
@@ -106,8 +120,8 @@ def write_task_family(
 ) -> None:
     """Write a task family in the `smoke` category, copying the echo task per ID.
 
-    A family that lists systems is scored by votes and runs them as terminus-2,
-    and one without is scored by tests.
+    A family that lists systems is scored by votes, tagged with the code
+    defects, and runs them as terminus-2, and one without is scored by tests.
     """
     directory = families_dir / name
     (directory / 'tasks').mkdir(parents=True)
@@ -116,6 +130,8 @@ def write_task_family(
         scorer = "votes"
         systems = {json.dumps(list(systems))}
         reference = "{systems[0]}"
+        render = "diff"
+        defects = {json.dumps(list(CODE_DEFECTS))}
         harness = "terminus-2"
         max_turns = 4
         max_output_tokens = 64
@@ -506,6 +522,7 @@ def write_votes_family(
             categories = {json.dumps(sorted(set(categories.values())))}
             reference = "{systems[0]}"
             render = "{render}"
+            defects = {json.dumps(list(PROSE_DEFECTS))}
             """
         )
     )
@@ -719,7 +736,7 @@ def _simulated_vote(
     else:
         choice = 'a' if rng.random() < 1 / (1 + np.exp(-gap)) else 'b'
     tagged = (
-        frozenset({DEFECTS[rng.integers(len(DEFECTS))]})
+        frozenset({PROSE_DEFECTS[rng.integers(len(PROSE_DEFECTS))]})
         if rng.random() < 0.2
         else frozenset()
     )

@@ -1,7 +1,7 @@
 import { z } from 'astro/zod';
 
 import { aspectIds } from '@/lib/aspects';
-import type { Defect } from '@/lib/report';
+import { defects, type Defect } from '@/lib/report';
 
 // The vote page's policy forbids eval, which Zod otherwise probes for to compile its parsers.
 z.config({ jitless: true });
@@ -13,6 +13,7 @@ export type Choice = 'a' | 'b' | 'tie' | 'both_bad';
 const pane = z.discriminatedUnion('render', [
   z.object({ render: z.literal('text'), text: z.string() }),
   z.object({ render: z.literal('html'), url: z.url() }),
+  z.object({ render: z.literal('diff'), text: z.string() }),
 ]);
 
 const pairView = z.object({
@@ -27,6 +28,7 @@ const familyView = z.object({
   name: z.string(),
   aspect: z.enum(aspectIds).nullable(),
   display_name: z.string(),
+  defects: z.array(z.enum(defects)),
 });
 
 const sessionView = z.object({

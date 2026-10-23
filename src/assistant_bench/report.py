@@ -18,15 +18,14 @@ from zhon import hanzi
 
 from assistant_bench.arena.resolution import MatchedVote, reconcile, settled
 from assistant_bench.arena.store import (
-    DEFECTS,
     LEFT_SCORE,
     SWAPPED,
     Choice,
-    Defect,
     Vote,
     VoteStore,
 )
 from assistant_bench.families import (
+    Defect,
     Family,
     TaskTestsSettings,
     VotesSettings,
@@ -72,8 +71,11 @@ class Standing(_Model):
 
     `rank` orders the scores, while `best_rank` and `worst_rank` span the ranks
     its interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`
-    decisive votes. `defects` counts the votes that tagged this system's output
-    with each defect, whichever side won.
+    decisive votes. `outputs` counts the outputs that finished without an
+    error, while `gate_failure_rate` covers every output with a verdict,
+    including a task's solution whose agent errored but whose tests still ran.
+    `defects` counts the votes that tagged this system's output with each of
+    the family's defects, in the family's order, whichever side won.
     """
 
     system: str
@@ -161,8 +163,8 @@ class VotesResults(_Model):
     counts the sessions that hold a counted vote. `reference` is the system the
     family names to anchor the board, while `anchor` is the system the round
     actually fixed at `ranking.ANCHOR`, which is the most-voted system when the
-    reference does not rank. `unranked` lists the voted systems with current
-    outputs that no comparison connects to the anchor, or that so many resamples
+    reference does not rank. `unranked` lists the systems with current outputs
+    that no comparison connects to the anchor, or that so many resamples
     leave unconnected that their interval is unbounded. `position` is the left
     pane's advantage, and `length` the score change per standard deviation of the
     relative length difference, both in score points, where `length` is absent
@@ -304,9 +306,10 @@ def _votes_results(
 ) -> VotesResults:
     """Fit the votes and settled results on the current cases' `outputs`.
 
-    `categories` maps each current case to its category. The systems with
-    recorded votes enter the board, through the votes that `reconcile` keeps and
-    the results their current outputs settle.
+    `categories` maps each current case to its category. Every system with
+    current outputs enters the board, through the votes that `reconcile` keeps
+    and the results its graded outputs settle, so a system that the gates or a
+    task's tests keep from every vote still ranks.
     """
     recorded = store.votes(family.name)
     if not recorded:
@@ -322,11 +325,7 @@ def _votes_results(
         )
     fingerprints = _fingerprints(outputs)
     voted = {system for vote in recorded for system in vote.systems}
-    comparisons = [m.vote.comparison() for m in votes] + [
-        comparison
-        for comparison in settled(outputs)
-        if {comparison.left, comparison.right} <= voted
-    ]
+    comparisons = [m.vote.comparison() for m in votes] + settled(outputs)
     everything = ranking.Matchups.build(comparisons)
     root = everything.root(settings.systems)
 
@@ -356,6 +355,7 @@ def _votes_results(
             (int(best[i]), int(worst[i])),
             [m.vote for m in votes if system in m.vote.systems],
             [output for output in outputs if output.system == system],
+            settings.defects,
         )
         for i, system in enumerate(ratings.systems)
     ]
@@ -370,7 +370,7 @@ def _votes_results(
         dropped_votes=len(recorded) - len(votes),
         sessions=len(sessions),
         standings=standings,
-        unranked=sorted((voted & fingerprints.keys()) - ranked),
+        unranked=sorted(fingerprints.keys() - ranked),
         head_to_head=_head_to_head([m.vote for m in votes], sorted(voted)),
         categories=_categories(
             categories, anchor, votes, comparisons, settings.systems
@@ -393,6 +393,7 @@ def _standing(
     spread: tuple[int, int],
     votes: list[Vote],
     outputs: list[Output],
+    listed: list[Defect],
 ) -> Standing:
     choices = Counter(vote.choice for vote in votes)
     defects = Counter(
@@ -403,6 +404,7 @@ def _standing(
         for defect in tagged
     )
     finished = [output for output in outputs if output.error is None]
+    graded = [output for output in outputs if output.gate_failures is not None]
     decisive = choices['a'] + choices['b']
     return Standing(
         system=system,
@@ -417,12 +419,12 @@ def _standing(
         decisive_votes=decisive,
         both_bad_rate=_share(vote.choice == 'both_bad' for vote in votes),
         outputs=len(finished),
-        gate_failure_rate=_share(bool(output.gate_failures) for output in finished),
+        gate_failure_rate=_share(bool(output.gate_failures) for output in graded),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
         latency_sec=_distribution(output.latency_sec for output in finished),
-        defects={defect: defects[defect] for defect in DEFECTS},
+        defects={defect: defects[defect] for defect in listed},
     )
 
 

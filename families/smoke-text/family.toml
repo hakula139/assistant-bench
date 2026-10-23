@@ -13,3 +13,4 @@ reference = "gemini-3.8-flash"
 samples = 1
 max_output_tokens = 512
 categories = ["message"]
+defects = ["facts", "punctuation", "tone", "formulaic", "length"]
