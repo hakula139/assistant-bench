@@ -1,7 +1,7 @@
 import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
 
-import { Markdown } from '@/components/vote/Markdown';
+import { Markdown, PlainText } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import type { Pane } from '@/lib/arena';
@@ -76,7 +76,7 @@ export function OutputPane({ side, pane, asMarkdown, viewport }: OutputPaneProps
         </CardContent>
       ) : (
         <CardContent className={cn(scroll, 'leading-relaxed whitespace-pre-wrap')}>
-          {pane.text}
+          <PlainText text={pane.text} />
         </CardContent>
       )}
     </Card>

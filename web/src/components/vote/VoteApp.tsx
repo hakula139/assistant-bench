@@ -1,6 +1,6 @@
 import { cn } from 'cn';
 import { ChevronDown, CircleCheck } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
 import { pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
@@ -131,6 +131,7 @@ const checklistHint = {
  * pair while `stacked`, and otherwise takes a column beside the outputs from `xl` up.
  */
 function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
+  const checklistTitle = useId();
   return (
     <Collapsible defaultOpen asChild>
       <Card
@@ -163,14 +164,17 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
           >
             <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
-              <section aria-label="What to check" className="space-y-1 rounded-lg bg-muted p-3">
-                <h2 className="text-sm font-medium text-muted-foreground">
+              <section
+                aria-labelledby={checklistTitle}
+                className="space-y-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
+              >
+                <h2 id={checklistTitle} className="text-sm font-medium text-muted-foreground">
                   <Hint term={checklistHint} />
                 </h2>
                 <ul className={cn(prose, 'text-muted-foreground')}>
                   {pair.checklist.map((item) => (
                     <li key={item} className="flex gap-2 ps-0">
-                      <CircleCheck className="mt-[0.4em] size-4 shrink-0" aria-hidden="true" />
+                      <CircleCheck className="h-lh w-4 shrink-0" aria-hidden="true" />
                       <InlineMarkdown text={item} />
                     </li>
                   ))}

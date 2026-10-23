@@ -156,7 +156,7 @@ describe('VoteApp', () => {
   test('renders the prompt as Markdown and sets the checklist apart under its own heading', async () => {
     stubApi(30, {
       instruction: 'Use only these facts:\n\n- The build passed.\n- `make test` ran.',
-      checklist: ['States both facts'],
+      checklist: ['Names `make test` and both facts'],
     });
 
     await startSession();
@@ -167,7 +167,9 @@ describe('VoteApp', () => {
       .filter((item) => !checklist.contains(item))
       .map((item) => item.textContent);
     expect(facts).toEqual(['The build passed.', 'make test ran.']);
-    expect(within(checklist).getByRole('listitem').textContent).toBe('States both facts');
+    const point = within(checklist).getByRole('listitem');
+    expect(point.textContent).toBe('Names make test and both facts');
+    expect(point.querySelector('code')?.textContent).toBe('make test');
   });
 
   test('opens the next pair at the top of the page in fresh output panes', async () => {
