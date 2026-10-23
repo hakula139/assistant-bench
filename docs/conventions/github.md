@@ -7,6 +7,7 @@ Repository rules for pull requests and issues beyond the general Git workflow.
 - Keep each line of work's open PRs in one stack with at most three unmerged, and land the bottom PR before opening another.
 - After a batch of related PRs merges, make one simplification pass over the merged changes.
 - Merge a PR once its review reports no remaining findings and the required checks pass, without per-PR approval.
+- Commit a PR's screenshots to one directory per PR on the orphan `docs/pr-screenshots` branch, link them by commit SHA, and show only synthetic data in them.
 
 ## Issues
 

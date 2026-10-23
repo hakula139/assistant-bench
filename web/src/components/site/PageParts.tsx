@@ -10,7 +10,7 @@ export const wideContainer = `${container} xl:max-w-7xl`;
 export const measure = 'max-w-measure';
 
 /** The gap between a page's blocks, and between a board's sections. */
-export const stack = 'space-y-10';
+export const stack = 'flex flex-col gap-10';
 
 /** The classes of a page's `<h1>`, except the home page's hero. */
 export const pageTitle = 'text-title leading-tight font-semibold text-balance';
@@ -48,7 +48,7 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="space-y-4">
+    <header className="flex flex-col gap-4">
       {context}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className={pageTitle}>{title}</h1>
@@ -71,7 +71,7 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 border-t pt-10">
+    <section className="flex flex-col gap-4 border-t pt-10">
       <h2 id={id} className={sectionTitle}>
         {title}
       </h2>
@@ -83,7 +83,7 @@ export function Section({
 /** A titled part of a `Section`, set off from the block above it without a rule. */
 export function Part({ title, id, children }: { title: string; id: string; children: ReactNode }) {
   return (
-    <section className="space-y-4 pt-4">
+    <section className="flex flex-col gap-4 pt-4">
       <h3 id={id} className={heading}>
         {title}
       </h3>

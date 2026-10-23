@@ -167,9 +167,9 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
     <Table className="table-fixed">
       <caption className="sr-only">{caption}</caption>
       <colgroup>
-        <col className="w-40 sm:w-48" />
+        <col className="w-2/5 sm:w-48" />
         <col />
-        <col className="w-20 sm:w-24" />
+        <col className="w-16 sm:w-24" />
       </colgroup>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
@@ -200,7 +200,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
           const unplaced = 'unplaced' in row ? row.unplaced : undefined;
           return (
             <TableRow key={row.system} title={summary(row)}>
-              <TableHead scope="row" className="h-auto font-normal whitespace-normal">
+              <TableHead scope="row" className="h-auto font-normal text-balance whitespace-normal">
                 {row.href ? <a href={row.href}>{row.name}</a> : row.name}
               </TableHead>
               <TableCell className={cn('relative p-0', large ? 'h-11' : 'h-9')}>

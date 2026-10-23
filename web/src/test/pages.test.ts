@@ -1,6 +1,7 @@
 import { getContainerRenderer } from '@astrojs/react/container-renderer';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { loadRenderers } from 'astro:container';
+import { JSDOM } from 'jsdom';
 import { describe, expect, test, vi } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
@@ -418,6 +419,57 @@ describe('system page', () => {
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
   });
+});
+
+const classesOf = (element: Element | null) => element?.getAttribute('class') ?? '';
+
+/** The blocks of a stack as they lay out, looking through the `display: contents` islands. */
+function blocks(stack: Element): Element[] {
+  return [...stack.children].flatMap((child) =>
+    child.localName === 'astro-island' ? [...child.children] : [child],
+  );
+}
+
+describe('stacks', () => {
+  test.each([
+    ['family page', FamilyPage],
+    ['system page', SystemPage],
+  ])('space the islands on the %s with gap', async (_, page) => {
+    const html = await render(page, { family: await family(), system: 'acme-pro', boards: [] });
+    const parents = [...new JSDOM(html).window.document.querySelectorAll('astro-island')].map(
+      (island) => classesOf(island.parentElement),
+    );
+    expect(parents).not.toEqual([]);
+
+    expect(
+      parents.filter((classes) => !/\bgap-/.test(classes) || /\bspace-[xy]-/.test(classes)),
+    ).toEqual([]);
+  });
+
+  test.each([
+    ['votes family page', FamilyPage, family],
+    ['tests family page', FamilyPage, () => Promise.resolve(testsFamily())],
+    ['system page', SystemPage, family],
+  ])(
+    'keep vertical margins off the blocks of each stack on the %s',
+    async (_, page, makeFamily) => {
+      const html = await render(page, {
+        family: await makeFamily(),
+        system: 'acme-pro',
+        boards: [],
+      });
+      const stacks = [
+        ...new JSDOM(html).window.document.querySelectorAll('.flex-col[class*="gap-"]'),
+      ];
+      expect(stacks).not.toEqual([]);
+
+      const margined = stacks
+        .flatMap(blocks)
+        .map(classesOf)
+        .filter((classes) => /(^|[\s:])-?m[tby]-/.test(classes));
+      expect(margined).toEqual([]);
+    },
+  );
 });
 
 /** The `[href, label, aria-current]` of each link in the nav that `label` names. */

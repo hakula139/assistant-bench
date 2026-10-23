@@ -21,8 +21,8 @@ export function TestsBoard({ rounds, names }: TestsBoardProps) {
   const { round, results } = rounds[rounds.length - 1];
   const standings = results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate);
   return (
-    <>
-      <p className="mb-4 text-sm text-muted-foreground">Round {round}</p>
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">Round {round}</p>
       <Table>
         <TableHeader>
           <TableRow>
@@ -47,6 +47,6 @@ export function TestsBoard({ rounds, names }: TestsBoardProps) {
           ))}
         </TableBody>
       </Table>
-    </>
+    </div>
   );
 }
