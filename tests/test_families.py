@@ -44,24 +44,22 @@ def write_task(
     category: str | None = 'message',
     source: str | None = 'synthetic',
     instruction: str | None = 'Hi.',
+    task_name: bool = True,
     task_toml: bool = True,
 ) -> None:
-    """Write a task directory whose metadata fields the caller may leave out."""
+    """Write a task directory whose fields the caller may leave out."""
     directory.mkdir(parents=True)
     metadata = {
         key: value
         for key, value in (('category', category), ('source', source))
         if value is not None
     }
+    task = {'version': '1.0.0'}
+    if task_name:
+        task['name'] = name
     if task_toml:
         (directory / 'task.toml').write_text(
-            tomli_w.dumps(
-                {
-                    'schema_version': '1.4',
-                    'task': {'name': name, 'version': '1.0.0'},
-                    'metadata': metadata,
-                }
-            )
+            tomli_w.dumps({'schema_version': '1.4', 'task': task, 'metadata': metadata})
         )
     if instruction is not None:
         (directory / 'instruction.md').write_text(instruction)
@@ -501,23 +499,32 @@ class TestLoadCases:
                 id='name-apart-from-its-directory',
             ),
             pytest.param(
+                {'task_name': False},
+                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
+                'for _TaskManifest\ntask.name',
+                id='no-name',
+            ),
+            pytest.param(
                 {'category': None},
-                "family 'f': tasks/a/task.toml sets no [metadata] category",
+                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
+                'for _TaskManifest\nmetadata.category',
                 id='no-category',
             ),
             pytest.param(
                 {'source': None},
-                "family 'f': tasks/a/task.toml sets no [metadata] source",
+                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
+                'for _TaskManifest\nmetadata.source',
                 id='no-source',
             ),
             pytest.param(
                 {'source': 'private'},
-                "family 'f': tasks/a/task.toml is not a valid case:",
+                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
+                'for _TaskManifest\nmetadata.source',
                 id='unknown-source',
             ),
             pytest.param(
                 {'category': 'other'},
-                "family 'f': case 'a' at tasks/a/task.toml has category 'other', "
+                "family 'f': case 'a' at tasks/a has category 'other', "
                 'which categories does not list',
                 id='unlisted-category',
             ),
@@ -533,6 +540,60 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value).startswith(message)
+
+    @pytest.mark.parametrize(
+        ('text', 'message'),
+        [
+            pytest.param(
+                '[task',
+                "family 'f': tasks/a/task.toml is not valid TOML:",
+                id='malformed-toml',
+            ),
+            pytest.param(
+                """\
+                [task]
+                name = "f/a"
+                version = "1.0.0"
+                metadata = "category source"
+                """,
+                "family 'f': tasks/a/task.toml is not valid:",
+                id='metadata-as-a-string',
+            ),
+            pytest.param(
+                """\
+                task = "f/a"
+
+                [metadata]
+                category = "message"
+                source = "synthetic"
+                """,
+                "family 'f': tasks/a/task.toml is not valid:",
+                id='task-as-a-string',
+            ),
+        ],
+    )
+    def test_rejects_a_task_toml_that_does_not_parse(
+        self, families_dir: Path, text: str, message: str
+    ) -> None:
+        write_task_family(families_dir)
+        task = families_dir / 'f' / 'tasks' / 'a'
+        task.mkdir(parents=True)
+        (task / 'task.toml').write_text(textwrap.dedent(text))
+        (task / 'instruction.md').write_text('Hi.')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value).startswith(message)
+
+    def test_ignores_a_file_under_tasks(self, families_dir: Path) -> None:
+        write_task_family(families_dir)
+        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
+        (families_dir / 'f' / 'tasks' / 'notes.md').write_text('Notes.')
+
+        cases = load_cases(load_family('f'))
+
+        assert [case.id for case in cases] == ['a']
 
 
 class TestCaseTask:

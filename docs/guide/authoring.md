@@ -52,7 +52,7 @@ Each line of `cases.jsonl` is one case:
 
 ## Tasks
 
-Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Because Harbor runs scripts in the main container through bash, the image must include it. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
+Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Harbor runs the task's scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so the image must include bash. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
 A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes.
 
@@ -60,11 +60,16 @@ A task's directory name is its ID, unique across the family's committed and loca
 
 - `[task] version`, which Harbor compares with an earlier trial's lock
 - `[environment] network_mode = "no-network"`, `cpus`, and `memory_mb`
+- `no-network` in the agent and verifier phases, which `[agent] network_mode` and `[verifier] network_mode` may not reopen
 - `[verifier] environment_mode = "separate"`, which gives the verifier its own container
+- no `[verifier.environment]`, so the verifier uses the task's own image
+- no `[[steps]]`, whose per-step overrides the check does not prove
 - `[agent] timeout_sec`
 - `/app` under `[[artifacts]]`, which the verifier receives
 
 It then runs Harbor's oracle and nop agents three times on each task, and fails unless every oracle attempt earns reward 1 and every nop attempt earns 0, so the reference solution passes a task that the repository as committed fails.
+
+A task family scored by `votes` cannot pass `bench check` yet, since the bench reads the verifier's reward only for a family scored by `tests`.
 
 A local task is a directory under the data directory's `cases/<family>/`, which `bench check` reads beside the committed tasks. It carries `source = "held-out"` or `"transcript"`, as [Data](../conventions/data.md#data-classes) describes.
 

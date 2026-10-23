@@ -59,17 +59,23 @@ def check(
         tasks = [case_task(selected, case.id) for case in cases]
         _check_tasks(selected, tasks)
         outputs = jobs.read_trials(selected, _run(jobs.check_job(selected, tasks)), {})
-        problems = []
+        problems: list[str] = []
         for agent, reward, verdict in (
             ('oracle', 1, 'failed on'),
             ('nop', 0, 'did not fail'),
         ):
             attempts = [output for output in outputs if output.system == agent]
+            errored = sorted(
+                {(output.case, output.error) for output in attempts if output.error}
+            )
+            problems.extend(
+                f'the {agent} errored on {case} ({error})' for case, error in errored
+            )
             broken = sorted(
                 {
                     output.case
                     for output in attempts
-                    if output.error or output.reward != reward
+                    if not output.error and output.reward != reward
                 }
             )
             missing = sorted({task.name for task in tasks} - {o.case for o in attempts})

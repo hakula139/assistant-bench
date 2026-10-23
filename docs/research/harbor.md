@@ -6,7 +6,7 @@
 
 - **Job configs:** `JobConfig` with one `AgentConfig` per system, `n_attempts` for samples, `RetryConfig(max_retries=1)` because Harbor defaults to no retries, and a `concurrency_group` with `n_concurrent` per route.
 - **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Its `AgentContext` takes token counts and free-form `metadata`.
-- **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, for `bench check`.
+- **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, beside its `nop` agent, which does nothing, for `bench check`. A task's separate verifier receives its `/app` artifact, and `network_mode = "no-network"` applies to the agent and verifier phases, which `resolve_trial_network_plan` resolves from the task's baseline and phase overrides.
 - **Reruns:** `SourceJobConfig(action='diff')`, which reuses finished trials from earlier jobs.
 
 ## Quirks of the Pinned Release

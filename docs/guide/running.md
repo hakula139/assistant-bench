@@ -25,7 +25,7 @@ uv run bench check
 uv run bench check smoke-text
 ```
 
-`bench check` validates each named family, or every family when none is named. It validates `family.toml`, its systems, and each task's settings. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it runs Harbor's oracle and nop agents three times on every task, and fails unless each reference solution earns reward 1 every time and the repository as committed earns 0 every time, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it checks each task's settings, then runs Harbor's oracle and nop agents three times on every task, and fails unless each reference solution earns reward 1 every time and the repository as committed earns 0 every time, which needs Docker but no endpoint.
 
 ## Running a Family
 

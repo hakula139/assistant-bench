@@ -14,8 +14,9 @@ pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
 
 def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None:
     family = load_family('smoke')
+    tasks = [case_task(family, case.id) for case in load_cases(family)]
 
-    job_dir = jobs.run_job(jobs.check_job(family, [case_task(family, 'echo')]))
+    job_dir = jobs.run_job(jobs.check_job(family, tasks))
 
     outputs = jobs.read_trials(family, job_dir, {})
     assert Counter((o.system, o.error, o.reward) for o in outputs) == Counter(

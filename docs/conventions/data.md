@@ -28,7 +28,7 @@ Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leav
 - Commit only synthetic or public cases, along with fixtures built from generic names such as `acme/large` and `example.com`.
 - Commit reports only as `bench close` writes them, holding the aggregates that [Reports](../design/reports.md#what-is-published) lists.
 - Keep the endpoint's hostname, its operator's name, headers specific to it, internal registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Committed text calls it an OpenAI-compatible endpoint configured in `.env`.
-- `pyproject.toml` and `.npmrc` name the public registries, and `test_repository.py` fails when `uv.lock` or `pnpm-lock.yaml` names any other host.
+- `pyproject.toml` and `.npmrc` name the public registries, and `test_repository.py` fails when any lockfile or requirements file in the repository or under `families/` names any other host.
 
 ## Public Names
 

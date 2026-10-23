@@ -5,7 +5,7 @@ assistant-bench is a public benchmark in which every AI assistant system in a fa
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 
 ```bash
-uv run bench check                          # Validate every family, running Harbor's oracle on task families
+uv run bench check                          # Validate every family, running the oracle and nop on task families
 uv run bench run --system <name>            # Generate one system's missing trials on every family that lists it
 uv run bench serve                          # Collect every votes family's trials, then serve the vote page
 uv run bench close writing-zh               # Write a family's report to reports/<family>/<round>.json
@@ -52,7 +52,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases. As [Data](docs/conventions/data.md) describes, transcript-derived and held-out cases, their outputs, and Harbor jobs live in the data directory, and a test fails if a committed case file holds a private source.
 - Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of the repository, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
-- Keep the lockfiles on public registries, as a test fails if `uv.lock` or `pnpm-lock.yaml` names a host other than PyPI or npm.
+- Keep the lockfiles and requirements files on public registries, as a test fails if any lockfile or requirements file in the repository or under `families/` names a host other than PyPI or npm.
 - Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config, since Harbor writes each agent's `kwargs` and `env` into the job's `config.json`.
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix for a variant. Routes and channel IDs stay in `systems.toml` and the data directory.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.

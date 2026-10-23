@@ -15,8 +15,10 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
+from harbor.models.task.verifier_mode import resolve_task_verifier_mode
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
+from harbor.trial.network_policy import resolve_trial_network_plan
 from pydantic import ValidationError
 
 from assistant_bench.catalog import System
@@ -28,12 +30,13 @@ from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
     case_task,
+    task_location,
     tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
 
@@ -192,7 +195,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
     """
     problems = []
     for task in tasks:
-        location = f'{_task_location(family, task)}/task.toml'
+        location = f'{task_location(family, task)}/task.toml'
         try:
             config = _task_config(task)
         except ValidationError as error:
@@ -207,13 +210,34 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
     problems = []
     if config.task is None or config.task.version is None:
         problems.append(f'{location}: set [task] version')
-    if config.environment.network_mode is not task_config.NetworkMode.NO_NETWORK:
-        problems.append(f'{location}: set [environment] network_mode = "no-network"')
     if (
         config.verifier.environment_mode
         is not task_config.VerifierEnvironmentMode.SEPARATE
     ):
         problems.append(f'{location}: set [verifier] environment_mode = "separate"')
+    if config.verifier.environment is not None:
+        problems.append(
+            f'{location}: do not set [verifier.environment], since the verifier '
+            "uses the task's environment"
+        )
+    if config.steps:
+        problems.append(
+            f'{location}: do not set [[steps]], whose overrides the check cannot prove'
+        )
+    if config.verifier.environment is None and not config.steps:
+        plan = resolve_trial_network_plan(
+            config,
+            trial_config.AgentConfig(),
+            trial_config.EnvironmentConfig(),
+            None,
+            verifier_mode=resolve_task_verifier_mode(config),
+        )
+        for phase, policy in (
+            ('agent', plan.agent_phase),
+            ('verifier', plan.verifier_phase),
+        ):
+            if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
+                problems.append(f'{location}: the {phase} phase needs no-network')
     if not any(
         (artifact if isinstance(artifact, str) else artifact.source) == '/app'
         for artifact in config.artifacts
@@ -225,12 +249,6 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
     if config.agent.timeout_sec is None:
         problems.append(f'{location}: set [agent] timeout_sec')
     return problems
-
-
-def _task_location(family: Family, task: Path) -> str:
-    if task.parent == FAMILIES_DIR / family.name / 'tasks':
-        return f'tasks/{task.name}'
-    return f'cases/{family.name}/{task.name}'
 
 
 def check_job(family: Family, tasks: list[Path]) -> JobConfig:

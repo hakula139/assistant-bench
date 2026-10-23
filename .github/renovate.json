@@ -1,8 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>hakula139/nixos-config//.github/renovate-preset"],
-  "ignorePaths": ["families/*/tasks/**"],
   "packageRules": [
+    {
+      "description": "A task image is part of the task's content, which needs a version bump Renovate cannot make",
+      "matchFileNames": ["families/*/tasks/**"],
+      "enabled": false
+    },
     {
       "description": "typescript-eslint and @astrojs/check do not yet accept TypeScript 7",
       "matchPackageNames": ["typescript"],

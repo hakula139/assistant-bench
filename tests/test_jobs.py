@@ -29,7 +29,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses.generate import GenerateOptions
 from assistant_bench.outputs import Output
-from assistant_bench.paths import FAMILIES_DIR, REPO_ROOT
+from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_trial
 
 
@@ -268,37 +268,23 @@ class TestCaseJob:
         ]
 
 
-class TestCheckJob:
-    def test_checks_the_committed_tasks_with_the_oracle_and_the_nop(
-        self, data_dir: Path
-    ) -> None:
-        job = jobs.check_job(
-            load_family('smoke'), [REPO_ROOT / 'families' / 'smoke' / 'tasks' / 'echo']
-        )
-
-        assert [(agent.name, agent.import_path) for agent in job.agents] == [
-            ('oracle', None),
-            ('nop', None),
-        ]
-        assert job.n_attempts == jobs.CHECK_ATTEMPTS == 3
-        assert [t.path for t in job.tasks] == [
-            REPO_ROOT / 'families' / 'smoke' / 'tasks' / 'echo'
-        ]
-        assert not job.verifier.disable
-        assert job.source_jobs == []
-        assert job.jobs_dir == data_dir / 'checks' / 'smoke'
-
-
-def broken_smoke_task(
-    families_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    path: tuple[str, ...],
-    value: Any,
-) -> tuple[Family, list[Path]]:
-    """Copy the smoke family and set or remove one setting of its echo task."""
+def smoke_family(families_dir: Path, *task_ids: str) -> tuple[Family, list[Path]]:
+    """Copy the smoke family, adding copies of its echo task under other IDs."""
     shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
-    monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
-    config_path = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
+    for task_id in task_ids:
+        if task_id == 'echo':
+            continue
+        target = families_dir / 'smoke' / 'tasks' / task_id
+        shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
+        config = target / 'task.toml'
+        config.write_text(config.read_text().replace('smoke/echo', f'smoke/{task_id}'))
+    family = load_family('smoke')
+    return family, [case_task(family, task_id) for task_id in task_ids]
+
+
+def break_setting(task: Path, path: tuple[str, ...], value: Any) -> None:
+    """Set or remove one setting in a task's `task.toml`."""
+    config_path = task / 'task.toml'
     config = tomllib.loads(config_path.read_text())
     target = config
     for key in path[:-1]:
@@ -308,8 +294,6 @@ def broken_smoke_task(
     else:
         target[path[-1]] = value
     config_path.write_text(tomli_w.dumps(config))
-    family = load_family('smoke')
-    return family, [case_task(family, 'echo')]
 
 
 class TestCheckTasks:
@@ -325,22 +309,58 @@ class TestCheckTasks:
                 ('task', 'version'), None, 'set [task] version', id='no-version'
             ),
             pytest.param(
-                ('environment', 'network_mode'),
+                ('agent', 'network_mode'),
                 'public',
-                'set [environment] network_mode = "no-network"',
-                id='open-network',
+                'the agent phase needs no-network',
+                id='open-agent-network',
+            ),
+            pytest.param(
+                ('verifier', 'network_mode'),
+                'public',
+                'the verifier phase needs no-network',
+                id='open-verifier-network',
+            ),
+            pytest.param(
+                ('environment', 'network_mode'),
+                'allowlist',
+                'the agent phase needs no-network',
+                id='allowlist-environment',
+            ),
+            pytest.param(
+                ('verifier', 'environment_mode'),
+                'shared',
+                'set [verifier] environment_mode = "separate"',
+                id='explicit-shared-verifier',
             ),
             pytest.param(
                 ('verifier', 'environment_mode'),
                 None,
                 'set [verifier] environment_mode = "separate"',
-                id='shared-verifier',
+                id='unset-verifier-mode',
+            ),
+            pytest.param(
+                ('verifier', 'environment'),
+                {'cpus': 1},
+                'do not set [verifier.environment]',
+                id='verifier-environment',
+            ),
+            pytest.param(
+                ('steps',),
+                [{'name': 'one'}],
+                'do not set [[steps]]',
+                id='steps',
             ),
             pytest.param(
                 ('artifacts',),
                 None,
                 'list "/app" under [[artifacts]]',
                 id='no-artifact',
+            ),
+            pytest.param(
+                ('artifacts',),
+                ['/logs/x'],
+                'list "/app" under [[artifacts]]',
+                id='artifact-outside-app',
             ),
             pytest.param(
                 ('environment', 'cpus'), None, 'set [environment] cpus', id='no-cpus'
@@ -362,17 +382,32 @@ class TestCheckTasks:
     def test_rejects_a_task_that_breaks_a_rule(
         self,
         families_dir: Path,
-        monkeypatch: pytest.MonkeyPatch,
         path: tuple[str, ...],
         value: Any,
         message: str,
     ) -> None:
-        family, tasks = broken_smoke_task(families_dir, monkeypatch, path, value)
+        family, tasks = smoke_family(families_dir, 'echo')
+        break_setting(tasks[0], path, value)
 
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
         assert f'tasks/echo/task.toml: {message}' in str(error.value)
+
+    def test_accepts_a_string_artifact(self, families_dir: Path) -> None:
+        family, tasks = smoke_family(families_dir, 'echo')
+        break_setting(tasks[0], ('artifacts',), ['/app'])
+
+        jobs.check_tasks(family, tasks)
+
+    def test_names_a_problem_in_a_later_task(self, families_dir: Path) -> None:
+        family, tasks = smoke_family(families_dir, 'echo', 'again')
+        break_setting(tasks[1], ('environment', 'cpus'), None)
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_tasks(family, tasks)
+
+        assert 'tasks/again/task.toml: set [environment] cpus' in str(error.value)
 
     def test_names_a_local_task(self, data_dir: Path) -> None:
         task = data_dir / 'cases' / 'smoke' / 'echo'
@@ -388,16 +423,10 @@ class TestCheckTasks:
 
         assert 'cases/smoke/echo/task.toml: set [environment] cpus' in str(error.value)
 
-    def test_names_every_problem_of_a_task(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        family, tasks = broken_smoke_task(
-            families_dir, monkeypatch, ('environment', 'cpus'), None
-        )
-        config_path = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
-        config = tomllib.loads(config_path.read_text())
-        del config['environment']['memory_mb']
-        config_path.write_text(tomli_w.dumps(config))
+    def test_names_every_problem_of_a_task(self, families_dir: Path) -> None:
+        family, tasks = smoke_family(families_dir, 'echo')
+        break_setting(tasks[0], ('environment', 'cpus'), None)
+        break_setting(tasks[0], ('environment', 'memory_mb'), None)
 
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
@@ -406,16 +435,38 @@ class TestCheckTasks:
         assert 'set [environment] memory_mb' in str(error.value)
 
     def test_rejects_a_task_toml_that_fails_to_validate(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+        self, families_dir: Path
     ) -> None:
-        family, tasks = broken_smoke_task(
-            families_dir, monkeypatch, ('environment', 'cpus'), 'two'
-        )
+        family, tasks = smoke_family(families_dir, 'echo')
+        break_setting(tasks[0], ('environment', 'cpus'), 'two')
 
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
         assert 'tasks/echo/task.toml is not valid:' in str(error.value)
+
+
+class TestCheckJob:
+    def test_checks_the_committed_tasks_with_the_oracle_and_the_nop(
+        self, data_dir: Path
+    ) -> None:
+        earlier = data_dir / 'checks' / 'smoke' / 'job-1'
+        earlier.mkdir(parents=True)
+        (earlier / 'result.json').touch()
+        family = load_family('smoke')
+        task = case_task(family, 'echo')
+
+        job = jobs.check_job(family, [task])
+
+        assert [(agent.name, agent.import_path) for agent in job.agents] == [
+            ('oracle', None),
+            ('nop', None),
+        ]
+        assert job.n_attempts == jobs.CHECK_ATTEMPTS == 3
+        assert [t.path for t in job.tasks] == [task]
+        assert not job.verifier.disable
+        assert job.source_jobs == []
+        assert job.jobs_dir == data_dir / 'checks' / 'smoke'
 
 
 class TestHasJobs:

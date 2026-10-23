@@ -60,6 +60,37 @@ def write_cases_family(families_dir: Path, systems: str, name: str = 'f') -> Non
     (directory / 'cases.jsonl').write_text('')
 
 
+def write_task_family(families_dir: Path, *task_ids: str) -> None:
+    """Write family `f` with a copy of the smoke echo task per ID."""
+    directory = families_dir / 'f'
+    (directory / 'tasks').mkdir(parents=True)
+    (directory / 'family.toml').write_text(
+        textwrap.dedent(
+            """\
+            scorer = "tests"
+            display_name = "Family F"
+            samples = 1
+            categories = ["smoke"]
+            """
+        )
+    )
+    for task_id in task_ids:
+        target = directory / 'tasks' / task_id
+        shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
+        config = target / 'task.toml'
+        config.write_text(config.read_text().replace('smoke/echo', f'f/{task_id}'))
+
+
+def trials(
+    case: str, system: str, reward: float | None, *, error: str | None = None
+) -> list[Output]:
+    """Return one output per check attempt for a task and agent."""
+    return [
+        make_output(case=case, system=system, reward=reward, error=error)
+        for _ in range(jobs.CHECK_ATTEMPTS)
+    ]
+
+
 def write_removed_case(families_dir: Path, data_dir: Path) -> None:
     """Write a script-gated votes family whose trial ran a case that is then removed."""
     write_votes_family(
@@ -135,141 +166,159 @@ class TestCheck:
         assert message == 'f: 0 valid cases\n'
 
     @pytest.mark.parametrize(
-        ('attempts', 'exit_code', 'message'),
+        ('tasks', 'outputs', 'exit_code', 'message'),
         [
             pytest.param(
-                {'oracle': [1.0, 1.0, 1.0], 'nop': [0.0, 0.0, 0.0]},
+                ('a',),
+                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
                 0,
-                'smoke: the oracle passed every task and the nop failed every task\n',
+                'f: the oracle passed every task and the nop failed every task\n',
                 id='passed',
             ),
             pytest.param(
-                {'oracle': [0.0, 0.0, 0.0], 'nop': [0.0, 0.0, 0.0]},
+                ('a',),
+                [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
                 1,
-                'smoke: the oracle failed on echo\n',
+                'f: the oracle failed on a\n',
                 id='oracle-failed',
             ),
             pytest.param(
-                {'oracle': [], 'nop': [0.0, 0.0, 0.0]},
+                ('a',),
+                [*trials('a', 'nop', 0.0)],
                 1,
-                'smoke: the oracle left no trial of echo\n',
+                'f: the oracle left no trial of a\n',
                 id='oracle-left-no-trial',
             ),
             pytest.param(
-                {'oracle': [1.0, 1.0, 1.0], 'nop': [1.0, 0.0, 0.0]},
+                ('a',),
+                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 1.0)],
                 1,
-                'smoke: the nop did not fail echo\n',
+                'f: the nop did not fail a\n',
                 id='nop-passed',
             ),
             pytest.param(
-                {'oracle': [1.0, 1.0, 1.0], 'nop': []},
+                ('a',),
+                [*trials('a', 'oracle', 1.0)],
                 1,
-                'smoke: the nop left no trial of echo\n',
+                'f: the nop left no trial of a\n',
                 id='nop-left-no-trial',
             ),
             pytest.param(
-                {},
+                ('a',),
+                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', None)],
                 1,
-                'smoke: the oracle left no trial of echo\n'
-                'smoke: the nop left no trial of echo\n',
+                'f: the nop did not fail a\n',
+                id='nop-without-a-verdict',
+            ),
+            pytest.param(
+                ('a',),
+                [],
+                1,
+                'f: the oracle left no trial of a\nf: the nop left no trial of a\n',
                 id='no-trials',
+            ),
+            pytest.param(
+                ('a',),
+                [
+                    *trials('a', 'oracle', 1.0, error='TimeoutError'),
+                    *trials('a', 'nop', 0.0),
+                ],
+                1,
+                'f: the oracle errored on a (TimeoutError)\n',
+                id='oracle-errored',
+            ),
+            pytest.param(
+                ('a',),
+                [
+                    *trials('a', 'oracle', 1.0),
+                    *trials('a', 'nop', 0.0, error='VerifierTimeoutError'),
+                ],
+                1,
+                'f: the nop errored on a (VerifierTimeoutError)\n',
+                id='nop-errored',
+            ),
+            pytest.param(
+                ('a', 'b'),
+                [
+                    *trials('a', 'oracle', 0.0),
+                    *trials('b', 'oracle', 0.0),
+                    *trials('a', 'nop', 0.0),
+                    *trials('b', 'nop', 0.0),
+                ],
+                1,
+                'f: the oracle failed on a, b\n',
+                id='both-tasks-failed',
+            ),
+            pytest.param(
+                ('a', 'b'),
+                [
+                    *trials('a', 'oracle', 0.0),
+                    *trials('a', 'nop', 0.0),
+                    *trials('b', 'nop', 0.0),
+                ],
+                1,
+                'f: the oracle failed on a\nf: the oracle left no trial of b\n',
+                id='failed-and-missing',
             ),
         ],
     )
     def test_runs_the_oracle_and_the_nop_on_task_directories(
         self,
+        families_dir: Path,
         submitted: list[JobConfig],
         monkeypatch: pytest.MonkeyPatch,
-        attempts: dict[str, list[float]],
+        tasks: tuple[str, ...],
+        outputs: list[Output],
         exit_code: int,
         message: str,
     ) -> None:
+        write_task_family(families_dir, *tasks)
         monkeypatch.setattr(
-            jobs,
-            'read_trials',
-            lambda family, job_dir, systems: [
-                make_output(case='echo', system=system, reward=reward)
-                for system, rewards in attempts.items()
-                for reward in rewards
-            ],
+            jobs, 'read_trials', lambda family, job_dir, systems: outputs
         )
 
-        result = runner.invoke(app, ['check', 'smoke'])
+        result = runner.invoke(app, ['check', 'f'])
 
         assert (result.exit_code, result.output) == (exit_code, message)
         (job,) = submitted
         assert [agent.name for agent in job.agents] == ['oracle', 'nop']
         assert job.n_attempts == jobs.CHECK_ATTEMPTS
+        assert [task.path.name for task in job.tasks if task.path] == list(tasks)
 
     @pytest.mark.parametrize(
-        'system', ['oracle', 'nop'], ids=['oracle-errored', 'nop-errored']
+        ('old', 'new', 'message'),
+        [
+            pytest.param(
+                'network_mode = "no-network"',
+                'network_mode = "public"',
+                'tasks/echo/task.toml: the agent phase needs no-network',
+                id='open-network',
+            ),
+            pytest.param(
+                'name = "smoke/echo"',
+                'name = "smoke/other"',
+                'family \'smoke\': set [task] name to "smoke/echo" in '
+                'tasks/echo/task.toml',
+                id='name-apart-from-its-directory',
+            ),
+        ],
     )
-    def test_fails_a_check_whose_trial_errored(
-        self,
-        submitted: list[JobConfig],
-        monkeypatch: pytest.MonkeyPatch,
-        system: str,
-    ) -> None:
-        monkeypatch.setattr(
-            jobs,
-            'read_trials',
-            lambda family, job_dir, systems: [
-                make_output(
-                    case='echo',
-                    system=system,
-                    reward=1.0 if system == 'oracle' else 0.0,
-                    error='TimeoutError',
-                )
-                for _ in range(jobs.CHECK_ATTEMPTS)
-            ],
-        )
-
-        result = runner.invoke(app, ['check', 'smoke'])
-
-        assert result.exit_code == 1
-        expected = 'failed on' if system == 'oracle' else 'did not fail'
-        assert f'smoke: the {system} {expected} echo' in result.output
-
-    def test_rejects_a_task_whose_settings_break_a_rule(
+    def test_rejects_a_task_that_breaks_a_rule(
         self,
         families_dir: Path,
         submitted: list[JobConfig],
-        monkeypatch: pytest.MonkeyPatch,
+        old: str,
+        new: str,
+        message: str,
     ) -> None:
         shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
         config = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
-        config.write_text(
-            config.read_text().replace(
-                'network_mode = "no-network"', 'network_mode = "public"'
-            )
-        )
-        monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
+        config.write_text(config.read_text().replace(old, new))
 
-        exit_code, message = invoke('check', 'smoke')
+        exit_code, output = invoke('check', 'smoke')
 
         assert exit_code == 2
-        assert (
-            'tasks/echo/task.toml: set [environment] network_mode = "no-network"'
-        ) in message
-        assert submitted == []
-
-    def test_rejects_a_task_named_apart_from_its_directory(
-        self,
-        families_dir: Path,
-        submitted: list[JobConfig],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
-        config = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
-        config.write_text(config.read_text().replace('smoke/echo', 'smoke/repeat'))
-        monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
-
-        exit_code, message = invoke('check', 'smoke')
-
-        assert exit_code == 2
-        assert (
-            'family \'smoke\': set [task] name to "smoke/echo" in tasks/echo/task.toml'
-        ) in message
+        assert message in output
         assert submitted == []
 
     def test_rejects_a_missing_family(self) -> None:
