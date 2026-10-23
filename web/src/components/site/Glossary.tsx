@@ -1,6 +1,6 @@
 import { cn } from 'cn';
 
-import { statusIcons, type Status } from '@/components/site/Term';
+import { KeptTail, statusIcons, type Status } from '@/components/site/Term';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -50,7 +50,9 @@ export function Glossary({ heading, entries }: GlossaryProps) {
                   {term}
                 </span>
               </TableCell>
-              <TableCell className={cn(wrapping, 'text-pretty')}>{definition}</TableCell>
+              <TableCell className={cn(wrapping, 'text-pretty')}>
+                <KeptTail text={definition} />
+              </TableCell>
             </TableRow>
           );
         })}

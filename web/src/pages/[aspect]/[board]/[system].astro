@@ -13,8 +13,7 @@ import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { PageHeader, Section, Stat, note, stack, statList } from '@/components/site/PageParts';
-import { statusIcons } from '@/components/site/Term';
-import { Badge } from '@/components/ui/badge';
+import { StatusMark } from '@/components/site/Term';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -26,7 +25,6 @@ import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
-import { terms } from '@/lib/glossary';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
@@ -88,7 +86,12 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
 const length = results.length;
-const Preliminary = statusIcons.preliminary;
+const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
+  round,
+  reference,
+  anchor,
+  standing,
+}));
 ---
 
 <Base title={`${name(system)} on ${family.title}`} section="leaderboards">
@@ -109,12 +112,7 @@ const Preliminary = statusIcons.preliminary;
       </Breadcrumb>
     </Fragment>
     <Fragment slot="status">
-      {standing.preliminary && (
-        <Badge variant="status" title={terms.preliminary.definition}>
-          <Preliminary aria-hidden="true" />
-          {terms.preliminary.term}
-        </Badge>
-      )}
+      {standing.preliminary && <StatusMark client:visible status="preliminary" />}
     </Fragment>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <dl class={statList}>
@@ -195,11 +193,11 @@ const Preliminary = statusIcons.preliminary;
 
     <Section title="Issues">
       <p class={note}>Votes that tagged this system's output with each issue.</p>
-      <DefectsTable standing={standing} />
+      <DefectsTable client:visible standing={standing} />
     </Section>
 
     <Section title="Rounds">
-      <RoundsTable client:visible appearances={appearances} names={names} />
+      <RoundsTable client:visible appearances={roundRows} names={names} />
     </Section>
   </div>
 </Base>

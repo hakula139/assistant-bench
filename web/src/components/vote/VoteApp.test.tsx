@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
 import type { FamilyView, SessionView } from '@/lib/arena';
+import { defectTerms } from '@/lib/glossary';
+import { defects } from '@/lib/report';
 
 const FAMILY: FamilyView = {
   name: 'fixture',
@@ -386,8 +388,16 @@ describe('VoteApp', () => {
     );
     const tone = await screen.findByRole('checkbox', { name: 'Wrong tone' });
     expect(tone.getAttribute('aria-keyshortcuts')).toBe('8');
+    expect(screen.getByText('its reader.').className).toBe('text-nowrap');
     await user.click(tone);
     expect(within(outputB).getByRole('button', { name: 'Issues 2' })).toBeDefined();
+    for (const defect of defects) {
+      const { term, definition } = defectTerms[defect];
+      expect(
+        screen.queryByRole('checkbox', { name: term, description: definition }),
+        defect,
+      ).not.toBeNull();
+    }
     await user.keyboard('{Escape}');
 
     await user.click(within(outputA).getByRole('button', { name: 'Issues 1' }));

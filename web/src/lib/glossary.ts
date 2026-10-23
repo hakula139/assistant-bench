@@ -88,7 +88,7 @@ export const defectTerms: Record<Defect, Term> = {
   },
   formulaic: {
     term: 'Formulaic',
-    definition: 'Templated, boilerplate prose, such as 公文腔 in Chinese.',
+    definition: 'Templated, boilerplate prose, such as Chinese 公文腔.',
   },
   length: {
     term: 'Too long',

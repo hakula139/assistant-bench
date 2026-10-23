@@ -131,7 +131,9 @@ describe('VotesBoard', () => {
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
 
-    expect(await screen.findByText(/reference Acme New, which is not ranked yet/)).toBeTruthy();
+    expect((await screen.findByRole('dialog', { name: 'Anchor' })).textContent).toContain(
+      'reference Acme New, which is not ranked yet',
+    );
   });
 
   test('names the unranked systems after the table, sorted by display name', async () => {

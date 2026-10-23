@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
-import { markdown, splitTail, TAIL_CLASS } from '@/lib/markdown';
+import { KeptTail } from '@/components/site/Term';
+import { markdown } from '@/lib/markdown';
 
 /** The typography of rendered Markdown, which also styles inline code in the checklist. */
 export const prose =
@@ -18,14 +19,10 @@ export function InlineMarkdown({ text }: { text: string }) {
 
 /** Text as written, inside preformatted white space, with the end of each line kept together. */
 export function PlainText({ text }: { text: string }) {
-  return text.split('\n').map((line, index) => {
-    const [head, tail] = splitTail(line);
-    return (
-      <Fragment key={index}>
-        {index > 0 && '\n'}
-        {head}
-        {tail !== '' && <span className={TAIL_CLASS}>{tail}</span>}
-      </Fragment>
-    );
-  });
+  return text.split('\n').map((line, index) => (
+    <Fragment key={index}>
+      {index > 0 && '\n'}
+      <KeptTail text={line} />
+    </Fragment>
+  ));
 }

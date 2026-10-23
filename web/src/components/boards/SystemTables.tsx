@@ -1,5 +1,5 @@
 import type { ForestPlotRow } from '@/components/charts/ForestPlot';
-import { StatusMark } from '@/components/site/Term';
+import { Hint, StatusMark } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -135,7 +135,9 @@ export function DefectsTable({ standing }: { standing: Standing }) {
           const count = standing.defects[defect] ?? 0;
           return (
             <TableRow key={defect}>
-              <TableCell>{defectTerms[defect].term}</TableCell>
+              <TableCell>
+                <Hint term={defectTerms[defect]} />
+              </TableCell>
               <TableCell numeric>{count}</TableCell>
               <TableCell numeric>
                 {formatPercent(standing.votes === 0 ? null : count / standing.votes)}
