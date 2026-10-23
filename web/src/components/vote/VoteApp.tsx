@@ -46,6 +46,12 @@ const CHOICES: { value: Choice; label: string; key: string; className?: string }
   { value: 'b', label: 'B is better', key: 'b' },
 ];
 
+/** The two panes, with the tagged state and keys each one reads. */
+const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
+  { side: 'A', key: 'a' },
+  { side: 'B', key: 'b' },
+];
+
 const UNTAGGED: TaggedDefects = { a: [], b: [] };
 
 /** The digits that tag each defect, the left half on output A and the right half on B. */
@@ -53,6 +59,13 @@ const DEFECT_KEYS: Record<keyof TaggedDefects, DefectKeys> = {
   a: ['1', '2', '3', '4', '5'],
   b: ['6', '7', '8', '9', '0'],
 };
+
+/** The defect each digit toggles, on the side that owns it. */
+const KEYED_DEFECTS = new Map(
+  SIDES.flatMap(({ key }) =>
+    DEFECT_KEYS[key].map((digit, index) => [digit, { key, defect: defects[index] }] as const),
+  ),
+);
 
 const sessionKey = (family: string) => `bench-session:${family}`;
 
@@ -419,17 +432,11 @@ export function VoteApp() {
       return;
     }
     const picked = CHOICES.find((item) => item.key === key);
-    const side = (['a', 'b'] as const).find((item) =>
-      (DEFECT_KEYS[item] as readonly string[]).includes(event.key),
-    );
-    const defect =
-      side === undefined
-        ? undefined
-        : defects[(DEFECT_KEYS[side] as readonly string[]).indexOf(event.key)];
+    const keyed = KEYED_DEFECTS.get(event.key);
     if (picked) {
       setChoice(picked.value);
-    } else if (side !== undefined && defect !== undefined) {
-      toggleDefect(side, defect);
+    } else if (keyed !== undefined) {
+      toggleDefect(keyed.key, keyed.defect);
     } else if (key === 'n') {
       noteField.current?.focus();
     } else if (event.key === 'Enter' && !outside(target)) {
@@ -557,40 +564,25 @@ export function VoteApp() {
         )}
       >
         <Brief pair={pair} status={status} stacked={hasFrames} />
-        <OutputPane
-          key={`a-${pair.token}`}
-          side="A"
-          pane={pair.a}
-          asMarkdown={asMarkdown}
-          viewport={viewport}
-          controls={
-            <DefectPicker
-              side="A"
-              tagged={tagged.a}
-              keys={DEFECT_KEYS.a}
-              onToggle={(defect) => {
-                toggleDefect('a', defect);
-              }}
-            />
-          }
-        />
-        <OutputPane
-          key={`b-${pair.token}`}
-          side="B"
-          pane={pair.b}
-          asMarkdown={asMarkdown}
-          viewport={viewport}
-          controls={
-            <DefectPicker
-              side="B"
-              tagged={tagged.b}
-              keys={DEFECT_KEYS.b}
-              onToggle={(defect) => {
-                toggleDefect('b', defect);
-              }}
-            />
-          }
-        />
+        {SIDES.map(({ side, key }) => (
+          <OutputPane
+            key={`${key}-${pair.token}`}
+            side={side}
+            pane={pair[key]}
+            asMarkdown={asMarkdown}
+            viewport={viewport}
+            controls={
+              <DefectPicker
+                side={side}
+                tagged={tagged[key]}
+                keys={DEFECT_KEYS[key]}
+                onToggle={(defect) => {
+                  toggleDefect(key, defect);
+                }}
+              />
+            }
+          />
+        ))}
       </div>
 
       <div className="space-y-3">
