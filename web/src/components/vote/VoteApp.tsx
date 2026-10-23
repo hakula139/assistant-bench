@@ -469,7 +469,6 @@ export function VoteApp() {
             {flagNames.map((value, index) => (
               <Toggle
                 key={value}
-                size="sm"
                 variant="outline"
                 pressed={flags.includes(value)}
                 aria-keyshortcuts={String(index + 1)}
@@ -485,16 +484,17 @@ export function VoteApp() {
 
           <Textarea
             ref={noteField}
+            size="line"
             rows={1}
             aria-label="Note"
             aria-keyshortcuts="N"
-            placeholder="Note (N), where ⌘↵ or Ctrl+↵ submits"
+            placeholder="Note (N), ⌘↵ or Ctrl+↵ submits"
             maxLength={500}
             value={note}
             onChange={(event) => {
               setNote(event.target.value);
             }}
-            className="min-h-9 min-w-64 flex-1"
+            className="min-w-64 flex-1"
           />
         </div>
       </div>
@@ -538,7 +538,8 @@ export function VoteApp() {
             disabled={session.votes === 0 || busy}
             aria-keyshortcuts="U"
           >
-            Undo <Kbd aria-hidden="true">U</Kbd>
+            Undo
+            <Kbd aria-hidden="true">U</Kbd>
           </Button>
           <Button
             size="lg"
@@ -547,7 +548,7 @@ export function VoteApp() {
             aria-keyshortcuts="Enter"
             className="max-sm:flex-1"
           >
-            Submit vote{' '}
+            Submit vote
             <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
               ↵
             </Kbd>
