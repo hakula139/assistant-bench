@@ -112,7 +112,7 @@ function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
     resumes,
     casts,
     undos: () => undos,
-    /** Votes the open pair in another tab, which retires it for this one. */
+    // Votes the open pair in another tab, which retires it for this one.
     elsewhere: () => {
       casts.push({ token: open as string, choice: 'tie', flags: [], note: null });
       open = null;
