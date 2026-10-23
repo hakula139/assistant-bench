@@ -1,4 +1,4 @@
-"""Output records of a family's trials, as ingest writes them to the data directory."""
+"""Output records of a family's trials, as `bench collect` writes them."""
 
 from pathlib import Path
 
@@ -43,7 +43,7 @@ class Output(BaseModel):
 
 
 def read_outputs(family: str) -> list[Output]:
-    """Return the family's outputs, or none before its first ingest."""
+    """Return the family's outputs, or none before its first collection."""
     path = _outputs_file(family)
     if not path.exists():
         return []

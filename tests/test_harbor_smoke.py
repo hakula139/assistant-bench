@@ -62,7 +62,7 @@ def test_generate_answers_each_case_once_across_reruns(
         tasks = jobs.render_tasks(family, cases)
         jobs.run_job(jobs.case_job(family, [system], tasks))
 
-    outputs = jobs.ingest(family, {system.name: system})
+    outputs = jobs.collect(family, {system.name: system})
     assert [
         (output.case, output.error, output.text, output.output_tokens)
         for output in outputs

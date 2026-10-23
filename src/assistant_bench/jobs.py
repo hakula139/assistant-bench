@@ -1,4 +1,4 @@
-"""Harbor task rendering, job configs, runs, and ingest of trials."""
+"""Harbor task rendering, job configs, runs, and collection of trials."""
 
 import hashlib
 import shutil
@@ -40,7 +40,7 @@ from assistant_bench.scoring.gates import failed_gates
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
-# Ingest matches each trial's version exactly, while Harbor reuses a trial whose
+# Collect matches each trial's version exactly, while Harbor reuses a trial whose
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
@@ -249,7 +249,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     The oracle must pass every task while the untouched repository must fail it.
     Each agent runs `CHECK_ATTEMPTS` times on each task, which catches a task that
     passes or fails only sometimes. Its trials go under `checks/`, apart from the
-    jobs that ingest reads.
+    jobs that `bench collect` reads.
     """
     return _job(
         family,
@@ -328,10 +328,10 @@ def run_job(config: JobConfig) -> Path:
     return job_path(config)
 
 
-# ── Ingest ──
+# ── Collect ──
 
 
-def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
+def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
     A case family keeps only trials of each case's installed task. Each case, system,

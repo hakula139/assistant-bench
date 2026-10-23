@@ -151,11 +151,11 @@ def run(
         try:
             _run(jobs.case_job(family, systems, tasks))
         finally:
-            _ingest(family)
+            _collect(family)
 
 
 @app.command()
-def ingest(families: FamilyNames = None) -> None:
+def collect(families: FamilyNames = None) -> None:
     """Collect the trials of every family with jobs, or of the named ones.
 
     The outputs go to outputs/<family>.jsonl in the data directory.
@@ -165,7 +165,7 @@ def ingest(families: FamilyNames = None) -> None:
         typer.echo('No family has jobs yet. Run `uv run bench run` first.')
         return
     for name in names:
-        _ingest(_load_family(name))
+        _collect(_load_family(name))
 
 
 @app.command()
@@ -174,7 +174,7 @@ def serve() -> None:
     for name in family_names():
         family = _load_family(name)
         if isinstance(family.settings, VotesSettings) and jobs.has_jobs(family):
-            _ingest(family)
+            _collect(family)
     families = load_families()
     if not families:
         _fail(
@@ -221,7 +221,7 @@ def close(
     """
     selected = _load_family(family)
     with closing(_vote_store()) as store:
-        _ingest(selected)
+        _collect(selected)
         try:
             closed = report.close(selected, store, datetime.now(UTC))
         except ValueError as error:
@@ -435,9 +435,9 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
     )
 
 
-def _ingest(family: Family) -> None:
+def _collect(family: Family) -> None:
     try:
-        outputs = jobs.ingest(family, _load_systems())
+        outputs = jobs.collect(family, _load_systems())
     except ValueError as invalid:
         _fail(str(invalid))
     errors = Counter(output.error for output in outputs if output.error)

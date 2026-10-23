@@ -48,11 +48,11 @@ Adding a system to the catalog is its table plus one line in each family's `syst
 ## Collecting Outputs
 
 ```bash
-uv run bench ingest
-uv run bench ingest smoke-text
+uv run bench collect
+uv run bench collect smoke-text
 ```
 
-`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
+`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
 
 It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns). The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one.
 
@@ -98,7 +98,7 @@ assistant-bench/
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
-├── outputs/<family>.jsonl                  # Records written by `bench run` and `bench ingest`
+├── outputs/<family>.jsonl                  # Records written by `bench run` and `bench collect`
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 └── votes.sqlite                            # Sessions, votes, and undos from `bench serve`
 ```

@@ -30,5 +30,5 @@ def terminus(system: System, settings: Settings) -> dict[str, Any]:
 
 
 def _labels(system: System) -> dict[str, Any]:
-    """Return the `Labels` kwargs that name the trial's system for ingest."""
+    """Return the `Labels` kwargs that name the trial's system for collection."""
     return {'system': system.name, 'fingerprint': system.fingerprint}
