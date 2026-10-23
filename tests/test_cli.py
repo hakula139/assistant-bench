@@ -436,31 +436,97 @@ class TestClose:
 
 
 class TestFingerprints:
-    @pytest.mark.parametrize(
-        ('changed', 'exit_code', 'message'),
-        [
-            (False, 0, 'Every system keeps its fingerprint since origin/main'),
-            (
-                True,
-                1,
-                "system 'opus-5.5' changed its fingerprint since origin/main, "
-                'so give the changed system a new name',
-            ),
-        ],
-    )
-    def test_compares_each_system_with_the_base_revision(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        changed: bool,
-        exit_code: int,
-        message: str,
+    def test_passes_when_every_system_keeps_its_fingerprint(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        head = load_systems(load_export())
-        opus = head['opus-5.5']
-        old = opus.model_copy(update={'route': f'{opus.route}-old'})
-        base = head | {'opus-5.5': old} if changed else head
+        base = load_systems(load_export())
         monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
 
         result = runner.invoke(app, ['fingerprints', 'origin/main'])
 
-        assert (result.exit_code, result.output) == (exit_code, f'{message}\n')
+        assert (result.exit_code, result.output) == (
+            0,
+            'Every system keeps its fingerprint since origin/main\n',
+        )
+
+    def test_prints_the_base_resolution_for_a_changed_system(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(update={'route': 'moved'})
+        monkeypatch.setattr(
+            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
+        )
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert result.exit_code == 1
+        assert (
+            "system 'opus-5.5' changed its fingerprint since origin/main, so give "
+            'the changed system a new name, and keep the old name on its old '
+            'resolution with the table below, as the Systems section of '
+            'docs/guide/authoring.md describes'
+        ) in result.stderr
+        assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
+
+    def test_round_trips_a_display_name_with_escapes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(
+            update={'route': 'moved', 'display_name': 'Claude "Opus" 5.5\\\x07 ·'}
+        )
+        monkeypatch.setattr(
+            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
+        )
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert result.exit_code == 1
+        assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
+
+    def test_omits_fields_that_the_base_leaves_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(update={'route': 'moved', 'effort': None, 'price': None})
+        monkeypatch.setattr(
+            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
+        )
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
+
+    def test_prints_no_table_for_a_prompt_system(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        head = load_systems(load_export())
+        opus = head['opus-5.5']
+        old = opus.model_copy(update={'route': 'moved', 'prompt': 'Be brief.'})
+        monkeypatch.setattr(
+            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
+        )
+
+        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+
+        assert result.exit_code == 1
+        assert result.stdout == ''
+        assert (
+            'A prompt system cannot be pinned with a `route` table yet' in result.stderr
+        )
+
+    def test_exits_with_the_code_of_a_failed_revision_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def systems_at(revision: str) -> dict[str, Any]:
+            raise subprocess.CalledProcessError(128, 'git')
+
+        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+
+        exit_code, _ = invoke('fingerprints', 'nope')
+
+        assert exit_code == 128
