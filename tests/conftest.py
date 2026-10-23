@@ -77,9 +77,9 @@ def fits(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Record the number of comparisons behind each refit of the scheduler's board."""
     comparisons: list[int] = []
 
-    def rate(matchups: ranking.Matchups, reference: str) -> ranking.Ratings:
+    def rate(matchups: ranking.Matchups, root: str) -> ranking.Ratings:
         comparisons.append(len(matchups.score))
-        return ranking.rate(matchups, reference)
+        return ranking.rate(matchups, root)
 
     monkeypatch.setattr(scheduler, 'rate', rate)
     return comparisons

@@ -1,5 +1,5 @@
+import { ANCHOR_SCORE } from '@/lib/anchor';
 import { formatScore } from '@/lib/format';
-import { REFERENCE_SCORE } from '@/lib/reference';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {
@@ -7,7 +7,7 @@ export interface Term {
   definition: string;
 }
 
-const reference = formatScore(REFERENCE_SCORE);
+const score = formatScore(ANCHOR_SCORE);
 
 /** The board terms, shared by the boards' labels, their definitions on tap, and the methodology. */
 export const terms = {
@@ -16,9 +16,9 @@ export const terms = {
     definition:
       'From 1 plus the systems whose interval lies wholly above this one, to 1 plus those whose interval reaches above its lower end.',
   },
-  reference: {
-    term: 'Reference',
-    definition: `The system every score is relative to, fixed at ${reference}.`,
+  anchor: {
+    term: 'Anchor',
+    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
   },
   preliminary: {
     term: 'Preliminary',
@@ -27,8 +27,7 @@ export const terms = {
   },
   unranked: {
     term: 'Unranked',
-    definition:
-      'Listed below the table without a score until enough comparisons connect it to the reference.',
+    definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
   },
   votes: {
     term: 'Votes',
@@ -71,6 +70,14 @@ export const terms = {
     definition: "A trial's mean cost at list prices and its median time.",
   },
 } satisfies Record<string, Term>;
+
+/** The anchor's definition in a round that cannot rank the reference, naming what it stands in for. */
+export function fallbackAnchor(referenceName: string): Term {
+  return {
+    ...terms.anchor,
+    definition: `The most-voted system, standing in for the reference ${referenceName}, which is not ranked yet.`,
+  };
+}
 
 /** What each gate rejects, in the order `failed_gates` checks them. */
 export const gates = {

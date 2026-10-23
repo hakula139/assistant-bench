@@ -5,7 +5,7 @@ import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
 import { clip, forestTicks, labelledTicks } from '@/lib/forest';
 import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
-import { REFERENCE_SCORE } from '@/lib/reference';
+import { ANCHOR_SCORE } from '@/lib/anchor';
 import type { CategoryBoard } from '@/lib/report';
 
 /** A category refit, which carries its votes and preliminary status. */
@@ -63,7 +63,7 @@ export function forestPlotOptions(
     y: { domain: labels, label: null, tickSize: 0, tickPadding: LABEL_GAP },
     color: { type: 'identity' },
     marks: [
-      Plot.ruleX([REFERENCE_SCORE], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
+      Plot.ruleX([ANCHOR_SCORE], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
       forestMarks(data, domain),
       offScaleLabels(data),
       Plot.tip(

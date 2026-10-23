@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 import numpy as np
@@ -113,8 +113,8 @@ class Ratings:
     """Scores on the Elo-like scale with their bootstrap intervals.
 
     `draws` holds each resample's scores, one row per resample, with NaN where
-    the resample leaves a system unconnected to the reference. Such a draw counts
-    as unbounded, so a bound that falls on one is infinite.
+    the resample leaves a system unconnected to the root. Such a draw counts as
+    unbounded, so a bound that falls on one is infinite.
     """
 
     systems: tuple[str, ...]
@@ -123,6 +123,17 @@ class Ratings:
     upper: Floats
     draws: Floats
     position: float
+
+    def anchored(self, system: str) -> Ratings:
+        """Move the scale so `system` sits at `ANCHOR`, shifting every score alike."""
+        shift = ANCHOR - self.score[self.systems.index(system)]
+        return replace(
+            self,
+            score=self.score + shift,
+            lower=self.lower + shift,
+            upper=self.upper + shift,
+            draws=self.draws + shift,
+        )
 
     def bounded(self) -> Ratings:
         """Keep the systems whose interval is finite."""
@@ -155,17 +166,17 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     return _fit(theta, len(matchups.systems))
 
 
-def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Floats:
+def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floats:
     """Refit on cases drawn with replacement, returning one row of strengths each.
 
     Votes on one case are correlated, so each draw takes all of a case's votes.
     The votes of each ordered pair and sidedness collapse into one weighted row,
     which keeps a refit cheap. A system that a resample's drawn rows leave
-    unconnected to `reference` gets NaN there, since the penalty would place it
-    at its own component's center.
+    unconnected to `root` gets NaN there, since the penalty would place it at its
+    own component's center.
     """
     k = len(matchups.systems)
-    anchor = matchups.systems.index(reference)
+    root_index = matchups.systems.index(root)
     keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
     pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
     x = _design(
@@ -196,22 +207,22 @@ def bootstrap(matchups: Matchups, reference: str, resamples: int = RESAMPLES) ->
                 pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
             )
             strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
-            connected = _connected(left[drawn], right[drawn], k, anchor)
+            connected = _connected(left[drawn], right[drawn], k, root_index)
             strengths[r, ~connected] = np.nan
     return strengths
 
 
-def rate(matchups: Matchups, reference: str, resamples: int = RESAMPLES) -> Ratings:
-    """Place the reference system's score at `ANCHOR` with percentile intervals.
+def rate(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Ratings:
+    """Place the root system's score at `ANCHOR` with percentile intervals.
 
     Each resample's scores shift so that the systems it connects keep the mean of
-    their point scores, which gives the reference an interval like every other
-    system and keeps a detached system's displacement out of the others' draws.
+    their point scores, which gives the root an interval like every other system
+    and keeps a detached system's displacement out of the others' draws.
     """
     point = fit(matchups)
-    shift = point.strength[matchups.systems.index(reference)]
+    shift = point.strength[matchups.systems.index(root)]
     score = ANCHOR + ELO_PER_LOGIT * (point.strength - shift)
-    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, reference, resamples) - shift)
+    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, root, resamples) - shift)
     draws += np.nanmean(score - draws, axis=1, keepdims=True)
     lower, upper = _interval(draws)
     return Ratings(

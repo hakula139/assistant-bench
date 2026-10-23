@@ -18,7 +18,7 @@ import {
   type LegendMark,
 } from '@/lib/forest';
 import { formatInterval, formatScore } from '@/lib/format';
-import { REFERENCE_SCORE } from '@/lib/reference';
+import { ANCHOR_SCORE } from '@/lib/anchor';
 
 interface ForestProps {
   rows: ForestRow[];
@@ -29,13 +29,13 @@ interface ForestProps {
   large?: boolean;
 }
 
-const reference = formatScore(REFERENCE_SCORE);
+const anchor = formatScore(ANCHOR_SCORE);
 
 const unplacedText = {
-  'reference': {
-    interval: `Fixed at ${reference} as the reference`,
-    score: reference,
-    summary: `the reference, fixed at ${reference}`,
+  'anchor': {
+    interval: `Fixed at ${anchor} as the anchor`,
+    score: anchor,
+    summary: `the anchor, fixed at ${anchor}`,
   },
   'unranked': {
     interval: 'Unbounded, too few comparisons to place it',
@@ -90,8 +90,8 @@ function Unbounded() {
   );
 }
 
-/** The rule a forest plot draws at the reference score. */
-const referenceRule = 'bg-faint/40';
+/** The rule a forest plot draws at the anchor score. */
+const anchorRule = 'bg-faint/40';
 
 const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   score: {
@@ -121,16 +121,16 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
       </>
     ),
   },
-  reference: {
-    label: `Reference, ${reference}`,
-    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', referenceRule)} />,
+  anchor: {
+    label: `Anchor, ${anchor}`,
+    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', anchorRule)} />,
   },
   unbounded: { label: 'Unbounded', mark: <Unbounded /> },
 };
 
 /** Returns the marks a `Forest` of `rows` on `domain` draws, for its legend. */
 export function drawnMarks(rows: ForestRow[], domain: [number, number]): LegendMark[] {
-  return legendMarks(rows, domain, forestTicks(domain).includes(REFERENCE_SCORE));
+  return legendMarks(rows, domain, forestTicks(domain).includes(ANCHOR_SCORE));
 }
 
 /** A key to the interval marks, for the `marks` a nearby forest plot draws. */
@@ -211,7 +211,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                       key={tick}
                       className={cn(
                         'absolute inset-y-0 w-px',
-                        tick === REFERENCE_SCORE ? referenceRule : 'bg-chart-grid',
+                        tick === ANCHOR_SCORE ? anchorRule : 'bg-chart-grid',
                       )}
                       style={{ left: position(tick) }}
                     />
@@ -233,11 +233,8 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                         />
                       )}
                     </>
-                  ) : unplaced === 'reference' ? (
-                    <span
-                      className={cn(dot, solidDot)}
-                      style={{ left: position(REFERENCE_SCORE) }}
-                    />
+                  ) : unplaced === 'anchor' ? (
+                    <span className={cn(dot, solidDot)} style={{ left: position(ANCHOR_SCORE) }} />
                   ) : (
                     <Unbounded />
                   )}
@@ -246,8 +243,8 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
               <TableCell numeric>
                 {'estimate' in row ? (
                   formatScore(row.estimate.score)
-                ) : unplaced === 'reference' ? (
-                  unplacedText.reference.score
+                ) : unplaced === 'anchor' ? (
+                  unplacedText.anchor.score
                 ) : (
                   <span className="text-xs text-faint">{unplacedText[row.unplaced].score}</span>
                 )}

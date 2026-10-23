@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render as renderInDom } from '@testing-library/react';
+import { cleanup, render as renderInDom, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
@@ -36,7 +37,7 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
 
 const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
 
-/** The x positions of a row's vertical rules, which only the reference draws. */
+/** The x positions of a row's vertical rules, which only the anchor draws. */
 function verticalRules(row: Element): number[] {
   return [...row.querySelectorAll('g[aria-label="rule"] line')]
     .filter((line) => line.getAttribute('y1') !== line.getAttribute('y2'))
@@ -83,11 +84,11 @@ describe('VotesBoard', () => {
     expect(text(html)).toMatch(/Acme Tiny Preliminary [^%]*? 0 – /);
   });
 
-  test('spells out the preliminary mark and leaves the reference mark an icon', async () => {
+  test('spells out the preliminary mark and leaves the anchor mark an icon', async () => {
     const html = render(await load());
 
     expect(html).toMatch(/<span>Preliminary<\/span>/);
-    expect(html).toMatch(/<span class="sr-only">Reference<\/span>/);
+    expect(html).toMatch(/<span class="sr-only">Anchor<\/span>/);
   });
 
   test('keys the legend to the marks the board draws', async () => {
@@ -98,17 +99,39 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(legend(html)).toBe('Score, 95% interval Past the axis Reference, 1,000');
+    expect(legend(html)).toBe('Score, 95% interval Past the axis Anchor, 1,000');
   });
 
-  test('marks only the reference and the preliminary systems', async () => {
+  test('marks only the anchor and the preliminary systems', async () => {
     const html = render(await load());
 
     const marked = (status: string) =>
       [...text(html).matchAll(new RegExp(`(Acme [A-Z][a-z]+) ${status} `, 'g'))].map((m) => m[1]);
 
-    expect(marked('Reference')).toEqual(['Acme Large']);
+    expect(marked('Anchor')).toEqual(['Acme Large']);
     expect(marked('Preliminary')).toEqual(['Acme Tiny']);
+  });
+
+  test('marks the stand-in anchor when the reference is not ranked', async () => {
+    const round = await load();
+    round.results.reference = 'acme-new';
+
+    const html = render(round);
+
+    expect(html).toMatch(/<span class="sr-only">Anchor<\/span>/);
+    expect(text(html)).toMatch(/Acme Large Anchor/);
+    expect(legend(html)).toContain('Anchor, 1,000');
+  });
+
+  test('names the reference the stand-in anchor replaces', async () => {
+    const { round, results } = await load();
+    results.reference = 'acme-new';
+    stubPlotFrame();
+    renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
+
+    expect(await screen.findByText(/reference Acme New, which is not ranked yet/)).toBeTruthy();
   });
 
   test('names the unranked systems after the table, sorted by display name', async () => {
@@ -187,8 +210,9 @@ describe('VotesBoard', () => {
     expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
   });
 
-  test("draws the reference's score as one rule through every row", async () => {
+  test("draws the anchor's score as one rule through every row", async () => {
     const { round, results } = await load();
+    results.reference = 'acme-new';
     stubPlotFrame();
 
     const { container } = renderInDom(
@@ -202,14 +226,12 @@ describe('VotesBoard', () => {
       return drawn;
     });
 
-    const referenceRow = rows.find((row) =>
-      row.querySelector(`a[href="${BOARD}${results.reference}/"]`),
-    );
-    const referenceScore = Number(
-      referenceRow?.querySelector('g[aria-label="dot"] circle')?.getAttribute('cx'),
+    const anchorRow = rows.find((row) => row.querySelector(`a[href="${BOARD}${results.anchor}/"]`));
+    const anchorScore = Number(
+      anchorRow?.querySelector('g[aria-label="dot"] circle')?.getAttribute('cx'),
     );
 
-    expect(rows.map(verticalRules)).toEqual(rows.map(() => [referenceScore]));
+    expect(rows.map(verticalRules)).toEqual(rows.map(() => [anchorScore]));
   });
 
   test('keeps every category row and the systems only the category ranks', async () => {

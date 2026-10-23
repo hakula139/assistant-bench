@@ -64,11 +64,11 @@ describe('forestTicks', () => {
 });
 
 describe('sparseTicks', () => {
-  test('labels both ends and a reference far from them', () => {
+  test('labels both ends and an anchor far from them', () => {
     expect(sparseTicks([600, 1400])).toEqual([600, 1000, 1400]);
   });
 
-  test('leaves out a reference next to an end', () => {
+  test('leaves out an anchor next to an end', () => {
     expect(sparseTicks([400, 1100])).toEqual([400, 1100]);
   });
 });
@@ -161,8 +161,8 @@ describe('legendMarks', () => {
     preliminary,
   });
 
-  test('names a settled score and the reference rule', () => {
-    expect(legendMarks([row(1004, 955, 1065)], domain, true)).toEqual(['score', 'reference']);
+  test('names a settled score and the anchor rule', () => {
+    expect(legendMarks([row(1004, 955, 1065)], domain, true)).toEqual(['score', 'anchor']);
   });
 
   test('names a preliminary score apart from a settled one', () => {
@@ -176,24 +176,24 @@ describe('legendMarks', () => {
     expect(legendMarks([cut], domain, false)).toEqual(['score', 'cut']);
   });
 
-  test('names the unbounded track for unplaced systems but not for the reference dot', () => {
-    const reference: ForestRow = {
+  test('names the unbounded track for unplaced systems but not for the anchor dot', () => {
+    const anchor: ForestRow = {
       system: 'acme-large',
       name: 'Acme Large',
-      unplaced: 'reference',
+      unplaced: 'anchor',
     };
     const unranked: ForestRow = { system: 'acme-edge', name: 'Acme Edge', unplaced: 'unranked' };
 
-    expect(legendMarks([reference], domain, true)).toEqual(['reference']);
+    expect(legendMarks([anchor], domain, true)).toEqual(['anchor']);
     expect(legendMarks([unranked], domain, false)).toEqual(['unbounded']);
   });
 });
 
 describe('unionMarks', () => {
   test("keeps every plot's marks once, in legend order", () => {
-    expect(unionMarks([['unbounded', 'reference'], ['score', 'reference'], []])).toEqual([
+    expect(unionMarks([['unbounded', 'anchor'], ['score', 'anchor'], []])).toEqual([
       'score',
-      'reference',
+      'anchor',
       'unbounded',
     ]);
   });

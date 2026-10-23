@@ -1,4 +1,5 @@
 import type { ForestPlotRow } from '@/components/charts/ForestPlot';
+import { StatusMark } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
   formatScore,
   formatSeconds,
 } from '@/lib/format';
+import { terms } from '@/lib/glossary';
 import { flagLabels, flags, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
@@ -142,11 +144,13 @@ export function FlagsTable({ standing }: { standing: Standing }) {
 /** Lists the system's standing in each round it appeared in, given oldest first. */
 export function RoundsTable({
   appearances,
+  names,
 }: {
-  appearances: { round: string; standing: Standing }[];
+  appearances: { round: string; reference: string; anchor: string; standing: Standing }[];
+  names: SystemNames;
 }) {
   return (
-    <Table className="max-w-xl">
+    <Table className="max-w-xl text-xs sm:text-sm">
       <TableHeader>
         <TableRow>
           <TableHead>Round</TableHead>
@@ -156,9 +160,22 @@ export function RoundsTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {appearances.toReversed().map(({ round, standing: past }) => (
+        {appearances.toReversed().map(({ round, reference, anchor, standing: past }) => (
           <TableRow key={round}>
-            <TableCell>{round}</TableCell>
+            <TableCell>
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {round}
+                {anchor !== reference && (
+                  <StatusMark
+                    status="anchor"
+                    term={{
+                      term: terms.anchor.term,
+                      definition: `This round fixed ${systemName(names, anchor)} at 1,000 because the reference, ${systemName(names, reference)}, is not ranked.`,
+                    }}
+                  />
+                )}
+              </span>
+            </TableCell>
             <TableCell numeric>{formatScore(past.score)}</TableCell>
             <TableCell numeric>{formatInterval(past.interval)}</TableCell>
             <TableCell numeric>{past.votes}</TableCell>

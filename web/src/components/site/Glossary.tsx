@@ -50,7 +50,7 @@ export function Glossary({ heading, entries }: GlossaryProps) {
                   {term}
                 </span>
               </TableCell>
-              <TableCell className={cn(wrapping, 'text-balance')}>{definition}</TableCell>
+              <TableCell className={cn(wrapping, 'text-pretty')}>{definition}</TableCell>
             </TableRow>
           );
         })}

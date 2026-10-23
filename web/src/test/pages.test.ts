@@ -187,7 +187,7 @@ describe('family page', () => {
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(text(html)).toContain('No round has closed yet.');
-    expect(text(html)).toContain('Acme Large Fixed at 1,000 as the reference 1,000');
+    expect(text(html)).toContain('Acme Large Fixed at 1,000 as the anchor 1,000');
     expect(text(html)).toContain('Acme Pro Unbounded no votes');
     expect(text(html)).not.toMatch(/\bLeader\b/);
   });
@@ -197,7 +197,7 @@ describe('family page', () => {
 
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
-    expect(text(html)).toContain('Reference, 1,000 Unbounded');
+    expect(text(html)).toContain('Anchor, 1,000 Unbounded');
     expect(html).not.toContain('Score, 95% interval');
   });
 
@@ -266,7 +266,7 @@ describe('home page', () => {
     const html = await render(HomePage, {});
 
     const legend = /<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '';
-    expect(text(legend).trim()).toBe('Reference, 1,000 Unbounded');
+    expect(text(legend).trim()).toBe('Anchor, 1,000 Unbounded');
   });
 });
 
@@ -361,6 +361,36 @@ describe('system page', () => {
     expect(text(html)).toContain(
       "Length preference Shorter, 6.5 points per SD of the pair's relative length difference",
     );
+  });
+
+  test('marks a round whose anchor differs from the reference', async () => {
+    const arena = await family();
+    const earlier = arena.rounds[0].results;
+    if (earlier.scorer !== 'votes') {
+      throw new Error('the fixture is a votes report');
+    }
+    earlier.anchor = 'acme-pro';
+
+    const html = await render(SystemPage, {
+      family: arena,
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).toMatch(/2026-10-07 Anchor/);
+    expect(text(html)).not.toMatch(/2026-10-21 Anchor/);
+  });
+
+  test('leaves the round unmarked when every round has one anchor', async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).not.toContain('Anchor');
   });
 
   test('leaves out the head-to-head chart for a system without votes', async () => {

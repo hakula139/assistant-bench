@@ -34,7 +34,7 @@ const rows: ForestRow[] = [
 
 const columns: GlossaryEntry[] = [
   terms.rank,
-  { ...terms.reference, status: 'reference' },
+  { ...terms.anchor, status: 'anchor' },
   { ...terms.preliminary, status: 'preliminary' },
   terms.unranked,
   terms.votes,
