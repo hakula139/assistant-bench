@@ -31,12 +31,47 @@ export interface Family {
   systemNames: SystemNames;
 }
 
+/** A family's path segment under its aspect: its language code, else its short name in kebab case. */
+export function boardSlug(config: FamilyConfig): string {
+  const language = 'language' in config ? config.language : undefined;
+  return (
+    language ??
+    config.display_name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+  );
+}
+
+/** A family's board path, which every link to the board and its system pages starts with. */
+export function boardPath(family: Family): string {
+  return `/${family.aspect}/${boardSlug(family.config)}/`;
+}
+
+/** A system's page path on a family's board. */
+export function systemPath(family: Family, system: string): string {
+  return `${boardPath(family)}${system}/`;
+}
+
+/**
+ * The `_redirects` rules that keep each family's old ID path working after it moved under its
+ * aspect, where the old path could lead to the board or to any system's page on it.
+ */
+export function redirectLines(families: Family[]): string {
+  const lines = families.flatMap((family) => {
+    const from = `/${family.name}`;
+    const to = boardPath(family);
+    return [`${from} ${to} 301`, `${from}/ ${to} 301`, `${from}/* ${to}:splat 301`];
+  });
+  return `${lines.join('\n')}\n`;
+}
+
 /**
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, or a public family has no
- *   aspect.
+ * @throws Error when two families, listed or not, share a full name, when a public family has no
+ *   aspect, or when two public families share a board path.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -44,6 +79,7 @@ export function listFamilies(
   systemNames: SystemNames,
 ): Family[] {
   const owners = new Map<string, string>();
+  const paths = new Map<string, string>();
   for (const { name, config } of configs) {
     const title = familyTitle(config);
     const owner = owners.get(title);
@@ -51,6 +87,14 @@ export function listFamilies(
       throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
+    if (config.public && config.aspect !== undefined) {
+      const path = `${config.aspect}/${boardSlug(config)}`;
+      const holder = paths.get(path);
+      if (holder !== undefined) {
+        throw new Error(`families ${holder} and ${name} share the board path /${path}/`);
+      }
+      paths.set(path, name);
+    }
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
   return configs
@@ -145,11 +189,11 @@ function siblings(families: Family[], family: Family): Family[] {
 /** Returns each family page's params and props: the family and its aspect's boards. */
 export function familyPaths(families: Family[]) {
   return families.map((family) => ({
-    params: { family: family.name },
+    params: { aspect: family.aspect, board: boardSlug(family.config) },
     props: {
       family,
       boards: siblings(families, family).map((item): BoardLink => ({
-        href: `/${item.name}/`,
+        href: boardPath(item),
         label: item.config.display_name,
         current: item.name === family.name,
       })),
@@ -165,14 +209,14 @@ export function systemPaths(families: Family[]) {
   const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
   return families.flatMap((family) =>
     [...systemPages(family)].map((system) => ({
-      params: { family: family.name, system },
+      params: { aspect: family.aspect, board: boardSlug(family.config), system },
       props: {
         family,
         system,
         boards: siblings(families, family)
           .filter((item) => pages.get(item.name)?.has(system))
           .map((item): BoardLink => ({
-            href: `/${item.name}/${system}/`,
+            href: systemPath(item, system),
             label: item.config.display_name,
             current: item.name === family.name,
           })),

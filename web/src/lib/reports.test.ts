@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'vitest';
 
-import type { FamilyConfig } from '@/lib/family';
+import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { listFamilies, systemPages } from '@/lib/reports';
+import {
+  boardPath,
+  boardSlug,
+  listFamilies,
+  redirectLines,
+  systemPages,
+  systemPath,
+} from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
-const votes = (listed: boolean, displayName = 'Prose'): FamilyConfig => ({
+const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
   scorer: 'votes',
   ...(listed && { aspect: 'technical-writing' }),
   display_name: displayName,
@@ -107,6 +114,52 @@ describe('listFamilies', () => {
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'public family prose has no aspect',
+    );
+  });
+});
+
+describe('board paths', () => {
+  test('uses the language code under the aspect, and the short name without one', () => {
+    expect(boardSlug({ ...votes(true), language: 'zh' })).toBe('zh');
+    expect(boardSlug(votes(true, 'Smoke Tasks'))).toBe('smoke-tasks');
+  });
+
+  test('builds a board and a system path from the aspect and the slug', () => {
+    const [family] = listFamilies(
+      [{ name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } }],
+      [],
+      FIXTURE_NAMES,
+    );
+
+    expect(boardPath(family)).toBe('/technical-writing/zh/');
+    expect(systemPath(family, 'acme-pro')).toBe('/technical-writing/zh/acme-pro/');
+  });
+
+  test('redirects the old family path to the board, at any depth', () => {
+    const [family] = listFamilies(
+      [{ name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } }],
+      [],
+      FIXTURE_NAMES,
+    );
+
+    expect(redirectLines([family])).toBe(
+      [
+        '/prose-zh /technical-writing/zh/ 301',
+        '/prose-zh/ /technical-writing/zh/ 301',
+        '/prose-zh/* /technical-writing/zh/:splat 301',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('rejects two public families sharing a board path', () => {
+    const configs = [
+      { name: 'prose-zh', config: { ...votes(true, 'Chinese'), language: 'zh' } },
+      { name: 'prose-zh-two', config: { ...votes(true, 'Chinese Two'), language: 'zh' } },
+    ] satisfies { name: string; config: FamilyConfig }[];
+
+    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
+      'families prose-zh and prose-zh-two share the board path /technical-writing/zh/',
     );
   });
 });

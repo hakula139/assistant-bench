@@ -22,11 +22,13 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
   return { round: report.round, results: report.results };
 }
 
+const BOARD = '/technical-writing/zh/';
+
 function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
   const reversed = { ...results, standings: results.standings.toReversed() };
   return renderToString(
-    <VotesBoard family="arena" rounds={[{ round, results: reversed }]} names={names} />,
+    <VotesBoard base={BOARD} rounds={[{ round, results: reversed }]} names={names} />,
   );
 }
 
@@ -53,7 +55,9 @@ describe('VotesBoard', () => {
   test('lists the ranked systems by score, best first', async () => {
     const html = render(await load());
 
-    const systems = [...html.matchAll(/href="\/arena\/([^/]+)\/"/g)].map((match) => match[1]);
+    const systems = [...html.matchAll(/href="\/technical-writing\/zh\/([^/]+)\/"/g)].map(
+      (match) => match[1],
+    );
 
     expect(systems).toEqual([
       'acme-pro',
@@ -188,7 +192,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard family="arena" rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
+      <VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -199,7 +203,7 @@ describe('VotesBoard', () => {
     });
 
     const referenceRow = rows.find((row) =>
-      row.querySelector(`a[href="/arena/${results.reference}/"]`),
+      row.querySelector(`a[href="${BOARD}${results.reference}/"]`),
     );
     const referenceScore = Number(
       referenceRow?.querySelector('g[aria-label="dot"] circle')?.getAttribute('cx'),
@@ -222,7 +226,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(text(html)).toContain('Acme Edge Preliminary 890 798–1,044 41 – – – –');
-    expect(html).not.toContain('href="/arena/acme-edge/"');
+    expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
     expect(text(html)).toContain('Acme Mini 769 (696–867), 38 votes, preliminary – 789');
     expect(text(html)).toContain('Acme Edge – 890 (798–1,044), 41 votes, preliminary – Score');
   });
