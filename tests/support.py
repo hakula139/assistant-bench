@@ -6,7 +6,7 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import numpy as np
 from harbor.job_plan import JobPlan
@@ -439,7 +439,7 @@ _SWAPPED: dict[Choice, Choice] = {
     'tie': 'tie',
     'both_bad': 'both_bad',
 }
-_DEFECTS: list[Defect] = ['facts', 'punctuation', 'tone', 'script', 'length']
+_DEFECTS: list[Defect] = list(get_args(Defect.__value__))
 
 
 def _simulated_vote(

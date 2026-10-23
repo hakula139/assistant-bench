@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena, HtmlPane
-from assistant_bench.arena.store import VoteStore
+from assistant_bench.arena.store import Defects, VoteStore
 from support import Clock, make_arena
 
 
@@ -27,7 +27,9 @@ def client(arena: Arena) -> TestClient:
 
 
 class TestCreateApp:
-    def test_runs_a_session_from_start_to_undo(self, client: TestClient) -> None:
+    def test_runs_a_session_from_start_to_undo(
+        self, client: TestClient, store: VoteStore
+    ) -> None:
         family = {
             'name': 'f',
             'aspect': 'writing',
@@ -52,6 +54,11 @@ class TestCreateApp:
         )
         assert voted.status_code == 200
         assert voted.json()['votes'] == 1
+        (vote,) = store.votes('f')
+        assert (vote.defects, vote.note) == (
+            Defects(a=frozenset({'script'}), b=frozenset({'length'})),
+            'Mixed.',
+        )
 
         undone = client.post(f'/api/sessions/{session["id"]}/undo', headers=ORIGIN)
         assert undone.json()['votes'] == 0
