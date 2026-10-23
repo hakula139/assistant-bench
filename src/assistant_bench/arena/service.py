@@ -258,7 +258,7 @@ class Arena:
             ),
             self._clock(),
         )
-        return self._view(self._session(issued.session))
+        return self._view(session)
 
     def undo(self, session_id: str) -> SessionView:
         """Withdraw the session's latest vote and show its pair again.

@@ -98,12 +98,13 @@ function classifyDiff(text: string): { line: string; kind: DiffLine; start: bool
 }
 
 /**
- * A unified diff in monospace, each line styled as a file header, hunk header, or change. Wrapped
- * lines hang past the change marker, and ligatures stay off so `==` and `->` read as typed.
+ * A unified diff in monospace, each line styled as a file header, hunk header, or change. Long
+ * lines break at the pane edge whatever the character there, so a hyphen gets no early break, and
+ * hang past the change marker, while ligatures stay off so `==` and `->` read as typed.
  */
 function Diff({ text }: { text: string }) {
   return (
-    <div className="font-mono text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap [font-variant-ligatures:none]">
+    <div className="font-mono text-sm leading-relaxed break-all whitespace-pre-wrap [font-variant-ligatures:none]">
       {classifyDiff(text).map(({ line, kind, start }, index) => (
         <div
           key={index}
@@ -134,7 +135,7 @@ export function OutputPane({ side, pane, asMarkdown, viewport, controls }: Outpu
         <CardTitle role="heading" aria-level={2}>
           Output {side}
         </CardTitle>
-        <div className="ml-auto">{controls}</div>
+        <div className="ml-auto min-h-7">{controls}</div>
       </div>
       {pane.render === 'html' ? (
         <CardContent className="min-h-0 flex-1 p-0">

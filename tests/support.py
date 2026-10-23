@@ -116,12 +116,16 @@ def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -
 
 
 def write_task_family(
-    families_dir: Path, *task_ids: str, name: str = 'f', systems: tuple[str, ...] = ()
+    families_dir: Path,
+    *task_ids: str,
+    name: str = 'f',
+    systems: tuple[str, ...] = (),
+    defects: tuple[Defect, ...] = CODE_DEFECTS,
 ) -> None:
     """Write a task family in the `smoke` category, copying the echo task per ID.
 
-    A family that lists systems is scored by votes, tagged with the code
-    defects, and runs them as terminus-2, and one without is scored by tests.
+    A family that lists systems is scored by votes, tagged with `defects`, and
+    runs them as terminus-2, and one without is scored by tests.
     """
     directory = families_dir / name
     (directory / 'tasks').mkdir(parents=True)
@@ -131,7 +135,7 @@ def write_task_family(
         systems = {json.dumps(list(systems))}
         reference = "{systems[0]}"
         render = "diff"
-        defects = {json.dumps(list(CODE_DEFECTS))}
+        defects = {json.dumps(list(defects))}
         harness = "terminus-2"
         max_turns = 4
         max_output_tokens = 64

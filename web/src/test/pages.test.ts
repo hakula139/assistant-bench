@@ -546,6 +546,35 @@ describe('system page', () => {
     );
   });
 
+  test.each([
+    [
+      'in the order the report keys them',
+      { testing: 2, scope: 1 },
+      'Weak tests 2 2% Off-scope 1 1%',
+    ],
+    ['nowhere for a family that tags none', {}, null],
+  ])('lists the issues %s', async (_, defects, row) => {
+    const tagged = await family();
+    const latest = tagged.rounds[tagged.rounds.length - 1];
+    if (latest.results.scorer !== 'votes') {
+      throw new Error('the fixture is a votes report');
+    }
+    const mini = latest.results.standings.find((standing) => standing.system === 'acme-mini');
+    if (mini === undefined) {
+      throw new Error('the fixture ranks acme-mini');
+    }
+    mini.defects = defects;
+
+    const html = await render(SystemPage, { family: tagged, system: 'acme-mini', boards: [] });
+
+    if (row === null) {
+      expect(text(html)).not.toContain('Issues Votes that tagged');
+      expect(island(html, 'DefectsTable')).toBeNull();
+    } else {
+      expect(text(html)).toContain(`Issue Votes Share ${row} Rounds`);
+    }
+  });
+
   test('passes the rounds table only the fields it shows', async () => {
     const html = await render(SystemPage, {
       family: await family(),

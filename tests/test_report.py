@@ -11,7 +11,7 @@ import pytest
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import Ballot, Choice, Defects, Vote, VoteStore
-from assistant_bench.families import Family, Gate, load_family
+from assistant_bench.families import Defect, Family, Gate, load_family
 from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.report import (
     Decision,
@@ -27,7 +27,6 @@ from assistant_bench.report import (
 from assistant_bench.scoring.ranking import Ratings
 from support import (
     AT,
-    CODE_DEFECTS,
     EARLY_REPORT_FIXTURE,
     RENDER_ORIGIN,
     REPORT_FIXTURE,
@@ -337,7 +336,9 @@ class TestClose:
         self, families_dir: Path, store: VoteStore
     ) -> None:
         tasks = ['t1', 't2', 't3', 't4']
-        write_task_family(families_dir, *tasks, systems=('a', 'b', 'c'))
+        write_task_family(
+            families_dir, *tasks, systems=('a', 'b', 'c'), defects=('testing', 'scope')
+        )
         failed = {'gate_failures': [Gate.TESTS], 'reward': 0.0}
         solved_by_c = {'t3', 't4'}
         outputs = {
@@ -352,13 +353,17 @@ class TestClose:
         )
         write_outputs('f', list(outputs.values()))
         session = store.start_session('f', AT)
-        for task, choice in (('t1', 'a'), ('t2', 'b')):
+        tagged: list[tuple[str, Choice, frozenset[Defect]]] = [
+            ('t1', 'a', frozenset({'scope'})),
+            ('t2', 'b', frozenset({'scope', 'testing'})),
+        ]
+        for task, choice, defects in tagged:
             ballot = make_ballot(
                 outputs[task, 'a'],
                 outputs[task, 'b'],
                 session=session.id,
                 choice=choice,
-                defects=Defects(a=frozenset({'scope'})),
+                defects=Defects(a=defects),
             )
             store.record(ballot, AT)
 
@@ -370,7 +375,27 @@ class TestClose:
         assert results.unranked == []
         c = standings['c']
         assert (c.votes, c.outputs, c.gate_failure_rate) == (0, 3, 0.5)
-        assert standings['a'].defects == dict.fromkeys(CODE_DEFECTS, 0) | {'scope': 2}
+        assert list(standings['a'].defects.items()) == [('testing', 1), ('scope', 2)]
+
+    def test_leaves_an_unlisted_system_without_votes_off_the_board(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {'r0': 'reply', 'r1': 'reply'}
+        write_votes_family(families_dir, 'f', ['a', 'b'], cases)
+        outputs = write_passing_outputs(cases, ['a', 'b', 'gone'])
+        session = store.start_session('f', AT)
+        for case in cases:
+            ballot = make_ballot(
+                outputs[case, 'a'], outputs[case, 'b'], session=session.id
+            )
+            store.record(ballot, AT)
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert {standing.system for standing in results.standings} == {'a', 'b'}
+        assert results.unranked == []
+        assert [board.unranked for board in results.categories] == [[]]
 
     def test_leaves_the_systems_a_board_cannot_bound_unranked_there(
         self, families_dir: Path, store: VoteStore
@@ -391,7 +416,7 @@ class TestClose:
         assert results.unranked == ['d']
         docs = next(board for board in results.categories if board.category == 'docs')
         assert [standing.system for standing in docs.standings] == ['a']
-        assert docs.unranked == ['b', 'c']
+        assert docs.unranked == ['b', 'c', 'd']
 
     def test_marks_a_system_preliminary_below_the_decisive_vote_bar(
         self, families_dir: Path, store: VoteStore
