@@ -3,27 +3,14 @@ import { describe, expect, test } from 'vitest';
 import { logTicks } from '@/components/charts/ticks';
 
 describe('logTicks', () => {
-  test('marks 1, 2, and 5 per decade when they fit', () => {
-    const values = logTicks([0.004, 0.06], 6);
+  test.each<[string, [number, number], number, number[]]>([
+    ['1, 2, and 5 per decade when they fit', [0.004, 0.06], 6, [0.005, 0.01, 0.02, 0.05]],
+    ['fewer ticks per decade when the axis is narrow', [0.5, 400], 4, [1, 10, 100]],
+    ['every few powers of ten when one per decade is too many', [0.0002, 20], 4, [0.01, 1]],
+    ['linear ticks within one short span', [20.1, 48.2], 4, [30, 40]],
+  ])('marks %s', (_, domain, count, ticks) => {
+    const values = logTicks(domain, count);
 
-    expect(values).toEqual([0.005, 0.01, 0.02, 0.05]);
-  });
-
-  test('thins to fewer ticks per decade when the axis is narrow', () => {
-    const values = logTicks([0.5, 400], 4);
-
-    expect(values).toEqual([1, 10, 100]);
-  });
-
-  test('keeps every few powers of ten when one per decade is too many', () => {
-    const values = logTicks([0.0002, 20], 4);
-
-    expect(values).toEqual([0.01, 1]);
-  });
-
-  test('falls back to linear ticks within one short span', () => {
-    const values = logTicks([20.1, 48.2], 4);
-
-    expect(values).toEqual([30, 40]);
+    expect(values).toEqual(ticks);
   });
 });

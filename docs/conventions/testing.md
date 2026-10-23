@@ -10,6 +10,10 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
 
+## Parametrized Tests
+
+Tests that differ only in their inputs and expected outputs make one parametrized test whose name states the rule they share: `pytest.mark.parametrize` with readable `ids` in Python, and `test.each` with a title that names each case in Vitest. Tests whose setup or checked outcome differs stay apart, even when they call the same function, and a test goes once another covers everything it checks.
+
 ## Models and Harbor
 
 - Fixtures use generic names such as `acme/large` and `example.com`. Real model names appear only where the code matches on them, as in the test of the committed `systems.toml`.

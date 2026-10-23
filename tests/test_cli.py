@@ -449,12 +449,20 @@ class TestFingerprints:
             'Every system keeps its fingerprint since origin/main\n',
         )
 
+    @pytest.mark.parametrize(
+        'fields',
+        [
+            {},
+            {'display_name': 'Claude "Opus" 5.5\\\x07 ·'},
+            {'effort': None, 'price': None},
+        ],
+        ids=['route-only', 'escaped-display-name', 'unset-effort-and-price'],
+    )
     def test_prints_the_base_resolution_for_a_changed_system(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any]
     ) -> None:
         head = load_systems(load_export())
-        opus = head['opus-5.5']
-        old = opus.model_copy(update={'route': 'moved'})
+        old = head['opus-5.5'].model_copy(update={'route': 'moved'} | fields)
         monkeypatch.setattr(
             revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
         )
@@ -468,37 +476,6 @@ class TestFingerprints:
             'resolution with the table below, as the Systems section of '
             'docs/guide/authoring.md describes'
         ) in result.stderr
-        assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
-
-    def test_round_trips_a_display_name_with_escapes(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        head = load_systems(load_export())
-        opus = head['opus-5.5']
-        old = opus.model_copy(
-            update={'route': 'moved', 'display_name': 'Claude "Opus" 5.5\\\x07 ·'}
-        )
-        monkeypatch.setattr(
-            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
-        )
-
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
-
-        assert result.exit_code == 1
-        assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
-
-    def test_omits_fields_that_the_base_leaves_unset(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        head = load_systems(load_export())
-        opus = head['opus-5.5']
-        old = opus.model_copy(update={'route': 'moved', 'effort': None, 'price': None})
-        monkeypatch.setattr(
-            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
-        )
-
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
-
         assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
 
     def test_prints_no_table_for_a_prompt_system(
