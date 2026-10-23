@@ -34,12 +34,11 @@ import {
   type LegendMark,
 } from '@/lib/forest';
 import {
-  formatCost,
+  formatCountOf,
   formatInterval,
   formatPercent,
   formatRank,
   formatScore,
-  formatSeconds,
   MISSING,
 } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
@@ -79,8 +78,17 @@ interface LeaderboardProps {
 const ROW_HEIGHT = 48;
 const FOREST_MARGIN = 22;
 
+interface ColumnMeta {
+  numeric?: boolean;
+  forest?: boolean;
+  wraps?: boolean;
+  term?: Term;
+  /** A figure that narrow screens leave out and the row's score opens instead. */
+  detail?: boolean;
+}
+
 const features = tableFeatures({
-  columnMeta: metaHelper<{ numeric?: boolean; forest?: boolean; wraps?: boolean; term?: Term }>(),
+  columnMeta: metaHelper<ColumnMeta>(),
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   sortFns: { alphanumeric: sortFn_alphanumeric, basic: sortFn_basic },
@@ -157,6 +165,18 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   return null;
 }
 
+/**
+ * The figures of a row's `detail` columns, which its score opens on tap, click, or Enter, since
+ * narrow screens leave those columns out.
+ */
+function rowDetails(row: LeaderboardRow, ranked: boolean): Term {
+  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${terms.gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
+  return {
+    term: row.name,
+    definition: `${formatCountOf(row.votes, 'vote')}, ${rates}${ranked ? '' : ' across all categories'}.`,
+  };
+}
+
 const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
   rows.find((row) => row.system === anchorSystem)?.score;
 
@@ -175,8 +195,9 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
 }
 
 /**
- * The leaderboard table, whose interval column is a forest plot on one shared axis. Phones leave
- * that column out, so the score shows on the first screen with its interval as text.
+ * The leaderboard table, whose interval column is a forest plot on one shared axis. Below `lg` the
+ * table leaves that column out, keeping each interval as text under its score, and below `md` it
+ * also leaves out the `detail` columns, which each score opens, so the table fits without scrolling.
  */
 export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
@@ -213,11 +234,14 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         cell: ({ row: { original } }) => (
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {original.standing ? (
-              <a href={href(original.system)} className="font-medium whitespace-nowrap">
+              <a
+                href={href(original.system)}
+                className="font-medium text-balance sm:whitespace-nowrap"
+              >
                 {original.name}
               </a>
             ) : (
-              <span className="font-medium whitespace-nowrap">{original.name}</span>
+              <span className="font-medium text-balance sm:whitespace-nowrap">{original.name}</span>
             )}
             {original.system === anchorSystem && <StatusMark status="anchor" term={anchorTerm} />}
             {original.preliminary && <StatusMark status="preliminary" />}
@@ -235,8 +259,10 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         header: 'Score',
         sortDescFirst: true,
         cell: ({ row }) => (
-          <span className="flex flex-col leading-tight">
-            <span className="font-medium">{formatScore(row.original.score)}</span>
+          <span className="flex flex-col items-end leading-tight">
+            <Hint term={rowDetails(row.original, ranked)}>
+              <span className="font-medium">{formatScore(row.original.score)}</span>
+            </Hint>
             <span className="text-xs text-muted-foreground">
               {formatInterval(row.original.interval)}
             </span>
@@ -247,7 +273,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
       helper.accessor('votes', {
         header: terms.votes.term,
         sortDescFirst: true,
-        meta: { numeric: true, term: terms.votes },
+        meta: { numeric: true, term: terms.votes, detail: true },
       }),
       helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
         id: 'both-bad',
@@ -255,7 +281,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: terms.bothBad },
+        meta: { numeric: true, term: terms.bothBad, detail: true },
       }),
       helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
         id: 'gate-failures',
@@ -263,23 +289,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: terms.gateFailures },
-      }),
-      helper.accessor((row) => row.standing?.mean_cost_usd ?? undefined, {
-        id: 'cost',
-        header: familyWide('Cost / output'),
-        sortDescFirst: false,
-        sortUndefined: 'last',
-        cell: ({ getValue }) => formatCost(getValue() ?? null),
-        meta: { numeric: true, term: terms.costLatency },
-      }),
-      helper.accessor((row) => row.standing?.p50_latency_sec ?? undefined, {
-        id: 'latency',
-        header: familyWide('p50 latency'),
-        sortDescFirst: false,
-        sortUndefined: 'last',
-        cell: ({ getValue }) => formatSeconds(getValue() ?? null),
-        meta: { numeric: true, term: terms.costLatency },
+        meta: { numeric: true, term: terms.gateFailures, detail: true },
       }),
     ]);
   }, [ranked, domain, anchor, anchorSystem, anchorTerm, href]);
@@ -297,13 +307,10 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         {table.getHeaderGroups().map((group) => (
           <TableRow key={group.id} className="hover:bg-transparent">
             {group.headers.map((header) => {
-              const { numeric, forest, term } = header.column.columnDef.meta ?? {};
+              const { numeric, forest, term, detail } = header.column.columnDef.meta ?? {};
               if (forest) {
                 return (
-                  <TableHead
-                    key={header.id}
-                    className="w-[38%] min-w-48 p-0 align-bottom max-sm:hidden"
-                  >
+                  <TableHead key={header.id} className="w-[38%] p-0 align-bottom max-lg:hidden">
                     <span className="sr-only">95% interval</span>
                     <table.FlexRender header={header} />
                   </TableHead>
@@ -314,6 +321,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
                 <TableHead
                   key={header.id}
                   numeric={numeric}
+                  className={cn(detail && 'max-md:hidden')}
                   aria-sort={
                     sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
                   }
@@ -348,12 +356,16 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         {table.getRowModel().rows.map((row) => (
           <TableRow key={row.id} className="h-12">
             {row.getAllCells().map((cell) => {
-              const { numeric, forest, wraps } = cell.column.columnDef.meta ?? {};
+              const { numeric, forest, wraps, detail } = cell.column.columnDef.meta ?? {};
               return (
                 <TableCell
                   key={cell.id}
                   numeric={numeric}
-                  className={cn(forest && 'p-0 max-sm:hidden', wraps && 'whitespace-normal')}
+                  className={cn(
+                    forest && 'p-0 max-lg:hidden',
+                    wraps && 'whitespace-normal',
+                    detail && 'max-md:hidden',
+                  )}
                 >
                   <table.FlexRender cell={cell} />
                 </TableCell>

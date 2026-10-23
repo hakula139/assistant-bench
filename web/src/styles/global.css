@@ -22,8 +22,6 @@
   --default-transition-timing-function: ease;
   --text-title: 1.75rem;
   --container-measure: 85ch;
-  /* Below this width a forest axis labels only its sparse ticks, as `NARROW_AXIS` does in Plot. */
-  --container-axis: 20rem;
 }
 
 :root {

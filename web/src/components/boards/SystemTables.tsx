@@ -1,4 +1,5 @@
 import type { ForestPlotRow } from '@/components/charts/ForestPlot';
+import { Stat } from '@/components/site/PageParts';
 import { Hint, StatusMark } from '@/components/site/Term';
 import {
   Table,
@@ -16,9 +17,24 @@ import {
   formatSeconds,
   MISSING,
 } from '@/lib/format';
-import { defectTerms, fallbackAnchor } from '@/lib/glossary';
+import { defectTerms, fallbackAnchor, fingerprintTerm, terms } from '@/lib/glossary';
 import { defects, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
+
+/**
+ * The system page's Votes figure as one island, so the decisive count's hint is the element a tap
+ * lands on, which an Astro slot around it would not be.
+ */
+export function VotesStat({ votes, decisive }: { votes: number; decisive: number }) {
+  return (
+    <Stat
+      label="Votes"
+      detail={<Hint term={terms.decisive}>({formatCount(decisive)} decisive)</Hint>}
+    >
+      {formatCount(votes)}
+    </Stat>
+  );
+}
 
 export function HeadToHeadTable({
   headToHead,
@@ -164,7 +180,6 @@ export function RoundsTable({
           <TableHead numeric>Score</TableHead>
           <TableHead numeric>95% interval</TableHead>
           <TableHead numeric>Votes</TableHead>
-          <TableHead>Fingerprint</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -172,7 +187,11 @@ export function RoundsTable({
           <TableRow key={round}>
             <TableCell>
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                {round}
+                {past.fingerprint === null ? (
+                  round
+                ) : (
+                  <Hint term={fingerprintTerm(past.fingerprint)}>{round}</Hint>
+                )}
                 {anchor !== reference && (
                   <StatusMark
                     status="anchor"
@@ -184,7 +203,6 @@ export function RoundsTable({
             <TableCell numeric>{formatScore(past.score)}</TableCell>
             <TableCell numeric>{formatInterval(past.interval)}</TableCell>
             <TableCell numeric>{past.votes}</TableCell>
-            <TableCell className="font-mono text-xs">{past.fingerprint ?? MISSING}</TableCell>
           </TableRow>
         ))}
       </TableBody>

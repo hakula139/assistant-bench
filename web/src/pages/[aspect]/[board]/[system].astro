@@ -7,13 +7,14 @@ import {
   DistributionTable,
   HeadToHeadTable,
   RoundsTable,
+  VotesStat,
 } from '@/components/boards/SystemTables';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { note, PageHeader, Section, stack, Stat, statList } from '@/components/site/PageParts';
-import { Hint, StatusMark } from '@/components/site/Term';
+import { StatusMark } from '@/components/site/Term';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -24,8 +25,7 @@ import {
 import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
-import { formatCount, formatInterval, formatRank, formatScore } from '@/lib/format';
-import { terms } from '@/lib/glossary';
+import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
@@ -120,12 +120,7 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
         {formatScore(standing.score)}
       </Stat>
       <Stat label="Rank">{formatRank(standing.best_rank, standing.worst_rank)}</Stat>
-      <Stat label="Votes">
-        <Hint slot="detail" client:visible term={terms.decisive}>
-          ({formatCount(standing.decisive_votes)} decisive)
-        </Hint>
-        {formatCount(standing.votes)}
-      </Stat>
+      <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
       <Stat label="Round">{round}</Stat>
     </dl>
   </PageHeader>

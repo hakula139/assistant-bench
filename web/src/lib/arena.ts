@@ -55,6 +55,9 @@ export class ApiError extends Error {
   }
 }
 
+/** No response from the vote API, as when `bench serve` has stopped. */
+export class NetworkError extends Error {}
+
 async function request<T>(
   schema: z.ZodType<T>,
   method: 'GET' | 'POST',
@@ -65,6 +68,8 @@ async function request<T>(
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch((reason: unknown) => {
+    throw new NetworkError(`no response from ${path}`, { cause: reason });
   });
   if (!response.ok) {
     const detail = z

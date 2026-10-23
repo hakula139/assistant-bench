@@ -22,7 +22,7 @@ const round = report
   class="flex flex-col gap-3 lg:row-span-2 lg:grid lg:grid-rows-subgrid"
   aria-labelledby={`family-${family.name}`}
 >
-  <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b pb-2">
+  <div class="flex flex-wrap content-start items-baseline justify-between gap-x-4 gap-y-1 border-b pb-2">
     <h3 id={`family-${family.name}`} class={sectionTitle}>
       <a href={boardPath(family)} class="text-foreground hover:text-link">
         {family.config.display_name}

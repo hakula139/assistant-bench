@@ -74,6 +74,20 @@ const line = cn(middle, 'h-0 border-t-3 border-chart-series');
 /** The rule a forest plot draws at the anchor score, matching `anchorRule` on the Plot charts. */
 const anchorRule = 'bg-faint/40';
 
+/**
+ * Hides a dense tick's label on an axis too narrow for its interval count to label every tick, at
+ * 2.5rem an interval as `labelledTicks` allows, written out so Tailwind sees each class.
+ */
+const axisFits: Record<number, string> = {
+  1: '@max-[2.5rem]:hidden',
+  2: '@max-[5rem]:hidden',
+  3: '@max-[7.5rem]:hidden',
+  4: '@max-[10rem]:hidden',
+  5: '@max-[12.5rem]:hidden',
+  6: '@max-[15rem]:hidden',
+  7: '@max-[17.5rem]:hidden',
+};
+
 /** An arrowhead at one end of the track, pointing off the axis. */
 function Arrow({ side, className }: { side: 'left' | 'right'; className: string }) {
   return (
@@ -139,11 +153,11 @@ export function drawnMarks(rows: ForestRow[], domain: [number, number]): LegendM
 }
 
 /** A key to the interval marks, for the `marks` a nearby forest plot draws. */
-export function ForestLegend({ marks }: { marks: LegendMark[] }) {
+export function ForestLegend({ marks, className }: { marks: LegendMark[]; className?: string }) {
   return (
     <ul
       aria-label="Legend"
-      className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground"
+      className={cn('flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground', className)}
     >
       {marks.map((key) => (
         <li key={key} className="flex items-center gap-2">
@@ -190,7 +204,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                   key={tick}
                   className={cn(
                     'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
-                    !sparse.has(tick) && '@max-axis:hidden',
+                    !sparse.has(tick) && axisFits[ticks.length - 1],
                   )}
                   style={{ left: position(tick) }}
                 >

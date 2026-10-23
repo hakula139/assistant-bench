@@ -20,6 +20,7 @@ import {
   ApiError,
   castVote,
   listFamilies,
+  NetworkError,
   resumeSession,
   startSession,
   undoVote,
@@ -36,7 +37,11 @@ import { defects, type Defect } from '@/lib/report';
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
 const STALE_PAIR = 'This pair changed in another tab.';
-const GONE_FAMILY = 'This family has no outputs to vote on now. Restart bench serve after a run.';
+const GONE_FAMILY = (
+  <>
+    This family has no outputs to vote on now. Restart <code>uv run bench serve</code> after a run.
+  </>
+);
 const VIEWPORTS = [375, 768, 1280] as const;
 
 /** The verdicts from left to right. On phones, two to a row, A and B share the first. */
@@ -95,15 +100,19 @@ async function enterFamily(family: string): Promise<SessionView> {
 }
 
 /** What went wrong, in words that say what to do when the server is out of reach. */
-function message(error: unknown): string {
-  // fetch rejects with a TypeError, whose text differs by browser, when no server answers.
-  if (error instanceof TypeError) {
-    return 'Could not reach the vote server. Check that bench serve is still running, then reload.';
+function message(error: unknown): ReactNode {
+  if (error instanceof NetworkError) {
+    return (
+      <>
+        Could not reach the vote server. Check that <code>uv run bench serve</code> is still
+        running, then reload.
+      </>
+    );
   }
   return error instanceof Error ? error.message : String(error);
 }
 
-function ErrorAlert({ error }: { error: string | null }) {
+function ErrorAlert({ error }: { error: ReactNode }) {
   return (
     error !== null && (
       <p role="alert" className="text-sm text-destructive">
@@ -135,13 +144,13 @@ function Screen({ title, children }: { title: string; children: ReactNode }) {
 
 interface StartScreenProps {
   busy: boolean;
-  error: string | null;
+  error: ReactNode;
   onStart: (family: string) => void;
 }
 
 function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   const [families, setFamilies] = useState<FamilyView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReactNode>(null);
 
   useEffect(() => {
     listFamilies().then(setFamilies, (reason: unknown) => {
@@ -151,7 +160,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
 
   return (
     <Screen title="Start a voting session">
-      <ErrorAlert error={error === null ? startError : `Could not list families: ${error}`} />
+      <ErrorAlert error={error === null ? startError : <>Could not list families: {error}</>} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
           No family has outputs to vote on. Run <code>uv run bench run &lt;family&gt;</code>, then
@@ -271,7 +280,7 @@ export function VoteApp() {
   const [resumingFamily, setResumingFamily] = useState(() =>
     new URLSearchParams(window.location.search).get(FAMILY_PARAM),
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReactNode>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [choice, setChoice] = useState<Choice | null>(null);

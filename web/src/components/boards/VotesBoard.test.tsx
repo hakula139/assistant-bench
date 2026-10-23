@@ -111,6 +111,17 @@ describe('VotesBoard', () => {
     ]);
   });
 
+  test('leaves out the left-out count and the length bias when the round has neither', async () => {
+    const round = await load();
+    round.results.dropped_votes = 0;
+    round.results.length = null;
+
+    const html = render(round);
+
+    expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
+    expect(stats(html)[1]).toEqual(['Votes', '340 over 10 sessions']);
+  });
+
   test('shows a dash for a system with no both-bad rate', async () => {
     const html = render(await load());
 
@@ -165,7 +176,7 @@ describe('VotesBoard', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
 
     expect((await screen.findByRole('dialog', { name: 'Anchor' })).textContent).toContain(
-      'reference Acme New, which is not ranked yet',
+      'The most-voted system, Acme Large, fixed at 1,000 in place of the reference Acme New, which that round could not rank.',
     );
   });
 
@@ -235,7 +246,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toBe(
-      ' System 95% interval Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means Cost / output all categories What Cost / output and p50 latency means p50 latency all categories What Cost / output and p50 latency means ',
+      ' System 95% interval Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means ',
     );
   });
 
@@ -258,23 +269,64 @@ describe('VotesBoard', () => {
     expect(search.get('category')).toBe('message');
   });
 
-  test('leaves the interval column and its legend out on phones, keeping the score', async () => {
-    const document = parse(render(await load()));
-    const leaderboard = document.querySelector('table');
-    const columns = [...(leaderboard?.querySelectorAll('thead th') ?? [])].map(
-      (cell) => cell.textContent,
-    );
-    const column = (name: string) =>
-      [...(leaderboard?.querySelectorAll('tr') ?? [])].map((row) =>
-        row.children.item(columns.indexOf(name))?.className.includes('max-sm:hidden'),
-      );
+  test.each([
+    ['95% interval', 'max-lg:hidden'],
+    ['Votes', 'max-md:hidden'],
+    ['Both bad', 'max-md:hidden'],
+    ['Gate failures', 'max-md:hidden'],
+    ['Score', null],
+  ])('hides the %s column on narrow screens with %s', async (name, hidden) => {
+    const leaderboard = parse(render(await load())).querySelector('table');
 
-    expect(new Set(column('95% interval'))).toEqual(new Set([true]));
-    expect(new Set(column('Score'))).toEqual(new Set([false]));
-    expect(
-      document.querySelector('ul[aria-label="Legend"]')?.closest('.max-sm\\:hidden')?.localName,
-    ).toBe('div');
+    const columns = [...(leaderboard?.querySelectorAll('thead th') ?? [])].map((cell) =>
+      text(cell.innerHTML).trim(),
+    );
+    const index = columns.findIndex((column) => column.startsWith(name));
+    const rules = [...(leaderboard?.querySelectorAll('tr') ?? [])].map(
+      (row) =>
+        row.children
+          .item(index)
+          ?.className.split(' ')
+          .find((rule) => rule.endsWith(':hidden')) ?? null,
+    );
+
+    expect(index, name).toBeGreaterThan(-1);
+    expect(new Set(rules), name).toEqual(new Set([hidden]));
   });
+
+  test('shows the category legend where the leaderboard legend hides with the interval column', async () => {
+    const document = parse(render(await load()));
+
+    const legends = [...document.querySelectorAll('ul[aria-label="Legend"]')].map((list) => [
+      list.className.split(' ').find((rule) => rule.endsWith(':hidden')),
+      list.closest('section')?.querySelector('h2')?.textContent ?? null,
+      text(list.innerHTML).trim(),
+    ]);
+
+    expect(legends).toEqual([
+      ['max-lg:hidden', null, legend(render(await load()))],
+      ['lg:hidden', 'Categories', expect.stringContaining('Preliminary')],
+    ]);
+  });
+
+  test.each([
+    ['all', '1,004', '114 votes, both bad 5%, gate failures 2%.'],
+    ['message', '972', '34 votes, both bad 5%, gate failures 2% across all categories.'],
+  ])(
+    "opens a system's votes and rates from its score on the %s board",
+    async (category, score, details) => {
+      search.set('category', category);
+      const { round, results } = await load();
+      stubPlotFrame();
+      renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+
+      await userEvent.setup().click(screen.getByRole('button', { name: score }));
+
+      expect((await screen.findByRole('dialog', { name: 'Acme Pro' })).textContent).toContain(
+        details,
+      );
+    },
+  );
 
   test("draws the anchor's score as one rule through every row", async () => {
     const { round, results } = await load();
@@ -298,6 +350,35 @@ describe('VotesBoard', () => {
     );
 
     expect(rows.map(verticalRules)).toEqual(rows.map(() => [anchorScore]));
+    expect(rows.map((row) => row.querySelector('svg.bench-plot')?.getAttribute('height'))).toEqual(
+      rows.map((row) =>
+        row.querySelector('svg.bench-plot')?.parentElement?.style.minHeight.replace('px', ''),
+      ),
+    );
+  });
+
+  test('draws no anchor rule in a category that leaves the anchor out', async () => {
+    const { round, results } = await load();
+    const message = results.categories.find((board) => board.category === 'message');
+    if (!message) {
+      throw new Error('the fixture has a message category');
+    }
+    message.standings = message.standings.filter((refit) => refit.system !== results.anchor);
+    search.set('category', 'message');
+    stubPlotFrame();
+
+    const { container } = renderInDom(
+      <VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
+    );
+    const rows = await vi.waitFor(() => {
+      const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
+        row.querySelector('svg'),
+      );
+      expect(drawn).toHaveLength(message.standings.length);
+      return drawn;
+    });
+
+    expect(rows.map(verticalRules)).toEqual(rows.map(() => []));
   });
 
   test('keeps every category row and the systems only the category ranks', async () => {
@@ -313,7 +394,7 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('Acme Edge Preliminary 890 798–1,044 41 – – – –');
+    expect(text(html)).toContain('Acme Edge Preliminary 890 798–1,044 41 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
     expect(text(html)).toContain('Acme Mini 769 (696–867), 38 votes, preliminary – 789');
     expect(text(html)).toContain('Acme Edge – 890 (798–1,044), 41 votes, preliminary – Score');

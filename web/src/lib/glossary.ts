@@ -117,7 +117,15 @@ export const defectTerms: Record<Defect, Term> = {
 export function fallbackAnchor(anchorName: string, referenceName: string): Term {
   return {
     ...terms.anchor,
-    definition: `The most-voted system, ${anchorName}, fixed at ${score} in place of the reference ${referenceName}, which is not ranked yet.`,
+    definition: `The most-voted system, ${anchorName}, fixed at ${score} in place of the reference ${referenceName}, which that round could not rank.`,
+  };
+}
+
+/** What a round's `fingerprint` for a system identifies, quoting the hash. */
+export function fingerprintTerm(fingerprint: string): Term {
+  return {
+    term: 'Fingerprint',
+    definition: `${fingerprint}, a hash of the route, effort, harness, and prompt the system ran with that round.`,
   };
 }
 
@@ -161,6 +169,6 @@ export const gates = {
   },
   script: {
     term: 'Script',
-    definition: 'The output uses Traditional Chinese characters that the prompt does not.',
+    definition: "The output uses Traditional-only characters that the prompt doesn't.",
   },
 } satisfies Record<string, Term>;

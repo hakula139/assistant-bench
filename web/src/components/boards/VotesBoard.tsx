@@ -8,7 +8,7 @@ import {
   leaderboardMarks,
   type LeaderboardRow,
 } from '@/components/boards/Leaderboard';
-import { CategoryForests } from '@/components/charts/CategoryForests';
+import { CategoryForests, categoryMarks } from '@/components/charts/CategoryForests';
 import type { Refit } from '@/components/charts/ForestPlot';
 import {
   paretoFrontier,
@@ -232,13 +232,12 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
               .join(', ')}`}
           </p>
         )}
-        <div className="max-sm:hidden">
-          <ForestLegend marks={leaderboardMarks(rows, results.anchor)} />
-        </div>
+        <ForestLegend className="max-lg:hidden" marks={leaderboardMarks(rows, results.anchor)} />
       </div>
 
       {categories.length > 0 && (
         <Section title="Categories">
+          <ForestLegend className="lg:hidden" marks={categoryMarks(results.categories)} />
           <CategoryForests categories={results.categories} systems={order} names={names} />
           <TableTwin>
             <Table>

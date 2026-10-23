@@ -559,12 +559,21 @@ describe('VoteApp', () => {
     [
       'the family is gone',
       () => Promise.resolve(new Response(JSON.stringify({ detail: 'not found' }), { status: 404 })),
-      'This family has no outputs to vote on now. Restart bench serve after a run.',
+      'This family has no outputs to vote on now. Restart uv run bench serve after a run.',
     ],
     [
       'no server answers',
       () => Promise.reject(new TypeError('Failed to fetch')),
-      'Could not reach the vote server. Check that bench serve is still running, then reload.',
+      'Could not reach the vote server. Check that uv run bench serve is still running, then reload.',
+    ],
+    [
+      'the response body cannot be read',
+      async () => {
+        const response = new Response(JSON.stringify({ id: 's1' }));
+        await response.text();
+        return response;
+      },
+      'Body is unusable: Body has already been read',
     ],
   ])('shows on the start screen why a session did not start when %s', async (_, start, alert) => {
     vi.stubGlobal('fetch', (path: string) =>

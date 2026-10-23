@@ -11,6 +11,7 @@ import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { defectTerms, terms } from '@/lib/glossary';
 import { defects, reportSchema } from '@/lib/report';
 import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
+import { REPOSITORY } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import HomePage from '@/pages/index.astro';
@@ -39,19 +40,34 @@ const arenaConfig: VotesConfig = {
   public: true,
 };
 
-/** The fixture's round, after an earlier one in which every system scored 900. */
+/**
+ * The fixture's round, after an earlier one in which every system scored 900, with each round's
+ * fingerprints as long as real ones and naming the round, such as `20261007abcdef01`.
+ */
 async function family(): Promise<Family> {
   const latest = reportSchema.parse(await readFixture());
   const earlier = structuredClone(latest);
   earlier.round = '2026-10-07';
   earlier.closed_at = '2026-10-07T18:00:00Z';
-  if (earlier.results.scorer !== 'votes') {
+  if (earlier.results.scorer !== 'votes' || latest.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
   }
   for (const standing of earlier.results.standings) {
     standing.score = 900;
   }
+  for (const report of [earlier, latest]) {
+    for (const standing of report.results.standings) {
+      standing.fingerprint = `${report.round.replaceAll('-', '')}abcdef01`;
+    }
+  }
   return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
+}
+
+/** The page header's figures as `label value`, read as the page shows them. */
+function headerStats(html: string): string[] {
+  return [...new JSDOM(html).window.document.querySelectorAll('header dl dt')].map(
+    (label) => `${label.textContent} ${label.nextElementSibling?.textContent ?? ''}`,
+  );
 }
 
 /** A family as `publicFamilies` lists it under the writing aspect. */
@@ -213,6 +229,22 @@ describe('family page', () => {
 
     expect(text(html)).toContain('Anchor, 1,000 Unbounded');
     expect(html).not.toContain('Score, 95% interval');
+    expect(islandHints(html, 'Forest')).toEqual(['1,000', 'no votes', 'no votes', 'no votes']);
+  });
+
+  test.each([
+    ['family page', FamilyPage, { boards: [] }],
+    ['family panel', FamilyPanel, {}],
+  ])("names a tests family's systems on the %s before its first round", async (_, page, props) => {
+    const empty: Family = { ...testsFamily(), rounds: [] };
+    const none: Family = { ...empty, config: { ...empty.config, systems: [] } };
+
+    const [html, noneHtml] = await Promise.all(
+      [empty, none].map((loaded) => render(page, { family: loaded, ...props })),
+    );
+
+    expect(text(html)).toContain('Systems: Acme Pro, Acme Small');
+    expect(text(noneHtml)).toContain('Systems: –');
   });
 
   test('draws the run of a family that renders pages as a page', async () => {
@@ -262,6 +294,19 @@ describe('family page', () => {
     expect(guide(html)).toBe(scorer);
     expect(methodology).toContain(`id="${scorer}"`);
   });
+
+  test.each([
+    ['votes', family, 'Cases'],
+    ['tests', () => Promise.resolve(testsFamily()), 'Tasks'],
+  ])("links the %s board's inputs to the family's directory", async (_, load, label) => {
+    const loaded = await load();
+
+    const html = await render(FamilyPage, { family: loaded, boards: [] });
+
+    const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
+    const link = new JSDOM(html).window.document.querySelector(`a[href="${href}"]`);
+    expect(link?.textContent.trim()).toBe(label);
+  });
 });
 
 describe('methodology page', () => {
@@ -270,6 +315,13 @@ describe('methodology page', () => {
 
     expect(text(html)).toContain('Run same tasks for all');
     expect(stepHints(html)).toEqual([]);
+  });
+
+  test("states the bootstrap count and opens the example figure's hints", async () => {
+    const html = await render(MethodologyPage, {});
+
+    expect(text(html)).toContain('95% intervals 1,000 bootstraps resampling whole cases');
+    expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
   });
 
   test("keeps the last words of a glossary term's meaning on one line", async () => {
@@ -365,9 +417,14 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain(
-      'Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
-    );
+    expect(text(html)).toContain('Writing Arena Writing Acme Pro Score');
+    expect(headerStats(html)).toEqual([
+      'Score 1,004 (955–1,065)',
+      'Rank 1–3',
+      'Votes 114 (89 decisive)',
+      'Round 2026-10-21',
+    ]);
+    expect(islandHints(html, 'VotesStat')).toEqual(['(89 decisive)']);
   });
 
   test('names the system, its family, and every other system by display name', async () => {
@@ -381,14 +438,14 @@ describe('system page', () => {
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
-  test('lists the fingerprint each round ran', async () => {
+  test("opens each round's fingerprint from its date in the rounds table", async () => {
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-pro',
       boards: [],
     });
 
-    expect(text(html)).toContain('Round Score 95% interval Votes Fingerprint');
+    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '2026-10-07']);
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -460,9 +517,11 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain(
-      'Acme Tiny Preliminary Score 233 (81–321) Rank 6 Votes 0 (0 decisive)',
-    );
+    expect(headerStats(html).slice(0, 3)).toEqual([
+      'Score 233 (81–321)',
+      'Rank 6',
+      'Votes 0 (0 decisive)',
+    ]);
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
     expect(islandHints(html, 'StatusMark')).toEqual(['Preliminary']);
@@ -652,6 +711,9 @@ describe('board switcher', () => {
       ['/writing/arena-en/', 'Arena English', 'page'],
       ['/writing/arena-ja/', 'Arena Japanese', null],
     ]);
+    expect(new JSDOM(html).window.document.querySelector('summary')?.textContent).toBe(
+      '3 Writing boards',
+    );
   });
 
   test('links the system on each sibling board that gives it a page', async () => {

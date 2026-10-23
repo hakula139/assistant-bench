@@ -18,9 +18,19 @@ describe('leaderNote', () => {
       null,
     ],
     [
-      'the tie break that chose a tied leader',
+      'the latency tie break that chose a tied leader',
       { leader: 'acme-pro', separated: false, tie_break: 'latency' as const },
       { term: 'Tied', definition: 'Tied with the top score, and chosen by the lower latency.' },
+    ],
+    [
+      'the cost tie break that chose a tied leader',
+      { leader: 'acme-pro', separated: false, tie_break: 'cost' as const },
+      { term: 'Tied', definition: 'Tied with the top score, and chosen by the lower cost.' },
+    ],
+    [
+      'the score tie break that chose a tied leader',
+      { leader: 'acme-pro', separated: false, tie_break: 'score' as const },
+      { term: 'Tied', definition: 'Tied with the top score, and chosen by the higher score.' },
     ],
   ])('gives %s', (_, decision, note) => {
     expect(leaderNote(decision)).toEqual(note);

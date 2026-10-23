@@ -83,15 +83,15 @@ export function sparseTicks(domain: [number, number]): number[] {
 }
 
 /**
- * The axis width, in CSS pixels, below which an axis labels only its sparse ticks, the narrowest
- * that keeps the labels of the up to seven intervals `forestTicks` makes apart. The static forest's
- * `--container-axis` in `global.css` matches it.
+ * The axis width each interval between ticks needs, in CSS pixels, for every tick to keep its label
+ * apart from its neighbors'. The static forest's `axisFits` variants in `Forest.tsx` match it.
  */
-const NARROW_AXIS = 320;
+const INTERVAL_WIDTH = 40;
 
-/** Returns the ticks a forest plot of a given width, in CSS pixels, labels. */
+/** Returns the ticks a forest plot labels on an axis `width` CSS pixels wide. */
 export function labelledTicks(domain: [number, number], width: number): number[] {
-  return width < NARROW_AXIS ? sparseTicks(domain) : forestTicks(domain);
+  const all = forestTicks(domain);
+  return width >= (all.length - 1) * INTERVAL_WIDTH ? all : sparseTicks(domain);
 }
 
 /** Where an estimate falls on an axis, with what the axis start cuts off. */
