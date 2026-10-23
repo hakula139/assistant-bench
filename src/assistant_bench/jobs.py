@@ -180,7 +180,7 @@ def oracle_job(family: Family) -> JobConfig:
                 import_path=HARNESSES['oracle'].import_path,
             )
         ],
-        sorted((FAMILIES_DIR / family.name / 'tasks').iterdir()),
+        tasks,
         [],
     )
 
