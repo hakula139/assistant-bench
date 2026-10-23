@@ -1,6 +1,6 @@
-import { nice, tickStep, ticks } from 'd3-array';
+import { nice, ticks, tickStep } from 'd3-array';
 
-import { ANCHOR_SCORE } from '@/lib/anchor';
+import { ANCHOR_SCORE } from '@/lib/ranking';
 import type { Interval, Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
@@ -82,12 +82,16 @@ export function sparseTicks(domain: [number, number]): number[] {
   return [all[0], ...(anchor ? [ANCHOR_SCORE] : []), all[all.length - 1]];
 }
 
-/** The plot width, in CSS pixels, below which an axis labels only its sparse ticks. */
-const NARROW_AXIS = 240;
+/**
+ * The axis width each interval between ticks needs, in CSS pixels, for every tick to keep its label
+ * apart from its neighbors'. The static forest's `axisFits` variants in `Forest.tsx` match it.
+ */
+const INTERVAL_WIDTH = 40;
 
-/** Returns the ticks a forest plot of a given width, in CSS pixels, labels. */
+/** Returns the ticks a forest plot labels on an axis `width` CSS pixels wide. */
 export function labelledTicks(domain: [number, number], width: number): number[] {
-  return width < NARROW_AXIS ? sparseTicks(domain) : forestTicks(domain);
+  const all = forestTicks(domain);
+  return width >= (all.length - 1) * INTERVAL_WIDTH ? all : sparseTicks(domain);
 }
 
 /** Where an estimate falls on an axis, with what the axis start cuts off. */

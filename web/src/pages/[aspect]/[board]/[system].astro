@@ -7,12 +7,13 @@ import {
   DistributionTable,
   HeadToHeadTable,
   RoundsTable,
+  VotesStat,
 } from '@/components/boards/SystemTables';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
-import { PageHeader, Section, Stat, note, stack, statList } from '@/components/site/PageParts';
+import { note, PageHeader, Section, stack, Stat, statList } from '@/components/site/PageParts';
 import { StatusMark } from '@/components/site/Term';
 import {
   Breadcrumb,
@@ -85,7 +86,6 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   });
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
-const length = results.length;
 const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
   round,
   reference,
@@ -120,15 +120,8 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
         {formatScore(standing.score)}
       </Stat>
       <Stat label="Rank">{formatRank(standing.best_rank, standing.worst_rank)}</Stat>
-      <Stat label="Votes" detail={`(${standing.decisive_votes} decisive)`}>
-        {standing.votes}
-      </Stat>
+      <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
       <Stat label="Round">{round}</Stat>
-      {standing.fingerprint !== null && (
-        <Stat label="Fingerprint">
-          <code class="font-mono text-xs font-normal">{standing.fingerprint}</code>
-        </Stat>
-      )}
     </dl>
   </PageHeader>
 
@@ -168,16 +161,6 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
 
     <Section title="Output length and latency">
       <p class={note}>Each system's median and 10th to 90th percentile range.</p>
-      {length !== null && (
-        <dl class="text-sm">
-          <Stat
-            label="Length preference"
-            detail="points per SD of the pair's relative length difference, family-wide"
-          >
-            {length >= 0 ? 'Longer' : 'Shorter'}, {Math.abs(length).toFixed(1)}
-          </Stat>
-        </dl>
-      )}
       <div class="grid gap-6 lg:grid-cols-2">
         {tokenRows.length > 0 && (
           <DotRangePlot client:visible rows={tokenRows} label="Output tokens" format="tokens" />

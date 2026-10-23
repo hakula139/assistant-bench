@@ -185,15 +185,3 @@
     }
   }
 }
-
-/* ── Charts ── */
-
-@layer components {
-  .bench-plot {
-    @apply font-sans text-xs text-muted-foreground;
-
-    [aria-label='tip'] {
-      @apply text-popover-foreground;
-    }
-  }
-}

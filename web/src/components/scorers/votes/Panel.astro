@@ -2,8 +2,8 @@
 import { Trophy } from 'lucide-react';
 
 import { panelForest } from '@/components/scorers/votes/forest';
+import { Leader } from '@/components/scorers/votes/Leader';
 import { Forest } from '@/components/site/Forest';
-import { formatLeaderNote } from '@/lib/format';
 import { latest, type Family } from '@/lib/reports';
 import { systemName } from '@/lib/systems';
 
@@ -19,17 +19,26 @@ const results = latest(family)?.results;
 
 {results?.scorer === 'votes' ? (
   <>
-    <Forest caption={`${title} scores with 95% intervals`} rows={rows} domain={domain} />
+    <Forest
+      client:visible
+      caption={`${title} scores with 95% intervals`}
+      rows={rows}
+      domain={domain}
+    />
     <p class="flex items-center gap-2 text-sm">
       <Trophy role="img" aria-label="Leader" className="size-4 shrink-0 text-muted-foreground" />
-      {[
-        results.decision && systemName(family.systemNames, results.decision.leader),
-        formatLeaderNote(results.decision),
-      ]
-        .filter(Boolean)
-        .join(', ')}
+      <Leader
+        client:visible
+        decision={results.decision}
+        name={results.decision && systemName(family.systemNames, results.decision.leader)}
+      />
     </p>
   </>
 ) : (
-  <Forest caption={`${title} systems, none measured yet`} rows={rows} domain={domain} />
+  <Forest
+    client:visible
+    caption={`${title} systems, none measured yet`}
+    rows={rows}
+    domain={domain}
+  />
 )}

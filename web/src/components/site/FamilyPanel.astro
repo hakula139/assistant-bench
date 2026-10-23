@@ -2,7 +2,6 @@
 import { scorerViews } from '@/components/scorers';
 import { ScorerIcon } from '@/components/site/Method';
 import { sectionTitle } from '@/components/site/PageParts';
-import { formatCountOf } from '@/lib/format';
 import { scorers } from '@/lib/method';
 import { boardPath, latest, type Family } from '@/lib/reports';
 
@@ -12,16 +11,18 @@ interface Props {
 
 const { family } = Astro.props;
 const { scorer } = family.config;
-const { Panel } = scorerViews[scorer];
+const { Panel, roundDetail } = scorerViews[scorer];
 const report = latest(family);
-const results = report?.results;
 const round = report
-  ? `Round ${report.round}${results?.scorer === 'votes' ? `, ${formatCountOf(results.votes, 'vote')}` : ''}`
+  ? [`Round ${report.round}`, roundDetail(family)].filter(Boolean).join(' · ')
   : 'No round has closed yet';
 ---
 
-<section class="space-y-3" aria-labelledby={`family-${family.name}`}>
-  <div class="flex flex-wrap items-baseline justify-between gap-x-4 border-b pb-2">
+<section
+  class="flex flex-col gap-3 lg:row-span-2 lg:grid lg:grid-rows-subgrid"
+  aria-labelledby={`family-${family.name}`}
+>
+  <div class="flex flex-wrap content-start items-baseline justify-between gap-x-4 gap-y-1 border-b pb-2">
     <h3 id={`family-${family.name}`} class={sectionTitle}>
       <a href={boardPath(family)} class="text-foreground hover:text-link">
         {family.config.display_name}
@@ -29,8 +30,11 @@ const round = report
     </h3>
     <p class="flex items-center gap-1.5 self-center text-sm text-muted-foreground">
       <ScorerIcon scorer={scorer} />
-      {scorers[scorer].title} · {round}
+      <span class="sr-only">{scorers[scorer].title}:</span>
+      {round}
     </p>
   </div>
-  <Panel family={family} />
+  <div class="flex flex-col gap-3">
+    <Panel family={family} />
+  </div>
 </section>

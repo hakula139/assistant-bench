@@ -1,12 +1,15 @@
 ---
 import { partId } from '@/components/scorers/parts';
 import { votesParts } from '@/components/scorers/votes/parts';
-import { Forest, ForestLegend, drawnMarks } from '@/components/site/Forest';
+import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
 import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
 import { MethodStrip } from '@/components/site/Method';
-import { Part, Stat, list, note, statList } from '@/components/site/PageParts';
-import { EMPTY_DOMAIN, type ForestRow } from '@/lib/forest';
+import { list, note, Part, Stat, statList } from '@/components/site/PageParts';
+import { KeptTail } from '@/components/site/Term';
+import { AXIS_SPAN_BELOW_TOP, EMPTY_DOMAIN, type ForestRow } from '@/lib/forest';
+import { formatCount } from '@/lib/format';
 import { gates, terms } from '@/lib/glossary';
+import { RESAMPLES } from '@/lib/ranking';
 
 const id = (part: keyof typeof votesParts) => partId('votes', part);
 
@@ -16,7 +19,7 @@ const example = (score: number, lower: number, upper: number) => ({
 });
 
 const rows: ForestRow[] = [
-  { system: 'settled', name: 'Settled', estimate: example(1040, 990, 1090), preliminary: false },
+  { system: 'measured', name: 'Measured', estimate: example(1040, 990, 1090), preliminary: false },
   {
     system: 'preliminary',
     name: 'Preliminary',
@@ -43,7 +46,13 @@ const columns: GlossaryEntry[] = [
   terms.costLatency,
 ];
 
-const diagnostics = [terms.raterAgreement, terms.separatedPairs, terms.splitHalf, terms.leftOut];
+const diagnostics = [
+  terms.raterAgreement,
+  terms.separatedPairs,
+  terms.splitHalf,
+  terms.leftOut,
+  terms.lengthBias,
+];
 ---
 
 <MethodStrip scorer="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
@@ -52,37 +61,44 @@ const diagnostics = [terms.raterAgreement, terms.separatedPairs, terms.splitHalf
 </p>
 
 <Part id={id('gates')} title={votesParts.gates}>
-  <p>A failing output loses its pairs without a vote, and two identical outputs tie.</p>
+  <p>
+    A failing output loses its pairs and two identical outputs tie, so such pairs are settled
+    without a vote.
+  </p>
   <Glossary heading="Gate" entries={Object.values(gates)} />
 </Part>
 
 <Part id={id('scores')} title={votesParts.scores}>
   <p>
-    A Bradley-Terry model turns the votes and the results settled without a vote into Elo-like
-    scores, counting ties and both-bad votes as half a win, so scores compare only within a family.
+    <KeptTail text="A Bradley-Terry model turns the votes, and the pairs settled without a vote, into Elo-like scores, counting ties and both-bad votes as half a win. Each family fits its own scores around its own anchor, so compare scores only within one family." />
   </p>
   <dl class={statList}>
     <Stat label="A 100-point gap" detail="of the votes between them">
       wins about 64%
     </Stat>
     <Stat label="95% intervals" detail="resampling whole cases">
-      1,000 bootstraps
+      {formatCount(RESAMPLES)} bootstraps
     </Stat>
   </dl>
 </Part>
 
 <Part id={id('leaderboard')} title={votesParts.leaderboard}>
-  <figure class="space-y-4 rounded-lg border p-4">
-    <Forest caption="Four example rows" domain={EMPTY_DOMAIN} rows={rows} />
-    <figcaption class="space-y-2">
+  <figure class="flex flex-col gap-4 rounded-lg border p-4">
+    <Forest client:visible caption="Four example rows" domain={EMPTY_DOMAIN} rows={rows} />
+    <figcaption class="flex flex-col gap-2">
       <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
-      <p class={note}>The axis starts at most 600 points below the top score.</p>
+      <p class={note}>
+        The axis starts at most {formatCount(AXIS_SPAN_BELOW_TOP)} points below the top score.
+      </p>
     </figcaption>
   </figure>
   <Glossary heading="Column" entries={columns} />
   <p>
-    A dash marks a missing value. A category view refits that category's votes alone, so intervals
-    widen and Rank disappears, while the columns labeled "all categories" stay family-wide.
+    <KeptTail
+      text={
+        'A dash marks a missing value. A category view refits that category\'s votes alone, so intervals widen and Rank disappears, while the columns labeled "all categories" stay family-wide.'
+      }
+    />
   </p>
 </Part>
 

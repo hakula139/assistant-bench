@@ -1,0 +1,15 @@
+---
+import { note } from '@/components/site/PageParts';
+import { MISSING } from '@/lib/format';
+import type { Family } from '@/lib/reports';
+import { systemName } from '@/lib/systems';
+
+interface Props {
+  family: Family;
+}
+
+const { family } = Astro.props;
+const names = family.config.systems.map((system) => systemName(family.systemNames, system));
+---
+
+<p class={note}>Systems: {names.join(', ') || MISSING}</p>

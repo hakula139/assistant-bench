@@ -4,7 +4,11 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { CategoryForests } from '@/components/charts/CategoryForests';
-import { forestPlotOptions, type ForestPlotRow } from '@/components/charts/ForestPlot';
+import {
+  forestPlotHeight,
+  forestPlotOptions,
+  type ForestPlotRow,
+} from '@/components/charts/ForestPlot';
 import type { CategoryBoard } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
@@ -26,7 +30,11 @@ const frame = { width: 600, measure: (text: string) => text.length * 7 };
 
 function draw(rows: ForestPlotRow[], domain: [number, number]): Element {
   const labels = rows.map((row) => row.label);
-  return Plot.plot({ ...forestPlotOptions({ rows, labels, domain }, frame), width: frame.width });
+  return Plot.plot({
+    ...forestPlotOptions({ rows, labels, domain }, frame),
+    width: frame.width,
+    height: forestPlotHeight(labels),
+  });
 }
 
 /** The y positions of the interval rules, dashed or solid. */

@@ -27,13 +27,15 @@ interface StubOptions {
   /** The votes `s1` already holds, as a session cast in an earlier visit does. */
   prior?: number;
   brief?: { instruction: string; checklist: string[] };
+  /** Serves each output as a page by URL, as a family that renders HTML does. */
+  pages?: boolean;
 }
 
 /**
  * A stand-in for the arena API that keeps one open pair in session `s1` until it is voted on or
  * undone, and records each session start, resume, vote, and undo.
  */
-function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
+function stubApi({ cases = 40, prior = 0, brief, pages = false }: StubOptions = {}) {
   const starts: { family: string }[] = [];
   const resumes: string[] = [];
   const casts: Cast[] = [];
@@ -48,8 +50,15 @@ function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
     instruction: `Instruction ${token}`,
     checklist: [],
     ...brief,
-    a: { render: 'text' as const, text: `Output A${token.slice(1)}` },
-    b: { render: 'text' as const, text: `Output B${token.slice(1)}` },
+    ...(pages
+      ? {
+          a: { render: 'html' as const, url: `http://127.0.0.1:8791/render/${token}/a` },
+          b: { render: 'html' as const, url: `http://127.0.0.1:8791/render/${token}/b` },
+        }
+      : {
+          a: { render: 'text' as const, text: `Output A${token.slice(1)}` },
+          b: { render: 'text' as const, text: `Output B${token.slice(1)}` },
+        }),
   });
 
   const view = (): SessionView => {
@@ -201,6 +210,66 @@ describe('VoteApp', () => {
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(api.undos()).toBe(1);
+  });
+
+  test('links back to the family list from the completed session', async () => {
+    stubApi({ cases: 1 });
+    const user = await startSession();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Session complete');
+
+    expect(screen.getByRole('link', { name: 'Choose another family' }).getAttribute('href')).toBe(
+      '/vote/',
+    );
+  });
+
+  test('submits the verdict picked and the vote sent by pointer', async () => {
+    const api = stubApi();
+    const user = await startSession();
+
+    await user.click(screen.getByRole('radio', { name: 'B is better' }));
+    await user.click(screen.getByRole('button', { name: /Submit vote/ }));
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['b']);
+  });
+
+  test('submits on Enter pressed inside an open Issues popover', async () => {
+    const api = stubApi();
+    const user = await startSession();
+    await user.keyboard('a');
+    const outputA = screen.getByRole('region', { name: 'Output A' });
+    await user.click(within(outputA).getByRole('button', { name: 'Issues' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Too long' }));
+
+    await user.keyboard('{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts).toEqual([
+      { token: 't1', choice: 'a', defects: { a: ['length'], b: [] }, note: null },
+    ]);
+  });
+
+  test('lays out page outputs at the viewport width picked', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    stubApi({ pages: true });
+    const user = userEvent.setup();
+    render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    const frame = await screen.findByTitle('Output A');
+    expect(frame.style.width).toBe('1280px');
+
+    await user.click(screen.getByRole('radio', { name: '375 px' }));
+
+    expect(screen.getByTitle('Output A').style.width).toBe('375px');
+    expect(screen.getByTitle('Output B').style.width).toBe('375px');
   });
 
   test('starts the family it shows by short name, and names it in full in the session', async () => {
@@ -478,19 +547,43 @@ describe('VoteApp', () => {
     ]);
   });
 
-  test('shows an error from starting a session on the start screen', async () => {
+  test.each([
+    [
+      'the server refuses it',
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ detail: 'no outputs to pair' }), { status: 409 }),
+        ),
+      'no outputs to pair',
+    ],
+    [
+      'the family is gone',
+      () => Promise.resolve(new Response(JSON.stringify({ detail: 'not found' }), { status: 404 })),
+      'This family has no outputs to vote on now. Restart uv run bench serve after a run.',
+    ],
+    [
+      'no server answers',
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      'Could not reach the vote server. Check that uv run bench serve is still running, then reload.',
+    ],
+    [
+      'the response body cannot be read',
+      async () => {
+        const response = new Response(JSON.stringify({ id: 's1' }));
+        await response.text();
+        return response;
+      },
+      'Body is unusable: Body has already been read',
+    ],
+  ])('shows on the start screen why a session did not start when %s', async (_, start, alert) => {
     vi.stubGlobal('fetch', (path: string) =>
-      Promise.resolve(
-        path === '/api/families'
-          ? new Response(JSON.stringify([FAMILY]))
-          : new Response(JSON.stringify({ detail: 'no outputs to pair' }), { status: 409 }),
-      ),
+      path === '/api/families' ? Promise.resolve(new Response(JSON.stringify([FAMILY]))) : start(),
     );
     const user = userEvent.setup();
     render(<VoteApp />);
 
     await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
 
-    expect((await screen.findByRole('alert')).textContent).toBe('no outputs to pair');
+    expect((await screen.findByRole('alert')).textContent).toBe(alert);
   });
 });

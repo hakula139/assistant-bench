@@ -1,6 +1,6 @@
 ---
 import type { GetStaticPaths } from 'astro';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, FileText } from 'lucide-react';
 
 import { scorerViews } from '@/components/scorers';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import { scorers } from '@/lib/method';
 import { familyPaths, getFamilies, type BoardLink, type Family } from '@/lib/reports';
+import { REPOSITORY } from '@/lib/site';
 
 export const getStaticPaths = (async () =>
   familyPaths(await getFamilies())) satisfies GetStaticPaths;
@@ -32,13 +33,19 @@ const { Board } = scorerViews[config.scorer];
   <PageHeader title={title}>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip client:load scorer={config.scorer} config={config} />
-    <a
-      href={`/methodology/#${config.scorer}`}
-      class="inline-flex items-center gap-2 self-start text-sm"
-    >
-      <BookOpen className="size-4" aria-hidden="true" />
-      How to read this board
-    </a>
+    <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      <a href={`/methodology/#${config.scorer}`} class="inline-flex items-center gap-2">
+        <BookOpen className="size-4" aria-hidden="true" />
+        How to read this board
+      </a>
+      <a
+        href={`${REPOSITORY}/tree/main/families/${family.name}`}
+        class="inline-flex items-center gap-2"
+      >
+        <FileText className="size-4" aria-hidden="true" />
+        {scorers[config.scorer].inputs}
+      </a>
+    </div>
   </PageHeader>
   <Board family={family} />
 </Base>

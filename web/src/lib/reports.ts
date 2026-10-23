@@ -2,6 +2,7 @@ import { getCollection } from 'astro:content';
 
 import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
+import { systemPagePath } from '@/lib/paths';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
 
@@ -58,7 +59,7 @@ export function boardPath(family: Family): string {
 
 /** A system's page path on a family's board. */
 export function systemPath(family: Family, system: string): string {
-  return `${boardPath(family)}${system}/`;
+  return systemPagePath(boardPath(family), system);
 }
 
 /**
@@ -68,7 +69,7 @@ export function systemPath(family: Family, system: string): string {
  * @throws Error when two families, listed or not, share a full name, or when a public family has
  *   no aspect.
  */
-export function listFamilies(
+export function publicFamilies(
   configs: { name: string; config: FamilyConfig }[],
   reports: Report[],
   systemNames: SystemNames,
@@ -110,7 +111,7 @@ export async function getFamilies(): Promise<Family[]> {
     getCollection('systems'),
     getCollection('models'),
   ]);
-  return listFamilies(
+  return publicFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
     resolveSystemNames(systems, new Map(models.map((entry) => [entry.id, entry.data.name]))),
@@ -166,19 +167,14 @@ export interface BoardLink {
   current: boolean;
 }
 
-/** Returns the families listed under `family`'s aspect, itself included, in `listFamilies` order. */
-function siblings(families: Family[], family: Family): Family[] {
-  // A `filter` on the aspect fails `no-unnecessary-condition` while the registry has one aspect.
-  return Map.groupBy(families, (item) => item.aspect).get(family.aspect) ?? [];
-}
-
 /** Returns each family page's params and props: the family and its aspect's boards. */
 export function familyPaths(families: Family[]) {
+  const byAspect = Map.groupBy(families, (family) => family.aspect);
   return families.map((family) => ({
     params: boardParams(family),
     props: {
       family,
-      boards: siblings(families, family).map((item): BoardLink => ({
+      boards: (byAspect.get(family.aspect) ?? []).map((item): BoardLink => ({
         href: boardPath(item),
         label: item.config.display_name,
         current: item.name === family.name,
@@ -193,13 +189,14 @@ export function familyPaths(families: Family[]) {
  */
 export function systemPaths(families: Family[]) {
   const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
+  const byAspect = Map.groupBy(families, (family) => family.aspect);
   return families.flatMap((family) =>
     [...systemPages(family)].map((system) => ({
       params: { ...boardParams(family), system },
       props: {
         family,
         system,
-        boards: siblings(families, family)
+        boards: (byAspect.get(family.aspect) ?? [])
           .filter((item) => pages.get(item.name)?.has(system))
           .map((item): BoardLink => ({
             href: systemPath(item, system),

@@ -1,7 +1,7 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatScore } from '@/lib/format';
 import { terms } from '@/lib/glossary';
-import { ANCHOR_SCORE } from '@/lib/anchor';
+import { ANCHOR_SCORE } from '@/lib/ranking';
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
@@ -13,10 +13,13 @@ export interface MethodStep {
   hint?: string;
 }
 
-/** How each scorer describes its boards, so a new scorer adds an entry here. */
-export const scorers: Record<Scorer, { title: string; summary: string }> = {
-  votes: { title: 'Votes', summary: 'Ranked by blind pairwise votes' },
-  tests: { title: 'Tests', summary: 'Scored by automated tests' },
+/**
+ * How each scorer describes its boards, with `inputs` naming what its systems answer, so a new
+ * scorer adds an entry here.
+ */
+export const scorers: Record<Scorer, { title: string; summary: string; inputs: string }> = {
+  votes: { title: 'Votes', summary: 'Ranked by blind pairwise votes', inputs: 'Cases' },
+  tests: { title: 'Tests', summary: 'Scored by automated tests', inputs: 'Tasks' },
 };
 
 const languages: Record<NonNullable<VotesConfig['language']>, string> = {

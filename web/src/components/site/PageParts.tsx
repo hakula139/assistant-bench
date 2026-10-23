@@ -1,10 +1,17 @@
 import type { ReactNode } from 'react';
 
 /** The classes of the column that the header, every page, and the footer share. */
-export const container = 'mx-auto w-full max-w-6xl px-4 sm:px-6';
+export const container =
+  'mx-auto w-full max-w-6xl px-(--gutter) [--gutter:--spacing(4)] sm:[--gutter:--spacing(6)]';
 
-/** The column of the vote page and its header, wide enough at `xl` for the brief beside both outputs. */
+/** The vote page's column and header, wide enough at `xl` for the brief beside both outputs. */
 export const wideContainer = `${container} xl:max-w-7xl`;
+
+/**
+ * The classes that pull a block out over its `container`'s gutter while keeping its content in
+ * line, so a bar's background runs to the screen's edges.
+ */
+export const bleed = '-mx-(--gutter) px-(--gutter)';
 
 /** The widest a line of running text grows, so wide screens use their width without long lines. */
 export const measure = 'max-w-measure';
@@ -27,7 +34,7 @@ export const groupTitle = `${heading} text-2xl`;
 export const intro = `${measure} text-lg text-muted-foreground`;
 
 /** The classes of a numbered or bulleted list in running text. */
-export const list = 'space-y-2 pl-6 marker:text-muted-foreground';
+export const list = 'flex flex-col gap-2 pl-6 marker:text-muted-foreground';
 
 /** The classes of a muted note that explains the figure or table beside it. */
 export const note = `${measure} text-sm text-muted-foreground`;
@@ -59,7 +66,7 @@ export function PageHeader({
   );
 }
 
-/** A titled part of a page or board, ruled off from the part above it by the same gap as `stack`. */
+/** A titled part of a page or board, ruled off from the part above by the same gap as `stack`. */
 export function Section({
   title,
   id,

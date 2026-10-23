@@ -1,6 +1,6 @@
-import { ANCHOR_SCORE } from '@/lib/anchor';
-import { formatScore } from '@/lib/format';
-import type { Defect } from '@/lib/report';
+import { formatPercent, formatScore } from '@/lib/format';
+import { AGREEMENT_FLOOR, ANCHOR_SCORE, PRELIMINARY_VOTES } from '@/lib/ranking';
+import type { Decision, Defect } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {
@@ -9,44 +9,52 @@ export interface Term {
 }
 
 const score = formatScore(ANCHOR_SCORE);
+const floor = formatPercent(AGREEMENT_FLOOR);
 
 /** The board terms, shared by the boards' labels, their definitions on tap, and the methodology. */
 export const terms = {
   rank: {
     term: 'Rank',
     definition:
-      'From 1 plus the systems whose interval lies wholly above this one, to 1 plus those whose interval reaches above its lower end.',
+      'The range of ranks the intervals allow: 1 plus the systems clearly above this one, up to 1 plus every system that might be above it.',
   },
   anchor: {
     term: 'Anchor',
-    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
+    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
   },
   preliminary: {
     term: 'Preliminary',
-    definition:
-      'Fewer than 40 decisive votes, those won by either side, so the score may still move.',
+    definition: `Fewer than ${PRELIMINARY_VOTES} votes with a winner, so the score may still move.`,
+  },
+  decisive: {
+    term: 'Decisive',
+    definition: 'Votes with a winner, leaving out ties and both-bad votes.',
   },
   unranked: {
     term: 'Unranked',
-    definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
+    definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
   },
   votes: {
     term: 'Votes',
-    definition: "The rater's votes on the system, leaving out results settled without a vote.",
+    definition: "The rater's votes on the system, leaving out pairs settled without a vote.",
   },
   bothBad: { term: 'Both bad', definition: 'The share of its votes judged both bad.' },
   gateFailures: {
     term: 'Gate failures',
-    definition: 'The share of its outputs that failed a gate.',
+    definition:
+      'The share of its outputs that failed an automatic check, such as being blank or in the wrong language, and so lost their pairs without a vote.',
   },
   costLatency: {
     term: 'Cost / output and p50 latency',
     definition: 'The mean cost at list prices and the median time to the complete response.',
   },
+  leader: {
+    term: 'Leader',
+    definition: `The top system, once every system tied with it has ${PRELIMINARY_VOTES} votes with a winner. A tie goes to the lower cost, then the lower latency, then the higher score.`,
+  },
   raterAgreement: {
     term: 'Rater agreement',
-    definition:
-      'How often a side-swapped repeat matched the original vote. Below 70%, the intervals overstate how well systems separate.',
+    definition: `How often a side-swapped repeat matched the original vote. Below ${floor}, the intervals overstate how well systems separate.`,
   },
   separatedPairs: {
     term: 'Separated pairs',
@@ -62,13 +70,22 @@ export const terms = {
     definition:
       'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle.',
   },
+  lengthBias: {
+    term: 'Length bias',
+    definition:
+      "How far the rater's votes lean toward the longer or the shorter output, in score points per standard deviation of the pair's relative length difference.",
+  },
   passRate: {
     term: 'Pass rate',
     definition: 'The share of trials whose tests pass, counting errored trials as failures.',
   },
+  errored: {
+    term: 'Errored',
+    definition: 'Trials that ended in an error, which count as failures.',
+  },
   testsCostLatency: {
     term: 'Cost / trial and p50 latency',
-    definition: "A trial's mean cost at list prices and its median time.",
+    definition: 'The mean cost per trial at list prices and the median trial time.',
   },
 } satisfies Record<string, Term>;
 
@@ -96,11 +113,45 @@ export const defectTerms: Record<Defect, Term> = {
   },
 };
 
-/** The anchor's definition in a round that cannot rank the reference, naming what it stands in for. */
-export function fallbackAnchor(referenceName: string): Term {
+/** The anchor's definition in a round that cannot rank the reference, naming both systems. */
+export function fallbackAnchor(anchorName: string, referenceName: string): Term {
   return {
     ...terms.anchor,
-    definition: `The most-voted system, standing in for the reference ${referenceName}, which is not ranked yet.`,
+    definition: `The most-voted system, ${anchorName}, fixed at ${score} in place of the reference ${referenceName}, which that round could not rank.`,
+  };
+}
+
+/** What a round's `fingerprint` for a system identifies, quoting the hash. */
+export function fingerprintTerm(fingerprint: string): Term {
+  return {
+    term: 'Fingerprint',
+    definition: `${fingerprint}, a hash of the route, effort, harness, and prompt the system ran with that round.`,
+  };
+}
+
+const tieBreaks: Record<Decision['tie_break'], string> = {
+  score: 'the higher score',
+  cost: 'the lower cost',
+  latency: 'the lower latency',
+};
+
+/**
+ * Qualifies a round's leader: why the round has none, how it broke a tie with the top score, or
+ * null when no other ranked system ties with the leader.
+ */
+export function leaderNote(decision: Decision | null): Term | null {
+  if (decision === null) {
+    return {
+      term: 'No leader yet',
+      definition: `None until every system tied for the top has ${PRELIMINARY_VOTES} votes with a winner.`,
+    };
+  }
+  if (decision.separated) {
+    return null;
+  }
+  return {
+    term: 'Tied',
+    definition: `Tied with the top score, and chosen by ${tieBreaks[decision.tie_break]}.`,
   };
 }
 
@@ -118,6 +169,6 @@ export const gates = {
   },
   script: {
     term: 'Script',
-    definition: 'The output holds Traditional-only characters that the instruction lacks.',
+    definition: "The output uses Traditional-only characters that the prompt doesn't.",
   },
 } satisfies Record<string, Term>;

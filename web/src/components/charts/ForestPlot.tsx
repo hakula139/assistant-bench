@@ -1,11 +1,16 @@
 import * as Plot from '@observablehq/plot';
 import { useCallback } from 'react';
 
-import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
+import {
+  anchorRule,
+  forestMarks,
+  offScaleLabels,
+  type ForestDatum,
+} from '@/components/charts/forest-marks';
+import { LABEL_GAP, PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { clip, forestTicks, labelledTicks } from '@/lib/forest';
 import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
-import { ANCHOR_SCORE } from '@/lib/anchor';
+import { ANCHOR_SCORE } from '@/lib/ranking';
 import type { CategoryBoard } from '@/lib/report';
 
 /** A category refit, which carries its votes and preliminary status. */
@@ -27,10 +32,11 @@ interface ForestPlotProps {
 }
 
 const ROW_HEIGHT = 30;
-/** Room between a row label and the plot, in CSS pixels. */
-const LABEL_GAP = 12;
 /** Room between the plot's left edge and the axis start, where an arrowhead points. */
 const ARROW_INSET = 8;
+
+/** The height of a plot with one row per label, in CSS pixels. */
+export const forestPlotHeight = (labels: string[]) => labels.length * ROW_HEIGHT + 36;
 
 /** Builds the plot for a measured frame. */
 export function forestPlotOptions(
@@ -48,7 +54,6 @@ export function forestPlotOptions(
   const ticks = forestTicks(domain);
   const labelled = new Set(labelledTicks(domain, width - marginLeft - ARROW_INSET));
   return {
-    height: labels.length * ROW_HEIGHT + 36,
     marginLeft,
     marginRight: 16,
     marginBottom: 28,
@@ -63,7 +68,7 @@ export function forestPlotOptions(
     y: { domain: labels, label: null, tickSize: 0, tickPadding: LABEL_GAP },
     color: { type: 'identity' },
     marks: [
-      Plot.ruleX([ANCHOR_SCORE], { stroke: 'var(--faint)', strokeOpacity: 0.6 }),
+      anchorRule(ANCHOR_SCORE),
       forestMarks(data, domain),
       offScaleLabels(data),
       Plot.tip(
@@ -86,5 +91,5 @@ export function ForestPlot({ rows, labels, domain, label }: ForestPlotProps) {
     (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain }, frame),
     [rows, labels, domain],
   );
-  return <PlotFigure plot={plot} height={labels.length * ROW_HEIGHT + 36} label={label} />;
+  return <PlotFigure plot={plot} height={forestPlotHeight(labels)} label={label} />;
 }

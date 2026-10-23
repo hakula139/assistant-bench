@@ -1,4 +1,5 @@
 import type { ForestPlotRow } from '@/components/charts/ForestPlot';
+import { Stat } from '@/components/site/PageParts';
 import { Hint, StatusMark } from '@/components/site/Term';
 import {
   Table,
@@ -9,18 +10,31 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  MISSING,
   formatCount,
   formatInterval,
   formatPercent,
   formatScore,
   formatSeconds,
+  MISSING,
 } from '@/lib/format';
-import { defectTerms, terms } from '@/lib/glossary';
+import { defectTerms, fallbackAnchor, fingerprintTerm, terms } from '@/lib/glossary';
 import { defects, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
-// ── System Page Tables ──
+/**
+ * The system page's Votes figure as one island, so the decisive count's hint is the element a tap
+ * lands on, which an Astro slot around it would not be.
+ */
+export function VotesStat({ votes, decisive }: { votes: number; decisive: number }) {
+  return (
+    <Stat
+      label="Votes"
+      detail={<Hint term={terms.decisive}>({formatCount(decisive)} decisive)</Hint>}
+    >
+      {formatCount(votes)}
+    </Stat>
+  );
+}
 
 export function HeadToHeadTable({
   headToHead,
@@ -122,7 +136,7 @@ export function DistributionTable({
 
 export function DefectsTable({ standing }: { standing: Standing }) {
   return (
-    <Table className="max-w-md">
+    <Table className="max-w-xl">
       <TableHeader>
         <TableRow>
           <TableHead>Issue</TableHead>
@@ -173,14 +187,15 @@ export function RoundsTable({
           <TableRow key={round}>
             <TableCell>
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                {round}
+                {past.fingerprint === null ? (
+                  round
+                ) : (
+                  <Hint term={fingerprintTerm(past.fingerprint)}>{round}</Hint>
+                )}
                 {anchor !== reference && (
                   <StatusMark
                     status="anchor"
-                    term={{
-                      term: terms.anchor.term,
-                      definition: `This round fixed ${systemName(names, anchor)} at 1,000 because the reference, ${systemName(names, reference)}, is not ranked.`,
-                    }}
+                    term={fallbackAnchor(systemName(names, anchor), systemName(names, reference))}
                   />
                 )}
               </span>

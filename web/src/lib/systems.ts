@@ -1,8 +1,8 @@
 import { z } from 'astro/zod';
 
 /**
- * The fields of a `systems.toml` table the site reads. The pydantic config model validates the
- * whole file, including that every resolved display name is unique.
+ * The fields of a `systems.toml` table the site reads. The bench's catalog validates the whole
+ * file, including that every resolved display name is unique.
  */
 export const systemConfigSchema = z.object({
   model: z.string().optional(),

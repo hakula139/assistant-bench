@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
 import {
-  EMPTY_DOMAIN,
   clip,
+  EMPTY_DOMAIN,
   forestDomain,
   forestTicks,
   labelledTicks,
@@ -83,13 +83,17 @@ describe('sparseTicks', () => {
 });
 
 describe('labelledTicks', () => {
-  test('labels only the sparse ticks below 240 px and every tick from there', () => {
-    const domain: [number, number] = [600, 1400];
+  test.each<[[number, number], number, number[]]>([
+    [[600, 1400], 160, [600, 1000, 1400]],
+    [[400, 1100], 280, [400, 1100]],
+  ])(
+    'labels every tick of %j from %i px, 40 px an interval, and only the sparse ones below',
+    (domain, width, sparse) => {
+      const ticks = [labelledTicks(domain, width), labelledTicks(domain, width - 1)];
 
-    const ticks = [labelledTicks(domain, 240), labelledTicks(domain, 239)];
-
-    expect(ticks).toEqual([forestTicks(domain), [600, 1000, 1400]]);
-  });
+      expect(ticks).toEqual([forestTicks(domain), sparse]);
+    },
+  );
 });
 
 describe('clip', () => {

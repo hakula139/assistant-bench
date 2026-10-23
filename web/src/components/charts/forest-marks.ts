@@ -17,11 +17,16 @@ const SERIES = 'var(--chart-series)';
 const SURFACE = 'var(--background)';
 const DASH = '5 4';
 
+/** The rule a forest plot draws at the anchor score, as the static `Forest` draws it. */
+export function anchorRule(score: number): Plot.Markish {
+  return Plot.ruleX([score], { stroke: 'var(--faint)', strokeOpacity: 0.4 });
+}
+
 /**
  * The marks of a forest plot: each interval as a 3 px rule, dashed while preliminary, then an
  * arrowhead where the axis cuts it, then a dot at the score, hollow while preliminary. A score
- * below the axis start keeps only the arrowhead. Plots that take these marks need
- * `color: { type: 'identity' }`.
+ * below the axis start keeps only the arrowhead. Plots taking these marks need an identity color
+ * scale, `color: { type: 'identity' }`.
  */
 export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plot.Markish[] {
   const rule = (preliminary: boolean) =>

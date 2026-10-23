@@ -1,7 +1,7 @@
 import * as Plot from '@observablehq/plot';
 import { useCallback } from 'react';
 
-import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { LABEL_GAP, PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { formatCount, formatPercent, formatScore, formatSeconds } from '@/lib/format';
 
 export interface DotRange {
@@ -26,8 +26,6 @@ interface DotRangePlotProps {
 }
 
 const ROW_HEIGHT = 32;
-/** Room between a row label and the plot, in CSS pixels. */
-const LABEL_GAP = 12;
 
 const formats: Record<ValueFormat, (value: number) => string> = {
   score: formatScore,
@@ -47,7 +45,6 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         row.emphasis ? 'var(--chart-emphasis)' : 'var(--chart-series)';
       const ranged = rows.filter((row) => row.range !== undefined);
       return {
-        height,
         marginLeft: Math.max(...rows.map((row) => measure(row.label))) + LABEL_GAP,
         marginRight: 24,
         marginBottom: 40,
@@ -94,7 +91,7 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         ],
       };
     },
-    [rows, label, tick, baseline, height],
+    [rows, label, tick, baseline],
   );
 
   return <PlotFigure plot={plot} height={height} label={label} />;

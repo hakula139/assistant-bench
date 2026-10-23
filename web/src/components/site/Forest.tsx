@@ -1,6 +1,7 @@
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 
+import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -18,7 +19,8 @@ import {
   type LegendMark,
 } from '@/lib/forest';
 import { formatInterval, formatScore } from '@/lib/format';
-import { ANCHOR_SCORE } from '@/lib/anchor';
+import type { Term } from '@/lib/glossary';
+import { ANCHOR_SCORE } from '@/lib/ranking';
 
 interface ForestProps {
   rows: ForestRow[];
@@ -35,14 +37,14 @@ const unplacedText = {
   'anchor': {
     interval: `Fixed at ${anchor} as the anchor`,
     score: anchor,
-    summary: `the anchor, fixed at ${anchor}`,
+    details: `The anchor, fixed at ${anchor}.`,
   },
   'unranked': {
     interval: 'Unbounded, too few comparisons to place it',
     score: 'unranked',
-    summary: 'unranked, too few comparisons to place it',
+    details: 'Unranked, with too few comparisons to place it.',
   },
-  'no-votes': { interval: 'Unbounded', score: 'no votes', summary: 'no votes yet' },
+  'no-votes': { interval: 'Unbounded', score: 'no votes', details: 'No votes yet.' },
 };
 
 /** The interval cell's text, which screen readers read under the "95% interval" header. */
@@ -53,12 +55,15 @@ function intervalText(row: ForestRow): string {
   return unplacedText[row.unplaced].interval;
 }
 
-/** The row's hover text, which names the system with its score and interval. */
-function summary(row: ForestRow): string {
-  if ('estimate' in row) {
-    return `${row.name}: ${formatScore(row.estimate.score)}, 95% interval ${intervalText(row)}`;
-  }
-  return `${row.name}: ${unplacedText[row.unplaced].summary}`;
+/** The row's details, which its score opens on tap, click, or Enter. */
+function details(row: ForestRow): Term {
+  return {
+    term: row.name,
+    definition:
+      'estimate' in row
+        ? `Score ${formatScore(row.estimate.score)}, 95% interval ${intervalText(row)}.`
+        : unplacedText[row.unplaced].details,
+  };
 }
 
 const middle = 'absolute top-1/2 -translate-y-1/2';
@@ -66,6 +71,22 @@ const dot = cn(middle, 'size-3.5 -translate-x-1/2 rounded-full border-2');
 const solidDot = 'border-background bg-chart-series';
 const hollowDot = 'border-chart-series bg-background';
 const line = cn(middle, 'h-0 border-t-3 border-chart-series');
+/** The rule a forest plot draws at the anchor score, matching `anchorRule` on the Plot charts. */
+const anchorRule = 'bg-faint/40';
+
+/**
+ * Hides a dense tick's label on an axis too narrow for its interval count to label every tick, at
+ * 2.5rem an interval as `labelledTicks` allows, written out so Tailwind sees each class.
+ */
+const axisFits: Record<number, string> = {
+  1: '@max-[2.5rem]:hidden',
+  2: '@max-[5rem]:hidden',
+  3: '@max-[7.5rem]:hidden',
+  4: '@max-[10rem]:hidden',
+  5: '@max-[12.5rem]:hidden',
+  6: '@max-[15rem]:hidden',
+  7: '@max-[17.5rem]:hidden',
+};
 
 /** An arrowhead at one end of the track, pointing off the axis. */
 function Arrow({ side, className }: { side: 'left' | 'right'; className: string }) {
@@ -90,10 +111,7 @@ function Unbounded() {
   );
 }
 
-/** The rule a forest plot draws at the anchor score. */
-const anchorRule = 'bg-faint/40';
-
-const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
+const legendKey: Record<LegendMark, { label: string; mark: ReactNode; width?: string }> = {
   score: {
     label: 'Score, 95% interval',
     mark: (
@@ -113,7 +131,7 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
     ),
   },
   cut: {
-    label: 'Past the axis',
+    label: 'Interval past the axis',
     mark: (
       <>
         <Arrow side="left" className="fill-chart-series" />
@@ -123,7 +141,8 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   },
   anchor: {
     label: `Anchor, ${anchor}`,
-    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', anchorRule)} />,
+    mark: <span className={cn('absolute inset-0', anchorRule)} />,
+    width: 'w-px',
   },
   unbounded: { label: 'Unbounded', mark: <Unbounded /> },
 };
@@ -134,15 +153,18 @@ export function drawnMarks(rows: ForestRow[], domain: [number, number]): LegendM
 }
 
 /** A key to the interval marks, for the `marks` a nearby forest plot draws. */
-export function ForestLegend({ marks }: { marks: LegendMark[] }) {
+export function ForestLegend({ marks, className }: { marks: LegendMark[]; className?: string }) {
   return (
     <ul
       aria-label="Legend"
-      className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground"
+      className={cn('flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground', className)}
     >
       {marks.map((key) => (
         <li key={key} className="flex items-center gap-2">
-          <span aria-hidden="true" className="relative h-4 w-9 shrink-0">
+          <span
+            aria-hidden="true"
+            className={cn('relative h-4 shrink-0', legendKey[key].width ?? 'w-9')}
+          >
             {legendKey[key].mark}
           </span>
           {legendKey[key].label}
@@ -153,9 +175,9 @@ export function ForestLegend({ marks }: { marks: LegendMark[] }) {
 }
 
 /**
- * A forest plot drawn as a table without JavaScript: one row per system, with its interval on an
- * axis every row shares and its score in the last column. Positions along the axis are data, so
- * they are the only inline styles.
+ * A forest plot drawn as a table: one row per system, with its interval on a shared axis and its
+ * score in the last column, which opens the row's details once hydrated. Positions along the axis
+ * are data, so they are the only inline styles.
  */
 export function Forest({ rows, domain, caption, large = false }: ForestProps) {
   const ticks = forestTicks(domain);
@@ -174,21 +196,22 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="sr-only">System</TableHead>
-          <TableHead className="relative h-6 p-0 font-normal">
+          <TableHead className="h-6 p-0 font-normal">
             <span className="sr-only">95% interval</span>
-            {ticks.map((tick) => (
-              <span
-                key={tick}
-                aria-hidden="true"
-                className={cn(
-                  'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
-                  !sparse.has(tick) && 'max-sm:hidden',
-                )}
-                style={{ left: position(tick) }}
-              >
-                {formatScore(tick)}
-              </span>
-            ))}
+            <div aria-hidden="true" className="@container relative h-6">
+              {ticks.map((tick) => (
+                <span
+                  key={tick}
+                  className={cn(
+                    'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
+                    !sparse.has(tick) && axisFits[ticks.length - 1],
+                  )}
+                  style={{ left: position(tick) }}
+                >
+                  {formatScore(tick)}
+                </span>
+              ))}
+            </div>
           </TableHead>
           <TableHead className="sr-only">Score</TableHead>
         </TableRow>
@@ -199,7 +222,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
           const preliminary = 'estimate' in row && row.preliminary;
           const unplaced = 'unplaced' in row ? row.unplaced : undefined;
           return (
-            <TableRow key={row.system} title={summary(row)}>
+            <TableRow key={row.system}>
               <TableHead scope="row" className="h-auto font-normal text-balance whitespace-normal">
                 {row.href ? <a href={row.href}>{row.name}</a> : row.name}
               </TableHead>
@@ -241,13 +264,15 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                 </span>
               </TableCell>
               <TableCell numeric>
-                {'estimate' in row ? (
-                  formatScore(row.estimate.score)
-                ) : unplaced === 'anchor' ? (
-                  unplacedText.anchor.score
-                ) : (
-                  <span className="text-xs text-faint">{unplacedText[row.unplaced].score}</span>
-                )}
+                <Hint term={details(row)}>
+                  {'estimate' in row ? (
+                    formatScore(row.estimate.score)
+                  ) : unplaced === 'anchor' ? (
+                    unplacedText.anchor.score
+                  ) : (
+                    <span className="text-xs text-faint">{unplacedText[row.unplaced].score}</span>
+                  )}
+                </Hint>
               </TableCell>
             </TableRow>
           );

@@ -1,4 +1,5 @@
 ---
+import Systems from '@/components/scorers/tests/Systems.astro';
 import {
   Table,
   TableBody,
@@ -7,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { MISSING, formatPercent } from '@/lib/format';
+import { formatPercent } from '@/lib/format';
 import { testsRounds, type Family } from '@/lib/reports';
 import { systemName } from '@/lib/systems';
 
@@ -40,7 +41,5 @@ const name = (system: string) => systemName(family.systemNames, system);
     </TableBody>
   </Table>
 ) : (
-  <p class="text-sm text-muted-foreground">
-    {family.config.systems.map(name).join(', ') || MISSING}
-  </p>
+  <Systems family={family} />
 )}

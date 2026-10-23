@@ -1,9 +1,9 @@
 import { cn } from 'cn';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Markdown, PlainText } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
-import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import type { Pane } from '@/lib/arena';
 
 interface OutputPaneProps {
@@ -17,7 +17,15 @@ interface OutputPaneProps {
   controls: ReactNode;
 }
 
-function FramedOutput({ url, viewport, side }: { url: string; viewport: number; side: string }) {
+function FramedOutput({
+  url,
+  viewport,
+  side,
+}: {
+  url: string;
+  viewport: number;
+  side: OutputPaneProps['side'];
+}) {
   const container = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
