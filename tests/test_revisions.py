@@ -19,12 +19,9 @@ SYSTEMS = textwrap.dedent(
 
 class TestSystemsAt:
     @staticmethod
-    def fake_git(
-        monkeypatch: pytest.MonkeyPatch, tracked: str
-    ) -> list[tuple[str, ...]]:
+    def fake_git(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
         outputs = {
             'rev-parse': 'abc123',
-            'ls-tree': tracked,
             'show': SYSTEMS,
             'build': str(EXPORT_FILE),
         }
@@ -34,7 +31,12 @@ class TestSystemsAt:
             args: tuple[str, ...], **kwargs: Any
         ) -> subprocess.CompletedProcess[str]:
             calls.append(args)
-            assert kwargs['cwd'] == REPO_ROOT
+            assert kwargs == {
+                'check': True,
+                'stdout': subprocess.PIPE,
+                'text': True,
+                'cwd': REPO_ROOT,
+            }
             return subprocess.CompletedProcess(args, 0, stdout=f'{outputs[args[1]]}\n')
 
         monkeypatch.setattr(subprocess, 'run', run)
@@ -43,14 +45,14 @@ class TestSystemsAt:
     def test_resolves_the_systems_against_the_export_of_the_revision(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = self.fake_git(monkeypatch, 'systems.toml')
+        calls = self.fake_git(monkeypatch)
 
         systems = revisions.systems_at('origin/main')
 
         assert systems == {'large': make_system(name='large')}
         assert calls == [
             ('git', 'rev-parse', '--verify', 'origin/main^{commit}'),
-            ('git', 'ls-tree', '--name-only', 'abc123', 'systems.toml'),
+            ('git', 'show', 'abc123:systems.toml'),
             (
                 'nix',
                 'build',
@@ -58,16 +60,7 @@ class TestSystemsAt:
                 '--print-out-paths',
                 f'git+file:{REPO_ROOT}?rev=abc123#nixos-config',
             ),
-            ('git', 'show', 'abc123:systems.toml'),
         ]
-
-    def test_finds_no_systems_at_a_revision_without_the_file(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls = self.fake_git(monkeypatch, '')
-
-        assert revisions.systems_at('origin/main') == {}
-        assert [call[1] for call in calls] == ['rev-parse', 'ls-tree']
 
 
 class TestChangedFingerprints:

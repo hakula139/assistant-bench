@@ -13,16 +13,14 @@ SYSTEMS_FILE = 'systems.toml'
 def systems_at(revision: str) -> dict[str, System]:
     """Resolve the revision's `systems.toml` against the revision's own export.
 
-    A revision without `systems.toml` has no systems.
-
     Raises
     ------
     subprocess.CalledProcessError
-        Git cannot resolve the revision, or Nix cannot build its export.
+        Git cannot resolve the revision or its `systems.toml`, or Nix cannot
+        build its export.
     """
     commit = _output('git', 'rev-parse', '--verify', f'{revision}^{{commit}}')
-    if not _output('git', 'ls-tree', '--name-only', commit, SYSTEMS_FILE):
-        return {}
+    systems = _output('git', 'show', f'{commit}:{SYSTEMS_FILE}')
     export_path = _output(
         'nix',
         'build',
@@ -31,7 +29,7 @@ def systems_at(revision: str) -> dict[str, System]:
         f'git+file:{REPO_ROOT}?rev={commit}#nixos-config',
     )
     export = NixosConfigExport.model_validate_json(Path(export_path).read_bytes())
-    return parse_systems(export, _output('git', 'show', f'{commit}:{SYSTEMS_FILE}'))
+    return parse_systems(export, systems)
 
 
 def changed_fingerprints(base: dict[str, System], head: dict[str, System]) -> list[str]:

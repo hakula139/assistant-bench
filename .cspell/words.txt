@@ -55,7 +55,6 @@ Sarasa
 scipy
 shadcn
 shfmt
-smol
 srcdoc
 SSIM
 statix
