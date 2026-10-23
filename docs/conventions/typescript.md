@@ -30,6 +30,10 @@ web/src/
 └── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it
 ```
 
+## Comments
+
+- Write a `/** */` TSDoc comment, which editors show on hover, on a module-level declaration or a member of a module-level interface, type, or class. Use `//` for every other comment, including one above a function or const declared inside a function body.
+
 ## Reports
 
 - The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, `systems.toml` through the `systems` collection's `file()` loader, and the export that `BENCH_NIXOS_CONFIG` names through the `models` collection's inline loader, so `pnpm build` and `pnpm typecheck` run only inside the dev shell. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.

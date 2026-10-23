@@ -484,7 +484,7 @@ describe('header', () => {
 });
 
 describe('board switcher', () => {
-  /** Three boards of one aspect, where the empty one has no system pages yet. */
+  // Three boards of one aspect, where the empty one has no system pages yet.
   async function boards(): Promise<Family[]> {
     const arena = await family();
     return [
