@@ -21,7 +21,7 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 | `Enter`    | Submit the vote and load the next pair, even with a vote control focused, which `Space` still presses  |
 | `u`        | Undo the last vote and show its pair again                                                             |
 
-An issue counts against the output you tag, whatever your verdict. Each output's Issues button toggles the same issues and shows what each means, which is how a phone tags them. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
+An issue counts against the output you tag, whatever your verdict. Each output's Issues button shows what each issue means and toggles the same issues, which is how a phone tags them. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
 
 ## HTML Outputs
 

@@ -23,7 +23,7 @@ web/src/
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
-├── lib/                                    # The report and family schemas, the aspects, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, the vote page's Markdown, formatters, hooks
+├── lib/                                    # The report and family schemas, the aspects, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, the vote page's Markdown, the line-tail split, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
@@ -44,10 +44,10 @@ web/src/
 
 ## Components
 
-- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state, its `choice` variant for the verdicts, and a gap at each size that matches the button's; `textarea.tsx` for its `line` size; `table.tsx` for its `numeric` cells; `badge.tsx` for its `status` variant; and `breadcrumb.tsx` for links colored like the header's.
+- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy. Adjust a copy in place when the site needs it, as `toggle.tsx` does for its pressed state, its `choice` variant for the verdicts, and a gap at each size that matches the button's; `textarea.tsx` for its `line` size; `table.tsx` for its `numeric` cells; `badge.tsx` for its `status` variant; `breadcrumb.tsx` for links colored like the header's; `popover.tsx` for content that scrolls within the height Radix leaves it; and `checkbox.tsx` for a border with 3:1 contrast.
 - Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component like `Section`, or a shared class constant like `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
 - Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every page's top level. Space stacked blocks with flex `gap` and no margins on the blocks, as `stack`, `PageHeader`, `Section`, and `Part` do, since Astro wraps each hydrated island in a `display: contents` element that `space-y` margins skip.
-- Hydrate a component only where the page is interactive. Tables render as static React components, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
+- Hydrate a component only where the page is interactive. Tables render as static React components unless a cell opens a hint, and island props stay serializable, which is why `DotRangePlot` takes a named format rather than a function.
 - Pass filter state through `useSearchParam` so each filter lands in the URL.
 
 ## Charts

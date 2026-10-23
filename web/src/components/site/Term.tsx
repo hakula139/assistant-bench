@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { terms, type Term } from '@/lib/glossary';
-import { splitTail, TAIL_CLASS } from '@/lib/markdown';
+import { splitTail, TAIL_CLASS } from '@/lib/tail';
 
 /** One line of text whose last words stay together, so no browser strands one on its own line. */
 export function KeptTail({ text }: { text: string }) {
@@ -33,11 +33,17 @@ export type Status = keyof typeof statusIcons;
 
 function Definition({ term }: { term: Term }) {
   const title = useId();
+  const description = useId();
   return (
-    <PopoverContent side="top" collisionPadding={16} aria-labelledby={title}>
+    <PopoverContent
+      side="top"
+      collisionPadding={16}
+      aria-labelledby={title}
+      aria-describedby={description}
+    >
       <PopoverHeader>
         <PopoverTitle id={title}>{term.term}</PopoverTitle>
-        <PopoverDescription>
+        <PopoverDescription id={description}>
           <KeptTail text={term.definition} />
         </PopoverDescription>
       </PopoverHeader>

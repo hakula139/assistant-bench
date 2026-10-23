@@ -8,7 +8,7 @@ import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
 import { familyTitle } from '@/lib/aspects';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
-import { defectTerms } from '@/lib/glossary';
+import { defectTerms, terms } from '@/lib/glossary';
 import { defects, reportSchema } from '@/lib/report';
 import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
@@ -155,6 +155,18 @@ function stepHints(html: string): string[] {
   );
 }
 
+/** The hydrated island of the component that its module exports as `name`. */
+function island(html: string, name: string): Element | null {
+  return new JSDOM(html).window.document.querySelector(`astro-island[component-export="${name}"]`);
+}
+
+/** The text of each hint trigger in the hydrated island of the component exported as `name`. */
+function islandHints(html: string, name: string): (string | null)[] {
+  return [...(island(html, name)?.querySelectorAll('[aria-haspopup="dialog"]') ?? [])].map(
+    (hint) => hint.textContent,
+  );
+}
+
 describe('family page', () => {
   test('links each system to its page under the board', async () => {
     const arena = await family();
@@ -258,6 +270,16 @@ describe('methodology page', () => {
 
     expect(text(html)).toContain('Run same tasks for all');
     expect(stepHints(html)).toEqual([]);
+  });
+
+  test("keeps the last words of a glossary term's meaning on one line", async () => {
+    const html = await render(MethodologyPage, {});
+
+    const row = [
+      ...new JSDOM(html).window.document.querySelectorAll<HTMLTableRowElement>('tbody tr'),
+    ].find((item) => item.cells[0].textContent === terms.separatedPairs.term);
+    expect(row?.cells[1].textContent).toBe(terms.separatedPairs.definition);
+    expect(row?.cells[1].querySelector('.text-nowrap')?.textContent).toBe('not overlap.');
   });
 });
 
@@ -365,7 +387,7 @@ describe('system page', () => {
     );
   });
 
-  test("counts each issue tagged on the system's outputs, with its share and meaning", async () => {
+  test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-mini',
@@ -375,14 +397,26 @@ describe('system page', () => {
     expect(text(html)).toContain(
       "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
     );
-    const table = [...new JSDOM(html).window.document.querySelectorAll('astro-island')].find(
-      (island) => island.textContent.includes('Wrong facts'),
+    expect(islandHints(html, 'DefectsTable')).toEqual(
+      defects.map((defect) => defectTerms[defect].term),
     );
-    expect(
-      [...(table?.querySelectorAll('button[aria-haspopup="dialog"]') ?? [])].map(
-        (hint) => hint.textContent,
-      ),
-    ).toEqual(defects.map((defect) => defectTerms[defect].term));
+  });
+
+  test('passes the rounds table only the fields it shows', async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    const rounds = island(html, 'RoundsTable');
+    const props = JSON.parse(rounds?.getAttribute('props') ?? '{}') as {
+      appearances: [number, [number, Record<string, unknown>][]];
+    };
+    expect(props.appearances[1].map(([, row]) => Object.keys(row).sort())).toEqual([
+      ['anchor', 'reference', 'round', 'standing'],
+      ['anchor', 'reference', 'round', 'standing'],
+    ]);
   });
 
   test('marks a round whose anchor differs from the reference', async () => {
@@ -427,6 +461,7 @@ describe('system page', () => {
     );
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
+    expect(islandHints(html, 'StatusMark')).toEqual(['Preliminary']);
   });
 });
 

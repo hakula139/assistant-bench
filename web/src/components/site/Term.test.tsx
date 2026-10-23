@@ -9,14 +9,16 @@ import { terms } from '@/lib/glossary';
 afterEach(cleanup);
 
 describe('Hint', () => {
-  test('opens the definition on tap with its last words kept on one line', async () => {
+  test('opens a dialog described by the definition, with its last words kept on one line', async () => {
     const user = userEvent.setup();
     render(<Hint term={terms.separatedPairs} />);
 
     await user.click(screen.getByRole('button', { name: 'Separated pairs' }));
 
-    const definition = screen.getByText(/^The share of system pairs/);
-    expect(definition.textContent).toBe(terms.separatedPairs.definition);
-    expect(definition.querySelector('.text-nowrap')?.textContent).toBe('not overlap.');
+    const dialog = screen.getByRole('dialog', {
+      name: 'Separated pairs',
+      description: terms.separatedPairs.definition,
+    });
+    expect(dialog.querySelector('.text-nowrap')?.textContent).toBe('not overlap.');
   });
 });
