@@ -231,6 +231,11 @@ def load_cases(family: Family) -> list[Case]:
     return list(cases.values())
 
 
+def tasks_dir(family: Family) -> Path:
+    """Return the directory that `jobs.render_tasks` installs the family's tasks in."""
+    return data_dir() / 'tasks' / family.name
+
+
 def case_task(family: Family, case_id: str) -> Path:
     """Return the directory that `jobs.render_tasks` installs a case's task in."""
-    return data_dir() / 'tasks' / family.name / case_id
+    return tasks_dir(family) / case_id

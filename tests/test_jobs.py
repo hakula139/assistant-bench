@@ -1,6 +1,5 @@
 import asyncio
 import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +12,6 @@ from harbor.models.task.task import Task
 from harbor.models.trial.config import AgentConfig
 
 from assistant_bench import jobs
-from assistant_bench.arena.resolution import reconcile
-from assistant_bench.arena.store import Ballot, Side, VoteStore
 from assistant_bench.catalog import System
 from assistant_bench.families import (
     Case,
@@ -70,6 +67,11 @@ def installed_version(path: Path) -> str:
 
 
 class TestRenderTasks:
+    def test_pins_the_version_of_a_known_task(self) -> None:
+        assert (
+            jobs.task_version('smoke-text/en-greeting', 'Hi.') == '1.0.0+74bceeb403c7'
+        )
+
     def test_writes_a_versioned_task_on_the_stock_image(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
@@ -320,9 +322,7 @@ class TestRunJob:
 
 
 class TestIngest:
-    def test_keeps_only_trials_of_the_current_task(
-        self, data_dir: Path, store: VoteStore
-    ) -> None:
+    def test_keeps_only_trials_of_the_current_task(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
         agents = {
@@ -353,6 +353,8 @@ class TestIngest:
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
             )
 
+        (data_dir / 'tasks' / 'smoke-text' / 'stray.md').write_text('Stray.')
+
         outputs = jobs.ingest(family, {})
 
         assert {(output.case, output.system) for output in outputs} == {
@@ -360,40 +362,87 @@ class TestIngest:
             ('zh-greeting', 'a'),
             ('zh-greeting', 'b'),
         }
-        at = datetime(2026, 10, 22, tzinfo=UTC)
-        session = store.start_session(family.name, at)
-        by_key = {(output.case, output.system): output for output in outputs}
-        store.record(
-            Ballot(
-                session=session.id,
-                case='en-greeting',
-                a=Side(
-                    system='a',
-                    fingerprint='fp-a',
-                    job='job-1',
-                    trial='en-greeting__a-old',
-                ),
-                b=Side.of(by_key['en-greeting', 'b']),
-                choice='a',
-                duration_sec=1.0,
+
+    def test_skips_a_trial_whose_case_no_longer_has_a_task(
+        self, data_dir: Path
+    ) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                display_name='Family F',
+                systems=['acme-large'],
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+                gates=Gates(script='hans'),
             ),
-            at,
         )
-        kept = store.record(
-            Ballot(
-                session=session.id,
-                case='zh-greeting',
-                a=Side.of(by_key['zh-greeting', 'a']),
-                b=Side.of(by_key['zh-greeting', 'b']),
-                choice='a',
-                duration_sec=1.0,
-            ),
-            at,
+        cases = [
+            Case(id='a', category='reply', source='held-out', instruction='Hi.'),
+            Case(id='b', category='reply', source='held-out', instruction='Hi.'),
+        ]
+        for path in jobs.render_tasks(family, cases):
+            write_trial(
+                data_dir / 'jobs' / 'f' / 'job-1',
+                f'{path.name}__1',
+                AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+                task=f'f/{path.name}',
+                output='你好。',
+                instruction=None,
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+        jobs.render_tasks(family, cases[:1])
+
+        (output,) = jobs.ingest(family, {})
+
+        assert output.case == 'a'
+
+    def test_keeps_a_trial_whose_instruction_has_a_carriage_return(
+        self, data_dir: Path
+    ) -> None:
+        family = load_family('smoke-text')
+        case = Case(
+            id='en-greeting',
+            category='reply',
+            source='held-out',
+            instruction='Line one.\r\nLine two.',
+        )
+        (path,) = jobs.render_tasks(family, [case])
+        write_trial(
+            data_dir / 'jobs' / 'smoke-text' / 'job-1',
+            'en-greeting__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='smoke-text/en-greeting',
+            output='Hi.',
+            instruction=None,
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
-        assert [
-            matched.vote.id for matched in reconcile(store.votes(family.name), outputs)
-        ] == [kept.id]
+        (output,) = jobs.ingest(family, {})
+
+        assert output.case == path.name
+
+    def test_keeps_trials_when_a_bench_constant_changes(
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        family = load_family('smoke-text')
+        jobs.render_tasks(family, load_cases(family)[:1])
+        write_trial(
+            data_dir / 'jobs' / 'smoke-text' / 'job-1',
+            'en-greeting__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='smoke-text/en-greeting',
+            output='Hi.',
+            instruction=None,
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+        monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
+
+        (output,) = jobs.ingest(family, {})
+
+        assert output.case == 'en-greeting'
 
     def test_collects_generations_and_errors(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
@@ -671,48 +720,19 @@ class TestIngest:
             ('b', [Gate.SCRIPT]),
         ]
 
-    def test_exempts_the_instruction_a_trial_ran_after_a_rejected_edit(
-        self, data_dir: Path
-    ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-                gates=Gates(script='hans'),
-            ),
-        )
-        case = Case(
-            id='a', category='reply', source='held-out', instruction='介绍臺北。'
-        )
-        jobs.render_tasks(family, [case])
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
-            task='f/a',
-            output='臺北今天很热。',
-            instruction=None,
-            context=AgentContext(metadata={'finish_reason': 'stop'}),
-        )
-
-        (output,) = jobs.ingest(family, {})
-
-        assert output.gate_failures == []
-
     def test_reads_no_instruction_without_the_script_gate(self, data_dir: Path) -> None:
+        task = data_dir / 'tasks' / 'f' / 'a'
+        task.mkdir(parents=True)
+        (task / 'task.toml').write_text(
+            jobs.render_task_config('f/a', 'Hi.').model_dump_toml()
+        )
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
             AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
             output='Hi.',
-            instruction='',
+            instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
@@ -722,9 +742,18 @@ class TestIngest:
 
     def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
         oracle = AgentConfig(name='oracle')
-        for family in ('f', 'g'):
-            job_dir = data_dir / 'jobs' / family / 'job-1'
-            write_trial(job_dir, 'a__1', oracle, task=f'{family}/a', reward=1.0)
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1', 'a__1', oracle, task='f/a', reward=1.0
+        )
+        write_trial(
+            data_dir / 'jobs' / 'g' / 'job-1',
+            'a__1',
+            oracle,
+            task='g/a',
+            reward=1.0,
+            instruction=None,
+            version=jobs.TASK_VERSION,
+        )
 
         (scored,) = jobs.ingest(TESTS, {})
         (voted,) = jobs.ingest(VOTES, {})

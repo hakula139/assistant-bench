@@ -27,6 +27,7 @@ from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
     case_task,
+    tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
@@ -36,8 +37,8 @@ from assistant_bench.scoring.gates import failed_gates
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
-# Harbor reruns a task whose version differs in its build metadata, so each rendered
-# task carries a hash of its own content there. An edited case then reruns under its ID.
+# Ingest matches each trial's version exactly, while Harbor reuses a trial whose
+# patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
 N_CONCURRENT_TRIALS = 8
@@ -50,24 +51,23 @@ ROUTE_CONCURRENCY = 4
 
 
 def task_version(name: str, instruction: str) -> str:
-    """Return the version of a task rendered from `name` and `instruction`.
+    """Return the version that `render_tasks` writes for a task named `name`.
 
-    Harbor reruns a task whose version differs in its build metadata, so the
-    version carries a hash of the task's content.
+    The hash covers only the inputs the bench controls, so a Harbor upgrade that
+    changes its default task.toml values leaves every version unchanged.
     """
-    config = _task_config(name, TASK_VERSION)
     digest = hashlib.sha256()
-    for file, content in (
-        ('instruction.md', instruction),
-        ('task.toml', config.model_dump_toml()),
-    ):
-        digest.update(f'{file}\0{content}'.encode())
+    for value in (name, instruction, STOCK_IMAGE, repr(AGENT_TIMEOUT_SEC)):
+        digest.update(f'{value}\0'.encode())
     return f'{TASK_VERSION}+{digest.hexdigest()[:12]}'
 
 
-def _task_config(name: str, version: str) -> task_config.TaskConfig:
+def render_task_config(name: str, instruction: str) -> task_config.TaskConfig:
+    """Return the Harbor task config that `render_tasks` writes for a task."""
     return task_config.TaskConfig(
-        task=task_config.PackageInfo(name=name, version=version),
+        task=task_config.PackageInfo(
+            name=name, version=task_version(name, instruction)
+        ),
         agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
         environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
     )
@@ -78,36 +78,32 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
 
     Each task names a stock image that idles while the agent calls the endpoint from
     the host. It has no tests, which Harbor accepts while the verifier is disabled.
-    A task's version follows its content, so an edited case reruns. Directories of
-    cases the family no longer has are removed.
+    A task's version follows its content. Directories of cases the family no longer
+    has are removed.
     """
-    data_dir().mkdir(parents=True, exist_ok=True)
-    tasks_dir = data_dir() / 'tasks' / family.name
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=data_dir()) as staging:
-        paths = []
-        for case in cases:
-            task = _render_task(family, case, Path(staging) / case.id)
-            installed = case_task(family, case.id)
-            if installed.exists():
-                shutil.rmtree(installed)
-            paths.append(task.rename(installed))
-        rendered = {task.name for task in paths}
-        for installed in tasks_dir.iterdir():
-            if installed.name in rendered:
-                continue
-            if installed.is_dir():
-                shutil.rmtree(installed)
-            else:
-                installed.unlink()
-        return paths
+    directory = tasks_dir(family)
+    directory.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for case in cases:
+        installed = case_task(family, case.id)
+        if installed.exists():
+            shutil.rmtree(installed)
+        paths.append(_render_task(family, case, installed))
+    rendered = {path.name for path in paths}
+    for installed in directory.iterdir():
+        if installed.name in rendered:
+            continue
+        if installed.is_dir():
+            shutil.rmtree(installed)
+        else:
+            installed.unlink()
+    return paths
 
 
 def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
     task_dir.mkdir(parents=True)
     (task_dir / 'instruction.md').write_text(case.instruction)
-    name = f'{family.name}/{case.id}'
-    config = _task_config(name, task_version(name, case.instruction))
+    config = render_task_config(f'{family.name}/{case.id}', case.instruction)
     (task_dir / 'task.toml').write_text(config.model_dump_toml())
     return task_dir
 
@@ -210,9 +206,7 @@ def oracle_job(family: Family) -> JobConfig:
 
 
 def _task_name(task_dir: Path) -> str | None:
-    config = task_config.TaskConfig.model_validate_toml(
-        (task_dir / 'task.toml').read_text()
-    )
+    config = _installed_config(task_dir)
     return config.task.name if config.task else None
 
 
@@ -291,24 +285,22 @@ def run_job(config: JobConfig) -> Path:
 def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
-    A case family keeps only trials of each case's current task, so an edited case's
-    earlier outputs and their votes drop out. Each case, system, and fingerprint
-    keeps at most `samples` outputs, preferring a successful trial whose recorded
-    request matches the family's current settings, and otherwise the oldest. Costs
-    come from the current catalog price, so a system missing from `systems` or
-    without a price reports as unpriced.
+    A case family keeps only trials of each case's installed task. Each case, system,
+    and fingerprint keeps at most `samples` outputs, preferring a successful trial
+    whose recorded request matches the family's current settings, and otherwise the
+    oldest. Costs come from the current catalog price, so a system missing from
+    `systems` or without a price reports as unpriced.
     """
     expected = (
         {name: _request_kwargs(family, system) for name, system in systems.items()}
         if family.source == 'cases'
         else {}
     )
-    versions = _rendered_versions(family) if family.source == 'cases' else None
+    versions = _installed_versions(family) if family.source == 'cases' else None
     candidates = [
         (output, kwargs == expected.get(output.system))
         for job_dir in _family_jobs(family)
-        for output, kwargs, version in _read_trials(family, job_dir, systems)
-        if versions is None or version == versions.get(output.case)
+        for output, kwargs in _read_trials(family, job_dir, systems, versions)
     ]
     candidates.sort(key=lambda candidate: candidate[0].trial)
     candidates.sort(key=lambda candidate: candidate[0].job)
@@ -334,40 +326,54 @@ def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
     """Return one output per finished trial of a job."""
-    return [output for output, _, _ in _read_trials(family, job_dir, systems)]
+    return [output for output, _ in _read_trials(family, job_dir, systems)]
 
 
 def _read_trials(
-    family: Family, job_dir: Path, systems: dict[str, System]
-) -> list[tuple[Output, dict[str, Any], str | None]]:
-    """Return each finished trial's output, agent kwargs, and task version."""
+    family: Family,
+    job_dir: Path,
+    systems: dict[str, System],
+    versions: dict[str, str] | None = None,
+) -> list[tuple[Output, dict[str, Any]]]:
+    """Return each kept trial's output and the agent kwargs it recorded.
+
+    A `versions` mapping drops a trial whose task is not the case's installed task
+    before an output reads that task.
+    """
     records = []
     for result_path in sorted(job_dir.glob('*/result.json')):
         trial_dir = result_path.parent
         result = TrialResult.model_validate_json(result_path.read_bytes())
-        lock = TrialLock.model_validate_json((trial_dir / 'lock.json').read_text())
+        if versions is not None:
+            lock = TrialLock.model_validate_json((trial_dir / 'lock.json').read_text())
+            case = result.task_name.removeprefix(f'{family.name}/')
+            if lock.task.version != versions.get(case):
+                continue
         records.append(
-            (
-                _output(family, trial_dir, result, systems),
-                result.config.agent.kwargs,
-                lock.task.version,
-            )
+            (_output(family, trial_dir, result, systems), result.config.agent.kwargs)
         )
     return records
 
 
-def _rendered_versions(family: Family) -> dict[str, str]:
-    """Return each installed task's current version, keyed by the case ID."""
-    tasks_dir = data_dir() / 'tasks' / family.name
-    if not tasks_dir.is_dir():
+def _installed_versions(family: Family) -> dict[str, str]:
+    """Return each installed task's version, keyed by the case ID."""
+    directory = tasks_dir(family)
+    if not directory.is_dir():
         return {}
-    return {
-        task.name: task_version(
-            f'{family.name}/{task.name}', (task / 'instruction.md').read_text()
-        )
-        for task in tasks_dir.iterdir()
-        if (task / 'instruction.md').is_file()
-    }
+    versions = {}
+    for task in directory.iterdir():
+        if not (task / 'task.toml').is_file():
+            continue
+        package = _installed_config(task).task
+        if package is not None and package.version is not None:
+            versions[task.name] = package.version
+    return versions
+
+
+def _installed_config(task_dir: Path) -> task_config.TaskConfig:
+    return task_config.TaskConfig.model_validate_toml(
+        (task_dir / 'task.toml').read_text()
+    )
 
 
 def _output(

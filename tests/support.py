@@ -13,6 +13,7 @@ from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.job.lock import TaskLock, TrialLock, VerifierLock
+from harbor.models.task import config as harbor_task_config
 from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import (
     AgentConfig,
@@ -36,7 +37,7 @@ from assistant_bench.arena.store import (
 )
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Gate
-from assistant_bench.jobs import task_version
+from assistant_bench.jobs import render_task_config
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 
@@ -71,21 +72,22 @@ def write_trial(
     error: str | None = None,
     output: str | None = None,
     instruction: str | None = 'Hi.',
-    digest: str = f'sha256:{"0" * 64}',
     version: str | None = None,
 ) -> None:
     """Write a trial's result and lock, its job's files, and its task's instruction.
 
     An `instruction` of `None` leaves a task that `render_tasks` wrote untouched.
-    The version follows the installed task's content unless it is given.
+    The trial records its installed task's version unless one is given.
     """
     if instruction is not None:
         task_dir = data_dir() / 'tasks' / task
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / 'instruction.md').write_text(instruction)
+        (task_dir / 'task.toml').write_text(
+            render_task_config(task, instruction).model_dump_toml()
+        )
     if version is None:
-        installed = (data_dir() / 'tasks' / task / 'instruction.md').read_text()
-        version = task_version(task, installed)
+        version = _installed_version(task)
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:
@@ -112,7 +114,10 @@ def write_trial(
     )
     lock = TrialLock(
         task=TaskLock(
-            name=Path(task).name, version=version, type='local', digest=digest
+            name=Path(task).name,
+            version=version,
+            type='local',
+            digest=f'sha256:{"0" * 64}',
         ),
         agent=agent,
         environment=EnvironmentConfig(),
@@ -122,6 +127,15 @@ def write_trial(
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+def _installed_version(task: str) -> str:
+    config = harbor_task_config.TaskConfig.model_validate_toml(
+        (data_dir() / 'tasks' / task / 'task.toml').read_text()
+    )
+    assert config.task is not None
+    assert config.task.version is not None
+    return config.task.version
 
 
 def finish_job(job: JobConfig) -> Path:
@@ -249,9 +263,13 @@ def write_votes_family(
         )
     )
     for case in categories:
+        instruction = f'Write about {case}.'
         task = data_dir() / 'tasks' / name / case
         task.mkdir(parents=True, exist_ok=True)
-        (task / 'instruction.md').write_text(f'Write about {case}.')
+        (task / 'instruction.md').write_text(instruction)
+        (task / 'task.toml').write_text(
+            render_task_config(f'{name}/{case}', instruction).model_dump_toml()
+        )
     (directory / 'cases.jsonl').write_text(
         ''.join(
             json.dumps(
