@@ -148,7 +148,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
       <ErrorAlert error={error === null ? startError : `Could not list families: ${error}`} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
-          No family has outputs to vote on. Run and ingest a family, then reload this page.
+          No family has outputs to vote on. Run a family, then restart `bench serve`.
         </p>
       )}
       {families &&

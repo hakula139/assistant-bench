@@ -3,6 +3,7 @@
 import os
 import subprocess
 from collections import Counter
+from collections.abc import Callable
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +19,13 @@ from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import System, load_export, load_systems, pin
-from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.families import (
+    Family,
+    VotesSettings,
+    family_names,
+    load_cases,
+    load_family,
+)
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -35,80 +42,85 @@ def main() -> None:
 
 
 @app.command()
-def check(family: str) -> None:
-    """Validate a family, running Harbor's oracle on its task directories."""
-    selected = _load_family(family)
-    _family_systems(selected)
-    if selected.source == 'cases':
-        typer.echo(f'{family}: {len(_render_tasks(selected))} valid cases')
-        return
+def check(
+    families: Annotated[list[str] | None, typer.Argument()] = None,
+) -> None:
+    """Validate every family, or the named ones, running Harbor's oracle on tasks."""
+    for name in _picked(families, family_names):
+        selected = _load_family(name)
+        _family_systems(selected)
+        if selected.source == 'cases':
+            typer.echo(f'{name}: {len(_render_tasks(selected))} valid cases')
+            continue
 
-    try:
-        job = jobs.oracle_job(selected)
-    except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
-    outputs = jobs.read_trials(selected, _run(job), {})
-    failed = sorted(
-        {output.case for output in outputs if output.error or output.reward != 1}
-    )
-    tasks = {task.get_task_id().get_name() for task in job.tasks}
-    missing = sorted(tasks - {output.case for output in outputs})
-    if failed:
-        typer.echo(f'{family}: the oracle failed on {", ".join(failed)}', err=True)
-    if missing:
-        typer.echo(
-            f'{family}: the oracle left no trial of {", ".join(missing)}', err=True
+        try:
+            job = jobs.oracle_job(selected)
+        except ValueError as error:
+            raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+        outputs = jobs.read_trials(selected, _run(job), {})
+        failed = sorted(
+            {output.case for output in outputs if output.error or output.reward != 1}
         )
-    if failed or missing:
-        raise typer.Exit(1)
-    typer.echo(f'{family}: the oracle passed every task')
+        tasks = {task.get_task_id().get_name() for task in job.tasks}
+        missing = sorted(tasks - {output.case for output in outputs})
+        if failed:
+            typer.echo(f'{name}: the oracle failed on {", ".join(failed)}', err=True)
+        if missing:
+            typer.echo(
+                f'{name}: the oracle left no trial of {", ".join(missing)}', err=True
+            )
+        if failed or missing:
+            raise typer.Exit(1)
+        typer.echo(f'{name}: the oracle passed every task')
 
 
 @app.command()
 def run(
-    family: str,
+    families: Annotated[list[str] | None, typer.Argument()] = None,
     names: Annotated[
         list[str] | None,
         typer.Option(
             '--system',
-            help="Limit the run to this system from the family's list. "
-            'Repeat for several.',
+            help='Limit the run to this system. Without a family, this sends it '
+            'to every family that lists it. Repeat for several.',
         ),
     ] = None,
 ) -> None:
-    """Generate missing trials for every listed system, or only for the named ones."""
-    selected = _load_family(family)
-    if selected.source != 'cases':
-        raise typer.BadParameter(
-            'single-call systems run only case families', param_hint='FAMILY'
-        )
-    systems = _family_systems(selected)
-    if names:
-        systems = _named_systems(selected, systems, names)
+    """Generate missing trials and collect them for every family, or the named ones.
 
-    tasks = _render_tasks(selected)
-    typer.echo(f'Job written to {_run(jobs.case_job(selected, systems, tasks))}')
+    A run without a family sends every family that lists systems.
+    """
+    prepared = []
+    for family, systems in _run_targets(families, names):
+        if family.source != 'cases':
+            raise typer.BadParameter(
+                'single-call systems run only case families', param_hint='FAMILY'
+            )
+        _refuse_drift(family, systems)
+        tasks = _render_tasks(family)
+        prepared.append((family, systems, tasks))
+
+    for family, systems, tasks in prepared:
+        try:
+            path = jobs.run_job(jobs.case_job(family, systems, tasks))
+        except subprocess.CalledProcessError as error:
+            _ingest(family)
+            raise typer.Exit(error.returncode) from error
+        typer.echo(f'Job written to {path}')
+        _ingest(family)
 
 
 @app.command()
-def ingest(family: str) -> None:
-    """Collect every trial of a family into `outputs/<family>.jsonl`."""
-    outputs = jobs.ingest(_load_family(family), _load_systems())
-    errors = Counter(output.error for output in outputs if output.error)
-    typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
-    for error, count in errors.most_common():
-        typer.echo(f'  {error}: {count}')
-    gated = [output for output in outputs if output.gate_failures]
-    if gated:
-        typer.echo(f'{len(gated)} failed a gate')
-        failures = Counter(
-            gate for output in gated for gate in output.gate_failures or []
-        )
-        for gate, count in failures.most_common():
-            typer.echo(f'  {gate}: {count}')
-    rewards = [output.reward for output in outputs if output.reward is not None]
-    if rewards:
-        typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
+def ingest(
+    families: Annotated[list[str] | None, typer.Argument()] = None,
+) -> None:
+    """Collect every family's trials into `outputs/<family>.jsonl`."""
+    names = _picked(families, _families_with_jobs)
+    if not names:
+        typer.echo('No family has jobs yet')
+        return
+    for name in names:
+        _ingest(_load_family(name))
 
 
 def _vote_store() -> VoteStore:
@@ -122,7 +134,11 @@ def _vote_store() -> VoteStore:
 
 @app.command()
 def serve() -> None:
-    """Build the local vote page and serve it for every family with outputs."""
+    """Collect every votes family's trials, then serve the vote page."""
+    for name in family_names():
+        family = _load_family(name)
+        if isinstance(family.settings, VotesSettings) and jobs.has_jobs(family):
+            _ingest(family)
     families = load_families()
     if not families:
         typer.echo('No family scored by votes has outputs yet', err=True)
@@ -154,9 +170,10 @@ def serve() -> None:
 
 @app.command()
 def close(family: str) -> None:
-    """Write the family's report to `reports/<family>/<round>.json`."""
+    """Collect the family's trials and write its report under `reports/`."""
     selected = _load_family(family)
     with closing(_vote_store()) as store:
+        _ingest(selected)
         try:
             closed = report.close(selected, store, datetime.now(UTC))
         except ValueError as error:
@@ -247,6 +264,91 @@ def _named_systems(
             param_hint='--system',
         )
     return [system for system in systems if system.name in names]
+
+
+def _picked(families: list[str] | None, every: Callable[[], list[str]]) -> list[str]:
+    return list(dict.fromkeys(families)) if families is not None else every()
+
+
+def _families_with_jobs() -> list[str]:
+    return [name for name in family_names() if jobs.has_jobs(_load_family(name))]
+
+
+def _run_targets(
+    families: list[str] | None, names: list[str] | None
+) -> list[tuple[Family, list[System]]]:
+    """Return each family to run with the systems to send it."""
+    if families is not None:
+        targets = []
+        for name in dict.fromkeys(families):
+            family = _load_family(name)
+            listed = _family_systems(family)
+            targets.append(
+                (family, _named_systems(family, listed, names) if names else listed)
+            )
+        return targets
+
+    every = [
+        family
+        for family in map(_load_family, family_names())
+        if family.settings.systems
+    ]
+    if names is None:
+        return [(family, _family_systems(family)) for family in every]
+
+    wanted = list(dict.fromkeys(names))
+    listed_names = {name for family in every for name in family.settings.systems}
+    unlisted = [name for name in wanted if name not in listed_names]
+    if unlisted:
+        raise typer.BadParameter(
+            f'no family lists {", ".join(unlisted)}', param_hint='--system'
+        )
+    targets = []
+    for family in every:
+        if not set(family.settings.systems) & set(wanted):
+            continue
+        chosen = [system for system in _family_systems(family) if system.name in wanted]
+        targets.append((family, chosen))
+    return targets
+
+
+def _refuse_drift(family: Family, systems: list[System]) -> None:
+    try:
+        drifted = jobs.drifted_systems(family, systems)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+    if not drifted:
+        return
+    detail = '\n'.join(
+        f'{name!r} ran under fingerprint {recorded} but now resolves to {current}'
+        for name, recorded, current in drifted
+    )
+    raise typer.BadParameter(
+        f'{family.name}:\n{detail}\nGive a changed system a new name, or keep its '
+        'old resolution on a `route` table, as docs/guide/authoring.md#systems '
+        'describes',
+        param_hint='systems.toml',
+    )
+
+
+def _ingest(family: Family) -> None:
+    outputs = jobs.ingest(family, _load_systems())
+    typer.echo(f'{family.name}:')
+    errors = Counter(output.error for output in outputs if output.error)
+    typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
+    for error, count in errors.most_common():
+        typer.echo(f'  {error}: {count}')
+    gated = [output for output in outputs if output.gate_failures]
+    if gated:
+        typer.echo(f'{len(gated)} failed a gate')
+        failures = Counter(
+            gate for output in gated for gate in output.gate_failures or []
+        )
+        for gate, count in failures.most_common():
+            typer.echo(f'  {gate}: {count}')
+    rewards = [output.reward for output in outputs if output.reward is not None]
+    if rewards:
+        typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
 
 
 def _run(job: JobConfig) -> Path:

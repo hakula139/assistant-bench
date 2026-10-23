@@ -10,6 +10,7 @@ from harbor.models.trial.config import AgentConfig
 from harbor.publisher.packager import Packager
 
 from assistant_bench import jobs
+from assistant_bench.catalog import System
 from assistant_bench.families import (
     Case,
     Family,
@@ -20,6 +21,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.harnesses.generate import GenerateOptions
 from assistant_bench.outputs import Output
 from assistant_bench.paths import REPO_ROOT
 from support import make_system, write_trial
@@ -42,6 +44,17 @@ TESTS = Family(
     source='tasks',
     settings=TaskTestsSettings(scorer='tests', display_name='Family G', samples=1),
 )
+
+
+def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
+    """Return the agent kwargs that a family with this bound sends a system."""
+    return GenerateOptions(
+        system=system.name,
+        fingerprint=system.fingerprint,
+        effort=system.effort,
+        system_prompt=system.prompt,
+        max_output_tokens=max_output_tokens,
+    ).model_dump()
 
 
 def record(data_dir: Path, task: Path, version: str = jobs.TASK_VERSION) -> None:
@@ -128,6 +141,91 @@ class TestRenderTasks:
         assert (path / 'instruction.md').read_text() == 'Reworded.'
 
 
+class TestDriftedSystems:
+    def test_returns_the_recorded_and_current_fingerprints(
+        self, data_dir: Path
+    ) -> None:
+        current = make_system()
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(
+                import_path='x:Y',
+                kwargs={'system': current.name, 'fingerprint': 'fp-old'},
+            ),
+            task='f/a',
+        )
+
+        assert jobs.drifted_systems(VOTES, [current]) == [
+            (current.name, 'fp-old', current.fingerprint)
+        ]
+
+    def test_accepts_a_system_whose_trials_kept_its_fingerprint(
+        self, data_dir: Path
+    ) -> None:
+        current = make_system()
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(
+                import_path='x:Y',
+                kwargs={'system': current.name, 'fingerprint': current.fingerprint},
+            ),
+            task='f/a',
+        )
+
+        assert jobs.drifted_systems(VOTES, [current]) == []
+
+    def test_returns_each_system_once_per_recorded_fingerprint(
+        self, data_dir: Path
+    ) -> None:
+        large = make_system()
+        small = make_system(name='acme-small', route='acme/small')
+        for trial, system in (
+            ('a__small', small),
+            ('a__large', large),
+            ('b__large', large),
+        ):
+            write_trial(
+                data_dir / 'jobs' / 'f' / 'job-1',
+                trial,
+                AgentConfig(
+                    import_path='x:Y',
+                    kwargs={'system': system.name, 'fingerprint': 'fp-old'},
+                ),
+                task=f'f/{trial}',
+            )
+
+        assert jobs.drifted_systems(VOTES, [small, large]) == [
+            ('acme-large', 'fp-old', large.fingerprint),
+            ('acme-small', 'fp-old', small.fingerprint),
+        ]
+
+    def test_ignores_a_system_the_run_does_not_select(self, data_dir: Path) -> None:
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(
+                import_path='x:Y',
+                kwargs={'system': 'retired', 'fingerprint': 'fp-old'},
+            ),
+            task='f/a',
+        )
+
+        assert jobs.drifted_systems(VOTES, [make_system()]) == []
+
+    def test_ignores_a_trial_that_recorded_no_fingerprint(self, data_dir: Path) -> None:
+        current = make_system()
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': current.name}),
+            task='f/a',
+        )
+
+        assert jobs.drifted_systems(VOTES, [current]) == []
+
+
 class TestCaseJob:
     def test_runs_each_system_through_its_harness_in_its_route_group(
         self, data_dir: Path
@@ -186,6 +284,24 @@ class TestOracleJob:
         assert not job.verifier.disable
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
+
+
+class TestHasJobs:
+    @pytest.mark.parametrize(
+        ('directory', 'result', 'expected'),
+        [(False, False, False), (True, False, False), (True, True, True)],
+    )
+    def test_reports_whether_the_family_has_a_job(
+        self, data_dir: Path, directory: bool, result: bool, expected: bool
+    ) -> None:
+        family = load_family('smoke-text')
+        job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
+        if directory:
+            job.mkdir(parents=True)
+        if result:
+            (job / 'result.json').touch()
+
+        assert jobs.has_jobs(family) is expected
 
 
 class TestRunJob:
@@ -270,6 +386,117 @@ class TestIngest:
         }
         written = (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
         assert [Output.model_validate_json(line) for line in written] == outputs
+
+    def test_prefers_a_trial_that_sent_the_current_request(
+        self, data_dir: Path
+    ) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                display_name='Family F',
+                systems=['acme-large'],
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+            ),
+        )
+        system = make_system()
+        jobs_dir = data_dir / 'jobs' / 'f'
+        for job, tokens, output in (
+            ('2026-10-20__10-00-00', 600, 'old request'),
+            ('2026-10-21__10-00-00', 300, 'current request'),
+        ):
+            write_trial(
+                jobs_dir / job,
+                'a__1',
+                AgentConfig(import_path='x:Y', kwargs=request(system, tokens)),
+                task='f/a',
+                output=output,
+                context=AgentContext(
+                    n_output_tokens=tokens, metadata={'finish_reason': 'stop'}
+                ),
+            )
+
+        outputs = jobs.ingest(family, {system.name: system})
+
+        assert [
+            (output.job, output.text, output.output_tokens) for output in outputs
+        ] == [('2026-10-21__10-00-00', 'current request', 300)]
+
+    def test_keeps_the_oldest_trial_that_sent_the_current_request(
+        self, data_dir: Path
+    ) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                display_name='Family F',
+                systems=['acme-large'],
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+            ),
+        )
+        system = make_system()
+        jobs_dir = data_dir / 'jobs' / 'f'
+        for job, output in (
+            ('2026-10-20__10-00-00', 'first'),
+            ('2026-10-21__10-00-00', 'second'),
+        ):
+            write_trial(
+                jobs_dir / job,
+                'a__1',
+                AgentConfig(import_path='x:Y', kwargs=request(system)),
+                task='f/a',
+                output=output,
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+
+        outputs = jobs.ingest(family, {system.name: system})
+
+        assert [(output.job, output.text) for output in outputs] == [
+            ('2026-10-20__10-00-00', 'first')
+        ]
+
+    def test_keeps_an_older_success_over_a_newer_error(self, data_dir: Path) -> None:
+        family = Family(
+            name='f',
+            source='cases',
+            settings=VotesSettings(
+                scorer='votes',
+                display_name='Family F',
+                systems=['acme-large'],
+                samples=1,
+                max_output_tokens=300,
+                reference='acme-large',
+            ),
+        )
+        system = make_system()
+        jobs_dir = data_dir / 'jobs' / 'f'
+        write_trial(
+            jobs_dir / '2026-10-20__10-00-00',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            task='f/a',
+            output='kept',
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+        write_trial(
+            jobs_dir / '2026-10-21__10-00-00',
+            'a__2',
+            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            task='f/a',
+            error='TimeoutError',
+        )
+
+        outputs = jobs.ingest(family, {system.name: system})
+
+        assert [(output.job, output.error, output.text) for output in outputs] == [
+            ('2026-10-20__10-00-00', None, 'kept')
+        ]
 
     def test_keeps_a_rerun_success_over_the_error_it_replaced(
         self, data_dir: Path
@@ -461,3 +688,19 @@ class TestIngest:
 
         assert output.system == 'retired'
         assert output.cost_usd is None
+
+
+class TestReadTrials:
+    def test_returns_one_output_per_finished_trial(self, data_dir: Path) -> None:
+        job = data_dir / 'jobs' / 'f' / 'job-1'
+        write_trial(
+            job,
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='f/a',
+            output='Hi.',
+        )
+
+        (output,) = jobs.read_trials(VOTES, job, {})
+
+        assert (output.case, output.system, output.text) == ('a', 's', 'Hi.')

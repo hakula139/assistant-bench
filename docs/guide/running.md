@@ -21,31 +21,38 @@ Each system's route is the model ID the endpoint expects, and every trial sends 
 ## Checking a Family
 
 ```bash
+uv run bench check
 uv run bench check smoke-text
-uv run bench check smoke
 ```
 
-`bench check` validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks to name any that changed since a trial ran them, which needs neither Docker nor an endpoint. For a `tasks/` family, it runs Harbor's oracle on every task and fails unless each reference solution earns reward 1, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks to name any that changed since a trial ran them, which needs neither Docker nor an endpoint. For a `tasks/` family, it runs Harbor's oracle on every task and fails unless each reference solution earns reward 1, which needs Docker but no endpoint.
 
 ## Running a Family
 
 ```bash
+uv run bench run
 uv run bench run smoke-text
+uv run bench run --system <name>
 ```
 
-`bench run` renders each case into a Harbor task, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI. Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial.
+`bench run` renders each case into a Harbor task, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI. A run without a family sends every family that lists systems, naming families limits it to those, and `--system` alone sends the named systems to every family that lists them, failing only when no family lists one. Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial.
 
-Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. To regenerate a case, give it a new ID.
+When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary below, also when Harbor fails, so finished trials land before the command exits.
 
-To run only some of the listed systems, name each with `--system`, as in `uv run bench run writing-zh --system kimi-k3 --system opus-5.5`, and a later run without the option generates the other systems' trials alone. Voting can start once two systems have outputs, and those votes keep counting after the rest join. `bench close` anchors the board at the family's reference when the round ranks it, and otherwise at the most-voted system.
+Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. To regenerate a case, give it a new ID. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
+
+A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
+
+Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their lines in `cases.jsonl`, then `uv run bench run`.
 
 ## Collecting Outputs
 
 ```bash
+uv run bench ingest
 uv run bench ingest smoke-text
 ```
 
-`bench ingest` reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint and preferring successful trials, so a rerun replaces an earlier error. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
+`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Within a slot it prefers a successful trial whose recorded request matches the family's current settings, then the oldest, so a changed request replaces what an earlier job produced while a rerun of the same request keeps the outputs its votes refer to. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
 
 ## Voting
 
@@ -53,7 +60,7 @@ uv run bench ingest smoke-text
 uv run bench serve
 ```
 
-`bench serve` builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every family scored by votes that has outputs, and it runs until interrupted. Open that address exactly, since the API admits no other host. A session runs until every case has a vote, and each vote is recorded as soon as it is cast. [Voting](voting.md) covers the keys and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
+`bench serve` collects every family scored by votes that has jobs, then builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every such family that has outputs, and it runs until interrupted. It reads the outputs at start, so restart it after a run. Open that address exactly, since the API admits no other host. A session runs until every case has a vote, and each vote is recorded as soon as it is cast. [Voting](voting.md) covers the keys and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ## Closing a Round
 
@@ -61,7 +68,7 @@ uv run bench serve
 uv run bench close writing-zh
 ```
 
-`bench close` fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+`bench close` collects the family's trials first, then fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 
@@ -72,7 +79,7 @@ assistant-bench/
 ├── cases/<family>.jsonl                    # Local cases, appended to the committed ones
 ├── checks/<family>/<job>/                  # Oracle jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
-├── outputs/<family>.jsonl                  # Records written by `bench ingest`
+├── outputs/<family>.jsonl                  # Records written by `bench run` and `bench ingest`
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 └── votes.sqlite                            # Sessions, votes, and undos from `bench serve`
 ```

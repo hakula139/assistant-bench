@@ -5,10 +5,9 @@ assistant-bench is a public benchmark in which every AI assistant system in a fa
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 
 ```bash
-uv run bench check smoke                    # Validate a family, running Harbor's oracle on a task family
-uv run bench run smoke-text                 # Generate a family's missing trials for every system it lists
-uv run bench ingest smoke-text              # Collect a family's trials into outputs/<family>.jsonl
-uv run bench serve                          # Serve the vote page for every family with outputs
+uv run bench check                          # Validate every family, running Harbor's oracle on task families
+uv run bench run --system <name>            # Generate one system's missing trials on every family that lists it
+uv run bench serve                          # Collect every votes family's trials, then serve the vote page
 uv run bench close writing-zh               # Write a family's report to reports/<family>/<round>.json
 ```
 
