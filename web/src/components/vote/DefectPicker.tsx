@@ -41,7 +41,7 @@ export function DefectPicker({ side, tagged, keys, onToggle }: DefectPickerProps
       <PopoverContent
         align="end"
         collisionPadding={16}
-        className="w-80"
+        className="w-80 max-w-[calc(100vw-2rem)]"
         aria-label={`Issues in output ${side}`}
       >
         <ul className="space-y-2">
