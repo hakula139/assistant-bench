@@ -18,6 +18,8 @@ pnpm install                                    # Site and vote page dependencie
 cp .env.example .env                            # Then fill in the endpoint variables
 ```
 
+If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loads the dev shell whenever you enter the repository.
+
 [Running](running.md#the-model-endpoint) describes each variable in `.env`.
 
 ## The Smoke Families

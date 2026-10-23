@@ -39,7 +39,7 @@ uv run bench run --system <name>
 
 When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails, so finished trials land before the command exits.
 
-Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. Editing a case reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
+Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. Editing a case's instruction reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
 
 A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
@@ -54,7 +54,7 @@ uv run bench ingest smoke-text
 
 `bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
 
-It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Within a slot it prefers a successful trial whose recorded request matches the family's current settings, then the oldest, as [Architecture](../design/architecture.md#reruns) describes. The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one.
+It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns). The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one.
 
 Each record holds:
 

@@ -6,7 +6,7 @@
 
 - **Job configs:** `JobConfig` with one `AgentConfig` per system, `n_attempts` for samples, `RetryConfig(max_retries=1)` because Harbor defaults to no retries, and a `concurrency_group` with `n_concurrent` per route.
 - **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Its `AgentContext` takes token counts and free-form `metadata`.
-- **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. Its `llm_kwargs` reach every `litellm.acompletion` call, and LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and leaves `api_base` unset.
+- **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and leaves `api_base` unset.
 - **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, beside its `nop` agent, which does nothing, for `bench check`. A task's separate verifier receives its `/app` artifact, and `network_mode = "no-network"` applies to the agent and verifier phases, which `resolve_trial_network_plan` resolves from the task's baseline and phase overrides.
 - **Reruns:** `SourceJobConfig(action='diff')`, which reuses finished trials from earlier jobs.
 
@@ -18,7 +18,7 @@
 - Each trial's `lock.json` records its task's digest, the `sha256:` of `Packager.compute_content_hash` over the task's files. A source and target task with the same version but different digests abort the whole job. A patch-level version bump reuses the earlier trials, a minor bump regrades them, and a major bump reruns them. A version that differs only in its pre-release or build metadata reruns, which Harbor's own comment calls outside its supported change levels.
 - The bench puts a hash of its own task inputs in the build metadata, so an edited case reruns under its ID. It hashes only what it controls, so a Harbor upgrade that changes a default in `task.toml` leaves every version alone while the digests change, and the job aborts until the family's earlier job directories are removed.
 - A source trial that errored is rerun into the new job, while the failed trial stays in its source job.
-- `harbor job resume` reuses the job's `config.json` but runs the current code, so a resumed trial records the rev of the current export against the system prompt the job was created with.
+- `harbor job resume` reuses the job's `config.json` but runs the current code, so a resumed trial records the rev of the current export, while a resumed `Generate` trial still sends the system prompt the job was created with.
 - A reused trial is skipped and stays in its source job, without a copy in the new one.
 - A retry deletes the failed attempt's directory, so only the final attempt of a trial remains.
 - `AgentContext.n_input_tokens` includes the cached tokens counted in `n_cache_tokens`.

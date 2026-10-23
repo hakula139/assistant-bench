@@ -13,9 +13,9 @@ Each case or task declares its `source`, which determines where it and everythin
 | `transcript` | Derived from the owner's assistant transcripts                 | The data directory's `cases/<family>.jsonl` |
 | `held-out`   | Kept private so a leaderboard cannot be fit to it              | The data directory's `cases/<family>.jsonl` |
 
-A `transcript` case passes gitleaks before it enters the local cases file, since every system receives it. `nix shell nixpkgs#gitleaks -c gitleaks dir <file>` exits nonzero when it finds a secret.
-
 A task in a task family declares its source the same way, in its `task.toml`'s `[metadata]`. A committed task is `synthetic` or `public` and lives in `families/<family>/tasks/<task>/`, while a `transcript` or `held-out` task lives under the data directory's `cases/<family>/<task>/`.
+
+A `transcript` case or task passes gitleaks before it enters the local cases, since every system receives it. `nix shell nixpkgs#gitleaks -c gitleaks dir <path>` exits nonzero when it finds a secret.
 
 ## The Data Directory
 

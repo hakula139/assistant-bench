@@ -1,12 +1,6 @@
 # Python
 
-Conventions for Python code under `src/` and `tests/`, covering the tooling configuration and what it leaves open.
-
-## Enforced by Tooling
-
-- `pyproject.toml`'s `[tool.ruff]` selects the `B`, `C4`, `D`, `E`, `F`, `I`, `SIM`, `UP`, and `W` rules, formats with single quotes at 88 columns, and treats `src` and `tests` as first-party for import sorting.
-- Docstrings follow the NumPy convention, which Ruff checks: an imperative summary line, then `Parameters`, `Returns`, or `Raises` sections only where the contract needs them.
-- `[tool.mypy]` runs mypy in strict mode over `src` and `tests`. Since Harbor, threadpoolctl, and zhon lack a `py.typed` marker, an override tells mypy to follow their imports.
+Conventions for Python code under `src/` and `tests/` that the tooling and the module map don't already state.
 
 ## Architecture
 

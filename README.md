@@ -15,21 +15,12 @@ Early development. The first families, `writing-zh` and `writing-en`, rank how s
 
 ## Usage
 
-Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists:
-
-```bash
-nix develop                                     # Dev shell with uv, Node.js, and the hooks
-uv sync                                         # Virtualenv with Harbor and the bench
-pnpm install                                    # Site and vote page dependencies
-cp .env.example .env                            # Then fill in the endpoint variables
-```
-
-The [quickstart](docs/guide/quickstart.md#the-smoke-families) then runs and votes on the smoke families.
+Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists. Its [setup](docs/guide/quickstart.md#setup) prepares a checkout, and its [smoke walk-through](docs/guide/quickstart.md#the-smoke-families) runs and votes on the smoke families.
 
 ## Documentation
 
 - [User guide](docs/guide/): setup, running and voting on a family, and authoring cases, families, and systems
-- [Design](docs/design/): how systems, the arena, ranking, reports, and each family work
+- [Design](docs/design/): how systems, the arena, ranking, reports, the site, and each family work
 - [`AGENTS.md`](AGENTS.md): the entry point for contributors, linking the [conventions](docs/conventions/)
 
 ## License

@@ -23,7 +23,7 @@ Entering the dev shell installs a [pre-commit](https://pre-commit.com) hook gene
 
 The hook runs the fast subset of the [verification](../../AGENTS.md#verification) checks on staged files: file hygiene, Nix formatting and lints, Ruff, shfmt, Prettier and Taplo formatting, `markdownlint`, `cspell`, actionlint on the workflows, lychee on local links and anchors, and the sort order of `.cspell/words.txt`, while mypy and pytest stay out of the hook because they take longer. Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so both installs come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
+The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 
 ## Where Settings Live
 

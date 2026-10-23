@@ -25,7 +25,7 @@ Votes and scores pool only within one fingerprint. Altering a system's route, ef
 
 Every system defaults to `generate`, the single-call agent. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry. `terminus-2` is Harbor's Terminal-Bench agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`.
 
-Harbor records each trial's agent import path in the job's `config.json`, and `harbor job resume` imports it from there, ensuring an import path never changes once a job uses it.
+Harbor records each trial's agent import path in the job's `config.json`, and `harbor job resume` imports it from there, so an import path must never change once a job uses it.
 
 ## The nixos-config Export
 
@@ -39,4 +39,4 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 
 ## Concurrency
 
-Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time, while a job runs at most eight trials at once. Each trial's request is bounded by the family's `max_output_tokens` and a 900-second agent timeout, and a failed trial is retried once.
+Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time, while a job runs at most eight trials at once. Each request is bounded by the family's `max_output_tokens` and each trial by a 900-second agent timeout, and a failed trial is retried once.

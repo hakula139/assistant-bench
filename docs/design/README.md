@@ -2,12 +2,12 @@
 
 Architecture decisions for assistant-bench. Each page covers the current design of one topic, building on the findings in [`docs/research/`](../research/).
 
-| Document                        | Description                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------ |
-| [Architecture](architecture.md) | Module map, import layers, families and scorers, data flow, reruns                         |
-| [Systems](systems.md)           | `systems.toml`, fingerprints, harnesses, the nixos-config export, concurrency              |
-| [Arena](arena.md)               | Blinding, sessions and pair scheduling, the vote store, the vote API, the render origin    |
-| [Ranking](ranking.md)           | Bradley-Terry with ties, the clustered bootstrap, rank spread, the decision, diagnostics   |
-| [Reports](reports.md)           | Closing a round, the report schema and its scorer variants, what is published, the fixture |
-| [Site](site.md)                 | The results pages, the vote page, the charts, the design direction                         |
-| [Writing](families/writing.md)  | `writing-zh` and `writing-en`: systems, categories, case sourcing, gates, verdicts         |
+| Document                        | Description                                                      |
+| ------------------------------- | ---------------------------------------------------------------- |
+| [Architecture](architecture.md) | How the package maps to Harbor's parts and fits together         |
+| [Systems](systems.md)           | What a system is, how it resolves, and how its trials run        |
+| [Arena](arena.md)               | How blind pairs are chosen, voted on, and stored                 |
+| [Ranking](ranking.md)           | How votes become scores, intervals, and a decision               |
+| [Reports](reports.md)           | What one closed round publishes and how the fixture mirrors it   |
+| [Site](site.md)                 | What the results and vote pages show, and how they look          |
+| [Writing](families/writing.md)  | How the two writing families source, gate, and judge their cases |
