@@ -3,6 +3,7 @@ import {
   AppWindow,
   ChevronRight,
   Columns2,
+  FileDiff,
   FileText,
   FlaskConical,
   ListChecks,
@@ -11,6 +12,7 @@ import {
   Play,
   ShieldCheck,
   Sigma,
+  SquareTerminal,
   Vote,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,6 +25,7 @@ import { methodSteps, scorers, type MethodStep } from '@/lib/method';
 const stepIcons: Record<MethodStep['step'], LucideIcon> = {
   text: FileText,
   html: AppWindow,
+  diff: FileDiff,
   trial: Play,
   gates: ShieldCheck,
   pairs: Columns2,
@@ -33,7 +36,10 @@ const stepIcons: Record<MethodStep['step'], LucideIcon> = {
 
 const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConical };
 
-const aspectIcons: Record<Aspect, LucideIcon> = { writing: PenLine };
+const aspectIcons: Record<Aspect, LucideIcon> = {
+  writing: PenLine,
+  coding: SquareTerminal,
+};
 
 /** An aspect's icon, which decorates the aspect's title beside it. */
 export function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {

@@ -40,7 +40,7 @@ import {
   formatTau,
   MISSING,
 } from '@/lib/format';
-import { fallbackAnchor, terms } from '@/lib/glossary';
+import { fallbackAnchor, terms, type Term } from '@/lib/glossary';
 import { systemPagePath } from '@/lib/paths';
 import { AGREEMENT_FLOOR } from '@/lib/ranking';
 import type { Standing, VotesResults } from '@/lib/report';
@@ -54,6 +54,8 @@ interface VotesBoardProps {
   /** Closed rounds, oldest first. */
   rounds: VotesRound[];
   names: SystemNames;
+  /** The leaderboard's gate-failure column, as `gateFailuresTerm` names it for the family. */
+  gateTerm?: Term;
 }
 
 const ALL = 'all';
@@ -144,7 +146,12 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
+export function VotesBoard({
+  base,
+  rounds,
+  names,
+  gateTerm = terms.gateFailures,
+}: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', ALL);
@@ -222,6 +229,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
           anchorSystem={results.anchor}
           anchorTerm={anchorTerm}
           href={href}
+          gateTerm={gateTerm}
         />
         {unranked.length > 0 && (
           <p className={note}>

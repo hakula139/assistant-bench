@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { VotesBoard } from '@/components/boards/VotesBoard';
+import { terms } from '@/lib/glossary';
 import { reportSchema } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -310,15 +311,29 @@ describe('VotesBoard', () => {
   });
 
   test.each([
-    ['all', '1,004', '114 votes, both bad 5%, gate failures 2%.'],
-    ['message', '972', '34 votes, both bad 5%, gate failures 2% across all categories.'],
-  ])(
-    "opens a system's votes and rates from its score on the %s board",
-    async (category, score, details) => {
+    ['all', '1,004', 'gateFailures', '114 votes, both bad 5%, gate failures 2%.'],
+    [
+      'message',
+      '972',
+      'gateFailures',
+      '34 votes, both bad 5%, gate failures 2% across all categories.',
+    ],
+    ['all', '1,004', 'failedTests', '114 votes, both bad 5%, failed tests 2%.'],
+  ] as const)(
+    "opens a system's votes and rates from its score on the %s board, naming its %s",
+    async (category, score, gate, details) => {
+      const gateTerm = terms[gate];
       search.set('category', category);
       const { round, results } = await load();
       stubPlotFrame();
-      renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+      renderInDom(
+        <VotesBoard
+          base={BOARD}
+          rounds={[{ round, results }]}
+          names={FIXTURE_NAMES}
+          gateTerm={gateTerm}
+        />,
+      );
 
       await userEvent.setup().click(screen.getByRole('button', { name: score }));
 

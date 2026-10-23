@@ -7,7 +7,7 @@ import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { MethodStrip } from '@/components/site/Method';
 import { PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
-import { scorers } from '@/lib/method';
+import { boardGuide, scorers } from '@/lib/method';
 import { familyPaths, getFamilies, type BoardLink, type Family } from '@/lib/reports';
 import { REPOSITORY } from '@/lib/site';
 
@@ -23,6 +23,7 @@ interface Props {
 const { family, boards } = Astro.props;
 const { config, title } = family;
 const { Board } = scorerViews[config.scorer];
+const guide = boardGuide(config);
 ---
 
 <Base
@@ -34,7 +35,7 @@ const { Board } = scorerViews[config.scorer];
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip client:load scorer={config.scorer} config={config} />
     <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-      <a href={`/methodology/#${config.scorer}`} class="inline-flex items-center gap-2">
+      <a href={`/methodology/#${guide.section}`} class="inline-flex items-center gap-2">
         <BookOpen className="size-4" aria-hidden="true" />
         How to read this board
       </a>
@@ -43,7 +44,7 @@ const { Board } = scorerViews[config.scorer];
         class="inline-flex items-center gap-2"
       >
         <FileText className="size-4" aria-hidden="true" />
-        {scorers[config.scorer].inputs}
+        {guide.inputs}
       </a>
     </div>
   </PageHeader>

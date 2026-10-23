@@ -69,6 +69,37 @@ describe('methodSteps', () => {
     ]);
   });
 
+  test('gates the solutions of a family that renders diffs on their tests', () => {
+    const family = config({ render: 'diff', harness: 'terminus-2', max_turns: 40 });
+
+    const steps = methodSteps('votes', family);
+
+    expect(steps.map(({ title }) => title)).toEqual(['Run', 'Tests', 'Blind pairs', 'Scores']);
+    expect(steps.slice(0, 3).map(({ step, detail, hint }) => [step, detail, hint])).toEqual([
+      [
+        'diff',
+        'same tasks for all',
+        "Every system changes each task's repository through the Terminus 2 agent, within 40 turns.",
+      ],
+      [
+        'tests',
+        'failing solutions lose',
+        "A solution that fails the task's hidden tests loses its pairs without a vote, and two failing solutions tie.",
+      ],
+      [
+        'pairs',
+        'system names hidden',
+        'One rater votes on the diffs of two passing solutions to a task without seeing which systems wrote them.',
+      ],
+    ]);
+  });
+
+  test("names only the repository in a diff family's run before it lists systems", () => {
+    const [run] = methodSteps('votes', config({ render: 'diff' }));
+
+    expect(run.hint).toBe("Every system changes each task's repository.");
+  });
+
   test("gives a tests family's steps their hints", () => {
     const family: FamilyConfig = {
       scorer: 'tests',

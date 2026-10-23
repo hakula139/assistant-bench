@@ -44,6 +44,11 @@ export const terms = {
     definition:
       'The share of its outputs that failed an automatic check, such as being blank or in the wrong language, and so lost their pairs without a vote.',
   },
+  failedTests: {
+    term: 'Failed tests',
+    definition:
+      "The share of its solutions that failed the task's hidden tests, and so lost their pairs without a vote.",
+  },
   costLatency: {
     term: 'Cost / output and p50 latency',
     definition: 'The mean cost at list prices and the median time to the complete response.',

@@ -2,8 +2,10 @@
 import { scorerViews } from '@/components/scorers';
 import { partId } from '@/components/scorers/parts';
 import { intro, list, PageHeader, Section, stack } from '@/components/site/PageParts';
+import { KeptTail } from '@/components/site/Term';
 import Base from '@/layouts/Base.astro';
 import type { Scorer } from '@/lib/family';
+import { terms } from '@/lib/glossary';
 import { scorers } from '@/lib/method';
 import { REPOSITORY } from '@/lib/site';
 
@@ -20,6 +22,7 @@ const contents = [
     title: scorers[scorer].title,
     parts: Object.entries(parts).map(([part, title]) => ({ id: partId(scorer, part), title })),
   })),
+  { id: 'coding', title: 'Coding', parts: [] },
   { id: 'limits', title: 'Known limits', parts: [] },
 ];
 ---
@@ -77,6 +80,21 @@ const contents = [
           <Method />
         </Section>
       ))}
+
+      <Section id="coding" title="Coding">
+        <p>
+          <KeptTail text="A coding family's tasks are a developer's request and a small repository in a sandbox without network access. Every system works on each task through the same agent within the same turn budget, which the board's Run step names." />
+        </p>
+        <p>
+          <KeptTail text="Hidden tests that the agent never sees then grade each solution. A passing solution wins its pairs with failing ones, and two failing solutions tie. The rater votes only between passing solutions, reading each as a diff of the repository without its commit history, much as a reviewer reads a pull request." />
+        </p>
+        <p>
+          The tests settle every pair they separate and the votes decide the rest, with no fixed
+          weight between them. The {terms.failedTests.term} column gives each system's share of
+          failing solutions, and <a href="#votes">Votes</a>{' '}
+          <KeptTail text="explains the rest of the board." />
+        </p>
+      </Section>
 
       <Section id="limits" title="Known limits">
         <ul class:list={['list-disc', list]}>

@@ -3,6 +3,7 @@ import { VotesBoard } from '@/components/boards/VotesBoard';
 import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
 import { note } from '@/components/site/PageParts';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
+import { gateFailuresTerm } from '@/lib/method';
 import { boardPath, configOf, votesRounds, type Family } from '@/lib/reports';
 
 interface Props {
@@ -28,5 +29,11 @@ const rows = unmeasuredRows(config.systems, config.reference, family.systemNames
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard client:load base={boardPath(family)} rounds={rounds} names={family.systemNames} />
+  <VotesBoard
+    client:load
+    base={boardPath(family)}
+    rounds={rounds}
+    names={family.systemNames}
+    gateTerm={gateFailuresTerm(config)}
+  />
 )}

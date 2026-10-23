@@ -6,6 +6,8 @@ const shared = {
   aspect: z.enum(aspectIds).optional(),
   display_name: z.string(),
   systems: z.array(z.string()).default([]),
+  harness: z.enum(['terminus-2']).optional(),
+  max_turns: z.int().optional(),
   public: z.boolean().default(false),
 };
 
@@ -19,13 +21,13 @@ const gatesSchema = z.object({
 /**
  * The fields of `families/<family>/family.toml` the site reads. The pydantic settings model
  * validates the whole file, so these objects drop the keys they do not list. The site alone knows
- * the aspects, so it rejects an unknown one.
+ * the aspects and names the renders and harnesses, so it rejects an unknown one.
  */
 export const familyConfigSchema = z.discriminatedUnion('scorer', [
   z.object({
     scorer: z.literal('votes'),
     reference: z.string(),
-    render: z.enum(['text', 'html']).default('text'),
+    render: z.enum(['text', 'html', 'diff']).default('text'),
     language: z.enum(['en', 'zh']).optional(),
     gates: gatesSchema.default({}),
     ...shared,
