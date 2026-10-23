@@ -1,5 +1,5 @@
 import { cn } from 'cn';
-import { ChevronDown, CircleCheck } from 'lucide-react';
+import { Check, ChevronDown, CircleCheck } from 'lucide-react';
 import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Kbd } from '@/components/ui/kbd';
-import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -32,7 +31,9 @@ import { familyTitle, groupByAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
 import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 
-const SESSION_KEY = 'bench-session';
+const FAMILY_PARAM = 'family';
+const SAVED_MS = 1500;
+const STALE_PAIR = 'This pair changed in another tab.';
 const VIEWPORTS = [375, 768, 1280] as const;
 
 /** The verdicts from left to right. On phones, two to a row, A and B share the first. */
@@ -43,6 +44,32 @@ const CHOICES: { value: Choice; label: string; key: string; className?: string }
   { value: 'b', label: 'B is better', key: 'b' },
 ];
 
+const sessionKey = (family: string) => `bench-session:${family}`;
+
+const notFound = (reason: unknown) => reason instanceof ApiError && reason.status === 404;
+
+/** Resumes the family's session from this browser, or starts one if the arena has no such session. */
+async function enterFamily(family: string): Promise<SessionView> {
+  const stored = localStorage.getItem(sessionKey(family));
+  if (stored !== null) {
+    try {
+      return await resumeSession(stored);
+    } catch (reason) {
+      if (!notFound(reason)) {
+        throw reason;
+      }
+    }
+  }
+  try {
+    return await startSession(family);
+  } catch (reason) {
+    if (notFound(reason)) {
+      localStorage.removeItem(sessionKey(family));
+    }
+    throw reason;
+  }
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -52,6 +79,16 @@ function ErrorAlert({ error }: { error: string | null }) {
     error !== null && (
       <p role="alert" className="text-sm text-destructive">
         {error}
+      </p>
+    )
+  );
+}
+
+function Notice({ notice }: { notice: string | null }) {
+  return (
+    notice !== null && (
+      <p role="status" className="text-sm text-muted-foreground">
+        {notice}
       </p>
     )
   );
@@ -132,8 +169,17 @@ const checklistHint = {
  */
 function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
   const checklistTitle = useId();
+  // The prompt opens for each pair unless the owner collapsed that pair's own prompt. Keeping this
+  // component mounted across pairs is what lets the status band's live region announce a change.
+  const [collapsed, setCollapsed] = useState<string | null>(null);
   return (
-    <Collapsible defaultOpen asChild>
+    <Collapsible
+      open={collapsed !== pair.token}
+      onOpenChange={(next) => {
+        setCollapsed(next ? null : pair.token);
+      }}
+      asChild
+    >
       <Card
         size="sm"
         className={cn(
@@ -191,9 +237,13 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
 /** The local vote page: blinded pairs from the arena API, voted on by keyboard or pointer. */
 export function VoteApp() {
   const [session, setSession] = useState<SessionView | null>(null);
-  // The page renders only in the browser, so the stored session is readable on the first render.
-  const [resuming, setResuming] = useState(() => sessionStorage.getItem(SESSION_KEY));
+  // The page renders only in the browser, so its URL is readable on the first render.
+  const [resumingFamily, setResumingFamily] = useState(() =>
+    new URLSearchParams(window.location.search).get(FAMILY_PARAM),
+  );
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [choice, setChoice] = useState<Choice | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [note, setNote] = useState('');
@@ -216,41 +266,75 @@ export function VoteApp() {
   }, [pair]);
 
   const show = (next: SessionView) => {
-    sessionStorage.setItem(SESSION_KEY, next.id);
+    localStorage.setItem(sessionKey(next.family.name), next.id);
+    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
     setSession(next);
     setChoice(null);
     setFlags([]);
     setNote('');
     setError(null);
+    setNotice(null);
+    setSavedAt(null);
   };
 
-  const run = async (action: () => Promise<SessionView>) => {
+  /** Shows the pair the family's session holds now, which another tab may have moved on. */
+  const follow = async (family: string) => {
+    try {
+      show(await enterFamily(family));
+      setNotice(STALE_PAIR);
+    } catch (reason) {
+      setError(message(reason));
+    }
+  };
+
+  /** Shows the session that `action` returns, and marks `saved` once a vote is recorded. */
+  const run = async (action: () => Promise<SessionView>, saved = false) => {
     setBusy(true);
     try {
       show(await action());
+      if (saved) {
+        setSavedAt(Date.now());
+      }
     } catch (reason) {
-      setError(message(reason));
+      if (session !== null && notFound(reason)) {
+        await follow(session.family.name);
+      } else {
+        setError(message(reason));
+      }
     } finally {
       setBusy(false);
     }
   };
 
   useEffect(() => {
-    if (resuming === null) {
+    if (resumingFamily === null) {
       return;
     }
-    resumeSession(resuming)
+    enterFamily(resumingFamily)
       .then(show, (reason: unknown) => {
-        if (reason instanceof ApiError && reason.status === 404) {
-          sessionStorage.removeItem(SESSION_KEY);
+        if (notFound(reason)) {
+          history.replaceState(null, '', window.location.pathname);
+          setError(`No family named ${resumingFamily} to vote on.`);
         } else {
           setError(message(reason));
         }
       })
       .finally(() => {
-        setResuming(null);
+        setResumingFamily(null);
       });
-  }, [resuming]);
+  }, [resumingFamily]);
+
+  useEffect(() => {
+    if (savedAt === null) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSavedAt(null);
+    }, SAVED_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [savedAt]);
 
   useEffect(() => {
     const onBlur = () => {
@@ -272,7 +356,7 @@ export function VoteApp() {
       return;
     }
     const text = note.trim();
-    void run(() => castVote(pair.token, { choice, flags, note: text === '' ? null : text }));
+    void run(() => castVote(pair.token, { choice, flags, note: text === '' ? null : text }), true);
   };
 
   const undo = () => {
@@ -343,7 +427,7 @@ export function VoteApp() {
     };
   }, []);
 
-  if (resuming !== null) {
+  if (resumingFamily !== null) {
     return null;
   }
 
@@ -353,7 +437,7 @@ export function VoteApp() {
         busy={busy}
         error={error}
         onStart={(family) => {
-          void run(() => startSession(family));
+          void run(() => enterFamily(family));
         }}
       />
     );
@@ -365,6 +449,7 @@ export function VoteApp() {
         <p className="text-muted-foreground">
           {formatCountOf(session.votes, 'vote')} recorded on {familyTitle(session.family)}.
         </p>
+        <Notice notice={notice} />
         <ErrorAlert error={error} />
         <div className="flex gap-2">
           <Button
@@ -385,14 +470,27 @@ export function VoteApp() {
 
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-      <span className="whitespace-nowrap tabular-nums">
-        {familyTitle(session.family)}, pair {session.votes + 1} of {session.size}
+      <span role="status" className="flex items-center gap-1">
+        {savedAt !== null ? (
+          <>
+            <Check className="size-4" aria-hidden="true" />
+            Saved
+          </>
+        ) : (
+          notice
+        )}
       </span>
-      <Progress
-        value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
-        aria-label="Session progress"
-        className={cn('w-32 max-sm:hidden', !hasFrames && 'xl:hidden')}
-      />
+      <span className="whitespace-nowrap tabular-nums">
+        {familyTitle(session.family)},{' '}
+        <Hint
+          term={{
+            term: 'This session',
+            definition: `${formatCountOf(session.remaining, 'pair')} left to vote on.`,
+          }}
+        >
+          {formatCountOf(session.votes, 'vote')}
+        </Hint>
+      </span>
 
       {hasText && (
         <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
@@ -429,7 +527,7 @@ export function VoteApp() {
       ref={pairView}
       tabIndex={-1}
       role="group"
-      aria-label={`Pair ${session.votes + 1} of ${session.size}`}
+      aria-label={`Pair ${session.votes + 1}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
       <div
@@ -438,7 +536,7 @@ export function VoteApp() {
           !hasFrames && 'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1',
         )}
       >
-        <Brief key={pair.token} pair={pair} status={status} stacked={hasFrames} />
+        <Brief pair={pair} status={status} stacked={hasFrames} />
         <OutputPane
           key={`a-${pair.token}`}
           side="A"

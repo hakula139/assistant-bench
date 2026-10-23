@@ -33,7 +33,7 @@ const sessionView = z.object({
   id: z.string(),
   family: familyView,
   votes: z.int().nonnegative(),
-  size: z.int().nonnegative(),
+  remaining: z.int().nonnegative(),
   pair: pairView.nullable(),
 });
 

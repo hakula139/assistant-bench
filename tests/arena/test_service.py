@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from assistant_bench.arena import scheduler, service
+from assistant_bench.arena import scheduler
 from assistant_bench.arena.service import (
     Arena,
     HtmlPane,
@@ -69,7 +69,7 @@ class TestArena:
         view = arena.start('f')
 
         assert view.pair is not None
-        assert (view.votes, view.size) == (0, 3)
+        assert (view.votes, view.remaining) == (0, 3)
         assert view.pair.instruction.startswith('Write about c')
         exposed = view.model_dump_json()
         trials = [
@@ -124,7 +124,7 @@ class TestArena:
 
         view = arena.start('f')
 
-        assert (view.votes, view.size, view.pair) == (0, 0, None)
+        assert (view.votes, view.remaining, view.pair) == (0, 0, None)
         assert store.votes('f') == []
 
     def test_undo_withdraws_the_vote_and_shows_its_pair_again(
@@ -201,22 +201,54 @@ class TestArena:
         assert undone.pair is not None
         assert undone.pair.token != first.pair.token
 
-    def test_ends_the_session_at_its_size(
-        self,
-        families_dir: Path,
-        clock: Clock,
-        store: VoteStore,
-        monkeypatch: pytest.MonkeyPatch,
+    def test_keeps_a_session_open_until_no_case_remains(
+        self, families_dir: Path, clock: Clock, store: VoteStore
     ) -> None:
-        monkeypatch.setattr(service, 'SESSION_VOTES', 2)
-        arena = make_arena(families_dir, clock, store)
+        cases = {f'c{i}': 'reply' for i in range(40)}
+        write_votes_family(families_dir, 'f', ARENA_SYSTEMS, cases)
+        write_outputs(
+            'f',
+            [
+                make_output(
+                    trial=f'{case}__{system}',
+                    case=case,
+                    system=system,
+                    text=f'{system} answers {case}',
+                    gate_failures=[],
+                )
+                for case in cases
+                for system in ARENA_SYSTEMS
+            ],
+        )
+        arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
         view = arena.start('f')
+        remaining = []
 
-        for _ in range(2):
-            assert view.pair is not None
+        while view.pair is not None:
+            remaining.append(view.remaining)
             view = arena.vote(view.pair.token, 'tie', frozenset(), None)
 
-        assert (view.votes, view.size, view.pair) == (2, 2, None)
+        assert remaining == list(range(len(cases), 0, -1))
+        assert (view.votes, view.remaining) == (len(cases), 0)
+
+    def test_resumes_after_a_restart_without_repeating_a_case(
+        self, families_dir: Path, clock: Clock, store: VoteStore
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        first = arena.start('f')
+        assert first.pair is not None
+        arena.vote(first.pair.token, 'a', frozenset(), None)
+        restarted = Arena(store, load_families(), RENDER_ORIGIN, clock)
+
+        resumed = restarted.resume(first.id)
+        undone = restarted.undo(first.id)
+
+        assert (resumed.votes, resumed.remaining) == (1, len(ARENA_CASES) - 1)
+        assert resumed.pair is not None
+        assert resumed.pair.instruction != first.pair.instruction
+        assert store.votes('f') == []
+        assert undone.pair is not None
+        assert (undone.pair.a, undone.pair.b) == (first.pair.a, first.pair.b)
 
     def test_pairs_the_systems_with_outputs_until_the_others_join(
         self, families_dir: Path, clock: Clock, store: VoteStore
