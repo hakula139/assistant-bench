@@ -416,6 +416,7 @@ describe('system page', () => {
       'Acme Tiny Preliminary Score 233 (81–321) Rank 6 Votes 0 (0 decisive)',
     );
     expect(html).not.toContain('Head to head');
+    expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
   });
 });
 
