@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -50,6 +51,10 @@ VOTES = Family(
     ),
 )
 START = datetime(2026, 10, 21, tzinfo=UTC)
+GREETING_DIFF = (
+    'diff --git a/greeting.txt b/greeting.txt\nnew file mode 100644\n'
+    '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
+)
 
 
 def votes_family(**settings: Any) -> Family:
@@ -175,6 +180,58 @@ def with_settings(family: Family, **settings: Any) -> Family:
     )
 
 
+class TestCheckSystems:
+    @pytest.mark.parametrize(
+        ('harness', 'system', 'message'),
+        [
+            pytest.param(
+                'claude-code',
+                make_system(),
+                'Family `f`: harness `claude-code` is not one of `generate`, '
+                '`terminus-2`.',
+                id='unknown-harness',
+            ),
+            pytest.param(
+                'generate',
+                make_system(),
+                'Family `f`: harness `generate` makes one request and never acts '
+                "in a task's environment, so choose among `terminus-2`.",
+                id='single-call-harness',
+            ),
+            pytest.param(
+                'terminus-2',
+                make_system(prompt='Be brief.'),
+                'Family `f` lists `acme-large`, whose prompt the `terminus-2` '
+                'harness cannot send. Remove them from `systems`.',
+                id='unsent-prompt',
+            ),
+        ],
+    )
+    def test_rejects_a_system_the_harness_cannot_run(
+        self, families_dir: Path, harness: str, system: System, message: str
+    ) -> None:
+        family = with_settings(voted_tasks(families_dir), harness=harness)
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_systems(family, [system])
+
+        assert str(error.value) == message
+
+    @pytest.mark.parametrize(
+        ('family', 'system'),
+        [
+            pytest.param(VOTES, make_system(prompt='Be brief.'), id='case-family'),
+            pytest.param(None, make_system(), id='task-family'),
+        ],
+    )
+    def test_accepts_a_system_the_harness_can_run(
+        self, families_dir: Path, family: Family | None, system: System
+    ) -> None:
+        family = family or voted_tasks(families_dir)
+
+        jobs.check_systems(family, [system])
+
+
 class TestFamilySystems:
     def test_runs_every_system_of_a_task_family_under_its_harness(
         self, families_dir: Path
@@ -193,35 +250,6 @@ class TestFamilySystems:
         run = jobs.family_systems(VOTES, systems)
 
         assert run == systems
-
-    @pytest.mark.parametrize(
-        ('harness', 'system', 'message'),
-        [
-            pytest.param(
-                'claude-code',
-                make_system(),
-                'Family `f`: harness `claude-code` is not one of `generate`, '
-                '`terminus-2`.',
-                id='unknown-harness',
-            ),
-            pytest.param(
-                'terminus-2',
-                make_system(prompt='Be brief.'),
-                'Family `f` lists `acme-large`, whose prompt the `terminus-2` '
-                'harness cannot send. Remove them from `systems`.',
-                id='unsent-prompt',
-            ),
-        ],
-    )
-    def test_rejects_a_system_the_harness_cannot_run(
-        self, families_dir: Path, harness: str, system: System, message: str
-    ) -> None:
-        family = with_settings(voted_tasks(families_dir), harness=harness)
-
-        with pytest.raises(ValueError) as error:
-            jobs.family_systems(family, [system])
-
-        assert str(error.value) == message
 
 
 class TestDriftedSystems:
@@ -436,6 +464,12 @@ class TestCheckTasks:
                 ('task', 'version'), None, 'set `[task] version`.', id='no-version'
             ),
             pytest.param(
+                ('task', 'version'),
+                '1.0',
+                '`[task] version` `1.0` is not a semantic version, such as `1.0.0`.',
+                id='non-semver-version',
+            ),
+            pytest.param(
                 ('agent', 'network_mode'),
                 'public',
                 'the agent phase needs `no-network`.',
@@ -489,6 +523,13 @@ class TestCheckTasks:
                 ['/logs/x'],
                 'list `"/app"` under `[[artifacts]]`.',
                 id='artifact-outside-app',
+            ),
+            pytest.param(
+                ('artifacts',),
+                [{'source': '/app', 'destination': 'workspace'}],
+                'remove the `destination` of the `"/app"` artifact, since '
+                'collection reads the workspace at its source path.',
+                id='app-artifact-with-destination',
             ),
             pytest.param(
                 ('environment', 'cpus'),
@@ -605,6 +646,7 @@ class TestCheckJob:
             ('nop', None),
         ]
         assert job.n_attempts == jobs.CHECK_ATTEMPTS == 3
+        assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert [t.path for t in job.tasks] == [task]
         assert not job.verifier.disable
         assert job.source_jobs == []
@@ -1092,11 +1134,14 @@ class TestCollect:
         [
             pytest.param('1.0.0', True, id='same-version'),
             pytest.param('1.0.3', True, id='patch-bump'),
+            pytest.param('1.0.3-rc.1', True, id='patch-bump-to-a-pre-release'),
+            pytest.param('1.0.0-rc.1', False, id='pre-release-alone'),
+            pytest.param('1.0.0+build.2', False, id='build-metadata-alone'),
             pytest.param('1.1.0', False, id='minor-bump'),
             pytest.param('2.0.0', False, id='major-bump'),
         ],
     )
-    def test_keeps_trials_of_current_tasks_at_their_major_and_minor(
+    def test_keeps_trials_of_current_tasks_at_a_version_harbor_reuses(
         self, families_dir: Path, data_dir: Path, current: str, kept: bool
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
@@ -1158,11 +1203,7 @@ class TestCollect:
             reward,
             verdict,
         )
-        assert output.text == (
-            '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
-            if diff
-            else None
-        )
+        assert output.text == (GREETING_DIFF if diff else None)
 
     @pytest.mark.parametrize(
         ('regrades', 'verdict'),
@@ -1184,8 +1225,9 @@ class TestCollect:
         agent = AgentConfig(
             import_path='x:Y', kwargs={'system': system.name, 'fingerprint': 'fp'}
         )
+        origin = data_dir / 'jobs' / 'f' / 'job-1'
         source = write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
+            origin,
             'echo__origin',
             agent,
             task='f/echo',
@@ -1196,10 +1238,17 @@ class TestCollect:
             context=AgentContext(
                 n_input_tokens=1_000,
                 n_output_tokens=500,
-                metadata={'latency_sec': 30.0, 'harbor_version': '0.24.0'},
+                metadata={'harbor_version': '0.24.0'},
+            ),
+            agent_execution=TimingInfo(
+                started_at=START, finished_at=START + timedelta(seconds=30)
             ),
         )
+        (origin / 'echo__origin' / 'artifacts' / 'app' / 'link').symlink_to(
+            'greeting.txt'
+        )
         for minor in range(1, regrades + 1):
+            # Harbor's regrade copies the artifacts with symlinks dereferenced.
             source = write_trial(
                 data_dir / 'jobs' / 'f' / f'job-{minor + 1}',
                 f'echo__regrade-{minor}',
@@ -1208,7 +1257,7 @@ class TestCollect:
                 reward=rewards[minor],
                 instruction=None,
                 version=f'1.{minor}.0',
-                workspace={'greeting.txt': 'hello\n'},
+                workspace={'greeting.txt': 'hello\n', 'link': 'hello\n'},
                 context=AgentContext(n_input_tokens=1, n_output_tokens=1),
                 source=source,
             )
@@ -1231,7 +1280,9 @@ class TestCollect:
         ) == {
             'job': 'job-1',
             'trial': 'echo__origin',
-            'text': '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n',
+            'text': GREETING_DIFF + 'diff --git a/link b/link\nnew file mode 120000\n'
+            '--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+greeting.txt\n'
+            '\\ No newline at end of file\n',
             'input_tokens': 1_000,
             'cost_usd': pytest.approx((1_000 * 2.0 + 500 * 10.0) / 1e6),
             'latency_sec': 30.0,
@@ -1239,6 +1290,139 @@ class TestCollect:
             'reward': rewards[regrades],
             'gate_failures': verdict,
         }
+
+    @pytest.mark.parametrize(
+        ('source_known', 'expected'),
+        [
+            pytest.param(
+                True,
+                ('job-1', 'echo__origin', 'VerifierTimeoutError', None, None),
+                id='errored-regrade',
+            ),
+            pytest.param(
+                False,
+                ('job-2', 'echo__regrade', 'VerifierTimeoutError', None, None),
+                id='source-missing-from-the-index',
+            ),
+        ],
+    )
+    def test_takes_a_regrade_error_and_ends_its_chain_at_a_missing_source(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        source_known: bool,
+        expected: tuple[str, str, str, float | None, list[Gate] | None],
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        agent = AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'})
+        source = write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'echo__origin',
+            agent,
+            task='f/echo',
+            reward=1.0,
+            instruction=None,
+            version='1.0.0',
+        )
+        if not source_known:
+            shutil.rmtree(data_dir / 'jobs' / 'f' / 'job-1')
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-2',
+            'echo__regrade',
+            agent,
+            task='f/echo',
+            error='VerifierTimeoutError',
+            instruction=None,
+            version='1.1.0',
+            source=source,
+        )
+        break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
+
+        (output,) = jobs.collect(family, {})
+
+        assert (
+            output.job,
+            output.trial,
+            output.error,
+            output.reward,
+            output.gate_failures,
+        ) == expected
+
+    def test_keeps_one_output_for_a_solution_harbor_regraded_twice(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        family = with_settings(voted_tasks(families_dir, 'echo'), samples=2)
+        agent = AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'})
+        origin = write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'echo__origin',
+            agent,
+            task='f/echo',
+            reward=1.0,
+            instruction=None,
+            version='1.0.0',
+        )
+        for job, trial in (('job-2', 'echo__first'), ('job-3', 'echo__second')):
+            write_trial(
+                data_dir / 'jobs' / 'f' / job,
+                trial,
+                agent,
+                task='f/echo',
+                reward=1.0,
+                instruction=None,
+                version='1.1.0',
+                source=origin,
+            )
+        break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
+
+        outputs = jobs.collect(family, {})
+
+        assert [(output.job, output.trial) for output in outputs] == [
+            ('job-1', 'echo__origin')
+        ]
+
+    def test_prefers_the_current_request_of_a_task_family_under_its_harness(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        system = make_system()
+        (run,) = jobs.family_systems(family, [system])
+        current = options.terminus(run, family.settings)
+        for job, kwargs in (
+            ('job-1', {**current, 'max_turns': 99}),
+            ('job-2', current),
+        ):
+            write_trial(
+                data_dir / 'jobs' / 'f' / job,
+                'echo__1',
+                AgentConfig(import_path='x:Y', kwargs=kwargs),
+                task='f/echo',
+                reward=1.0,
+                instruction=None,
+                version='1.0.0',
+            )
+
+        (output,) = jobs.collect(family, {system.name: system})
+
+        assert output.job == 'job-2'
+
+    def test_prefers_the_current_request_of_a_system_the_family_no_longer_lists(
+        self, data_dir: Path
+    ) -> None:
+        system = make_system()
+        family = votes_family(systems=['other'], reference='other', samples=1)
+        for job, bound in (('job-1', 100), ('job-2', 300)):
+            write_trial(
+                data_dir / 'jobs' / 'f' / job,
+                'c__1',
+                AgentConfig(import_path='x:Y', kwargs=request(system, bound)),
+                task='f/c',
+                output=f'reply at {bound}',
+            )
+
+        (output,) = jobs.collect(family, {system.name: system})
+
+        assert (output.job, output.text) == ('job-2', 'reply at 300')
 
     @pytest.mark.parametrize(
         ('metadata', 'timing', 'latency'),
@@ -1280,6 +1464,17 @@ class TestCollect:
         (output,) = jobs.collect(VOTES, {})
 
         assert output.latency_sec == latency
+
+    def test_names_an_unknown_harness(self, families_dir: Path) -> None:
+        family = with_settings(voted_tasks(families_dir), harness='claude-code')
+        system = make_system()
+
+        with pytest.raises(ValueError) as error:
+            jobs.collect(family, {system.name: system})
+
+        assert str(error.value) == (
+            'Family `f`: harness `claude-code` is not one of `generate`, `terminus-2`.'
+        )
 
     def test_leaves_a_system_missing_from_the_catalog_unpriced(
         self, data_dir: Path

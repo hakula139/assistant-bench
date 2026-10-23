@@ -122,33 +122,60 @@ def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
     return task_dir
 
 
-def family_systems(family: Family, systems: list[System]) -> list[System]:
-    """Return the systems as the family runs them.
-
-    A task family runs every system under its `harness`, which enters the
-    system's fingerprint, while a case family runs each system as it resolves.
+def check_harness(family: Family) -> None:
+    """Check that a task family's harness can solve its tasks.
 
     Raises
     ------
     ValueError
-        The family names an unknown harness, or a system has a prompt that the
-        harness cannot send.
+        The family names an unknown harness or a single-call one.
     """
     harness = family.settings.harness
     if harness is None:
-        return systems
+        return
     if harness not in HARNESSES:
         raise ValueError(
             f'Family `{family.name}`: harness `{harness}` is not one of '
             f'{code(HARNESSES)}.'
         )
-    if not HARNESSES[harness].system_prompt:
-        prompted = [system.name for system in systems if system.prompt is not None]
-        if prompted:
-            raise ValueError(
-                f'Family `{family.name}` lists {code(prompted)}, whose prompt the '
-                f'`{harness}` harness cannot send. Remove them from `systems`.'
-            )
+    if HARNESSES[harness].single_call:
+        agents = [name for name, entry in HARNESSES.items() if not entry.single_call]
+        raise ValueError(
+            f'Family `{family.name}`: harness `{harness}` makes one request and '
+            f"never acts in a task's environment, so choose among {code(agents)}."
+        )
+
+
+def check_systems(family: Family, systems: list[System]) -> None:
+    """Check the family's harness, and that it can send each system's prompt.
+
+    Raises
+    ------
+    ValueError
+        The harness is one `check_harness` refuses, or a system has a prompt
+        that it cannot send.
+    """
+    check_harness(family)
+    harness = family.settings.harness
+    if harness is None or HARNESSES[harness].sends_prompt:
+        return
+    prompted = [system.name for system in systems if system.prompt is not None]
+    if prompted:
+        raise ValueError(
+            f'Family `{family.name}` lists {code(prompted)}, whose prompt the '
+            f'`{harness}` harness cannot send. Remove them from `systems`.'
+        )
+
+
+def family_systems(family: Family, systems: list[System]) -> list[System]:
+    """Return the systems as the family runs them.
+
+    A task family runs every system under its `harness`, which enters the
+    system's fingerprint, while a case family runs each system as it resolves.
+    """
+    harness = family.settings.harness
+    if harness is None:
+        return systems
     return [system.model_copy(update={'harness': harness}) for system in systems]
 
 
@@ -278,6 +305,11 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
     problems = []
     if config.task is None or config.task.version is None:
         problems.append(f'{location}: set `[task] version`.')
+    elif not semver.Version.is_valid(config.task.version):
+        problems.append(
+            f'{location}: `[task] version` `{config.task.version}` is not a '
+            'semantic version, such as `1.0.0`.'
+        )
     if (
         config.verifier.environment_mode
         is not task_config.VerifierEnvironmentMode.SEPARATE
@@ -306,11 +338,21 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
         ):
             if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
                 problems.append(f'{location}: the {phase} phase needs `no-network`.')
-    if not any(
-        (artifact if isinstance(artifact, str) else artifact.source) == WORKSPACE
+    workspaces = [
+        artifact
         for artifact in config.artifacts
-    ):
+        if (artifact if isinstance(artifact, str) else artifact.source) == WORKSPACE
+    ]
+    if not workspaces:
         problems.append(f'{location}: list `"{WORKSPACE}"` under `[[artifacts]]`.')
+    if any(
+        not isinstance(artifact, str) and artifact.destination is not None
+        for artifact in workspaces
+    ):
+        problems.append(
+            f'{location}: remove the `destination` of the `"{WORKSPACE}"` '
+            'artifact, since collection reads the workspace at its source path.'
+        )
     for field in ('cpus', 'memory_mb'):
         if getattr(config.environment, field) is None:
             problems.append(f'{location}: set `[environment] {field}`.')
@@ -413,28 +455,26 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
     A case family keeps only trials of each case's installed task. A task family
-    keeps only trials of its current tasks whose version matches the task's in
-    major and minor, so a patch bump keeps the trials Harbor reused, while a minor
-    bump keeps only their regrades. Each case, system, and fingerprint keeps at
+    keeps only trials of its current tasks at a version Harbor would reuse, so a
+    patch bump keeps the trials Harbor reused, while a minor bump keeps only their
+    regrades. Each case, system, and fingerprint keeps at
     most `samples` outputs, preferring a successful trial whose recorded request
-    matches what the family sends a listed system now, and otherwise the oldest.
+    matches what the family would send the system now, and otherwise the oldest.
     Costs come from the current catalog price, so a system missing from `systems`
     or without a price reports as unpriced.
 
     A regraded trial yields the output of the trial whose agent wrote its
-    solution, with the regrade's verdict, so the votes on that output stay.
+    solution, with the regrade's verdict, so the votes on that output stay. Harbor
+    can regrade one trial twice, so each solution keeps only its first output.
 
     Raises
     ------
     ValueError
         A source job is not a job directory, a trial record is unreadable, a
-        task is invalid, or the family's systems are, as `family_systems` says.
+        task is invalid, or the harness is one `check_harness` refuses.
     """
-    listed = [systems[name] for name in family.settings.systems if name in systems]
-    expected = {
-        system.name: HARNESSES[system.harness].options(system, family.settings)
-        for system in family_systems(family, listed)
-    }
+    check_harness(family)
+    expected = _requests(family, list(systems.values()))
     candidates = [
         (output, kwargs == expected.get(output.system))
         for output, kwargs in _read_trials(
@@ -450,7 +490,11 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         )
     )
     groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
+    solutions = set()
     for output, _ in candidates:
+        if (output.job, output.trial) in solutions:
+            continue
+        solutions.add((output.job, output.trial))
         groups[(output.case, output.system, output.fingerprint)].append(output)
     outputs = sorted(
         (
@@ -463,6 +507,20 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
 
     write_outputs(family.name, outputs)
     return outputs
+
+
+def _requests(family: Family, systems: list[System]) -> dict[str, dict[str, Any]]:
+    """Return the agent kwargs the family would send each system now.
+
+    A task family that lists no systems may lack the settings its harness needs,
+    so it sends none.
+    """
+    if family.source == 'tasks' and not family.settings.systems:
+        return {}
+    return {
+        system.name: HARNESSES[system.harness].options(system, family.settings)
+        for system in family_systems(family, systems)
+    }
 
 
 def read_trials(
@@ -523,23 +581,29 @@ def _current_versions(family: Family) -> dict[str, str]:
 def _is_current(family: Family, version: str | None, current: str | None) -> bool:
     """Return whether a trial's task version matches its task's current version.
 
-    A rendered case matches exactly, since its build metadata hashes its content,
-    while a task matches in major and minor, the levels Harbor reruns or regrades.
+    A rendered case matches exactly, since its build metadata hashes its content.
+    A task also matches a version with the same major and minor but another
+    patch, which Harbor reuses whatever the pre-release and build metadata say,
+    while it reruns or regrades any other difference.
     """
     if version is None or current is None:
         return False
-    if family.source == 'cases':
+    if version == current or family.source == 'cases':
         return version == current
     recorded = semver.Version.parse(version)
     installed = semver.Version.parse(current)
-    return (recorded.major, recorded.minor) == (installed.major, installed.minor)
+    return (recorded.major, recorded.minor) == (
+        installed.major,
+        installed.minor,
+    ) and recorded.patch != installed.patch
 
 
 def _origin(trial: SourceTrial, trials: dict[UUID, SourceTrial]) -> SourceTrial:
     """Return the trial whose agent wrote the trial's solution.
 
     A regrade names its source trial, which may be a regrade itself. A source
-    outside `trials` ends the chain, since the regrade holds a copy of its record.
+    outside `trials` ends the chain at the regrade, which holds copies of its
+    source's agent result and artifacts, with symlinks dereferenced.
     """
     while (source := trial.result.config.source_trial) is not None and (
         source.trial_id in trials
@@ -617,13 +681,17 @@ def _text(
             output_file = origin.trial_dir / 'agent' / OUTPUT_FILE
             return output_file.read_text() if output_file.exists() else None
         case 'tasks':
-            if not isinstance(family.settings, VotesSettings) or reward is None:
-                return None
-            artifacts = TrialPaths(origin.trial_dir).artifacts_dir
-            return workspace_diff(
-                case_task(family, case) / 'environment' / 'app',
-                source_host_path(artifacts, WORKSPACE),
-            )
+            match family.settings:
+                case VotesSettings() if reward is not None:
+                    artifacts = TrialPaths(origin.trial_dir).artifacts_dir
+                    return workspace_diff(
+                        case_task(family, case) / 'environment' / 'app',
+                        source_host_path(artifacts, WORKSPACE),
+                    )
+                case VotesSettings() | TaskTestsSettings():
+                    return None
+                case _:
+                    assert_never(family.settings)
         case _:
             assert_never(family.source)
 

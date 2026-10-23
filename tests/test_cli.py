@@ -15,6 +15,7 @@ from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
+from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner, Result
 
@@ -436,6 +437,24 @@ class TestCheck:
             'Trial `echo__1` has an unreadable `result.json`.\n',
         )
 
+    def test_reports_an_unreadable_run_trial_without_a_traceback(
+        self, data_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
+        write_trial(
+            job,
+            'en-greeting__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5'}),
+            task='smoke-text/en-greeting',
+        )
+        (job / 'en-greeting__1' / 'lock.json').unlink()
+
+        result = invoke('check', 'smoke-text')
+
+        assert result.exit_code == 1
+        assert 'has a result.json but no lock.json' in result.stderr
+        assert submitted == []
+
     def test_names_the_file_and_field_of_an_invalid_family(
         self, families_dir: Path
     ) -> None:
@@ -479,6 +498,29 @@ class TestCheck:
             '',
             'Family `f`: harness `claude-code` is not one of `generate`, '
             '`terminus-2`.\n',
+        )
+        assert submitted == []
+
+    def test_rejects_a_family_whose_harness_cannot_send_a_listed_prompt(
+        self,
+        families_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        submitted: list[JobConfig],
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('opus-5.5',))
+        systems = load_systems(load_export())
+        prompted = systems['opus-5.5'].model_copy(update={'prompt': 'Be brief.'})
+        monkeypatch.setattr(
+            cli, 'load_systems', lambda export: systems | {'opus-5.5': prompted}
+        )
+
+        result = invoke('check', 'f')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `f` lists `opus-5.5`, whose prompt the `terminus-2` harness '
+            'cannot send. Remove them from `systems`.\n',
         )
         assert submitted == []
 
@@ -866,6 +908,35 @@ class TestRun:
         )
         assert submitted == []
 
+    def test_refuses_a_case_whose_rendered_task_changed_under_its_version(
+        self, monkeypatch: pytest.MonkeyPatch, submitted: list[JobConfig]
+    ) -> None:
+        result = invoke('run', 'smoke-text')
+        assert result.exit_code == 0, result.output
+        finish_job(submitted.pop())
+        render = jobs.render_task_config
+
+        def with_new_default(name: str, instruction: str) -> TaskConfig:
+            config = render(name, instruction)
+            verifier = config.verifier.model_copy(update={'timeout_sec': 1.0})
+            return config.model_copy(update={'verifier': verifier})
+
+        monkeypatch.setattr(jobs, 'render_task_config', with_new_default)
+
+        result = invoke('run', 'smoke-text')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `smoke-text` has cases whose rendered task changed under a '
+            'version a trial recorded: `en-greeting`, `zh-greeting`. A Harbor '
+            'upgrade that changes a `task.toml` default does this, and Harbor '
+            "aborts the job until the family's earlier job directories are "
+            'removed, as `docs/research/harbor.md#quirks-of-the-pinned-release` '
+            'describes.\n',
+        )
+        assert submitted == []
+
     def test_rejects_an_unreadable_trial_record(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
@@ -908,8 +979,8 @@ class TestCollect:
             pytest.param(
                 'smoke',
                 [
-                    make_output(reward=1.0),
-                    make_output(reward=0.0),
+                    make_output(reward=1.0, harness_version='0.24.0'),
+                    make_output(reward=0.0, harness_version='0.24.0'),
                     make_output(error='TimeoutError'),
                 ],
                 """\
@@ -917,7 +988,7 @@ class TestCollect:
                   TimeoutError: 1
                 Mean reward 0.500.
                 """,
-                id='errors-and-rewards',
+                id='errors-rewards-and-one-harbor-version',
             ),
             pytest.param(
                 'smoke',

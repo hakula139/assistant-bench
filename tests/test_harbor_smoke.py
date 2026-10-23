@@ -108,7 +108,8 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
         'error': None,
         'reward': 1.0,
         'gate_failures': [],
-        'text': '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
+        'text': 'diff --git a/greeting.txt b/greeting.txt\nnew file mode 100644\n'
+        '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
         '\\ No newline at end of file\n',
     }
     assert (output.job, output.nixos_config_rev) == (job_dir.name, export.rev)

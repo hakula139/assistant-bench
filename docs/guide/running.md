@@ -66,7 +66,7 @@ Each record holds:
 | `case`, `system`                                                     | The case, and the system's `systems.toml` name                                                                                        |
 | `fingerprint`, `nixos_config_rev`                                    | The system's fingerprint and the export revision it ran under                                                                         |
 | `harness_version`                                                    | The Harbor version whose terminal agent wrote a task's solution                                                                       |
-| `text`                                                               | A case's reply, or on a voted task the unified diff of the graded `/app` against the task's `environment/app/`, without `.git`        |
+| `text`                                                               | A case's reply, or on a voted task the git-style diff of the graded `/app` against the task's `environment/app/`, without `.git`      |
 | `reward`                                                             | A task's reward from its tests                                                                                                        |
 | `gate_failures`                                                      | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed, which on a task is `tests` when its reward is below 1 |
 | `error`                                                              | The error type of a failed trial, whose `text` is null                                                                                |

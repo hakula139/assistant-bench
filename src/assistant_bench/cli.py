@@ -41,6 +41,7 @@ from assistant_bench.paths import REPO_ROOT
 LOCAL_SITE_VAR = 'BENCH_LOCAL'
 SITE_DIR = REPO_ROOT / 'web' / 'dist'
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
+HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -302,7 +303,18 @@ def _load_cases(family: Family) -> list[Case]:
 
 
 def _render_tasks(family: Family) -> list[Path]:
-    return jobs.render_tasks(family, _load_cases(family))
+    """Render a case family's tasks, refusing any that would abort its job."""
+    tasks = jobs.render_tasks(family, _load_cases(family))
+    changed = _changed_tasks(family, tasks)
+    if changed:
+        _fail(
+            f'Family `{family.name}` has cases whose rendered task changed under a '
+            f'version a trial recorded: {code([case for case, _ in changed])}. A '
+            'Harbor upgrade that changes a `task.toml` default does this, and '
+            "Harbor aborts the job until the family's earlier job directories "
+            f'are removed, as `{HARBOR_DOC}` describes.'
+        )
+    return tasks
 
 
 def _task_dirs(family: Family) -> list[Path]:
@@ -310,9 +322,9 @@ def _task_dirs(family: Family) -> list[Path]:
     tasks = [case_task(family, case.id) for case in _load_cases(family)]
     try:
         jobs.check_tasks(family, tasks)
-        changed = jobs.changed_tasks(family, tasks)
     except ValueError as error:
         _fail(str(error))
+    changed = _changed_tasks(family, tasks)
     if changed:
         detail = '\n'.join(
             f'Task `{task}` changed since a trial ran it at version `{version}`.'
@@ -326,6 +338,13 @@ def _task_dirs(family: Family) -> list[Path]:
             'sees, which reruns them.'
         )
     return tasks
+
+
+def _changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
+    try:
+        return jobs.changed_tasks(family, tasks)
+    except ValueError as error:
+        _fail(str(error))
 
 
 def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
@@ -360,22 +379,23 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
 
 
 def _family_systems(family: Family) -> list[System]:
-    if not family.settings.systems:
-        return []
-    known = _load_systems()
-    unknown = [name for name in family.settings.systems if name not in known]
-    if unknown:
-        _fail(
-            f'Family `{family.name}` lists {code(unknown)}, which `{SYSTEMS_FILE}` '
-            f'does not define. Add a table to `{SYSTEMS_FILE}` or fix the name in '
-            f'`families/{family.name}/family.toml`.'
-        )
+    listed = []
+    if family.settings.systems:
+        known = _load_systems()
+        unknown = [name for name in family.settings.systems if name not in known]
+        if unknown:
+            _fail(
+                f'Family `{family.name}` lists {code(unknown)}, which '
+                f'`{SYSTEMS_FILE}` does not define. Add a table to '
+                f'`{SYSTEMS_FILE}` or fix the name in '
+                f'`families/{family.name}/family.toml`.'
+            )
+        listed = [known[name] for name in family.settings.systems]
     try:
-        return jobs.family_systems(
-            family, [known[name] for name in family.settings.systems]
-        )
+        jobs.check_systems(family, listed)
     except ValueError as error:
         _fail(str(error))
+    return jobs.family_systems(family, listed)
 
 
 def _named_systems(
@@ -482,7 +502,9 @@ def _collect(family: Family) -> None:
     solved = {output.case for output in outputs if (output.reward or 0) >= 1}
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
-    versions = sorted({o.harness_version for o in outputs if o.harness_version})
+    versions = sorted(
+        {output.harness_version for output in outputs if output.harness_version}
+    )
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
 
