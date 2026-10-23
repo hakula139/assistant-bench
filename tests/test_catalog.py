@@ -136,33 +136,51 @@ class TestLoadSystems:
             load_systems(export, path)
 
         assert str(error.value) == (
-            "systems 'large' and 'large-codex' share the display name 'Acme Large', "
-            'so set a distinct `display_name`'
+            'Systems `large` and `large-codex` share the display name `Acme Large`. '
+            'Set a distinct `display_name`.'
         )
 
-    def test_names_the_table_that_fails_to_validate(
-        self, export: NixosConfigExport, tmp_path: Path
-    ) -> None:
-        path = tmp_path / 'systems.toml'
-        path.write_text(
-            textwrap.dedent(
+    @pytest.mark.parametrize(
+        ('document', 'message'),
+        [
+            pytest.param(
                 """\
                 [large]
                 model = "acme-large"
 
                 [broken]
                 effort = "low"
-                """
-            )
-        )
+                """,
+                '`systems.toml`: `broken`: set exactly one of `model` and `route`.',
+                id='invalid-table',
+            ),
+            pytest.param(
+                """\
+                [large]
+                effort = "low"
+                route = 5
+                display_name = "Large"
+                """,
+                '`systems.toml`: `large.route`: Input should be a valid string.',
+                id='invalid-field',
+            ),
+            pytest.param(
+                '[large',
+                '`systems.toml` is not valid TOML: ',
+                id='malformed-toml',
+            ),
+        ],
+    )
+    def test_names_the_file_and_field_that_fail_to_validate(
+        self, export: NixosConfigExport, tmp_path: Path, document: str, message: str
+    ) -> None:
+        path = tmp_path / 'systems.toml'
+        path.write_text(textwrap.dedent(document))
 
         with pytest.raises(ValueError) as error:
             load_systems(export, path)
 
-        assert str(error.value).startswith(
-            '1 validation error for systems.toml\nbroken\n'
-            '  Value error, set exactly one of `model` and `route`'
-        )
+        assert str(error.value).startswith(message)
 
     def test_committed_systems_resolve_against_the_pinned_catalog(self) -> None:
         systems = load_systems(load_export())
@@ -254,40 +272,40 @@ class TestResolveSystem:
         [
             (
                 SystemConfig(model='acme-huge'),
-                "system 'x': model 'acme-huge' is not in the nixos-config catalog, "
-                'data/llm-models.nix, so check it against acme-large, acme-routed, '
-                'acme-unrouted',
+                'System `x`: model `acme-huge` is not in the nixos-config catalog, '
+                '`data/llm-models.nix`. Check it against `acme-large`, '
+                '`acme-routed`, `acme-unrouted`.',
             ),
             (
                 SystemConfig(model='zeta'),
-                "system 'x': model 'zeta' is not in the nixos-config catalog, "
-                'data/llm-models.nix',
+                'System `x`: model `zeta` is not in the nixos-config catalog, '
+                '`data/llm-models.nix`.',
             ),
             (
                 SystemConfig(model='acme-small', effort='medium'),
-                "system 'x': effort 'medium' is not one of low, high",
+                'System `x`: effort `medium` is not one of `low`, `high`.',
             ),
             (
                 SystemConfig(model='local-model', effort='low'),
-                "system 'x': the model takes no effort",
+                'System `x`: the model takes no effort.',
             ),
             (
                 SystemConfig(model='acme-unrouted'),
-                "system 'x': catalog model 'acme-unrouted' has no channel",
+                'System `x`: catalog model `acme-unrouted` has no channel.',
             ),
             (
                 SystemConfig(model='acme-routed'),
-                "system 'x': catalog model 'acme-routed' has channels acme, router, "
-                'so set its `route` and `price` instead',
+                'System `x`: catalog model `acme-routed` has channels `acme`, '
+                '`router`. Set its `route` and `price` instead.',
             ),
             (
                 SystemConfig(model='acme-large', prompt='nixos-config:omp'),
-                "system 'x': nixos-config has no 'omp' instructions "
-                '(expected one of claudeCode, codex)',
+                'System `x`: nixos-config has no `omp` instructions. Choose among '
+                '`claudeCode`, `codex`.',
             ),
             (
                 SystemConfig(model='acme-large', prompt='prompts/brief.md'),
-                "system 'x': prompt 'prompts/brief.md' is not nixos-config:<client>",
+                'System `x`: prompt `prompts/brief.md` is not `nixos-config:<client>`.',
             ),
         ],
         ids=[

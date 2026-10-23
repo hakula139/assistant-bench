@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
@@ -80,7 +81,7 @@ class Gates(BaseModel):
             and self.min_chars > self.max_chars
         ):
             raise ValueError(
-                f'min_chars {self.min_chars} exceeds max_chars {self.max_chars}'
+                f'`min_chars` {self.min_chars} exceeds `max_chars` {self.max_chars}'
             )
         return self
 
@@ -88,11 +89,11 @@ class Gates(BaseModel):
 class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes.
 
-    `reference` names the listed system whose score anchors the board at 1000
-    when the round ranks it, and otherwise the most-voted system anchors in its place.
-    `render` says whether the vote page shows outputs as text or as sandboxed
-    HTML, and `language` is the language every output must be written in, which
-    the gates check when it is set.
+    `reference` names the listed system whose score anchors the board at
+    `ranking.ANCHOR` when the round ranks it, and otherwise the most-voted
+    system anchors in its place. `render` says whether the vote page shows
+    outputs as text or as sandboxed HTML, and `language` is the language every
+    output must be written in, which the gates check when it is set.
     """
 
     scorer: Literal['votes']
@@ -104,7 +105,7 @@ class VotesSettings(_Settings):
     @model_validator(mode='after')
     def _check_reference(self) -> Self:
         if self.reference not in self.systems:
-            raise ValueError(f'reference {self.reference!r} is not in systems')
+            raise ValueError(f'reference `{self.reference}` is not in `systems`')
         return self
 
 
@@ -201,36 +202,38 @@ def load_family(name: str) -> Family:
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
         raise ValueError(
-            f'no family named {name!r}, so choose among {", ".join(family_names())}'
+            f'No family named `{name}`. Choose among {code(family_names())}.'
         )
     has_cases = (directory / 'cases.jsonl').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
-            f'family {name!r}: expected exactly one of cases.jsonl and tasks/'
+            f'Family `{name}`: expected exactly one of `cases.jsonl` and `tasks/`.'
         )
 
-    prefix = f'family {name!r}: family.toml'
+    prefix = f'Family `{name}`: `family.toml`'
     try:
         with (directory / 'family.toml').open('rb') as file:
             settings = _SETTINGS.validate_python(tomllib.load(file))
     except tomllib.TOMLDecodeError as error:
-        raise ValueError(f'{prefix} is not valid TOML: {error}') from error
+        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
     except ValidationError as error:
         # The first part of each error's path is the scorer's tag.
         raise ValueError(error_lines(error, prefix, skip=1)) from error
     if settings.public:
         if settings.aspect is None:
-            raise ValueError(f'family {name!r}: a public family needs an aspect')
+            raise ValueError(f'Family `{name}`: a public family needs an `aspect`.')
         if not name.startswith(f'{settings.aspect}-'):
             raise ValueError(
-                f'family {name!r}: a public family ID starts with its aspect, '
-                f'as in {settings.aspect}-<name>'
+                f'Family `{name}`: a public family ID starts with its aspect, '
+                f'as in `{settings.aspect}-<name>`.'
             )
     if has_cases and settings.max_output_tokens is None:
-        raise ValueError(f'family {name!r}: case families need max_output_tokens')
+        raise ValueError(
+            f'Family `{name}`: a `cases.jsonl` family needs `max_output_tokens`.'
+        )
     if has_cases != isinstance(settings, VotesSettings):
         raise ValueError(
-            f'family {name!r}: score cases.jsonl by "votes" and tasks/ by "tests"'
+            f'Family `{name}`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.'
         )
     return Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
@@ -257,14 +260,14 @@ def load_cases(family: Family) -> list[Case]:
     for location, case in entries:
         if case.id in cases:
             raise ValueError(
-                f'family {family.name!r}: case {case.id!r} appears at '
-                f'{locations[case.id]} and {location}'
+                f'Family `{family.name}`: case `{case.id}` appears at '
+                f'`{locations[case.id]}` and `{location}`.'
             )
         if case.category not in family.settings.categories:
             raise ValueError(
-                f'family {family.name!r}: case {case.id!r} at {location} has '
-                f'category {case.category!r}, missing from `categories` in '
-                'family.toml'
+                f'Family `{family.name}`: case `{case.id}` at `{location}` has '
+                f'category `{case.category}`, missing from `categories` in '
+                '`family.toml`.'
             )
         cases[case.id] = case
         locations[case.id] = location
@@ -287,7 +290,7 @@ def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
                 case = Case.model_validate_json(line)
             except ValidationError as error:
                 raise ValueError(
-                    error_lines(error, f'family {family.name!r}: {location}')
+                    error_lines(error, f'Family `{family.name}`: `{location}`')
                 ) from error
             yield location, case
 
@@ -305,30 +308,27 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
     config_path = directory / 'task.toml'
     if not config_path.is_file():
         raise ValueError(
-            f'family {family.name!r}: task {directory.name!r} at {location} '
-            'has no task.toml'
+            f'Family `{family.name}`: task `{directory.name}` at `{location}` '
+            'has no `task.toml`.'
         )
+    prefix = f'Family `{family.name}`: `{location}/task.toml`'
     try:
         manifest = _TaskManifest.model_validate(tomllib.loads(config_path.read_text()))
     except tomllib.TOMLDecodeError as error:
-        raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not valid TOML: {error}'
-        ) from error
+        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
     except ValidationError as error:
-        raise ValueError(
-            error_lines(error, f'family {family.name!r}: {location}/task.toml')
-        ) from error
+        raise ValueError(error_lines(error, prefix)) from error
     expected = f'{family.name}/{directory.name}'
     if manifest.task.name != expected:
         raise ValueError(
-            f'family {family.name!r}: set [task] name to "{expected}" in '
-            f'{location}/task.toml'
+            f'Family `{family.name}`: set `[task] name` to `"{expected}"` in '
+            f'`{location}/task.toml`.'
         )
     instruction_path = directory / 'instruction.md'
     if not instruction_path.is_file():
         raise ValueError(
-            f'family {family.name!r}: task {directory.name!r} at {location} '
-            'has no instruction.md'
+            f'Family `{family.name}`: task `{directory.name}` at `{location}` '
+            'has no `instruction.md`.'
         )
     try:
         return Case(
@@ -339,26 +339,8 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
         )
     except ValidationError as error:
         raise ValueError(
-            error_lines(error, f'family {family.name!r}: {location}')
+            error_lines(error, f'Family `{family.name}`: `{location}`')
         ) from error
-
-
-def error_lines(error: ValidationError, prefix: str, *, skip: int = 0) -> str:
-    """Return one line per validation error, starting with `prefix` and the field.
-
-    `skip` drops that many leading parts of each error's path, such as the tag
-    of a tagged union.
-    """
-    lines = []
-    for detail in error.errors():
-        message = (
-            str(detail['ctx']['error'])
-            if detail['type'] == 'value_error'
-            else detail['msg']
-        )
-        path = '.'.join(str(part) for part in detail['loc'][skip:])
-        lines.append(f'{prefix}: {path}: {message}' if path else f'{prefix}: {message}')
-    return '\n'.join(lines)
 
 
 # ── Task Paths ──

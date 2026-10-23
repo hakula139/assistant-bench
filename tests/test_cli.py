@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sqlite3
 import subprocess
 import textwrap
@@ -118,7 +119,7 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Site:
     stub = Site(tmp_path / 'dist')
 
     def build(args: list[str], **options: Any) -> None:
-        stub.builds.append((args, options['env'].get(cli.LOCAL_SITE_VAR)))
+        stub.builds.append((args, os.environ.get(cli.LOCAL_SITE_VAR)))
         (stub.path / 'vote').mkdir(parents=True)
         (stub.path / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
 
@@ -131,6 +132,22 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Site:
     return stub
 
 
+class TestMain:
+    def test_sets_the_environment_harbor_runs_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in jobs.HARBOR_ENV:
+            monkeypatch.delenv(name)
+
+        result = invoke('check', 'smoke-text')
+        assert result.exit_code == 0, result.output
+
+        assert {name: os.environ.get(name) for name in jobs.HARBOR_ENV} == {
+            'HARBOR_TELEMETRY': 'off',
+            'LITELLM_MODE': 'PRODUCTION',
+        }
+
+
 class TestCheck:
     def test_counts_the_cases_of_a_case_family(
         self, submitted: list[JobConfig]
@@ -138,7 +155,7 @@ class TestCheck:
         result = invoke('check', 'smoke-text')
         assert result.exit_code == 0, result.output
 
-        assert result.output == 'smoke-text: 2 valid cases\n'
+        assert result.output == 'Family `smoke-text`: 2 valid cases.\n'
         assert submitted == []
 
     def test_checks_every_family_without_a_name(
@@ -150,7 +167,9 @@ class TestCheck:
         result = invoke('check')
         assert result.exit_code == 0, result.output
 
-        assert result.output == 'f: 0 valid cases\ng: 0 valid cases\n'
+        assert result.output == (
+            'Family `f`: 0 valid cases.\nFamily `g`: 0 valid cases.\n'
+        )
         assert submitted == []
 
     def test_checks_a_named_family_once(self, families_dir: Path) -> None:
@@ -159,7 +178,7 @@ class TestCheck:
         result = invoke('check', 'f', 'f')
         assert result.exit_code == 0, result.output
 
-        assert result.output == 'f: 0 valid cases\n'
+        assert result.output == 'Family `f`: 0 valid cases.\n'
 
     @pytest.mark.parametrize(
         ('tasks', 'outputs', 'exit_code', 'message'),
@@ -168,51 +187,51 @@ class TestCheck:
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
                 0,
-                'f: every reference solution passed its tests, and the do-nothing '
-                'agent failed every task\n',
+                'Family `f`: every reference solution passed its tests, and the '
+                'do-nothing agent failed every task.\n',
                 id='passed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
                 1,
-                'f: the reference solution failed the tests of a\n',
+                'Family `f`: the reference solution failed the tests of `a`.\n',
                 id='oracle-failed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'nop', 0.0)],
                 1,
-                'f: the reference solution left no trial of a\n',
+                'Family `f`: the reference solution left no trial of `a`.\n',
                 id='oracle-left-no-trial',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 1.0)],
                 1,
-                'f: the do-nothing agent passed the tests of a\n',
+                'Family `f`: the do-nothing agent passed the tests of `a`.\n',
                 id='nop-passed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0)],
                 1,
-                'f: the do-nothing agent left no trial of a\n',
+                'Family `f`: the do-nothing agent left no trial of `a`.\n',
                 id='nop-left-no-trial',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', None)],
                 1,
-                'f: the do-nothing agent passed the tests of a\n',
+                'Family `f`: the do-nothing agent passed the tests of `a`.\n',
                 id='nop-without-a-verdict',
             ),
             pytest.param(
                 ('a',),
                 [],
                 1,
-                'f: the reference solution left no trial of a\n'
-                'f: the do-nothing agent left no trial of a\n',
+                'Family `f`: the reference solution left no trial of `a`.\n'
+                'Family `f`: the do-nothing agent left no trial of `a`.\n',
                 id='no-trials',
             ),
             pytest.param(
@@ -222,7 +241,7 @@ class TestCheck:
                     *trials('a', 'nop', 0.0),
                 ],
                 1,
-                'f: the reference solution errored on a (TimeoutError)\n',
+                'Family `f`: the reference solution errored on `a` (`TimeoutError`).\n',
                 id='oracle-errored',
             ),
             pytest.param(
@@ -232,7 +251,8 @@ class TestCheck:
                     *trials('a', 'nop', 0.0, error='VerifierTimeoutError'),
                 ],
                 1,
-                'f: the do-nothing agent errored on a (VerifierTimeoutError)\n',
+                'Family `f`: the do-nothing agent errored on `a` '
+                '(`VerifierTimeoutError`).\n',
                 id='nop-errored',
             ),
             pytest.param(
@@ -244,7 +264,7 @@ class TestCheck:
                     *trials('b', 'nop', 0.0),
                 ],
                 1,
-                'f: the reference solution failed the tests of a, b\n',
+                'Family `f`: the reference solution failed the tests of `a`, `b`.\n',
                 id='both-tasks-failed',
             ),
             pytest.param(
@@ -255,8 +275,8 @@ class TestCheck:
                     *trials('b', 'nop', 0.0),
                 ],
                 1,
-                'f: the reference solution failed the tests of a\n'
-                'f: the reference solution left no trial of b\n',
+                'Family `f`: the reference solution failed the tests of `a`.\n'
+                'Family `f`: the reference solution left no trial of `b`.\n',
                 id='failed-and-missing',
             ),
         ],
@@ -275,19 +295,22 @@ class TestCheck:
         monkeypatch.setattr(
             jobs, 'read_trials', lambda family, job_dir, systems: outputs
         )
+        verdicts = {0: (message, ''), 1: ('', message)}
 
         result = invoke('check', 'f')
 
         (job,) = submitted
-        assert (result.exit_code, result.output) == (
+        verdict, problems = verdicts[exit_code]
+        assert (result.exit_code, result.stdout, result.stderr) == (
             exit_code,
-            f'Job written to {jobs.job_path(job)}\n{message}',
+            f'Job written to `{jobs.job_path(job)}`.\n{verdict}',
+            problems,
         )
         assert [agent.name for agent in job.agents] == ['oracle', 'nop']
         assert job.n_attempts == jobs.CHECK_ATTEMPTS
         assert [task.path.name for task in job.tasks if task.path] == list(tasks)
 
-    def test_reports_the_problems_of_every_task_family(
+    def test_fails_when_an_earlier_task_family_fails_and_a_later_one_passes(
         self,
         families_dir: Path,
         submitted: list[JobConfig],
@@ -295,17 +318,25 @@ class TestCheck:
     ) -> None:
         write_task_family(families_dir, 'a', name='f')
         write_task_family(families_dir, 'a', name='g')
-        outputs = [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)]
+        outputs = {
+            'f': [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
+            'g': [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
+        }
         monkeypatch.setattr(
-            jobs, 'read_trials', lambda family, job_dir, systems: outputs
+            jobs, 'read_trials', lambda family, job_dir, systems: outputs[family.name]
         )
 
         result = invoke('check')
 
         assert result.exit_code == 1
         assert [job.jobs_dir.name for job in submitted] == ['f', 'g']
-        assert 'f: the reference solution failed the tests of a\n' in result.output
-        assert 'g: the reference solution failed the tests of a\n' in result.output
+        assert result.stderr == (
+            'Family `f`: the reference solution failed the tests of `a`.\n'
+        )
+        assert (
+            'Family `g`: every reference solution passed its tests, and the '
+            'do-nothing agent failed every task.\n'
+        ) in result.stdout
 
     def test_validates_every_family_before_running_a_check(
         self, families_dir: Path, submitted: list[JobConfig]
@@ -316,7 +347,7 @@ class TestCheck:
         result = invoke('check')
 
         assert result.exit_code == 1
-        assert "family 'g' lists ghost" in result.output
+        assert 'Family `g` lists `ghost`' in result.stderr
         assert submitted == []
 
     @pytest.mark.parametrize(
@@ -325,14 +356,14 @@ class TestCheck:
             pytest.param(
                 'network_mode = "no-network"',
                 'network_mode = "public"',
-                'tasks/echo/task.toml: the agent phase needs no-network',
+                '`tasks/echo/task.toml`: the agent phase needs `no-network`.',
                 id='open-network',
             ),
             pytest.param(
                 'name = "smoke/echo"',
                 'name = "smoke/other"',
-                'family \'smoke\': set [task] name to "smoke/echo" in '
-                'tasks/echo/task.toml',
+                'Family `smoke`: set `[task] name` to `"smoke/echo"` in '
+                '`tasks/echo/task.toml`.',
                 id='name-apart-from-its-directory',
             ),
         ],
@@ -352,33 +383,57 @@ class TestCheck:
         result = invoke('check', 'smoke')
 
         assert result.exit_code == 1
-        assert message in result.output
+        assert message in result.stderr
         assert 'Usage:' not in result.output
         assert submitted == []
 
-    def test_rejects_a_missing_family_and_names_the_choices(self) -> None:
-        result = invoke('check', 'nope')
-
-        assert result.exit_code == 2
-        assert (
-            f'no family named nope, so choose among {", ".join(family_names())}'
-            in result.output
-        )
-
-    def test_names_the_job_of_a_failed_oracle_run(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('started', 'message'),
+        [
+            pytest.param(
+                True,
+                'Harbor exited with code 5. Browse its trials with '
+                '`harbor view {job}`.\n',
+                id='job-started',
+            ),
+            pytest.param(False, 'Harbor exited with code 5.\n', id='preflight-failed'),
+        ],
+    )
+    def test_reports_a_failed_harbor_run(
+        self, monkeypatch: pytest.MonkeyPatch, started: bool, message: str
     ) -> None:
+        failed: list[JobConfig] = []
+
         def run_job(job: JobConfig) -> Path:
+            failed.append(job)
+            if started:
+                jobs.job_path(job).mkdir(parents=True)
             raise subprocess.CalledProcessError(5, 'harbor')
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
 
         result = invoke('check', 'smoke')
 
-        assert result.exit_code == 5
-        assert result.output.startswith(
-            'Harbor exited with code 5. Browse its trials with '
-            f'`harbor view {data_dir / "checks" / "smoke"}/'
+        (job,) = failed
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            5,
+            '',
+            message.format(job=jobs.job_path(job)),
+        )
+
+    def test_reports_an_unreadable_check_trial_without_a_traceback(
+        self, submitted: list[JobConfig], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def read_trials(family: Any, job_dir: Path, systems: Any) -> list[Output]:
+            raise ValueError('Trial `echo__1` has an unreadable `result.json`.')
+
+        monkeypatch.setattr(jobs, 'read_trials', read_trials)
+
+        result = invoke('check', 'smoke')
+
+        assert (result.exit_code, result.stderr) == (
+            1,
+            'Trial `echo__1` has an unreadable `result.json`.\n',
         )
 
     def test_names_the_file_and_field_of_an_invalid_family(
@@ -391,8 +446,8 @@ class TestCheck:
 
         assert (result.exit_code, result.output) == (
             1,
-            "family 'f': family.toml: samples: Input should be greater than or "
-            'equal to 1\n',
+            'Family `f`: `family.toml`: `samples`: Input should be greater than or '
+            'equal to 1.\n',
         )
 
     def test_rejects_a_local_case_that_reuses_a_committed_id(
@@ -408,7 +463,7 @@ class TestCheck:
         result = invoke('check', 'smoke-text')
 
         assert result.exit_code == 1
-        assert "case 'en-greeting' appears at" in result.output
+        assert 'case `en-greeting` appears at' in result.output
 
     def test_rejects_a_family_listing_an_unknown_system(
         self, families_dir: Path
@@ -417,10 +472,11 @@ class TestCheck:
 
         result = invoke('check', 'f')
 
-        assert (result.exit_code, result.output) == (
+        assert (result.exit_code, result.stdout, result.stderr) == (
             1,
-            "family 'f' lists ghost, which systems.toml does not define. Add a "
-            'table to systems.toml or fix the name in families/f/family.toml\n',
+            '',
+            'Family `f` lists `ghost`, which `systems.toml` does not define. Add a '
+            'table to `systems.toml` or fix the name in `families/f/family.toml`.\n',
         )
 
     def test_rejects_a_systems_table_that_fails_to_validate(
@@ -434,8 +490,10 @@ class TestCheck:
 
         result = invoke('check', 'smoke-text')
 
-        assert result.exit_code == 1
-        assert result.output.startswith('1 validation error for systems.toml\nbroken\n')
+        assert (result.exit_code, result.output) == (
+            1,
+            '`systems.toml`: `broken`: set exactly one of `model` and `route`.\n',
+        )
 
     def test_reports_a_missing_export_without_a_traceback(
         self, monkeypatch: pytest.MonkeyPatch
@@ -446,8 +504,19 @@ class TestCheck:
 
         assert (result.exit_code, result.output) == (
             1,
-            'BENCH_NIXOS_CONFIG is unset. Run bench inside `nix develop`.\n',
+            '`BENCH_NIXOS_CONFIG` is unset. Run `bench` inside `nix develop`.\n',
         )
+
+
+class TestKnownFamilies:
+    @pytest.mark.parametrize('command', ['check', 'run', 'ingest', 'close'])
+    def test_rejects_a_missing_family_and_names_the_choices(self, command: str) -> None:
+        choices = ', '.join(f'`{name}`' for name in family_names())
+
+        result = invoke(command, 'nope')
+
+        assert result.exit_code == 2
+        assert f'No family named `nope`. Choose among {choices}.' in result.output
 
 
 class TestRun:
@@ -488,7 +557,10 @@ class TestRun:
         result = invoke('run', 'f', '--system', 'gpt-6-astra', '--system', 'opus-5.5')
 
         assert result.exit_code == 2
-        assert 'f does not list gpt-6-astra, so choose among opus-5.5' in result.output
+        assert (
+            'Family `f` does not list `gpt-6-astra`. Choose among `opus-5.5`.'
+            in result.output
+        )
         assert submitted == []
 
     def test_generates_after_a_named_run_only_the_systems_it_left_out(
@@ -521,8 +593,9 @@ class TestRun:
 
         assert (result.exit_code, result.output) == (
             1,
-            "family 'smoke' holds tasks/, and bench run runs only families with "
-            'cases.jsonl. Validate its tasks with `uv run bench check smoke`\n',
+            'Family `smoke` holds `tasks/`, and `bench run` runs only families '
+            'with `cases.jsonl`. Validate its tasks with '
+            '`uv run bench check smoke`.\n',
         )
         assert submitted == []
 
@@ -572,8 +645,8 @@ class TestRun:
 
         assert result.exit_code == 2
         assert (
-            'no family lists gpt-6-astra in its systems, so check the name against '
-            'systems.toml' in result.output
+            'No family lists `gpt-6-astra` in its `systems`. Check the name '
+            'against `systems.toml`.' in result.output
         )
         assert submitted == []
 
@@ -596,7 +669,7 @@ class TestRun:
         result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
 
-        assert 'smoke-text:\n1 outputs, 0 errored\n' in result.output
+        assert 'Family `smoke-text`: 1 outputs, 0 errored.\n' in result.output
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
@@ -643,11 +716,11 @@ class TestRun:
         result = invoke('run', 'smoke-text')
 
         (job,) = submitted
-        assert result.exit_code == 3
-        assert result.output == (
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            3,
+            'Family `smoke-text`: 1 outputs, 0 errored.\n',
             'Harbor exited with code 3. Browse its trials with '
-            f'`harbor view {jobs.job_path(job)}`.\n'
-            'smoke-text:\n1 outputs, 0 errored\n'
+            f'`harbor view {jobs.job_path(job)}`.\n',
         )
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
@@ -671,10 +744,11 @@ class TestRun:
 
         assert (result.exit_code, result.output) == (
             1,
-            "family 'f':\n'opus-5.5' ran under fingerprint fp-old but now resolves "
-            f'to {current}\nGive a changed system a new name, or keep its old '
-            'resolution on a `route` table, as docs/guide/authoring.md#systems '
-            'describes\n',
+            'Family `f` has systems that changed their fingerprints:\n'
+            'System `opus-5.5` ran under fingerprint `fp-old` but now resolves '
+            f'to `{current}`.\nGive a changed system a new name, or keep its old '
+            'resolution on a `route` table, as `docs/guide/authoring.md#systems` '
+            'describes.\n',
         )
         assert submitted == []
 
@@ -700,7 +774,7 @@ class TestRun:
         result = invoke('run')
 
         assert result.exit_code == 1
-        assert "'opus-5.5' ran under fingerprint fp-old" in result.output
+        assert 'System `opus-5.5` ran under fingerprint `fp-old`' in result.output
         assert submitted == []
         assert not (data_dir / 'tasks' / 'g' / 'c1').exists()
 
@@ -715,7 +789,7 @@ class TestRun:
         result = invoke('run')
 
         assert result.exit_code == 1
-        assert "family 'z' holds tasks/" in result.output
+        assert 'Family `z` holds `tasks/`' in result.output
         assert submitted == []
 
     def test_rejects_an_unreadable_trial_record(
@@ -750,9 +824,8 @@ class TestIngest:
                     make_output(gate_failures=[Gate.TRUNCATED]),
                 ],
                 """\
-                smoke-text:
-                3 outputs, 0 errored
-                2 failed a gate
+                Family `smoke-text`: 3 outputs, 0 errored.
+                2 failed a gate.
                   truncated: 2
                   length: 1
                 """,
@@ -766,10 +839,9 @@ class TestIngest:
                     make_output(error='TimeoutError'),
                 ],
                 """\
-                smoke:
-                3 outputs, 1 errored
+                Family `smoke`: 3 outputs, 1 errored.
                   TimeoutError: 1
-                Mean reward 0.500
+                Mean reward 0.500.
                 """,
                 id='errors-and-rewards',
             ),
@@ -800,7 +872,9 @@ class TestIngest:
         result = invoke('ingest')
         assert result.exit_code == 0, result.output
 
-        assert result.output == 'f:\n0 outputs, 0 errored\ng:\n0 outputs, 0 errored\n'
+        assert result.output == (
+            'Family `f`: 0 outputs, 0 errored.\nFamily `g`: 0 outputs, 0 errored.\n'
+        )
         assert (data_dir / 'outputs' / 'f.jsonl').exists()
         assert (data_dir / 'outputs' / 'g.jsonl').exists()
         assert not (data_dir / 'outputs' / 'h.jsonl').exists()
@@ -847,8 +921,8 @@ class TestServe:
         assert site.builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
         assert site.served == [(['f'], site.path)]
         assert result.output == (
-            'Voting on f at http://127.0.0.1:8790/vote/. Open that exact address, '
-            'since the server refuses localhost.\n'
+            'Voting on `f` at http://127.0.0.1:8790/vote/. Open that exact address, '
+            'since the server refuses `localhost`.\n'
         )
 
     def test_serves_after_a_case_is_removed(
@@ -874,7 +948,7 @@ class TestServe:
 
         assert result.exit_code == 1
         assert (
-            f'No vote page at {tmp_path / "dist" / "vote" / "index.html"}'
+            f'No vote page at `{tmp_path / "dist" / "vote" / "index.html"}`.'
             in result.output
         )
         assert '`BENCH_LOCAL=1 pnpm --filter web build`' in result.output
@@ -1002,7 +1076,9 @@ class TestClose:
         assert result.exit_code == 0, result.output
 
         (path,) = (tmp_path / 'reports' / 'f').iterdir()
-        assert result.output == f'f:\n4 outputs, 0 errored\nReport written to {path}\n'
+        assert result.output == (
+            f'Family `f`: 4 outputs, 0 errored.\nReport written to `{path}`.\n'
+        )
         closed = report.Report.model_validate_json(path.read_text())
         assert isinstance(closed.results, report.VotesResults)
         assert closed.family == 'f'
@@ -1054,7 +1130,7 @@ class TestFingerprints:
 
         assert (result.exit_code, result.output) == (
             0,
-            'Every system keeps its fingerprint since origin/main\n',
+            'Every system keeps its fingerprint since `origin/main`.\n',
         )
 
     @pytest.mark.parametrize(
@@ -1079,10 +1155,10 @@ class TestFingerprints:
 
         assert result.exit_code == 1
         assert result.stderr == (
-            "system 'opus-5.5' changed its fingerprint since origin/main, so give "
+            'System `opus-5.5` changed its fingerprint since `origin/main`. Give '
             'the changed system a new name, and keep the old name on its old '
-            'resolution with the table below, as docs/guide/authoring.md#systems '
-            'describes\n'
+            'resolution with the table below, as `docs/guide/authoring.md#systems` '
+            'describes.\n'
         )
         assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
 
@@ -1101,10 +1177,10 @@ class TestFingerprints:
         assert result.exit_code == 1
         assert result.stdout == ''
         assert result.stderr == (
-            "system 'opus-5.5' changed its fingerprint since origin/main, and a "
-            '`route` table cannot pin its prompt, so give the changed system a new '
+            'System `opus-5.5` changed its fingerprint since `origin/main`, and a '
+            '`route` table cannot pin its prompt. Give the changed system a new '
             'name and keep the old name only in closed reports, as '
-            'docs/guide/authoring.md#systems describes\n'
+            '`docs/guide/authoring.md#systems` describes.\n'
         )
 
     def test_exits_with_the_code_of_a_failed_revision_lookup(

@@ -34,7 +34,7 @@ class TestTerminus:
         ) -> None:
             monkeypatch.delenv(EXPORT_VAR)
 
-            with pytest.raises(ValueError, match='unset'):
+            with pytest.raises(ValueError, match='^Set `BENCH_API_BASE_URL`'):
                 Terminus.preflight(OPTIONS, {})
 
     class TestRun:

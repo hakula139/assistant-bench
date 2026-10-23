@@ -32,8 +32,8 @@ class TestPreflight:
             preflight({})
 
         assert str(error.value) == (
-            'BENCH_API_BASE_URL, BENCH_API_KEY_FILE, BENCH_NIXOS_CONFIG unset. '
-            'Copy .env.example to .env, and run inside `nix develop`.'
+            'Set `BENCH_API_BASE_URL`, `BENCH_API_KEY_FILE`, `BENCH_NIXOS_CONFIG`. '
+            'Copy `.env.example` to `.env`, and run inside `nix develop`.'
         )
 
     @pytest.mark.parametrize(

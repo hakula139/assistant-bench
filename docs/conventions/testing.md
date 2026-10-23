@@ -19,7 +19,7 @@ Drop a test once another covers everything it checks.
 ## Models and Harbor
 
 - Fixtures use generic names such as `acme/large` and `example.com`. Real model names appear only where the code matches on them, as in the test of the committed `systems.toml`.
-- An autouse fixture points `BENCH_DATA_DIR` at a scratch directory and runs each test from it, so no test reads the real data directory or a local `.env`.
+- `conftest.py` sets the environment `bench` gives Harbor before any test module imports LiteLLM, so no import, fixture, or test loads a local `.env`. An autouse fixture points `BENCH_DATA_DIR` at a scratch directory, runs each test from it, and clears the endpoint and proxy variables the shell exports, so no test reads the real data directory or endpoint.
 - Tests reach models only through the `endpoint` fixture or its variants: a chat-completions server on 127.0.0.1 that records each request and returns a configurable response, `tls_endpoint`, the same server behind a test CA, and `ipv6_endpoint`, the same server on `::1`.
 - The `export` fixture points `BENCH_NIXOS_CONFIG` at `tests/fixtures/nixos-config.json`. The CLI tests and the test of the committed `systems.toml` read the dev shell's real export, so the suite runs inside `nix develop`.
 - CLI tests replace `jobs.run_job` with a recorder to check the submitted job config without starting Harbor, and `write_trial` writes the trial records Harbor would, including the `lock.json` its diff reads. `finish_job` writes a successful trial for each trial Harbor plans for a submitted job, with the locks from Harbor's own plan, so a test can check what a later job's diff reuses.

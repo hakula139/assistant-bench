@@ -67,7 +67,7 @@ A task's directory name is its ID, unique across the family's committed and loca
 - `[agent] timeout_sec`
 - `/app` under `[[artifacts]]`, which the verifier receives
 
-It then runs Harbor's oracle and nop agents three times on each task, and fails unless every oracle attempt earns reward 1 and every nop attempt earns 0, so the reference solution passes a task that the repository as committed fails.
+It then runs the reference solution (Harbor's `oracle` agent) and a do-nothing agent (`nop`) three times on each task, and fails unless every reference attempt earns reward 1 and every do-nothing attempt earns 0, so the reference solution passes a task that the repository as committed fails.
 
 `bench run` runs only case families, so `bench check` validates a task family but nothing produces outputs for `bench close` ([#47](https://github.com/hakula139/assistant-bench/issues/47)).
 

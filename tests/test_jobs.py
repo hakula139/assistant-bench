@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import os
 import subprocess
 import sys
 import textwrap
@@ -33,7 +32,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import options
 from assistant_bench.outputs import Output
-from assistant_bench.paths import FAMILIES_DIR, REPO_ROOT
+from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_task_family, write_trial
 
 
@@ -327,75 +326,79 @@ class TestCheckTasks:
         ('path', 'value', 'message'),
         [
             pytest.param(
-                ('task', 'version'), None, 'set [task] version', id='no-version'
+                ('task', 'version'), None, 'set `[task] version`.', id='no-version'
             ),
             pytest.param(
                 ('agent', 'network_mode'),
                 'public',
-                'the agent phase needs no-network',
+                'the agent phase needs `no-network`.',
                 id='open-agent-network',
             ),
             pytest.param(
                 ('verifier', 'network_mode'),
                 'public',
-                'the verifier phase needs no-network',
+                'the verifier phase needs `no-network`.',
                 id='open-verifier-network',
             ),
             pytest.param(
                 ('environment', 'network_mode'),
                 'allowlist',
-                'the agent phase needs no-network',
+                'the agent phase needs `no-network`.',
                 id='allowlist-environment',
             ),
             pytest.param(
                 ('verifier', 'environment_mode'),
                 'shared',
-                'set [verifier] environment_mode = "separate"',
+                'set `[verifier] environment_mode = "separate"`.',
                 id='explicit-shared-verifier',
             ),
             pytest.param(
                 ('verifier', 'environment_mode'),
                 None,
-                'set [verifier] environment_mode = "separate"',
+                'set `[verifier] environment_mode = "separate"`.',
                 id='unset-verifier-mode',
             ),
             pytest.param(
                 ('verifier', 'environment'),
                 {'cpus': 1},
-                'do not set [verifier.environment]',
+                'remove `[verifier.environment]`, since the verifier uses the '
+                "task's environment.",
                 id='verifier-environment',
             ),
             pytest.param(
                 ('steps',),
                 [{'name': 'one'}],
-                'do not set [[steps]]',
+                'remove `[[steps]]`, whose overrides the check cannot prove.',
                 id='steps',
             ),
             pytest.param(
                 ('artifacts',),
                 None,
-                'list "/app" under [[artifacts]]',
+                'list `"/app"` under `[[artifacts]]`.',
                 id='no-artifact',
             ),
             pytest.param(
                 ('artifacts',),
                 ['/logs/x'],
-                'list "/app" under [[artifacts]]',
+                'list `"/app"` under `[[artifacts]]`.',
                 id='artifact-outside-app',
             ),
             pytest.param(
-                ('environment', 'cpus'), None, 'set [environment] cpus', id='no-cpus'
+                ('environment', 'cpus'),
+                None,
+                'set `[environment] cpus`.',
+                id='no-cpus',
             ),
             pytest.param(
                 ('environment', 'memory_mb'),
                 None,
-                'set [environment] memory_mb',
+                'set `[environment] memory_mb`.',
                 id='no-memory',
             ),
             pytest.param(
                 ('agent', 'timeout_sec'),
                 None,
-                'set [agent] timeout_sec',
+                'set `[agent] timeout_sec`.',
                 id='no-agent-timeout',
             ),
         ],
@@ -413,7 +416,7 @@ class TestCheckTasks:
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
-        assert f'tasks/echo/task.toml: {message}' in str(error.value)
+        assert f'`tasks/echo/task.toml`: {message}' in str(error.value)
 
     def test_accepts_a_string_artifact(self, families_dir: Path) -> None:
         family, tasks = task_family(families_dir, 'echo')
@@ -428,7 +431,10 @@ class TestCheckTasks:
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
-        assert 'tasks/again/task.toml: set [environment] cpus' in str(error.value)
+        assert str(error.value) == (
+            'Family `f` has tasks to fix:\n'
+            '`tasks/again/task.toml`: set `[environment] cpus`.'
+        )
 
     def test_names_a_local_task(self, data_dir: Path) -> None:
         task = data_dir / 'cases' / 'smoke' / 'echo'
@@ -442,7 +448,9 @@ class TestCheckTasks:
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(load_family('smoke'), [task])
 
-        assert 'cases/smoke/echo/task.toml: set [environment] cpus' in str(error.value)
+        assert '`cases/smoke/echo/task.toml`: set `[environment] cpus`.' in str(
+            error.value
+        )
 
     def test_names_every_problem_of_a_task(self, families_dir: Path) -> None:
         family, tasks = task_family(families_dir, 'echo')
@@ -452,8 +460,11 @@ class TestCheckTasks:
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
-        assert 'set [environment] cpus' in str(error.value)
-        assert 'set [environment] memory_mb' in str(error.value)
+        assert str(error.value) == (
+            'Family `f` has tasks to fix:\n'
+            '`tasks/echo/task.toml`: set `[environment] cpus`.\n'
+            '`tasks/echo/task.toml`: set `[environment] memory_mb`.'
+        )
 
     def test_rejects_a_task_toml_that_fails_to_validate(
         self, families_dir: Path
@@ -465,8 +476,8 @@ class TestCheckTasks:
             jobs.check_tasks(family, tasks)
 
         assert str(error.value).startswith(
-            "family 'f':\ntasks/echo/task.toml: environment.cpus: Input should be a "
-            'valid integer'
+            'Family `f` has tasks to fix:\n`tasks/echo/task.toml`: '
+            '`environment.cpus`: Input should be a valid integer'
         )
 
 
@@ -530,8 +541,7 @@ class TestRunJob:
     ) -> Path:
         """Put a `harbor` beside the interpreter that records its call and exits.
 
-        It writes its arguments, the variables `run_job` sets, and the config it
-        receives beside itself.
+        It writes its arguments and the config it receives beside itself.
         """
         harbor = directory / 'harbor'
         harbor.write_text(
@@ -539,7 +549,6 @@ class TestRunJob:
                 f"""\
                 #!/bin/sh
                 printf '%s\\n' "$@" > "$0.args"
-                printf '%s\\n' "$HARBOR_TELEMETRY" "$LITELLM_MODE" > "$0.env"
                 cp "$3" "$0.json"
                 exit {exit_code}
                 """
@@ -549,7 +558,7 @@ class TestRunJob:
         monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
         return harbor
 
-    def test_runs_harbor_on_the_config_without_telemetry_or_dotenv(
+    def test_runs_harbor_on_the_config(
         self, data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         harbor = self.stub_harbor(tmp_path, monkeypatch, 0)
@@ -561,7 +570,6 @@ class TestRunJob:
         args = Path(f'{harbor}.args').read_text().splitlines()
         assert args[:2] == ['run', '--config']
         assert args[3:] == ['--yes']
-        assert Path(f'{harbor}.env').read_text().splitlines() == ['off', 'PRODUCTION']
         assert JobConfig.model_validate_json(Path(f'{harbor}.json').read_text()) == job
         assert job_dir == data_dir / 'checks' / 'smoke' / job.job_name
 
@@ -576,51 +584,6 @@ class TestRunJob:
             jobs.run_job(job)
 
         assert error.value.returncode == 3
-
-    def test_keeps_the_environment_out_of_a_failing_test_report(
-        self, tmp_path: Path
-    ) -> None:
-        secret = 'sentinel-secret-value'
-        test = tmp_path / 'test_failing_harbor.py'
-        test.write_text(
-            textwrap.dedent(
-                """\
-                import sys
-                from pathlib import Path
-
-                import pytest
-                from harbor.models.job.config import JobConfig
-
-                from assistant_bench import jobs
-
-
-                def test_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-                    harbor = tmp_path / 'harbor'
-                    harbor.write_text('#!/bin/sh\\nexit 3\\n')
-                    harbor.chmod(0o755)
-                    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'python'))
-                    jobs.run_job(JobConfig())
-                """
-            )
-        )
-
-        report = subprocess.run(
-            [
-                *(sys.executable, '-m', 'pytest', '-p', 'no:cacheprovider'),
-                *('-c', REPO_ROOT / 'pyproject.toml', '--rootdir', tmp_path),
-                *('--no-cov', test),
-            ],
-            capture_output=True,
-            env={
-                'BENCH_TEST_SECRET': secret,
-                'LITELLM_MODE': 'PRODUCTION',
-                'PATH': os.environ['PATH'],
-            },
-            text=True,
-        )
-        assert 'CalledProcessError' in report.stdout, report.stdout
-
-        assert secret not in report.stdout + report.stderr
 
 
 class TestIngest:
@@ -868,6 +831,34 @@ class TestIngest:
 
         assert [(output.job, output.error, output.text) for output in outputs] == [
             ('2026-10-20__10-00-00', None, 'kept')
+        ]
+
+    def test_keeps_a_success_on_an_old_request_over_an_error_on_the_current(
+        self, data_dir: Path
+    ) -> None:
+        family = votes_family(samples=1)
+        system = make_system()
+        jobs_dir = data_dir / 'jobs' / 'f'
+        write_trial(
+            jobs_dir / '2026-10-20__10-00-00',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            task='f/a',
+            error='TimeoutError',
+        )
+        write_trial(
+            jobs_dir / '2026-10-21__10-00-00',
+            'a__2',
+            AgentConfig(import_path='x:Y', kwargs=request(system, 600)),
+            task='f/a',
+            output='old request',
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+
+        outputs = jobs.ingest(family, {system.name: system})
+
+        assert [(output.job, output.error, output.text) for output in outputs] == [
+            ('2026-10-21__10-00-00', None, 'old request')
         ]
 
     def test_keeps_a_rerun_success_over_the_error_it_replaced(

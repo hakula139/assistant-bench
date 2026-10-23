@@ -8,8 +8,16 @@ import tomllib
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
+from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -68,7 +76,9 @@ def load_export() -> NixosConfigExport:
     """
     path = os.environ.get(EXPORT_VAR)
     if not path:
-        raise RuntimeError(f'{EXPORT_VAR} is unset. Run bench inside `nix develop`.')
+        raise RuntimeError(
+            f'`{EXPORT_VAR}` is unset. Run `bench` inside `nix develop`.'
+        )
     return NixosConfigExport.model_validate_json(Path(path).read_bytes())
 
 
@@ -170,19 +180,27 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
     Raises
     ------
     ValueError
-        A table fails to resolve, or two systems share a display name.
+        The document does not parse or validate, a table fails to resolve, or
+        two systems share a display name.
     """
+    try:
+        configs = _CONFIGS.validate_python(tomllib.loads(document))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(
+            sentence(f'`{SYSTEMS_FILE}` is not valid TOML: {error}')
+        ) from error
+    except ValidationError as error:
+        raise ValueError(error_lines(error, f'`{SYSTEMS_FILE}`')) from error
     systems = {
-        name: resolve_system(name, config, export)
-        for name, config in _CONFIGS.validate_python(tomllib.loads(document)).items()
+        name: resolve_system(name, config, export) for name, config in configs.items()
     }
     owners: dict[str, str] = {}
     for name, system in systems.items():
         owner = owners.setdefault(system.display_name, name)
         if owner != name:
             raise ValueError(
-                f'systems {owner!r} and {name!r} share the display name '
-                f'{system.display_name!r}, so set a distinct `display_name`'
+                f'Systems `{owner}` and `{name}` share the display name '
+                f'`{system.display_name}`. Set a distinct `display_name`.'
             )
     return systems
 
@@ -213,21 +231,20 @@ def resolve_system(
     entry = export.catalog.models.get(config.model)
     if entry is None:
         close = difflib.get_close_matches(config.model, export.catalog.models)
-        hint = f', so check it against {", ".join(close)}' if close else ''
+        hint = f' Check it against {code(close)}.' if close else ''
         raise ValueError(
-            f'system {name!r}: model {config.model!r} is not in the nixos-config '
-            f'catalog, data/llm-models.nix{hint}'
+            f'System `{name}`: model `{config.model}` is not in the nixos-config '
+            f'catalog, `data/llm-models.nix`.{hint}'
         )
 
     if not entry.channel_id:
         raise ValueError(
-            f'system {name!r}: catalog model {config.model!r} has no channel'
+            f'System `{name}`: catalog model `{config.model}` has no channel.'
         )
     if len(entry.channel_id) > 1:
-        channels = ', '.join(entry.channel_id)
         raise ValueError(
-            f'system {name!r}: catalog model {config.model!r} has channels '
-            f'{channels}, so set its `route` and `price` instead'
+            f'System `{name}`: catalog model `{config.model}` has channels '
+            f'{code(entry.channel_id)}. Set its `route` and `price` instead.'
         )
     ((channel, route),) = entry.channel_id.items()
     return System(
@@ -250,7 +267,7 @@ def pin(system: System) -> SystemConfig:
     """
     if system.prompt is not None:
         raise ValueError(
-            f'system {system.name!r}: a prompt cannot be pinned with a `route` table'
+            f'System `{system.name}`: a `route` table cannot pin its prompt.'
         )
     return SystemConfig(
         route=system.route,
@@ -266,13 +283,13 @@ def _prompt(name: str, reference: str | None, export: NixosConfigExport) -> str 
     client = reference.removeprefix(NIXOS_CONFIG_PROMPT)
     if client == reference:
         raise ValueError(
-            f'system {name!r}: prompt {reference!r} is not nixos-config:<client>'
+            f'System `{name}`: prompt `{reference}` is not '
+            f'`{NIXOS_CONFIG_PROMPT}<client>`.'
         )
     if client not in export.instructions:
-        accepted = ', '.join(export.instructions)
         raise ValueError(
-            f'system {name!r}: nixos-config has no {client!r} instructions '
-            f'(expected one of {accepted})'
+            f'System `{name}`: nixos-config has no `{client}` instructions. '
+            f'Choose among {code(export.instructions)}.'
         )
     return export.instructions[client]
 
@@ -282,13 +299,15 @@ def _resolve_effort(
 ) -> str | None:
     if thinking is None:
         if effort is not None:
-            raise ValueError(f'system {name!r}: the model takes no effort')
+            raise ValueError(f'System `{name}`: the model takes no effort.')
         return None
     if effort is None:
         return thinking.default_level if thinking.requires_effort else None
     if effort not in thinking.efforts:
-        accepted = ', '.join(thinking.efforts)
-        raise ValueError(f'system {name!r}: effort {effort!r} is not one of {accepted}')
+        raise ValueError(
+            f'System `{name}`: effort `{effort}` is not one of '
+            f'{code(thinking.efforts)}.'
+        )
     return effort
 
 

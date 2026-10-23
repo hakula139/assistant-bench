@@ -17,7 +17,13 @@ from assistant_bench import jobs, report, revisions
 from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import VoteStore, votes_file
-from assistant_bench.catalog import System, load_export, load_systems, pin
+from assistant_bench.catalog import (
+    SYSTEMS_FILE,
+    System,
+    load_export,
+    load_systems,
+    pin,
+)
 from assistant_bench.families import (
     Case,
     Family,
@@ -27,6 +33,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.messages import code
 from assistant_bench.outputs import Output
 from assistant_bench.paths import REPO_ROOT
 
@@ -49,7 +56,7 @@ def _known_families(names: list[str] | None) -> list[str] | None:
     unknown = [name for name in dict.fromkeys(names) if name not in known]
     if unknown:
         raise typer.BadParameter(
-            f'no family named {", ".join(unknown)}, so choose among {", ".join(known)}'
+            f'No family named {code(unknown)}. Choose among {code(known)}.'
         )
     return list(dict.fromkeys(names))
 
@@ -73,6 +80,7 @@ FamilyNames = Annotated[
 def main() -> None:
     """Run families on the systems under test, vote on their outputs, and report."""
     load_dotenv(find_dotenv(usecwd=True))
+    os.environ.update(jobs.HARBOR_ENV)
 
 
 @app.command()
@@ -87,7 +95,8 @@ def check(families: FamilyNames = None) -> None:
     for family in map(_load_family, families or family_names()):
         _family_systems(family)
         if family.source == 'cases':
-            typer.echo(f'{family.name}: {len(_render_tasks(family))} valid cases')
+            cases = len(_render_tasks(family))
+            typer.echo(f'Family `{family.name}`: {cases} valid cases.')
             continue
         tasks = [case_task(family, case.id) for case in _load_cases(family)]
         _check_tasks(family, tasks)
@@ -95,14 +104,14 @@ def check(families: FamilyNames = None) -> None:
 
     failed = False
     for family, tasks in task_families:
-        outputs = jobs.read_trials(family, _run(jobs.check_job(family, tasks)), {})
+        outputs = _read_trials(family, _run(jobs.check_job(family, tasks)))
         problems = _check_problems(tasks, outputs)
         for problem in problems:
-            typer.echo(f'{family.name}: {problem}', err=True)
+            typer.echo(f'Family `{family.name}`: {problem}.', err=True)
         if not problems:
             typer.echo(
-                f'{family.name}: every reference solution passed its tests, and the '
-                'do-nothing agent failed every task'
+                f'Family `{family.name}`: every reference solution passed its tests, '
+                'and the do-nothing agent failed every task.'
             )
         failed = failed or bool(problems)
     if failed:
@@ -130,9 +139,9 @@ def run(
     for family, systems in _run_targets(families, names):
         if family.source != 'cases':
             _fail(
-                f'family {family.name!r} holds tasks/, and bench run runs only '
-                'families with cases.jsonl. Validate its tasks with '
-                f'`uv run bench check {family.name}`'
+                f'Family `{family.name}` holds `tasks/`, and `bench run` runs only '
+                'families with `cases.jsonl`. Validate its tasks with '
+                f'`uv run bench check {family.name}`.'
             )
         _refuse_drift(family, systems)
         tasks = _render_tasks(family)
@@ -172,13 +181,11 @@ def serve() -> None:
             'No family scored by votes has outputs yet. Run '
             '`uv run bench run <family>` first.'
         )
+    os.environ[LOCAL_SITE_VAR] = '1'
     with closing(_vote_store()) as store:
         try:
             subprocess.run(
-                ['pnpm', '--filter', 'web', 'build'],
-                check=True,
-                cwd=REPO_ROOT,
-                env={**os.environ, LOCAL_SITE_VAR: '1'},
+                ['pnpm', '--filter', 'web', 'build'], check=True, cwd=REPO_ROOT
             )
         except subprocess.CalledProcessError as error:
             typer.echo(
@@ -190,13 +197,13 @@ def serve() -> None:
         page = SITE_DIR / api.VOTE_DIR / 'index.html'
         if not page.is_file():
             _fail(
-                f'No vote page at {page}. Build the site with '
+                f'No vote page at `{page}`. Build the site with '
                 f'`{LOCAL_SITE_VAR}=1 pnpm --filter web build` and fix what it '
                 'reports.'
             )
         typer.echo(
-            f'Voting on {", ".join(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/. '
-            'Open that exact address, since the server refuses localhost.'
+            f'Voting on {code(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/. '
+            'Open that exact address, since the server refuses `localhost`.'
         )
         api.serve(Arena(store, families, api.RENDER_ORIGIN), SITE_DIR)
 
@@ -219,7 +226,7 @@ def close(
             closed = report.close(selected, store, datetime.now(UTC))
         except ValueError as error:
             _fail(str(error))
-    typer.echo(f'Report written to {report.write_report(closed)}')
+    typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
 
 @app.command()
@@ -245,24 +252,24 @@ def fingerprints(
             config = pin(system)
         except ValueError:
             typer.echo(
-                f'system {name!r} changed its fingerprint since {base}, and a '
-                '`route` table cannot pin its prompt, so give the changed system a '
+                f'System `{name}` changed its fingerprint since `{base}`, and a '
+                '`route` table cannot pin its prompt. Give the changed system a '
                 'new name and keep the old name only in closed reports, as '
-                f'{SYSTEMS_DOC} describes',
+                f'`{SYSTEMS_DOC}` describes.',
                 err=True,
             )
             continue
         typer.echo(
-            f'system {name!r} changed its fingerprint since {base}, so give the '
+            f'System `{name}` changed its fingerprint since `{base}`. Give the '
             'changed system a new name, and keep the old name on its old '
-            f'resolution with the table below, as {SYSTEMS_DOC} describes',
+            f'resolution with the table below, as `{SYSTEMS_DOC}` describes.',
             err=True,
         )
         typer.echo(tomli_w.dumps({name: config.model_dump(exclude_none=True)}))
         typer.echo()
     if changed:
         raise typer.Exit(1)
-    typer.echo(f'Every system keeps its fingerprint since {base}')
+    typer.echo(f'Every system keeps its fingerprint since `{base}`.')
 
 
 # ── Helpers ──
@@ -318,7 +325,7 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
             {(output.case, output.error) for output in attempts if output.error}
         )
         problems.extend(
-            f'{label} errored on {case} ({error})' for case, error in errored
+            f'{label} errored on `{case}` (`{error}`)' for case, error in errored
         )
         broken = sorted(
             {
@@ -328,12 +335,12 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
             }
         )
         if broken:
-            problems.append(f'{label} {verdict} the tests of {", ".join(broken)}')
+            problems.append(f'{label} {verdict} the tests of {code(broken)}')
         missing = sorted(
             {task.name for task in tasks} - {output.case for output in attempts}
         )
         if missing:
-            problems.append(f'{label} left no trial of {", ".join(missing)}')
+            problems.append(f'{label} left no trial of {code(missing)}')
     return problems
 
 
@@ -344,9 +351,9 @@ def _family_systems(family: Family) -> list[System]:
     unknown = [name for name in family.settings.systems if name not in known]
     if unknown:
         _fail(
-            f'family {family.name!r} lists {", ".join(unknown)}, which systems.toml '
-            'does not define. Add a table to systems.toml or fix the name in '
-            f'families/{family.name}/family.toml'
+            f'Family `{family.name}` lists {code(unknown)}, which `{SYSTEMS_FILE}` '
+            f'does not define. Add a table to `{SYSTEMS_FILE}` or fix the name in '
+            f'`families/{family.name}/family.toml`.'
         )
     return [known[name] for name in family.settings.systems]
 
@@ -358,8 +365,8 @@ def _named_systems(
     unknown = [name for name in dict.fromkeys(names) if name not in listed]
     if unknown:
         raise typer.BadParameter(
-            f'{family.name} does not list {", ".join(unknown)}, '
-            f'so choose among {", ".join(listed)}',
+            f'Family `{family.name}` does not list {code(unknown)}. '
+            f'Choose among {code(listed)}.',
             param_hint='--system',
         )
     return [system for system in systems if system.name in names]
@@ -396,8 +403,8 @@ def _run_targets(
     unlisted = [name for name in wanted if name not in listed_names]
     if unlisted:
         raise typer.BadParameter(
-            f'no family lists {", ".join(unlisted)} in its systems, so check the '
-            'name against systems.toml',
+            f'No family lists {code(unlisted)} in its `systems`. Check the name '
+            f'against `{SYSTEMS_FILE}`.',
             param_hint='--system',
         )
     targets = []
@@ -417,12 +424,14 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
     if not drifted:
         return
     detail = '\n'.join(
-        f'{name!r} ran under fingerprint {recorded} but now resolves to {current}'
+        f'System `{name}` ran under fingerprint `{recorded}` but now resolves to '
+        f'`{current}`.'
         for name, recorded, current in drifted
     )
     _fail(
-        f'family {family.name!r}:\n{detail}\nGive a changed system a new name, or '
-        f'keep its old resolution on a `route` table, as {SYSTEMS_DOC} describes'
+        f'Family `{family.name}` has systems that changed their fingerprints:\n'
+        f'{detail}\nGive a changed system a new name, or keep its old resolution '
+        f'on a `route` table, as `{SYSTEMS_DOC}` describes.'
     )
 
 
@@ -431,14 +440,16 @@ def _ingest(family: Family) -> None:
         outputs = jobs.ingest(family, _load_systems())
     except ValueError as invalid:
         _fail(str(invalid))
-    typer.echo(f'{family.name}:')
     errors = Counter(output.error for output in outputs if output.error)
-    typer.echo(f'{len(outputs)} outputs, {sum(errors.values())} errored')
+    typer.echo(
+        f'Family `{family.name}`: {len(outputs)} outputs, '
+        f'{sum(errors.values())} errored.'
+    )
     for error, count in errors.most_common():
         typer.echo(f'  {error}: {count}')
     gated = [output for output in outputs if output.gate_failures]
     if gated:
-        typer.echo(f'{len(gated)} failed a gate')
+        typer.echo(f'{len(gated)} failed a gate.')
         failures = Counter(
             gate for output in gated for gate in output.gate_failures or []
         )
@@ -446,7 +457,7 @@ def _ingest(family: Family) -> None:
             typer.echo(f'  {gate}: {count}')
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
-        typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
+        typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}.')
 
 
 def _run(job: JobConfig) -> Path:
@@ -454,14 +465,20 @@ def _run(job: JobConfig) -> Path:
     try:
         path = jobs.run_job(job)
     except subprocess.CalledProcessError as error:
-        typer.echo(
-            f'Harbor exited with code {error.returncode}. Browse its trials with '
-            f'`harbor view {jobs.job_path(job)}`.',
-            err=True,
-        )
+        failure = f'Harbor exited with code {error.returncode}.'
+        if jobs.job_path(job).is_dir():
+            failure += f' Browse its trials with `harbor view {jobs.job_path(job)}`.'
+        typer.echo(failure, err=True)
         raise typer.Exit(error.returncode) from error
-    typer.echo(f'Job written to {path}')
+    typer.echo(f'Job written to `{path}`.')
     return path
+
+
+def _read_trials(family: Family, job_dir: Path) -> list[Output]:
+    try:
+        return jobs.read_trials(family, job_dir, {})
+    except ValueError as error:
+        _fail(str(error))
 
 
 def _vote_store() -> VoteStore:

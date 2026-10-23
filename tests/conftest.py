@@ -1,3 +1,4 @@
+import os
 import ssl
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -5,15 +6,19 @@ from pathlib import Path
 import pytest
 import trustme
 
-from assistant_bench import families
+from assistant_bench import families, jobs
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.cli import LOCAL_SITE_VAR
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.paths import DATA_DIR_VAR
 from assistant_bench.scoring import ranking
 from support import EXPORT_FILE, Clock, StubEndpoint, serve_stub
 
+
+# Set as `bench` sets it, before a test module imports LiteLLM.
+os.environ.update(jobs.HARBOR_ENV)
 
 PROXY_VARS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')
 
@@ -45,13 +50,16 @@ def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]
 
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the data directory at a scratch path, away from `.env` and any proxy.
+    """Point the data directory at a scratch path, away from the shell's endpoint.
 
-    Importing LiteLLM loads the checkout's `.env`, so the endpoint variables are
-    cleared too.
+    The endpoint and proxy variables the shell exports are cleared, and the
+    variable `bench serve` sets is removed after each test.
     """
     path = tmp_path / 'data'
     monkeypatch.setenv(DATA_DIR_VAR, str(path))
+    # Setting it first makes teardown restore its absence.
+    monkeypatch.setenv(LOCAL_SITE_VAR, '')
+    monkeypatch.delenv(LOCAL_SITE_VAR)
     monkeypatch.chdir(tmp_path)
     for name in ENDPOINT_VARS:
         monkeypatch.delenv(name, raising=False)

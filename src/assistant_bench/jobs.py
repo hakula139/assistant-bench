@@ -1,7 +1,6 @@
 """Harbor task rendering, job configs, runs, and ingest of trials."""
 
 import hashlib
-import os
 import shutil
 import subprocess
 import sys
@@ -29,12 +28,12 @@ from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
     case_task,
-    error_lines,
     task_location,
     tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.messages import error_lines
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
@@ -51,6 +50,9 @@ N_CONCURRENT_TRIALS = 8
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
 CHECK_ATTEMPTS = 3
+# LiteLLM loads a .env above its own install unless its mode is PRODUCTION, and
+# bench loads the working directory's .env itself.
+HARBOR_ENV = {'HARBOR_TELEMETRY': 'off', 'LITELLM_MODE': 'PRODUCTION'}
 
 
 # ── Jobs ──
@@ -183,7 +185,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
     """
     problems = []
     for task in tasks:
-        location = f'{task_location(family, task)}/task.toml'
+        location = f'`{task_location(family, task)}/task.toml`'
         try:
             config = _task_config(task)
         except ValidationError as error:
@@ -191,26 +193,28 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
             continue
         problems.extend(_task_problems(config, location))
     if problems:
-        raise ValueError(f'family {family.name!r}:\n' + '\n'.join(problems))
+        raise ValueError(
+            f'Family `{family.name}` has tasks to fix:\n' + '\n'.join(problems)
+        )
 
 
 def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
     problems = []
     if config.task is None or config.task.version is None:
-        problems.append(f'{location}: set [task] version')
+        problems.append(f'{location}: set `[task] version`.')
     if (
         config.verifier.environment_mode
         is not task_config.VerifierEnvironmentMode.SEPARATE
     ):
-        problems.append(f'{location}: set [verifier] environment_mode = "separate"')
+        problems.append(f'{location}: set `[verifier] environment_mode = "separate"`.')
     if config.verifier.environment is not None:
         problems.append(
-            f'{location}: do not set [verifier.environment], since the verifier '
-            "uses the task's environment"
+            f'{location}: remove `[verifier.environment]`, since the verifier '
+            "uses the task's environment."
         )
     if config.steps:
         problems.append(
-            f'{location}: do not set [[steps]], whose overrides the check cannot prove'
+            f'{location}: remove `[[steps]]`, whose overrides the check cannot prove.'
         )
     if config.verifier.environment is None and not config.steps:
         plan = resolve_trial_network_plan(
@@ -225,17 +229,17 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
             ('verifier', plan.verifier_phase),
         ):
             if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
-                problems.append(f'{location}: the {phase} phase needs no-network')
+                problems.append(f'{location}: the {phase} phase needs `no-network`.')
     if not any(
         (artifact if isinstance(artifact, str) else artifact.source) == '/app'
         for artifact in config.artifacts
     ):
-        problems.append(f'{location}: list "/app" under [[artifacts]]')
+        problems.append(f'{location}: list `"/app"` under `[[artifacts]]`.')
     for field in ('cpus', 'memory_mb'):
         if getattr(config.environment, field) is None:
-            problems.append(f'{location}: set [environment] {field}')
+            problems.append(f'{location}: set `[environment] {field}`.')
     if config.agent.timeout_sec is None:
-        problems.append(f'{location}: set [agent] timeout_sec')
+        problems.append(f'{location}: set `[agent] timeout_sec`.')
     return problems
 
 
@@ -307,6 +311,8 @@ def job_path(config: JobConfig) -> Path:
 def run_job(config: JobConfig) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
+    Harbor inherits the process environment, which must hold `HARBOR_ENV`.
+
     Raises
     ------
     subprocess.CalledProcessError
@@ -318,13 +324,7 @@ def run_job(config: JobConfig) -> Path:
     ) as file:
         file.write(config.model_dump_json())
         file.close()
-        subprocess.run(
-            [harbor, 'run', '--config', file.name, '--yes'],
-            check=True,
-            # LiteLLM loads a .env above its own install unless its mode is
-            # PRODUCTION, and bench has already loaded the checkout's.
-            env={**os.environ, 'HARBOR_TELEMETRY': 'off', 'LITELLM_MODE': 'PRODUCTION'},
-        )
+        subprocess.run([harbor, 'run', '--config', file.name, '--yes'], check=True)
     return job_path(config)
 
 
