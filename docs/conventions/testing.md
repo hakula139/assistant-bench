@@ -1,6 +1,6 @@
 # Testing
 
-Where tests live, how they reach models and Harbor, and what coverage they owe.
+Where tests live, when they merge or go, how they reach models and Harbor, and what coverage they owe.
 
 ## Placement
 
@@ -10,9 +10,11 @@ Where tests live, how they reach models and Harbor, and what coverage they owe.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
 
-## Parametrized Tests
+## Merging and Dropping Tests
 
-Tests that differ only in their inputs and expected outputs make one parametrized test whose name states the rule they share: `pytest.mark.parametrize` with readable `ids` in Python, and `test.each` with a title that names each case in Vitest. Tests whose setup or checked outcome differs stay apart, even when they call the same function, and a test goes once another covers everything it checks.
+Tests that run the same steps and assertions on different values make one parametrized test whose name states the rule they share. In Python, that test uses `pytest.mark.parametrize` with `ids` wherever pytest's own would not name the case, and in Vitest, `test.each` with a title that names each case. Tests whose arrange steps or assertions differ stay apart, even when they call the same function.
+
+Drop a test once another covers everything it checks.
 
 ## Models and Harbor
 

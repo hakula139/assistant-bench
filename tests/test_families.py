@@ -101,81 +101,167 @@ class TestLoadFamily:
             ),
         )
 
-    @pytest.mark.parametrize(
-        ('name', 'aspect', 'message'),
-        [
-            ('f', '', "family 'f': a public family needs an aspect"),
-            (
-                'writingf',
-                'aspect = "writing"',
-                "family 'writingf': a public family ID starts with its aspect, "
-                'as in writing-<name>',
-            ),
-        ],
-    )
-    def test_requires_a_public_family_id_under_its_aspect(
-        self, families_dir: Path, name: str, aspect: str, message: str
-    ) -> None:
-        write_family(
-            families_dir,
-            name,
-            f"""\
-            scorer = "votes"
-            display_name = "Family F"
-            systems = ["large"]
-            samples = 1
-            max_output_tokens = 300
-            reference = "large"
-            public = true
-            {aspect}
-            """,
-            cases=True,
-            tasks=False,
-        )
-
-        with pytest.raises(ValueError, match=message):
-            load_family(name)
-
     def test_names_a_missing_family(self, families_dir: Path) -> None:
         with pytest.raises(ValueError, match="^no family named 'nope'$"):
             load_family('nope')
 
-    @pytest.mark.parametrize(('cases', 'tasks'), [(True, True), (False, False)])
-    def test_requires_exactly_one_task_source(
-        self, families_dir: Path, cases: bool, tasks: bool
+    @pytest.mark.parametrize(
+        ('name', 'settings', 'cases', 'tasks', 'error', 'message'),
+        [
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                public = true
+                """,
+                True,
+                False,
+                ValueError,
+                "family 'f': a public family needs an aspect",
+                id='public-without-an-aspect',
+            ),
+            pytest.param(
+                'writingf',
+                """\
+                scorer = "votes"
+                aspect = "writing"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                public = true
+                """,
+                True,
+                False,
+                ValueError,
+                "family 'writingf': a public family ID starts with its aspect, "
+                'as in writing-<name>',
+                id='public-id-outside-its-aspect',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                display_name = "Family F"
+                samples = 1
+                """,
+                True,
+                True,
+                ValueError,
+                'expected exactly one of cases.jsonl',
+                id='cases-and-tasks',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                display_name = "Family F"
+                samples = 1
+                """,
+                False,
+                False,
+                ValueError,
+                'expected exactly one of cases.jsonl',
+                id='no-task-source',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
+                """,
+                True,
+                False,
+                ValueError,
+                'case families need max_output_tokens',
+                id='cases-without-an-output-bound',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large", "small"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "medium"
+                """,
+                True,
+                False,
+                ValidationError,
+                "reference 'medium' is not in",
+                id='reference-outside-the-systems',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+
+                [gates]
+                min_chars = 500
+                max_chars = 400
+                """,
+                True,
+                False,
+                ValidationError,
+                'min_chars 500 exceeds max_chars 400',
+                id='inverted-length-bounds',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "judges"
+                display_name = "Family F"
+                samples = 1
+                """,
+                False,
+                True,
+                ValidationError,
+                "tag 'judges' found using 'scorer'",
+                id='unknown-scorer',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                samples = 1
+                """,
+                False,
+                True,
+                ValidationError,
+                'display_name',
+                id='no-display-name',
+            ),
+        ],
+    )
+    def test_rejects_a_family_that_breaks_a_rule(
+        self,
+        families_dir: Path,
+        name: str,
+        settings: str,
+        cases: bool,
+        tasks: bool,
+        error: type[Exception],
+        message: str,
     ) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "tests"
-            display_name = "Family F"
-            samples = 1
-            """,
-            cases=cases,
-            tasks=tasks,
-        )
+        write_family(families_dir, name, settings, cases=cases, tasks=tasks)
 
-        with pytest.raises(ValueError, match='expected exactly one of cases.jsonl'):
-            load_family('f')
-
-    def test_requires_an_output_bound_for_cases(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "votes"
-            display_name = "Family F"
-            systems = ["large"]
-            samples = 1
-            reference = "large"
-            """,
-            cases=True,
-            tasks=False,
-        )
-
-        with pytest.raises(ValueError, match='case families need max_output_tokens'):
-            load_family('f')
+        with pytest.raises(error, match=message):
+            load_family(name)
 
     def test_rejects_cases_scored_by_tests(self, families_dir: Path) -> None:
         write_family(
@@ -198,50 +284,6 @@ class TestLoadFamily:
             'family \'f\': scorer "tests" needs tasks/ with their own tests, '
             'so score cases.jsonl by "votes"'
         )
-
-    def test_requires_the_reference_among_the_systems(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "votes"
-            display_name = "Family F"
-            systems = ["large", "small"]
-            samples = 1
-            max_output_tokens = 300
-            reference = "medium"
-            """,
-            cases=True,
-            tasks=False,
-        )
-
-        with pytest.raises(ValidationError, match="reference 'medium' is not in"):
-            load_family('f')
-
-    def test_rejects_inverted_length_bounds(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "votes"
-            display_name = "Family F"
-            systems = ["large"]
-            samples = 1
-            max_output_tokens = 300
-            reference = "large"
-
-            [gates]
-            min_chars = 500
-            max_chars = 400
-            """,
-            cases=True,
-            tasks=False,
-        )
-
-        with pytest.raises(
-            ValidationError, match='min_chars 500 exceeds max_chars 400'
-        ):
-            load_family('f')
 
     def test_accepts_equal_length_bounds(self, families_dir: Path) -> None:
         write_family(
@@ -270,37 +312,6 @@ class TestLoadFamily:
             400,
             400,
         )
-
-    def test_rejects_an_unknown_scorer(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "judges"
-            display_name = "Family F"
-            samples = 1
-            """,
-            cases=False,
-            tasks=True,
-        )
-
-        with pytest.raises(ValidationError):
-            load_family('f')
-
-    def test_requires_a_display_name(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "tests"
-            samples = 1
-            """,
-            cases=False,
-            tasks=True,
-        )
-
-        with pytest.raises(ValidationError, match='display_name'):
-            load_family('f')
 
 
 class TestLoadCases:

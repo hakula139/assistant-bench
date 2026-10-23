@@ -19,7 +19,7 @@ from assistant_bench.arena.store import VoteStore
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
-from assistant_bench.outputs import write_outputs
+from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import FAMILIES_DIR
 from support import (
     finish_job,
@@ -86,6 +86,7 @@ class TestCheck:
             ([0.0], 1, 'smoke: the oracle failed on echo\n'),
             ([], 1, 'smoke: the oracle left no trial of echo\n'),
         ],
+        ids=['passed', 'failed', 'no-trial'],
     )
     def test_runs_the_oracle_on_task_directories(
         self,
@@ -147,6 +148,7 @@ class TestCheck:
                 'give each a new ID',
             ),
         ],
+        ids=['one-case', 'two-cases'],
     )
     def test_rejects_cases_whose_task_differs_from_a_recorded_trial(
         self, data_dir: Path, edited: list[str], expected: str
@@ -291,52 +293,53 @@ class TestRun:
 
 
 class TestIngest:
-    def test_summarizes_gate_failures(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            jobs,
-            'ingest',
-            lambda family, systems: [
-                make_output(gate_failures=[]),
-                make_output(gate_failures=[Gate.TRUNCATED, Gate.LENGTH]),
-                make_output(gate_failures=[Gate.TRUNCATED]),
-            ],
-        )
-
-        result = runner.invoke(app, ['ingest', 'smoke-text'])
-
-        assert result.exit_code == 0, result.output
-        assert result.output == textwrap.dedent(
-            """\
-            3 outputs, 0 errored
-            2 failed a gate
-              truncated: 2
-              length: 1
-            """
-        )
-
-    def test_summarizes_errors_and_rewards(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('name', 'outputs', 'summary'),
+        [
+            pytest.param(
+                'smoke-text',
+                [
+                    make_output(gate_failures=[]),
+                    make_output(gate_failures=[Gate.TRUNCATED, Gate.LENGTH]),
+                    make_output(gate_failures=[Gate.TRUNCATED]),
+                ],
+                """\
+                3 outputs, 0 errored
+                2 failed a gate
+                  truncated: 2
+                  length: 1
+                """,
+                id='gate-failures',
+            ),
+            pytest.param(
+                'smoke',
+                [
+                    make_output(reward=1.0),
+                    make_output(reward=0.0),
+                    make_output(error='TimeoutError'),
+                ],
+                """\
+                3 outputs, 1 errored
+                  TimeoutError: 1
+                Mean reward 0.500
+                """,
+                id='errors-and-rewards',
+            ),
+        ],
+    )
+    def test_summarizes_the_ingested_outputs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        name: str,
+        outputs: list[Output],
+        summary: str,
     ) -> None:
-        monkeypatch.setattr(
-            jobs,
-            'ingest',
-            lambda family, systems: [
-                make_output(reward=1.0),
-                make_output(reward=0.0),
-                make_output(error='TimeoutError'),
-            ],
-        )
+        monkeypatch.setattr(jobs, 'ingest', lambda family, systems: outputs)
 
-        result = runner.invoke(app, ['ingest', 'smoke'])
+        result = runner.invoke(app, ['ingest', name])
 
         assert result.exit_code == 0, result.output
-        assert result.output == textwrap.dedent(
-            """\
-            3 outputs, 1 errored
-              TimeoutError: 1
-            Mean reward 0.500
-            """
-        )
+        assert result.output == textwrap.dedent(summary)
 
 
 class TestServe:

@@ -1,4 +1,5 @@
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from itertools import permutations
 
@@ -248,45 +249,64 @@ class TestDraw:
         assert picked is not None
         assert (picked.a.system, picked.b.system) == ('small', 'large')
 
-    @pytest.mark.parametrize(
-        ('age', 'repeated', 'expected'),
-        [
-            (timedelta(days=1), False, True),
-            (timedelta(hours=23), False, False),
-            (timedelta(days=2), True, False),
-        ],
-    )
     def test_repeats_a_vote_a_day_old_with_sides_swapped(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        age: timedelta,
-        repeated: bool,
-        expected: bool,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
         pool = make_pool(systems=('large', 'small'))
         (original,) = votes_between(pool, 'large', 'small', ['a'])
-        original = original.model_copy(update={'recorded_at': NOW - age})
-        votes = [original]
-        if repeated:
-            votes.append(
-                original.model_copy(
-                    update={'id': 2, 'a': original.b, 'b': original.a, 'repeat_of': 1}
-                )
-            )
+        original = original.model_copy(update={'recorded_at': NOW - timedelta(days=1)})
+
+        picked = draw(
+            pool,
+            matched(pool, [original]),
+            set(),
+            NOW,
+            np.random.default_rng(0),
+            Board(),
+        )
+
+        assert picked is not None
+        assert picked.repeat_of == 1
+        assert (picked.case, Side.of(picked.a), Side.of(picked.b)) == (
+            original.case,
+            original.b,
+            original.a,
+        )
+
+    @pytest.mark.parametrize(
+        ('age', 'history'),
+        [
+            (timedelta(hours=23), lambda vote: [vote]),
+            (
+                timedelta(days=2),
+                lambda vote: [
+                    vote,
+                    vote.model_copy(
+                        update={'id': 2, 'a': vote.b, 'b': vote.a, 'repeat_of': 1}
+                    ),
+                ],
+            ),
+        ],
+        ids=['too-recent', 'already-repeated'],
+    )
+    def test_repeats_no_vote_younger_than_a_day_or_repeated_already(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        age: timedelta,
+        history: Callable[[Vote], list[Vote]],
+    ) -> None:
+        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
+        pool = make_pool(systems=('large', 'small'))
+        (original,) = votes_between(pool, 'large', 'small', ['a'])
+        votes = history(original.model_copy(update={'recorded_at': NOW - age}))
 
         picked = draw(
             pool, matched(pool, votes), set(), NOW, np.random.default_rng(0), Board()
         )
 
         assert picked is not None
-        assert (picked.repeat_of == 1) is expected
-        if expected:
-            assert (picked.case, Side.of(picked.a), Side.of(picked.b)) == (
-                original.case,
-                original.b,
-                original.a,
-            )
+        assert picked.repeat_of is None
 
     def test_skips_a_repeat_on_a_case_the_session_used(
         self, monkeypatch: pytest.MonkeyPatch

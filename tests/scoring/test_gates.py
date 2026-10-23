@@ -40,6 +40,7 @@ class TestFailedGates:
     @pytest.mark.parametrize(
         ('finish_reason', 'failures'),
         [('stop', [Gate.EMPTY]), ('length', [Gate.EMPTY, Gate.TRUNCATED])],
+        ids=['stop', 'length'],
     )
     def test_rejects_a_blank_output_without_further_checks(
         self, finish_reason: str, failures: list[Gate]
@@ -101,15 +102,13 @@ class TestDetectLanguage:
             '构建通过，详见 https://example.com/docs/release/notes/install/upgrade/guide',
             '构建通过，运行 `cargo test --workspace --all-features --release --locked '
             '--offline --quiet` 即可',
+            '```text\n构建通过，详见 '
+            'https://example.com/docs/release/notes/install/upgrade/guide\n```\n',
+            'Docs at https://example.com/a，安装方法和迁移说明都在发布页里，旧配置仍可读取',
         ],
-        ids=['url', 'inline-code'],
+        ids=['url', 'inline-code', 'prose-fence', 'url-ending-at-chinese-text'],
     )
     def test_ignores_urls_and_inline_code_in_prose(self, text: str) -> None:
-        assert detect_language(text) == 'zh'
-
-    def test_ends_a_url_at_chinese_text(self) -> None:
-        text = 'Docs at https://example.com/a，安装方法和迁移说明都在发布页里，旧配置仍可读取'
-
         assert detect_language(text) == 'zh'
 
     def test_reads_english_prose_quoting_chinese(self) -> None:
@@ -123,6 +122,7 @@ class TestDetectLanguage:
             ('接口限流为每秒两次，留出余量', 'zh'),
             ('Rate limit of two per second', 'en'),
         ],
+        ids=['zh', 'en'],
     )
     def test_judges_code_by_its_comments(self, comment: str, language: str) -> None:
         text = textwrap.dedent(
@@ -144,22 +144,20 @@ class TestDetectLanguage:
             '#!/usr/bin/env rust-script\n#[derive(Debug)]\nstruct Retry; // 重试',
             '#include <stdio.h>\n#define BUFFER_SIZE 4096\n// 缓冲区',
             '/* 主色 */\n.button { color: #fff; background: #0a84ff; }',
-        ],
-        ids=['shebang-and-attribute', 'preprocessor', 'css-colors'],
-    )
-    def test_skips_hashes_that_open_no_comment(self, code: str) -> None:
-        assert detect_language(f'```\n{code}\n```\n') == 'zh'
-
-    @pytest.mark.parametrize(
-        'code',
-        [
             'fn main() { let page = 4096; } /* 缓冲区按页对齐 */',
             'def parse(raw):\n    """解析原始字节。"""',
             "def parse(raw):\n    '''解析原始字节。'''",
         ],
-        ids=['block-comment', 'double-quoted-docstring', 'single-quoted-docstring'],
+        ids=[
+            'shebang-and-attribute',
+            'preprocessor',
+            'css-colors',
+            'block-comment',
+            'double-quoted-docstring',
+            'single-quoted-docstring',
+        ],
     )
-    def test_reads_block_comments_and_docstrings(self, code: str) -> None:
+    def test_reads_the_comments_of_fenced_code_alone(self, code: str) -> None:
         assert detect_language(f'```\n{code}\n```\n') == 'zh'
 
     def test_reads_an_indented_code_block_as_code(self) -> None:
@@ -203,28 +201,26 @@ class TestDetectLanguage:
 
         assert detect_language(text) == 'en'
 
-    def test_ignores_urls_inside_a_prose_fence(self) -> None:
-        url = 'https://example.com/docs/release/notes/install/upgrade/guide'
-
-        assert detect_language(f'```text\n构建通过，详见 {url}\n```\n') == 'zh'
-
-    @pytest.mark.parametrize('text', ['```\nx = 1\n```\n`y` 42', '你好 hello there'])
+    @pytest.mark.parametrize(
+        'text',
+        ['```\nx = 1\n```\n`y` 42', '你好 hello there'],
+        ids=['code-and-numbers', 'even-split'],
+    )
     def test_returns_none_without_a_majority(self, text: str) -> None:
         assert detect_language(text) is None
 
 
 class TestTraditionalCharacters:
-    def test_lists_each_traditional_only_character_once(self) -> None:
-        assert traditional_characters('這個設定，這個測試', '') == [
-            '這',
-            '個',
-            '設',
-            '測',
-            '試',
-        ]
-
-    def test_never_flags_a_character_valid_in_both_scripts(self) -> None:
-        assert traditional_characters('乾坤未定，著作等身，於是动身', '') == []
-
-    def test_exempts_characters_from_the_source(self) -> None:
-        assert traditional_characters('请把「臺北」改成「台北」', '原文写作臺北') == []
+    @pytest.mark.parametrize(
+        ('text', 'source', 'characters'),
+        [
+            ('這個設定，這個測試', '', ['這', '個', '設', '測', '試']),
+            ('乾坤未定，著作等身，於是动身', '', []),
+            ('请把「臺北」改成「台北」', '原文写作臺北', []),
+        ],
+        ids=['each-once', 'valid-in-both-scripts', 'in-the-source'],
+    )
+    def test_lists_each_traditional_only_character_the_source_lacks(
+        self, text: str, source: str, characters: list[str]
+    ) -> None:
+        assert traditional_characters(text, source) == characters

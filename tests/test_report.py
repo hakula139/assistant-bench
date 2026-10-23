@@ -650,30 +650,27 @@ class TestClose:
         with pytest.raises(ValueError, match="family 'quiet' has no votes"):
             close(family, store, AT)
 
-    def test_needs_votes_on_the_current_outputs(
-        self, families_dir: Path, store: VoteStore
-    ) -> None:
-        family = small_family(families_dir, store)
-        write_outputs('f', [])
-
-        with pytest.raises(
-            ValueError, match="family 'f' has no votes on its current outputs"
-        ):
-            close(family, store, AT)
-
-    def test_needs_votes_when_only_settled_results_remain(
-        self, families_dir: Path, store: VoteStore
-    ) -> None:
-        family = small_family(families_dir, store)
-        write_outputs(
-            'f',
-            [
+    @pytest.mark.parametrize(
+        'current',
+        [
+            lambda outputs: [],
+            lambda outputs: [
                 output
                 if output.system == 'large'
                 else output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
-                for output in read_outputs('f')
+                for output in outputs
             ],
-        )
+        ],
+        ids=['outputs-gone', 'only-settled-results'],
+    )
+    def test_needs_votes_on_the_current_outputs(
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        current: Callable[[list[Output]], list[Output]],
+    ) -> None:
+        family = small_family(families_dir, store)
+        write_outputs('f', current(read_outputs('f')))
 
         with pytest.raises(
             ValueError, match="family 'f' has no votes on its current outputs"
@@ -770,6 +767,7 @@ class TestClose:
     @pytest.mark.parametrize(
         ('fingerprints', 'message'),
         [([], 'has no outputs'), (['a', 'b'], 'has outputs under several')],
+        ids=['no-outputs', 'several-fingerprints'],
     )
     def test_rejects_a_tests_family_it_cannot_aggregate(
         self, store: VoteStore, fingerprints: list[str], message: str
@@ -823,6 +821,7 @@ class TestTextLength:
             ('运行 nix flake check 即可', 7),
             ('', 0),
         ],
+        ids=['words', 'han', 'mixed', 'empty'],
     )
     def test_counts_han_characters_and_other_words(
         self, text: str, length: int
