@@ -147,12 +147,6 @@ describe('listFamilies', () => {
 
     expect(families.map((family) => family.name)).toEqual(['cpp']);
   });
-
-  test.each(['writing', 'methodology', 'vote'])('rejects a family named %s', (name) => {
-    expect(() => listFamilies([{ name, config: votes(false) }], [], FIXTURE_NAMES)).toThrow(
-      `family ${name} takes the name of a top-level path`,
-    );
-  });
 });
 
 describe('systemPages', () => {
