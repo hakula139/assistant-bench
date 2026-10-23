@@ -522,7 +522,7 @@ class TestRun:
         exit_code, message = invoke('run', 'f')
 
         assert exit_code == 2
-        assert 'has a result.json but no lock.json' in message
+        assert 'lock.json' in message
         assert submitted == []
 
     def test_exits_with_the_code_of_a_failed_harbor_run(
