@@ -2,7 +2,6 @@
 
 import asyncio
 from pathlib import Path, PurePath
-from typing import Any
 
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -14,6 +13,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from assistant_bench.arena.service import (
+    OUTPUTS_PATH,
     Arena,
     FamilyView,
     NothingToUndo,
@@ -28,14 +28,7 @@ APP_PORT = 8790
 RENDER_PORT = 8791
 APP_ORIGIN = f'http://{HOST}:{APP_PORT}'
 RENDER_ORIGIN = f'http://{HOST}:{RENDER_PORT}'
-NOTE_MAX_CHARS = 500
-# Outputs load by URL from a second origin, since a `srcdoc` frame inherits the
-# vote page's policy. `sandbox` without `allow-same-origin` makes each opaque.
-RENDER_POLICY = (
-    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
-    "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
-    f'frame-ancestors {APP_ORIGIN}'
-)
+
 VOTE_DIR = 'vote'
 VOTE_POLICY = (
     "default-src 'none'; script-src 'self' 'unsafe-inline'; "
@@ -44,11 +37,22 @@ VOTE_POLICY = (
     "form-action 'none'; frame-ancestors 'none'"
 )
 
+# Outputs load by URL from a second origin, since a `srcdoc` frame inherits the
+# vote page's policy. `sandbox` without `allow-same-origin` makes each opaque.
+RENDER_POLICY = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
+    f'frame-ancestors {APP_ORIGIN}'
+)
+
 
 class StartSession(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     family: str
+
+
+NOTE_MAX_CHARS = 500
 
 
 class VoteRequest(BaseModel):
@@ -81,13 +85,8 @@ class SiteFiles(StaticFiles):
 
 
 def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
-    """Build the vote API under `/api`, serving the built site at `/`.
-
-    The app serves no API docs, since their page loads scripts from a CDN.
-    """
-    app = _app(
-        title='assistant-bench arena', docs_url=None, redoc_url=None, openapi_url=None
-    )
+    """Build the vote API under `/api`, serving the built site at `/`."""
+    app = _app()
     app.add_exception_handler(NothingToUndo, _conflict)
     router = APIRouter(prefix='/api')
     writes = APIRouter(dependencies=[Depends(same_origin)])
@@ -107,15 +106,15 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
         """Return the session's current pair, drawing one if none is open."""
         return arena.resume(session_id)
 
-    @writes.post('/sessions/{session_id}/undo')
-    async def undo(session_id: str) -> SessionView:
-        """Withdraw the session's latest vote and show its pair again."""
-        return arena.undo(session_id)
-
     @writes.post('/pairs/{token}/vote')
     async def vote(token: str, body: VoteRequest) -> SessionView:
         """Record a vote on a pair and return the session's next pair."""
         return arena.vote(token, body.choice, body.defects, body.note)
+
+    @writes.post('/sessions/{session_id}/undo')
+    async def undo(session_id: str) -> SessionView:
+        """Withdraw the session's latest vote and show its pair again."""
+        return arena.undo(session_id)
 
     router.include_router(writes)
     app.include_router(router)
@@ -126,9 +125,9 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
 
 def create_render_app(arena: Arena) -> FastAPI:
     """Build the origin that serves each HTML output under its sandbox policy."""
-    app = _app(openapi_url=None)
+    app = _app()
 
-    @app.get('/outputs/{token}')
+    @app.get(f'{OUTPUTS_PATH}/{{token}}')
     async def output(token: str) -> HTMLResponse:
         return HTMLResponse(
             arena.document(token), headers={'Content-Security-Policy': RENDER_POLICY}
@@ -153,8 +152,13 @@ def serve(arena: Arena, site: Path) -> None:
     asyncio.run(run())
 
 
-def _app(**options: Any) -> FastAPI:
-    app = FastAPI(**options)
+def _app() -> FastAPI:
+    """Build an app on the loopback host that serves no API docs.
+
+    FastAPI serves its docs pages only beside an OpenAPI document, and their page
+    loads scripts from a CDN.
+    """
+    app = FastAPI(openapi_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST])
     app.add_exception_handler(UnknownItem, _not_found)
     return app

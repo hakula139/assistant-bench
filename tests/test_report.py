@@ -1,8 +1,8 @@
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import jsonschema
 import numpy as np
@@ -10,18 +10,12 @@ import pytest
 
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
-from assistant_bench.arena.store import (
-    Ballot,
-    Choice,
-    Defects,
-    Side,
-    Vote,
-    VoteStore,
-)
+from assistant_bench.arena.store import Ballot, Choice, Defects, Vote, VoteStore
 from assistant_bench.families import Family, Gate, load_family
 from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.report import (
     Decision,
+    Distribution,
     Interval,
     Report,
     Standing,
@@ -32,6 +26,7 @@ from assistant_bench.report import (
 )
 from assistant_bench.scoring.ranking import Ratings
 from support import (
+    AT,
     EARLY_REPORT_FIXTURE,
     RENDER_ORIGIN,
     REPORT_FIXTURE,
@@ -40,21 +35,11 @@ from support import (
     SYNTHETIC_EARLY_CLOSE,
     Clock,
     make_arena,
+    make_ballot,
     make_output,
+    passing_outputs,
     write_synthetic_round,
     write_votes_family,
-)
-
-
-AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
-UNTAGGED = Defects()
-ROUNDS = pytest.mark.parametrize(
-    ('fixture', 'sessions', 'closed_at'),
-    [
-        (REPORT_FIXTURE, 10, SYNTHETIC_CLOSE),
-        (EARLY_REPORT_FIXTURE, 1, SYNTHETIC_EARLY_CLOSE),
-    ],
-    ids=['full', 'early'],
 )
 
 
@@ -69,47 +54,11 @@ def approx(value: Any) -> Any:
     return value
 
 
-def record(
-    store: VoteStore,
-    session: str,
-    a: Output,
-    b: Output,
-    choice: Choice,
-    defects: Defects = UNTAGGED,
-    note: str | None = None,
-) -> Vote:
-    return store.record(
-        Ballot(
-            session=session,
-            case=a.case,
-            a=Side.of(a),
-            b=Side.of(b),
-            choice=choice,
-            defects=defects,
-            note=note,
-            duration_sec=10.0,
-        ),
-        AT,
-    )
-
-
-def passing_outputs(
-    cases: dict[str, str], texts: dict[str, dict[str, str]]
+def write_passing_outputs(
+    cases: dict[str, str], systems: list[str], text: str = '{system} on {case}'
 ) -> dict[tuple[str, str], Output]:
-    """Write one passing output per case and system, `texts[case][system]`."""
-    outputs = {
-        (case, system): make_output(
-            trial=f'{case}__{system}',
-            job='job-1',
-            case=case,
-            system=system,
-            fingerprint=f'fp-{system}',
-            text=text,
-            gate_failures=[],
-        )
-        for case in cases
-        for system, text in texts[case].items()
-    }
+    """Write family `f`'s outputs, one passing output per case and system."""
+    outputs = passing_outputs(cases, systems, text=text)
     write_outputs('f', list(outputs.values()))
     return outputs
 
@@ -123,26 +72,24 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
     ties = [f't{i}' for i in range(5)]
     cases = {'c1': 'reply', 'c2': 'docs', 'c3': 'misc'} | dict.fromkeys(ties, 'reply')
     write_votes_family(families_dir, 'f', ['large', 'medium', 'small'], cases)
-    texts = {'large': 'one two three', 'medium': '一二三四五六', 'small': 'four five'}
+    profiles: dict[str, dict[str, Any]] = {
+        'large': {
+            'text': 'one two three',
+            'cost_usd': 0.02,
+            'latency_sec': 5.0,
+            'output_tokens': 10,
+        },
+        'medium': {
+            'text': '一二三四五六',
+            'cost_usd': 0.01,
+            'latency_sec': 4.0,
+            'output_tokens': 10,
+        },
+        'small': {'text': 'four five', 'latency_sec': 3.0},
+    }
     outputs = [
-        make_output(
-            trial=f'{case}__{system}',
-            job='job-1',
-            case=case,
-            system=system,
-            fingerprint=f'fp-{system}',
-            text=texts[system],
-            gate_failures=[],
-            cost_usd=cost,
-            latency_sec=latency,
-            output_tokens=None if system == 'small' else 10,
-        )
-        for case in cases
-        for system, cost, latency in (
-            ('large', 0.02, 5.0),
-            ('medium', 0.01, 4.0),
-            ('small', None, 3.0),
-        )
+        output.model_copy(update=profiles[output.system])
+        for output in passing_outputs(cases, list(profiles)).values()
     ]
     write_outputs('f', outputs)
     by_trial = {output.trial: output for output in outputs}
@@ -167,15 +114,15 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
             (case, 'small', 'large', 'tie', Defects(), None),
         ]
     for case, left, right, choice, defects, note in votes:
-        record(
-            store,
-            session.id,
+        ballot = make_ballot(
             by_trial[f'{case}__{left}'],
             by_trial[f'{case}__{right}'],
-            choice,
-            defects,
-            note,
+            session=session.id,
+            choice=choice,
+            defects=defects,
+            note=note,
         )
+        store.record(ballot, AT)
     return load_family('f')
 
 
@@ -200,7 +147,14 @@ class TestReport:
 
 
 class TestClose:
-    @ROUNDS
+    @pytest.mark.parametrize(
+        ('fixture', 'sessions', 'closed_at'),
+        [
+            (REPORT_FIXTURE, 10, SYNTHETIC_CLOSE),
+            (EARLY_REPORT_FIXTURE, 1, SYNTHETIC_EARLY_CLOSE),
+        ],
+        ids=['full', 'early'],
+    )
     def test_matches_the_committed_fixture(
         self,
         families_dir: Path,
@@ -261,6 +215,34 @@ class TestClose:
         small = next(s for s in results.standings if s.system == 'small')
         assert small.output_tokens is None
         assert small.mean_cost_usd is None
+
+    def test_leaves_errored_trials_out_of_a_standing_s_aggregates(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        family = small_family(families_dir, store)
+        errored = make_output(
+            trial='c1__large__2',
+            job='job-1',
+            case='c1',
+            system='large',
+            fingerprint='fp-large',
+            error='TimeoutError',
+            output_tokens=999,
+            cost_usd=1.0,
+            latency_sec=99.0,
+        )
+        write_outputs('f', [*read_outputs('f'), errored])
+
+        results = close(family, store, AT).results
+
+        assert results.scorer == 'votes'
+        large = next(s for s in results.standings if s.system == 'large')
+        assert large.outputs == 8
+        assert large.gate_failure_rate == 0.0
+        assert large.mean_cost_usd == pytest.approx(0.02)
+        assert large.p50_latency_sec == 5.0
+        assert large.latency_sec == Distribution(p10=5.0, p50=5.0, p90=5.0)
+        assert large.output_tokens == Distribution(p10=10.0, p50=10.0, p90=10.0)
 
     def test_lets_the_results_that_gate_failures_settle_replace_votes(
         self, families_dir: Path, store: VoteStore
@@ -333,19 +315,12 @@ class TestClose:
     ) -> None:
         cases = {'c1': 'reply', 'c2': 'reply'}
         write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in 'abcd'} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, ['a', 'b', 'c', 'd'])
         session = store.start_session('f', AT)
         for left, right, case in (('a', 'b', 'c1'), ('c', 'd', 'c2')):
             for choice in ('a', 'b', 'a'):
-                record(
-                    store,
-                    session.id,
-                    outputs[(case, left)],
-                    outputs[(case, right)],
-                    choice,
-                )
+                a, b = outputs[(case, left)], outputs[(case, right)]
+                store.record(make_ballot(a, b, session=session.id, choice=choice), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -361,9 +336,7 @@ class TestClose:
     ) -> None:
         cases = {'c1': 'reply', 'c2': 'reply'}
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in 'abc'} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, ['a', 'b', 'c'])
         write_outputs(
             'f',
             [
@@ -376,13 +349,8 @@ class TestClose:
         session = store.start_session('f', AT)
         for case in cases:
             for choice in ('a', 'b', 'tie'):
-                record(
-                    store,
-                    session.id,
-                    outputs[(case, 'a')],
-                    outputs[(case, 'b')],
-                    choice,
-                )
+                a, b = outputs[(case, 'a')], outputs[(case, 'b')]
+                store.record(make_ballot(a, b, session=session.id, choice=choice), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -395,13 +363,12 @@ class TestClose:
     ) -> None:
         cases = {f'r{i}': 'reply' for i in range(5)} | {'d0': 'docs', 'd1': 'docs'}
         write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in 'abcd'} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, ['a', 'b', 'c', 'd'])
         session = store.start_session('f', AT)
         pairs = [(f'r{i}', opponent) for i in range(5) for opponent in 'bc']
         for case, opponent in [*pairs, ('r0', 'd'), ('d0', 'b'), ('d1', 'c')]:
-            record(store, session.id, outputs[case, 'a'], outputs[case, opponent], 'a')
+            a, b = outputs[case, 'a'], outputs[case, opponent]
+            store.record(make_ballot(a, b, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -412,26 +379,50 @@ class TestClose:
         assert [standing.system for standing in docs.standings] == ['a']
         assert docs.unranked == ['b', 'c']
 
+    def test_marks_a_system_preliminary_below_the_decisive_vote_bar(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {f'c{i:02}': 'reply' for i in range(45)}
+        write_votes_family(families_dir, 'f', ['x', 'y', 'z'], cases)
+        outputs = write_passing_outputs(cases, ['x', 'y', 'z'])
+        session = store.start_session('f', AT)
+        for i, case in enumerate(cases):
+            x, y, z = (outputs[(case, system)] for system in 'xyz')
+            choice: Choice = 'a' if i % 5 < 3 else 'b'
+            store.record(make_ballot(x, y, session=session.id, choice=choice), AT)
+            if i < 10:
+                store.record(make_ballot(z, x, session=session.id, choice='tie'), AT)
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        expected = {'x': False, 'y': False, 'z': True}
+        assert {s.system: s.preliminary for s in results.standings} == expected
+        (board,) = results.categories
+        assert {s.system: s.preliminary for s in board.standings} == expected
+
     def test_measures_a_preference_for_longer_outputs(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         cases = {f'c{i}': 'reply' for i in range(8)}
         write_votes_family(families_dir, 'f', ['x', 'y'], cases)
         words = {'x': lambda i: 5 + 3 * i, 'y': lambda i: 26 - 3 * i}
-        outputs = passing_outputs(
-            cases,
-            {
-                f'c{i}': {s: ' '.join(['word'] * words[s](i)) for s in 'xy'}
-                for i in range(8)
-            },
-        )
+        outputs = {
+            (case, system): output.model_copy(
+                update={'text': ' '.join(['word'] * words[system](int(case[1:])))}
+            )
+            for (case, system), output in passing_outputs(cases, ['x', 'y']).items()
+        }
+        write_outputs('f', list(outputs.values()))
         session = store.start_session('f', AT)
         for i in range(8):
             x, y = outputs[(f'c{i}', 'x')], outputs[(f'c{i}', 'y')]
             longer: Choice = 'a' if i >= 4 else 'b'
-            record(store, session.id, x, y, longer)
-            record(store, session.id, y, x, 'b' if longer == 'a' else 'a')
-        record(store, session.id, outputs[('c0', 'x')], outputs[('c0', 'y')], 'a')
+            shorter: Choice = 'b' if longer == 'a' else 'a'
+            store.record(make_ballot(x, y, session=session.id, choice=longer), AT)
+            store.record(make_ballot(y, x, session=session.id, choice=shorter), AT)
+        x, y = outputs[('c0', 'x')], outputs[('c0', 'y')]
+        store.record(make_ballot(x, y, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -452,20 +443,18 @@ class TestClose:
     ) -> None:
         cases = {f'c{i}': 'reply' for i in range(4)}
         write_votes_family(families_dir, 'f', ['x', 'y'], cases)
-        outputs = passing_outputs(
-            cases,
-            {case: {s: texts[s].format(case=case) for s in 'xy'} for case in cases},
-        )
+        outputs = {
+            (case, system): output.model_copy(
+                update={'text': texts[system].format(case=case)}
+            )
+            for (case, system), output in passing_outputs(cases, ['x', 'y']).items()
+        }
+        write_outputs('f', list(outputs.values()))
         session = store.start_session('f', AT)
         for case in cases:
             for choice in ('a', 'b', 'tie'):
-                record(
-                    store,
-                    session.id,
-                    outputs[(case, 'x')],
-                    outputs[(case, 'y')],
-                    choice,
-                )
+                x, y = outputs[(case, 'x')], outputs[(case, 'y')]
+                store.record(make_ballot(x, y, session=session.id, choice=choice), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -473,39 +462,44 @@ class TestClose:
         assert {standing.system for standing in results.standings} == {'x', 'y'}
         assert results.length is None
 
+    @pytest.mark.parametrize('empty', [False, True], ids=['voted', 'empty-session'])
     def test_agrees_across_halves_split_by_session_parity(
-        self, families_dir: Path, store: VoteStore
+        self, families_dir: Path, store: VoteStore, empty: bool
     ) -> None:
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
-        outputs = passing_outputs({'c1': 'reply'}, {'c1': {s: s for s in 'abc'}})
+        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'], '{system}')
         strong = [('a', 'b'), ('b', 'c'), ('a', 'c')] * 3
         weak = [('c', 'b'), ('b', 'a'), ('c', 'a')]
         for day, pairs in enumerate((strong, strong, weak, weak)):
             session = store.start_session('f', AT + timedelta(days=day))
             for i, (winner, loser) in enumerate(pairs):
                 a, b = outputs[('c1', winner)], outputs[('c1', loser)]
-                if i % 2:
-                    record(store, session.id, b, a, 'b')
-                else:
-                    record(store, session.id, a, b, 'a')
+                ballot = (
+                    make_ballot(b, a, session=session.id, choice='b')
+                    if i % 2
+                    else make_ballot(a, b, session=session.id)
+                )
+                store.record(ballot, AT)
+            if empty and day == 0:
+                store.start_session('f', AT + timedelta(hours=1))
 
         results = close(load_family('f'), store, AT).results
 
         assert results.scorer == 'votes'
+        assert results.sessions == 4
         assert results.split_half_tau == pytest.approx(1.0)
 
     def test_leaves_split_half_agreement_out_when_a_half_misses_the_root(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
-        outputs = passing_outputs({'c1': 'reply'}, {'c1': {s: s for s in 'abc'}})
+        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'], '{system}')
         halves = ([('a', 'b'), ('a', 'c')] * 4, [('b', 'c')] * 3)
         for day, pairs in enumerate(halves):
             session = store.start_session('f', AT + timedelta(days=day))
             for winner, loser in pairs:
-                record(
-                    store, session.id, outputs['c1', winner], outputs['c1', loser], 'a'
-                )
+                a, b = outputs['c1', winner], outputs['c1', loser]
+                store.record(make_ballot(a, b, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -521,18 +515,16 @@ class TestClose:
         session = store.start_session('f', AT)
         repeats: list[tuple[Vote, Choice]] = [(first, 'b'), (third, 'a')]
         for original, choice in repeats:
-            store.record(
-                Ballot(
-                    session=session.id,
-                    case=original.case,
-                    a=original.b,
-                    b=original.a,
-                    choice=choice,
-                    duration_sec=10.0,
-                    repeat_of=original.id,
-                ),
-                AT,
+            repeat = Ballot(
+                session=session.id,
+                case=original.case,
+                a=original.b,
+                b=original.a,
+                choice=choice,
+                duration_sec=10.0,
+                repeat_of=original.id,
             )
+            store.record(repeat, AT)
 
         results = close(family, store, AT).results
 
@@ -561,25 +553,12 @@ class TestClose:
         cases = {f'c{i}': 'reply' for i in range(8)}
         systems = ['large', 'small', 'medium', 'tiny']
         write_votes_family(families_dir, 'f', systems, cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, systems)
         session = store.start_session('f', AT)
         for case in cases:
-            record(
-                store,
-                session.id,
-                outputs[(case, 'medium')],
-                outputs[(case, 'small')],
-                'a',
-            )
-            record(
-                store,
-                session.id,
-                outputs[(case, 'medium')],
-                outputs[(case, 'tiny')],
-                'b',
-            )
+            for opponent, choice in (('small', 'a'), ('tiny', 'b')):
+                a, b = outputs[(case, 'medium')], outputs[(case, opponent)]
+                store.record(make_ballot(a, b, session=session.id, choice=choice), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -598,13 +577,13 @@ class TestClose:
         cases = {'r0': 'reply'} | {f'c{i}': 'reply' for i in range(8)}
         systems = ['ref', 'a', 'b']
         write_votes_family(families_dir, 'f', systems, cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, systems)
         session = store.start_session('f', AT)
-        record(store, session.id, outputs[('r0', 'ref')], outputs[('r0', 'a')], 'a')
-        for case in (f'c{i}' for i in range(8)):
-            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
+        for case, left, right in [('r0', 'ref', 'a')] + [
+            (f'c{i}', 'a', 'b') for i in range(8)
+        ]:
+            a, b = outputs[(case, left)], outputs[(case, right)]
+            store.record(make_ballot(a, b, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -621,16 +600,16 @@ class TestClose:
         }
         systems = ['a', 'b', 'c', 'd']
         write_votes_family(families_dir, 'f', systems, cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, systems)
         session = store.start_session('f', AT)
-        for case in (f'r{i}' for i in range(5)):
-            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
-        for case in (f'd{i}' for i in range(2)):
-            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
-        for case in (f'd{i}' for i in range(3)):
-            record(store, session.id, outputs[(case, 'c')], outputs[(case, 'd')], 'a')
+        votes = (
+            [(f'r{i}', 'a', 'b') for i in range(5)]
+            + [(f'd{i}', 'a', 'b') for i in range(2)]
+            + [(f'd{i}', 'c', 'd') for i in range(3)]
+        )
+        for case, left, right in votes:
+            a, b = outputs[(case, left)], outputs[(case, right)]
+            store.record(make_ballot(a, b, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -648,19 +627,20 @@ class TestClose:
         }
         systems = ['a', 'b', 'c']
         write_votes_family(families_dir, 'f', systems, cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, systems)
         session = store.start_session('f', AT)
-        for case in (f'r{i}' for i in range(5)):
-            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
-            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'c')], 'b')
-        record(store, session.id, outputs[('d0', 'a')], outputs[('d0', 'b')], 'a')
-        for case in (f'd{i}' for i in range(3)):
-            for _ in range(3):
-                record(
-                    store, session.id, outputs[(case, 'b')], outputs[(case, 'c')], 'a'
-                )
+        votes = (
+            [
+                (f'r{i}', 'a', opponent, choice)
+                for i in range(5)
+                for opponent, choice in (('b', 'a'), ('c', 'b'))
+            ]
+            + [('d0', 'a', 'b', 'a')]
+            + [(f'd{i}', 'b', 'c', 'a') for i in range(3) for _ in range(3)]
+        )
+        for case, left, right, choice in votes:
+            a, b = outputs[(case, left)], outputs[(case, right)]
+            store.record(make_ballot(a, b, session=session.id, choice=choice), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -674,7 +654,7 @@ class TestClose:
         family = small_family(families_dir, store)
         family = family.model_copy(update={'name': 'quiet'})
 
-        with pytest.raises(ValueError, match="family 'quiet' has no votes"):
+        with pytest.raises(ValueError, match="family 'quiet' has no votes yet"):
             close(family, store, AT)
 
     @pytest.mark.parametrize(
@@ -700,7 +680,7 @@ class TestClose:
         write_outputs('f', current(read_outputs('f')))
 
         with pytest.raises(
-            ValueError, match="family 'f' has no votes on its current outputs"
+            ValueError, match="family 'f' has votes, but none compares two of its"
         ):
             close(family, store, AT)
 
@@ -710,18 +690,11 @@ class TestClose:
         cases = {f'c{i}': 'reply' for i in range(8)}
         systems = ['ref', 'zeta', 'alpha']
         write_votes_family(families_dir, 'f', systems, cases)
-        outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
-        )
+        outputs = write_passing_outputs(cases, systems)
         session = store.start_session('f', AT)
         for case in cases:
-            record(
-                store,
-                session.id,
-                outputs[(case, 'zeta')],
-                outputs[(case, 'alpha')],
-                'a',
-            )
+            a, b = outputs[(case, 'zeta')], outputs[(case, 'alpha')]
+            store.record(make_ballot(a, b, session=session.id), AT)
 
         results = close(load_family('f'), store, AT).results
 
@@ -732,7 +705,7 @@ class TestClose:
             'zeta',
         }
 
-    def test_anchors_a_fallback_when_the_reference_loses_its_votes(
+    def test_anchors_a_fallback_when_the_reference_loses_its_outputs(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         family = small_family(families_dir, store)
@@ -742,7 +715,11 @@ class TestClose:
 
         assert results.scorer == 'votes'
         assert (results.reference, results.anchor) == ('large', 'medium')
-        assert 'large' not in {standing.system for standing in results.standings}
+        assert {standing.system for standing in results.standings} == {
+            'medium',
+            'small',
+        }
+        assert results.unranked == []
         assert [board.category for board in results.categories] == ['misc', 'reply']
 
     def test_ignores_a_retired_output_under_a_stale_fingerprint(
@@ -776,7 +753,7 @@ class TestClose:
         cases = {'c1': 'reply', 'c2': 'reply'}
         write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
         outputs = passing_outputs(
-            cases, {case: {s: f'{s} on {case}' for s in 'abcd'} for case in cases}
+            cases, ['a', 'b', 'c', 'd'], text='{system} on {case}'
         )
         old = outputs[('c2', 'd')].model_copy(
             update={'trial': 'old', 'fingerprint': 'fp-old', 'text': 'd before'}
@@ -784,9 +761,8 @@ class TestClose:
         write_outputs('f', [*outputs.values(), old])
         session = store.start_session('f', AT)
         for left, right, case in (('a', 'b', 'c1'), ('c', 'd', 'c2')):
-            record(
-                store, session.id, outputs[(case, left)], outputs[(case, right)], 'a'
-            )
+            a, b = outputs[(case, left)], outputs[(case, right)]
+            store.record(make_ballot(a, b, session=session.id), AT)
 
         with pytest.raises(ValueError, match="'d' has outputs under several"):
             close(load_family('f'), store, AT)
@@ -801,19 +777,34 @@ class TestClose:
     ) -> None:
         write_outputs(
             'smoke',
-            [make_output(trial=f, system='large', fingerprint=f) for f in fingerprints],
+            [
+                make_output(trial=f, case='echo', system='large', fingerprint=f)
+                for f in fingerprints
+            ],
         )
 
         with pytest.raises(ValueError, match=message):
             close(load_family('smoke'), store, AT)
 
     def test_reports_pass_rates_for_a_tests_family(self, store: VoteStore) -> None:
+        trials: list[dict[str, Any]] = [
+            {'trial': '1', 'reward': 1.0, 'latency_sec': 2.0},
+            {'trial': '2', 'reward': 0.0, 'latency_sec': 4.0},
+            {
+                'trial': '3',
+                'error': 'TimeoutError',
+                'cost_usd': 1.0,
+                'latency_sec': 60.0,
+            },
+            {'trial': '4', 'case': 'retired', 'reward': 1.0},
+        ]
         write_outputs(
             'smoke',
             [
-                make_output(trial='1', system='large', reward=1.0, latency_sec=2.0),
-                make_output(trial='2', system='large', reward=0.0, latency_sec=4.0),
-                make_output(trial='3', system='large', error='TimeoutError'),
+                make_output(
+                    **{'case': 'echo', 'system': 'large', 'cost_usd': 0.01} | trial
+                )
+                for trial in trials
             ],
         )
 
@@ -823,6 +814,7 @@ class TestClose:
         (standing,) = results.standings
         assert (standing.trials, standing.errored) == (3, 1)
         assert standing.pass_rate == pytest.approx(1 / 3)
+        assert standing.mean_cost_usd == pytest.approx(0.01)
         assert standing.p50_latency_sec == 3.0
 
 
@@ -846,9 +838,10 @@ class TestTextLength:
             ('Two words.', 2),
             ('用一句话欢迎。', 7),
             ('运行 nix flake check 即可', 7),
+            ('增长一〇〇%', 6),
             ('', 0),
         ],
-        ids=['words', 'han', 'mixed', 'empty'],
+        ids=['words', 'han', 'mixed', 'ling', 'empty'],
     )
     def test_counts_han_characters_and_other_words(
         self, text: str, length: int
@@ -856,8 +849,13 @@ class TestTextLength:
         assert text_length(text) == length
 
 
-type Row = tuple[str, float, float, float | None, float, bool]
-"""A system, its score, how far its resamples spread, cost, latency, preliminary."""
+class Row(NamedTuple):
+    system: str
+    score: float
+    spread: float
+    cost: float | None
+    latency: float
+    preliminary: bool
 
 
 class TestDecide:
@@ -869,36 +867,38 @@ class TestDecide:
         spread 100 against a top with spread 0 ties within about 95 points.
         """
         steps = np.linspace(-1, 1, 201)
-        scores = np.array([row[1] for row in rows])
+        scores = np.array([row.score for row in rows])
         standings = [
             Standing(
-                system=system,
+                system=row.system,
                 fingerprint=None,
-                score=score,
-                interval=Interval(lower=score - spread, upper=score + spread),
-                rank=int((scores > score).sum()) + 1,
+                score=row.score,
+                interval=Interval(
+                    lower=row.score - row.spread, upper=row.score + row.spread
+                ),
+                rank=int((scores > row.score).sum()) + 1,
                 best_rank=1,
                 worst_rank=len(rows),
-                preliminary=preliminary,
+                preliminary=row.preliminary,
                 votes=50,
                 decisive_votes=45,
                 both_bad_rate=0.0,
                 outputs=10,
                 gate_failure_rate=0.0,
-                mean_cost_usd=cost,
-                p50_latency_sec=latency,
+                mean_cost_usd=row.cost,
+                p50_latency_sec=row.latency,
                 output_tokens=None,
                 latency_sec=None,
                 defects={},
             )
-            for system, score, spread, cost, latency, preliminary in rows
+            for row in rows
         ]
         ratings = Ratings(
-            systems=tuple(row[0] for row in rows),
+            systems=tuple(row.system for row in rows),
             score=scores,
             lower=scores,
             upper=scores,
-            draws=np.stack([row[1] + row[2] * steps for row in rows], axis=1),
+            draws=np.stack([row.score + row.spread * steps for row in rows], axis=1),
             position=0.0,
         )
         return standings, ratings
@@ -907,32 +907,47 @@ class TestDecide:
         ('rows', 'expected'),
         [
             (
-                [('x', 1100, 0, 0.02, 9.0, False), ('y', 1000, 0, 0.01, 1.0, False)],
+                [
+                    Row('x', 1100, 0, 0.02, 9.0, False),
+                    Row('y', 1000, 0, 0.01, 1.0, False),
+                ],
                 Decision(leader='x', separated=True, tie_break='score'),
             ),
             (
                 [
-                    ('x', 1100, 0, 0.02, 9.0, False),
-                    ('y', 1050, 100, 0.01, 9.0, False),
-                    ('z', 1020, 100, None, 1.0, False),
-                    ('w', 900, 100, 0.001, 1.0, False),
+                    Row('x', 1100, 0, 0.02, 9.0, False),
+                    Row('y', 1050, 100, 0.01, 9.0, False),
+                    Row('z', 1020, 100, None, 1.0, False),
+                    Row('w', 900, 100, 0.001, 1.0, False),
                 ],
                 Decision(leader='y', separated=False, tie_break='cost'),
             ),
             (
-                [('x', 1100, 0, 0.01, 9.0, False), ('y', 1050, 100, 0.01, 3.0, False)],
+                [
+                    Row('x', 1100, 0, 0.01, 9.0, False),
+                    Row('y', 1050, 100, 0.01, 3.0, False),
+                ],
                 Decision(leader='y', separated=False, tie_break='latency'),
             ),
             (
-                [('x', 1100, 0, 0.01, 3.0, False), ('y', 1050, 100, 0.01, 3.0, False)],
+                [
+                    Row('x', 1100, 0, 0.01, 3.0, False),
+                    Row('y', 1050, 100, 0.01, 3.0, False),
+                ],
                 Decision(leader='x', separated=False, tie_break='score'),
             ),
             (
-                [('x', 1100, 0, None, 3.0, False), ('y', 1050, 100, None, 2.0, False)],
+                [
+                    Row('x', 1100, 0, None, 3.0, False),
+                    Row('y', 1050, 100, None, 2.0, False),
+                ],
                 Decision(leader='y', separated=False, tie_break='latency'),
             ),
             (
-                [('x', 1100, 0, 0.02, 9.0, False), ('y', 900, 0, 0.01, 1.0, True)],
+                [
+                    Row('x', 1100, 0, 0.02, 9.0, False),
+                    Row('y', 900, 0, 0.01, 1.0, True),
+                ],
                 Decision(leader='x', separated=True, tie_break='score'),
             ),
         ],
@@ -953,8 +968,8 @@ class TestDecide:
     @pytest.mark.parametrize(
         'rows',
         [
-            [('x', 1800, 0, 0.001, 1.0, True), ('y', 1100, 0, 0.02, 9.0, False)],
-            [('x', 1100, 0, 0.02, 9.0, False), ('y', 1050, 100, 0.01, 1.0, True)],
+            [Row('x', 1800, 0, 0.001, 1.0, True), Row('y', 1100, 0, 0.02, 9.0, False)],
+            [Row('x', 1100, 0, 0.02, 9.0, False), Row('y', 1050, 100, 0.01, 1.0, True)],
         ],
         ids=['preliminary-top', 'preliminary-tied'],
     )

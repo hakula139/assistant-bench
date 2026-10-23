@@ -11,8 +11,6 @@ from zhon.cedict.traditional import CHARACTERS as TRADITIONAL
 from assistant_bench.families import Gate, Language, VotesSettings
 
 
-# CC-CEDICT's Traditional characters minus its Simplified ones, so a character valid
-# in both scripts, such as 乾 or 於, never fails the script gate.
 _TRADITIONAL_ONLY = frozenset(TRADITIONAL) - frozenset(SIMPLIFIED)
 
 _MARKDOWN = MarkdownIt('commonmark')
@@ -20,8 +18,8 @@ _MARKDOWN = MarkdownIt('commonmark')
 _PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
 # A URL, which ends at whitespace, Han characters, or Chinese punctuation.
 _URL = re.compile(f'https?://[^\\s{hanzi.characters}{re.escape(hanzi.punctuation)}]+')
-# A line comment opened by `#` and a space or by `//`, leaving out `#include`, CSS
-# colors, shebangs, and `#[attribute]`.
+# An end-of-line comment opened at line start or after whitespace by `# ` or `//`,
+# leaving out `#include`, CSS colors, shebangs, and `#[attribute]`.
 _LINE_COMMENT = re.compile(r'(?:^|\s)(?:#(?=\s)|//)(.*)$', re.MULTILINE)
 _BLOCK_COMMENT = re.compile(r'/\*(.*?)\*/|"""(.*?)"""|\'\'\'(.*?)\'\'\'', re.DOTALL)
 _HAN = re.compile(f'[{hanzi.characters}]')
@@ -72,8 +70,9 @@ def detect_language(text: str) -> Language | None:
     The text is parsed as CommonMark. Natural language is its inline text without
     inline code or URLs, with each fence tagged `markdown`, `md`, `text`, or `txt`
     parsed the same way. Every other fenced or indented code block contributes only
-    its comments: lines opened by `# ` or `//`, `/* */` blocks, and triple-quoted
-    strings, so code-only outputs are judged by their comments. Han characters count
+    its comments: those opened by `#` and a space or by `//` at a line's start or
+    after whitespace, `/* */` blocks, and triple-quoted strings, so code-only
+    outputs are judged by their comments. Han characters count
     against Latin words, and a tie, including text with neither, returns `None`.
     """
     natural = '\n'.join(_natural_language(text))

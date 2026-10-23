@@ -31,8 +31,15 @@ from assistant_bench.families import (
 from assistant_bench.outputs import Output, read_outputs
 
 
+OUTPUTS_PATH = '/outputs'
+
+
 class UnknownItem(LookupError):
-    """A session, pair, or document that the arena never issued or has retired."""
+    """An item the arena does not hold.
+
+    The item is a family the arena does not serve, or a session, pair, or
+    document that it never issued or has retired.
+    """
 
 
 class NothingToUndo(Exception):
@@ -84,8 +91,8 @@ class FamilyView(BaseModel):
 class SessionView(BaseModel):
     """A session's votes and the pair to show, absent once no case remains.
 
-    `remaining` counts the cases the session has yet to vote on, the open pair's
-    included.
+    `remaining` counts the cases the session has yet to vote on, including the
+    open pair's.
     """
 
     id: str
@@ -116,9 +123,12 @@ class ArenaFamily:
 
 @dataclass(frozen=True)
 class _Issued:
+    """A pair shown to a session, with the tokens of the documents its panes load."""
+
     session: str
     draw: Draw
     view: PairView
+    documents: list[str]
     served_at: datetime
 
 
@@ -176,7 +186,9 @@ class Arena:
         self._render_origin = render_origin
         self._clock = clock
         self._rng = rng or np.random.default_rng()
-        self._boards = {name: Board() for name in families}
+        self._boards = {
+            name: Board(family.pool.systems) for name, family in families.items()
+        }
         self._pairs: dict[str, _Issued] = {}
         self._current: dict[str, str] = {}
         self._documents: dict[str, str] = {}
@@ -285,6 +297,7 @@ class Arena:
     def _serve(self, session: Session, picked: Draw) -> None:
         family = self._families[session.family]
         token = secrets.token_urlsafe(16)
+        documents: list[str] = []
         self._pairs[token] = _Issued(
             session=session.id,
             draw=picked,
@@ -292,14 +305,16 @@ class Arena:
                 token=token,
                 instruction=family.instructions[picked.case],
                 checklist=family.checklists[picked.case],
-                a=self._pane(family, picked.a),
-                b=self._pane(family, picked.b),
+                a=self._pane(family, picked.a, documents),
+                b=self._pane(family, picked.b, documents),
             ),
+            documents=documents,
             served_at=self._clock(),
         )
         self._current[session.id] = token
 
-    def _pane(self, family: ArenaFamily, output: Output) -> Pane:
+    def _pane(self, family: ArenaFamily, output: Output, documents: list[str]) -> Pane:
+        """Return the pane that shows `output`, adding an HTML pane's document."""
         assert output.text is not None
         match family.render:
             case 'text':
@@ -307,7 +322,8 @@ class Arena:
             case 'html':
                 document = secrets.token_urlsafe(16)
                 self._documents[document] = output.text
-                url = f'{self._render_origin}/outputs/{document}'
+                documents.append(document)
+                url = f'{self._render_origin}{OUTPUTS_PATH}/{document}'
                 return HtmlPane(render='html', url=url)
             case _:
                 assert_never(family.render)
@@ -317,7 +333,6 @@ class Arena:
             raise UnknownItem(token)
         issued = self._pairs.pop(token)
         del self._current[issued.session]
-        for pane in (issued.view.a, issued.view.b):
-            if isinstance(pane, HtmlPane):
-                del self._documents[pane.url.rsplit('/', 1)[1]]
+        for document in issued.documents:
+            del self._documents[document]
         return issued

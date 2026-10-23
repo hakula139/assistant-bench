@@ -1,10 +1,10 @@
 """Pair scheduling: a balanced seed, adaptive pairing, and delayed swapped repeats."""
 
 from collections import Counter
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from itertools import permutations
+from itertools import combinations, permutations
 
 import numpy as np
 from scipy import special
@@ -77,7 +77,7 @@ class Pool:
         return {
             case
             for case in self.outputs_by_case
-            for left, right in permutations(self.systems, 2)
+            for left, right in combinations(self.systems, 2)
             if self.pairings(case, left, right)
         }
 
@@ -97,10 +97,12 @@ class Board:
 
     A refit runs the full bootstrap, so the board refits only when `REFIT_VOTES`
     votes have been cast or undone since the last fit, when it lacks a system the
-    draw weighs, or after `reset`.
+    draw weighs, or after `reset`. Each fit roots at the most-voted system, and
+    `order`, the family's `systems` list, breaks a tie.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, order: Sequence[str]) -> None:
+        self._order = tuple(order)
         self._ratings: Ratings | None = None
         self._fitted: frozenset[int] = frozenset()
 
@@ -122,7 +124,7 @@ class Board:
             or not set(systems) <= set(self._ratings.systems)
         ):
             matchups = Matchups.build([m.vote.comparison() for m in votes] + settled)
-            self._ratings = rate(matchups, matchups.systems[0])
+            self._ratings = rate(matchups, matchups.root(self._order))
             self._fitted = current
         return self._ratings
 
@@ -146,8 +148,11 @@ def draw(
     if repeats and rng.random() < REPEAT_SHARE:
         return repeats[rng.integers(len(repeats))]
 
+    shared = {
+        frozenset(pair): pool.cases(*pair) for pair in combinations(pool.systems, 2)
+    }
     open_cases = {
-        pair: [case for case in pool.cases(*pair) if case not in used]
+        pair: [case for case in shared[frozenset(pair)] if case not in used]
         for pair in permutations(pool.systems, 2)
     }
     open_cases = {pair: cases for pair, cases in open_cases.items() if cases}

@@ -1,6 +1,6 @@
 from collections import Counter
-from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterable
+from datetime import timedelta
 from itertools import permutations
 
 import numpy as np
@@ -13,66 +13,38 @@ from assistant_bench.arena.scheduler import Board, Draw, Pool, draw, pair_weight
 from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
-from assistant_bench.scoring.ranking import ELO_PER_LOGIT, Comparison, Ratings
-from support import make_output
+from assistant_bench.scoring.ranking import ANCHOR, ELO_PER_LOGIT, Comparison, Ratings
+from support import AT, make_output, make_vote, passing_outputs
 
 
-NOW = datetime(2026, 10, 21, 9, tzinfo=UTC)
 SYSTEMS = ('large', 'medium', 'small')
 
 
 def make_pool(
     systems: tuple[str, ...] = SYSTEMS, cases: int = 10, **fields: object
 ) -> Pool:
-    outputs = [
-        make_output(
-            trial=f'c{case}__{system}',
-            case=f'c{case}',
-            system=system,
-            text=f'{system} on c{case}',
-            gate_failures=[],
-            **fields,
-        )
-        for case in range(cases)
-        for system in systems
-    ]
-    return Pool.build(systems, {f'c{case}' for case in range(cases)}, outputs)
+    names = [f'c{case}' for case in range(cases)]
+    outputs = passing_outputs(names, systems, text='{system} on {case}', **fields)
+    return Pool.build(systems, set(names), outputs.values())
 
 
 def matched(pool: Pool, votes: list[Vote]) -> list[MatchedVote]:
     return reconcile(votes, pool.outputs)
 
 
-def vote_on(
-    picked: Draw, choice: Choice, vote_id: int, at: datetime = NOW, **fields: object
-) -> Vote:
-    return Vote.model_validate(
-        {
-            'id': vote_id,
-            'recorded_at': at,
-            'session': 's',
-            'case': picked.case,
-            'a': Side.of(picked.a),
-            'b': Side.of(picked.b),
-            'choice': choice,
-            'duration_sec': 5.0,
-        }
-        | fields
-    )
+def vote_on(picked: Draw, choice: Choice, vote_id: int) -> Vote:
+    return make_vote(picked.a, picked.b, id=vote_id, choice=choice)
 
 
 def votes_between(
     pool: Pool, left: str, right: str, choices: list[Choice], start: int = 1
 ) -> list[Vote]:
     return [
-        vote_on(
-            Draw(
-                case=f'c{i % 10}',
-                a=pool.outputs_by_case[f'c{i % 10}'][left][0],
-                b=pool.outputs_by_case[f'c{i % 10}'][right][0],
-            ),
-            choice,
-            start + i,
+        make_vote(
+            pool.outputs_by_case[f'c{i % 10}'][left][0],
+            pool.outputs_by_case[f'c{i % 10}'][right][0],
+            id=start + i,
+            choice=choice,
         )
         for i, choice in enumerate(choices)
     ]
@@ -125,7 +97,7 @@ class TestBoard:
         def test_refits_on_the_next_draw(self, fits: list[int]) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
-            board = Board()
+            board = Board(pool.systems)
             board.ratings(votes, [], {'large', 'small'})
 
             board.reset()
@@ -134,37 +106,32 @@ class TestBoard:
             assert fits == [4, 4]
 
     class TestRatings:
-        def test_refits_once_refit_votes_are_cast_or_undone(
-            self, fits: list[int]
+        @pytest.mark.parametrize(
+            ('subsets', 'expected'),
+            [
+                ([range(4), range(8), range(9), range(5), range(4)], [4, 9, 4]),
+                ([range(4), [0, 1, 4, 5], [0, 4, 5, 6]], [4, 4]),
+            ],
+            ids=['cast-then-undone', 'undone-and-recast'],
+        )
+        def test_refits_once_refit_votes_changed_since_the_last_fit(
+            self, fits: list[int], subsets: list[Iterable[int]], expected: list[int]
         ) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 9))
-            board = Board()
+            board = Board(pool.systems)
 
-            for count in (4, 8, 9, 5, 4):
-                board.ratings(votes[:count], [], {'large', 'small'})
+            for subset in subsets:
+                board.ratings([votes[i] for i in subset], [], {'large', 'small'})
 
-            assert fits == [4, 9, 4]
-
-        def test_refits_once_refit_votes_are_undone_and_recast(
-            self, fits: list[int]
-        ) -> None:
-            pool = make_pool(systems=('large', 'small'))
-            votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 7))
-            board = Board()
-            board.ratings(votes[:4], [], {'large', 'small'})
-
-            board.ratings(votes[:2] + votes[4:6], [], {'large', 'small'})
-            board.ratings(votes[:1] + votes[4:7], [], {'large', 'small'})
-
-            assert fits == [4, 4]
+            assert fits == expected
 
         def test_fits_the_settled_results_with_the_votes(self, fits: list[int]) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
             settled = [Comparison('large', 'small', 1.0, 'c9', 0.25, sided=False)]
 
-            Board().ratings(votes, settled, {'large', 'small'})
+            Board(pool.systems).ratings(votes, settled, {'large', 'small'})
 
             assert fits == [5]
 
@@ -175,13 +142,26 @@ class TestBoard:
                 votes_between(pool, 'large', 'small', ['a'] * 4)
                 + votes_between(pool, 'medium', 'small', ['a'], start=5),
             )
-            board = Board()
+            board = Board(pool.systems)
 
             board.ratings(votes[:4], [], {'large', 'small'})
             ratings = board.ratings(votes, [], set(SYSTEMS))
 
             assert fits == [4, 5]
             assert ratings.systems == SYSTEMS
+
+        def test_roots_the_fit_at_the_most_voted_system(self) -> None:
+            pool = make_pool()
+            votes = matched(
+                pool,
+                votes_between(pool, 'medium', 'large', ['a'] * 3)
+                + votes_between(pool, 'medium', 'small', ['a'] * 3, start=4)
+                + votes_between(pool, 'large', 'small', ['a'], start=7),
+            )
+
+            ratings = Board(pool.systems).ratings(votes, [], set(SYSTEMS))
+
+            assert ratings.score[ratings.systems.index('medium')] == ANCHOR
 
 
 class TestDraw:
@@ -192,7 +172,7 @@ class TestDraw:
         counts = []
 
         for vote_id in range(1, 13):
-            picked = draw(pool, matched(pool, votes), set(), NOW, rng, Board())
+            picked = draw(pool, matched(pool, votes), set(), AT, rng, Board(SYSTEMS))
             assert picked is not None
             votes.append(vote_on(picked, 'a', vote_id))
             if vote_id % 6 == 0:
@@ -209,12 +189,12 @@ class TestDraw:
 
         cases = set()
         for _ in range(10):
-            picked = draw(pool, [], {'c0', 'c2'}, NOW, rng, Board())
+            picked = draw(pool, [], {'c0', 'c2'}, AT, rng, Board(SYSTEMS))
             assert picked is not None
             cases.add(picked.case)
 
         assert cases == {'c1'}
-        assert draw(pool, [], {'c0', 'c1', 'c2'}, NOW, rng, Board()) is None
+        assert draw(pool, [], {'c0', 'c1', 'c2'}, AT, rng, Board(SYSTEMS)) is None
 
     def test_favors_the_close_pair_once_seeded(self) -> None:
         pool = make_pool()
@@ -227,11 +207,11 @@ class TestDraw:
             + votes_between(pool, 'small', 'medium', ['a', 'b'] * 2, start=45)
         )
         rng = np.random.default_rng(0)
-        board = Board()
+        board = Board(SYSTEMS)
 
         pairs = set()
         for _ in range(10):
-            picked = draw(pool, matched(pool, votes), set(), NOW, rng, board)
+            picked = draw(pool, matched(pool, votes), set(), AT, rng, board)
             assert picked is not None
             pairs.add(frozenset((picked.a.system, picked.b.system)))
 
@@ -244,7 +224,7 @@ class TestDraw:
         )
         rng = np.random.default_rng(0)
 
-        picked = draw(pool, matched(pool, votes), set(), NOW, rng, Board())
+        picked = draw(pool, matched(pool, votes), set(), AT, rng, Board(pool.systems))
 
         assert picked is not None
         assert (picked.a.system, picked.b.system) == ('small', 'large')
@@ -255,15 +235,15 @@ class TestDraw:
         monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
         pool = make_pool(systems=('large', 'small'))
         (original,) = votes_between(pool, 'large', 'small', ['a'])
-        original = original.model_copy(update={'recorded_at': NOW - timedelta(days=1)})
+        original = original.model_copy(update={'recorded_at': AT - timedelta(days=1)})
 
         picked = draw(
             pool,
             matched(pool, [original]),
             set(),
-            NOW,
+            AT,
             np.random.default_rng(0),
-            Board(),
+            Board(pool.systems),
         )
 
         assert picked is not None
@@ -275,9 +255,9 @@ class TestDraw:
         )
 
     @pytest.mark.parametrize(
-        ('age', 'history'),
+        ('age', 'history', 'used'),
         [
-            (timedelta(hours=23), lambda vote: [vote]),
+            (timedelta(hours=23), lambda vote: [vote], set()),
             (
                 timedelta(days=2),
                 lambda vote: [
@@ -286,48 +266,35 @@ class TestDraw:
                         update={'id': 2, 'a': vote.b, 'b': vote.a, 'repeat_of': 1}
                     ),
                 ],
+                set(),
             ),
+            (timedelta(days=1), lambda vote: [vote], {'c0'}),
         ],
-        ids=['too-recent', 'already-repeated'],
+        ids=['too-recent', 'already-repeated', 'case-used'],
     )
-    def test_repeats_no_vote_younger_than_a_day_or_repeated_already(
+    def test_repeats_no_vote_that_is_recent_repeated_or_on_a_used_case(
         self,
         monkeypatch: pytest.MonkeyPatch,
         age: timedelta,
         history: Callable[[Vote], list[Vote]],
+        used: set[str],
     ) -> None:
         monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
         pool = make_pool(systems=('large', 'small'))
         (original,) = votes_between(pool, 'large', 'small', ['a'])
-        votes = history(original.model_copy(update={'recorded_at': NOW - age}))
-
-        picked = draw(
-            pool, matched(pool, votes), set(), NOW, np.random.default_rng(0), Board()
-        )
-
-        assert picked is not None
-        assert picked.repeat_of is None
-
-    def test_skips_a_repeat_on_a_case_the_session_used(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
-        pool = make_pool(systems=('large', 'small'))
-        (original,) = votes_between(pool, 'large', 'small', ['a'])
-        original = original.model_copy(update={'recorded_at': NOW - timedelta(days=1)})
+        votes = history(original.model_copy(update={'recorded_at': AT - age}))
 
         picked = draw(
             pool,
-            matched(pool, [original]),
-            {original.case},
-            NOW,
+            matched(pool, votes),
+            used,
+            AT,
             np.random.default_rng(0),
-            Board(),
+            Board(pool.systems),
         )
 
         assert picked is not None
         assert picked.repeat_of is None
-        assert picked.case != original.case
 
 
 class TestPairWeights:
