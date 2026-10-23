@@ -14,7 +14,7 @@ const rounds = testsRounds(family);
 ---
 
 {rounds.length === 0 ? (
-  <div class="space-y-4">
+  <div class="flex flex-col gap-4">
     <p class={note}>No round has closed yet.</p>
     <p>
       {family.config.systems.map((system) => systemName(family.systemNames, system)).join(', ') ||

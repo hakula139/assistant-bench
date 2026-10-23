@@ -497,7 +497,7 @@ export function VoteApp() {
 
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-      <span role="status" className="flex items-center gap-1">
+      <span role="status" className="flex items-center gap-1 empty:sr-only">
         {savedAt !== null ? (
           <>
             <Check className="size-4" aria-hidden="true" />
@@ -518,12 +518,6 @@ export function VoteApp() {
           {formatCountOf(session.votes, 'vote')}
         </Hint>
       </span>
-
-      {hasText && (
-        <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
-          Markdown
-        </Toggle>
-      )}
 
       {hasFrames && (
         <ToggleGroup
@@ -595,19 +589,27 @@ export function VoteApp() {
         )}
         <ErrorAlert error={error} />
 
-        <Textarea
-          ref={noteField}
-          size="line"
-          rows={1}
-          aria-label="Note"
-          aria-keyshortcuts="N"
-          placeholder="Note (N), ⌘↵ or Ctrl+↵ submits"
-          maxLength={500}
-          value={note}
-          onChange={(event) => {
-            setNote(event.target.value);
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          {hasText && (
+            <Toggle variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
+              Markdown
+            </Toggle>
+          )}
+          <Textarea
+            ref={noteField}
+            size="line"
+            rows={1}
+            aria-label="Note"
+            aria-keyshortcuts="N"
+            placeholder="Note (N), ⌘↵ or Ctrl+↵ submits"
+            maxLength={500}
+            value={note}
+            onChange={(event) => {
+              setNote(event.target.value);
+            }}
+            className="min-w-72 flex-1"
+          />
+        </div>
       </div>
 
       <div className="grid gap-2 max-md:sticky max-md:bottom-0 max-md:-mx-4 max-md:border-t max-md:bg-background max-md:px-4 max-md:py-3 sm:grid-cols-[1fr_auto] sm:max-md:-mx-6 sm:max-md:px-6">
