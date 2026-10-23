@@ -123,6 +123,39 @@ def _changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
     return changed
 
 
+def drifted_systems(
+    family: Family, systems: list[System]
+) -> list[tuple[str, str | None, str | None]]:
+    """Return each selected system whose earlier trials recorded another fingerprint.
+
+    An entry names the system, the fingerprint an earlier trial recorded, and the
+    fingerprint the system resolves to now. A system can contribute one entry per
+    recorded fingerprint, and the list is sorted by system name.
+
+    Raises
+    ------
+    ValueError
+        A source job is not a job directory, or a trial record is unreadable.
+    """
+    current = {system.name: system.fingerprint for system in systems}
+    recorded: defaultdict[str, set[str | None]] = defaultdict(set)
+    for trial in load_source_trials(_sources(family)):
+        kwargs = trial.result.config.agent.kwargs
+        name = str(kwargs.get('system', trial.result.agent_info.name))
+        fingerprint = kwargs.get('fingerprint')
+        if name in current and isinstance(fingerprint, str):
+            recorded[name].add(fingerprint)
+    return sorted(
+        (
+            (name, fingerprint, current[name])
+            for name, fingerprints in recorded.items()
+            for fingerprint in fingerprints
+            if fingerprint != current[name]
+        ),
+        key=lambda entry: (entry[0], entry[1] or ''),
+    )
+
+
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     """Build a job that runs every system on every case task.
 
@@ -190,6 +223,11 @@ def _task_name(task_dir: Path) -> str | None:
         (task_dir / 'task.toml').read_text()
     )
     return config.task.name if config.task else None
+
+
+def has_jobs(family: Family) -> bool:
+    """Return whether the family has at least one finished Harbor job."""
+    return bool(_family_jobs(family))
 
 
 def _family_jobs(family: Family) -> list[Path]:
@@ -263,19 +301,22 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
     Each case, system, and fingerprint keeps at most `samples` outputs, preferring
-    successful trials, so an errored trial drops out once a rerun replaces it. Costs
-    come from the current catalog price of each system name, so a system missing
-    from `systems` or without a price reports as unpriced.
+    the newest successful trial, so a rerun under the current config replaces what
+    an earlier job produced. Costs come from the catalog, so a system outside it
+    reports as unpriced.
     """
-    groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
-    for output in sorted(
+    candidates = sorted(
         (
             output
             for job_dir in _family_jobs(family)
             for output in read_trials(family, job_dir, systems)
         ),
-        key=lambda output: (output.error is not None, output.job, output.trial),
-    ):
+        key=lambda output: output.trial,
+    )
+    candidates.sort(key=lambda output: output.job, reverse=True)
+    candidates.sort(key=lambda output: output.error is not None)
+    groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
+    for output in candidates:
         groups[(output.case, output.system, output.fingerprint)].append(output)
     outputs = sorted(
         (

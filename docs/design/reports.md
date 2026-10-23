@@ -4,7 +4,7 @@ A report is the published record of one closed round of a family: aggregates und
 
 ## Closing a Round
 
-`uv run bench close <family>` aggregates everything the family has so far and writes `reports/<family>/<round>.json`, where the round is the UTC date of closing, so closing again on the same day replaces that day's file. Only `bench close` writes under `reports/`, and each report is committed through an ordinary PR. A board pools every round, so each report is a snapshot of the cumulative board at its date.
+`uv run bench close <family>` collects the family's trials and aggregates everything it has so far, then writes `reports/<family>/<round>.json`, where the round is the UTC date of closing, so closing again on the same day replaces that day's file. Only `bench close` writes under `reports/`, and each report is committed through an ordinary PR. A board pools every round, so each report is a snapshot of the cumulative board at its date.
 
 Closing fails, naming the problem, when the family has nothing to report, when a family scored by votes has no votes on its current outputs, or when a system's current outputs carry several fingerprints.
 

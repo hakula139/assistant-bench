@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
+from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner
@@ -40,8 +41,8 @@ def invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-def write_cases_family(families_dir: Path, systems: str) -> None:
-    directory = families_dir / 'f'
+def write_cases_family(families_dir: Path, systems: str, name: str = 'f') -> None:
+    directory = families_dir / name
     directory.mkdir(parents=True)
     (directory / 'family.toml').write_text(
         textwrap.dedent(
@@ -86,6 +87,18 @@ class TestCheck:
 
         assert result.exit_code == 0, result.output
         assert result.output == 'smoke-text: 2 valid cases\n'
+        assert submitted == []
+
+    def test_checks_every_family_without_a_name(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_cases_family(families_dir, '["opus-5.5"]', name='g')
+
+        exit_code, message = invoke('check')
+
+        assert exit_code == 0
+        assert message == 'f: 0 valid cases\ng: 0 valid cases\n'
         assert submitted == []
 
     @pytest.mark.parametrize(
@@ -143,6 +156,18 @@ class TestCheck:
 
         assert exit_code == 2
         assert "Invalid value for FAMILY: no family named 'nope'" in message
+
+    def test_exits_with_the_code_of_a_failed_oracle_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def run_job(job: JobConfig) -> Path:
+            raise subprocess.CalledProcessError(5, 'harbor')
+
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        exit_code, _ = invoke('check', 'smoke')
+
+        assert exit_code == 5
 
     @pytest.mark.parametrize(
         ('edited', 'expected'),
@@ -288,6 +313,96 @@ class TestRun:
         assert 'single-call systems run only case families' in message
         assert submitted == []
 
+    def test_generates_every_family_that_lists_systems(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_cases_family(families_dir, '["opus-5.5", "kimi-k3"]', name='g')
+
+        result = runner.invoke(app, ['run'])
+
+        assert result.exit_code == 0, result.output
+        assert [job.jobs_dir.name for job in submitted] == ['f', 'g']
+        assert [len(job.agents) for job in submitted] == [1, 2]
+
+    def test_generates_a_named_system_on_every_family_that_lists_it(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_cases_family(families_dir, '["opus-5.5", "kimi-k3"]', name='g')
+
+        result = runner.invoke(app, ['run', '--system', 'kimi-k3'])
+
+        assert result.exit_code == 0, result.output
+        (job,) = submitted
+        assert job.jobs_dir.name == 'g'
+        assert [agent.kwargs['system'] for agent in job.agents] == ['kimi-k3']
+
+    def test_rejects_a_named_system_no_family_lists(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+
+        exit_code, message = invoke('run', '--system', 'gpt-6-astra')
+
+        assert exit_code == 2
+        assert 'no family lists gpt-6-astra' in message
+        assert submitted == []
+
+    def test_collects_the_run_into_outputs(
+        self, data_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        result = runner.invoke(app, ['run', 'smoke-text'])
+
+        assert result.exit_code == 0, result.output
+        assert (data_dir / 'outputs' / 'smoke-text.jsonl').read_text() == ''
+        assert 'smoke-text:\n0 outputs, 0 errored\n' in result.output
+
+    def test_collects_finished_trials_when_harbor_fails(
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def run_job(job: JobConfig) -> Path:
+            write_trial(
+                job.jobs_dir / job.job_name,
+                'en-greeting__1',
+                AgentConfig(name='generate'),
+                task='smoke-text/en-greeting',
+                output='Hi.',
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+            raise subprocess.CalledProcessError(3, 'harbor')
+
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        result = runner.invoke(app, ['run', 'smoke-text'])
+
+        assert result.exit_code == 3
+        assert 'smoke-text:\n1 outputs, 0 errored\n' in result.output
+        written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
+        assert written.count('\n') == 1
+
+    def test_rejects_a_system_whose_recorded_fingerprint_changed(
+        self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_trial(
+            data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
+            'c1__1',
+            AgentConfig(
+                import_path='x:Y',
+                kwargs={'system': 'opus-5.5', 'fingerprint': 'fp-old'},
+            ),
+            task='f/c1',
+        )
+        current = load_systems(load_export())['opus-5.5'].fingerprint
+
+        exit_code, message = invoke('run', 'f')
+
+        assert exit_code == 2
+        assert "'opus-5.5' ran under fingerprint fp-old" in message
+        assert f'now resolves to {current}' in message
+        assert submitted == []
+
     def test_exits_with_the_code_of_a_failed_harbor_run(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -313,6 +428,7 @@ class TestIngest:
                     make_output(gate_failures=[Gate.TRUNCATED]),
                 ],
                 """\
+                smoke-text:
                 3 outputs, 0 errored
                 2 failed a gate
                   truncated: 2
@@ -328,6 +444,7 @@ class TestIngest:
                     make_output(error='TimeoutError'),
                 ],
                 """\
+                smoke:
                 3 outputs, 1 errored
                   TimeoutError: 1
                 Mean reward 0.500
@@ -349,6 +466,27 @@ class TestIngest:
 
         assert result.exit_code == 0, result.output
         assert result.output == textwrap.dedent(summary)
+
+    def test_collects_every_family_with_jobs(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_cases_family(families_dir, '["opus-5.5"]', name='g')
+        write_cases_family(families_dir, '["opus-5.5"]', name='h')
+        for name in ('f', 'g'):
+            job = data_dir / 'jobs' / name / 'job-1'
+            job.mkdir(parents=True)
+            (job / 'result.json').touch()
+
+        exit_code, message = invoke('ingest')
+
+        assert exit_code == 0, message
+        assert 'f:\n0 outputs, 0 errored\n' in message
+        assert 'g:\n0 outputs, 0 errored\n' in message
+        assert 'h:' not in message
+        assert (data_dir / 'outputs' / 'f.jsonl').exists()
+        assert (data_dir / 'outputs' / 'g.jsonl').exists()
+        assert not (data_dir / 'outputs' / 'h.jsonl').exists()
 
 
 class TestServe:
@@ -413,6 +551,53 @@ class TestServe:
 
         assert exit_code == 4
 
+    def test_ingests_every_votes_family_with_jobs_before_loading(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_votes_family(families_dir, 'g', ['large', 'small'], {'c1': 'reply'})
+        write_votes_family(families_dir, 'h', ['large', 'small'], {'c1': 'reply'})
+        for name in ('f', 'g'):
+            write_trial(
+                data_dir / 'jobs' / name / 'job-1',
+                'c1__large__1',
+                AgentConfig(
+                    import_path='x:Y',
+                    kwargs={'system': 'large', 'fingerprint': 'fp-large'},
+                ),
+                task=f'{name}/c1',
+                output='text',
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+        site = tmp_path / 'dist'
+        served: list[list[str]] = []
+
+        def build(args: list[str], **options: Any) -> None:
+            (site / 'vote').mkdir(parents=True)
+            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+
+        monkeypatch.setattr(cli, 'SITE_DIR', site)
+        monkeypatch.setattr(subprocess, 'run', build)
+        monkeypatch.setattr(
+            api,
+            'serve',
+            lambda arena, site: served.append(
+                [family.name for family in arena.families()]
+            ),
+        )
+
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 0, message
+        assert (data_dir / 'outputs' / 'f.jsonl').exists()
+        assert (data_dir / 'outputs' / 'g.jsonl').exists()
+        assert not (data_dir / 'outputs' / 'h.jsonl').exists()
+        assert served == [['f', 'g']]
+
     def test_stops_when_no_family_has_outputs(self, families_dir: Path) -> None:
         exit_code, message = invoke('serve')
 
@@ -445,10 +630,17 @@ class TestClose:
     ) -> None:
         write_synthetic_round(families_dir, store, sessions=1)
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        ingested: list[str] = []
+
+        def ingest(family: Any) -> None:
+            ingested.append(family.name)
+
+        monkeypatch.setattr(cli, '_ingest', ingest)
 
         exit_code, message = invoke('close', 'arena')
 
         assert exit_code == 0, message
+        assert ingested == ['arena']
         (path,) = (tmp_path / 'reports' / 'arena').iterdir()
         assert message == f'Report written to {path}\n'
         assert report.Report.model_validate_json(path.read_text()).family == 'arena'

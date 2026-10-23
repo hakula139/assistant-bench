@@ -26,7 +26,8 @@ cp .env.example .env                        # Then fill in the endpoint variable
 ```bash
 uv run bench check smoke                    # Run Harbor's oracle on the smoke task, which needs no endpoint
 uv run bench run smoke-text                 # Send each case to every listed system, once each
-uv run bench ingest smoke-text              # Collect the replies into outputs/smoke-text.jsonl
+uv run bench run --system <name>            # Send one system's missing trials to every family that lists it
+uv run bench serve                          # Vote on the outputs the runs collected
 ```
 
-`bench run smoke-text` makes one request per case and system, verifying that every system answers and reports usage. A second `bench run smoke-text` sends nothing until a case or system is added.
+`bench run smoke-text` makes one request per case and system, verifying that every system answers and reports usage, then collects the replies into `outputs/smoke-text.jsonl`. A second `bench run smoke-text` sends nothing until a case or system is added, though it retries every trial that errored.

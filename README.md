@@ -23,7 +23,7 @@ uv sync                                     # Virtualenv with Harbor and the ben
 cp .env.example .env                        # Then fill in the endpoint variables
 uv run bench check smoke                    # Run Harbor's oracle on the smoke task
 uv run bench run smoke-text                 # Send each smoke case to every listed system
-uv run bench ingest smoke-text              # Collect the replies into the data directory
+uv run bench run --system <name>            # Send one system's missing trials to every family that lists it
 uv run bench serve                          # Vote on blind pairs at http://127.0.0.1:8790/vote/
 uv run bench close smoke-text               # Write the family's report under reports/
 ```
