@@ -469,7 +469,6 @@ export function VoteApp() {
             {flagNames.map((value, index) => (
               <Toggle
                 key={value}
-                size="sm"
                 variant="outline"
                 pressed={flags.includes(value)}
                 aria-keyshortcuts={String(index + 1)}
@@ -485,6 +484,7 @@ export function VoteApp() {
 
           <Textarea
             ref={noteField}
+            size="line"
             rows={1}
             aria-label="Note"
             aria-keyshortcuts="N"
@@ -494,7 +494,7 @@ export function VoteApp() {
             onChange={(event) => {
               setNote(event.target.value);
             }}
-            className="min-h-9 min-w-64 flex-1"
+            className="min-w-64 flex-1"
           />
         </div>
       </div>
