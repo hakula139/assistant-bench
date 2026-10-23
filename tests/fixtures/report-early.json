@@ -43,7 +43,7 @@
           "facts": 0,
           "punctuation": 0,
           "tone": 1,
-          "script": 0,
+          "formulaic": 0,
           "length": 0
         }
       },
@@ -80,7 +80,7 @@
           "facts": 0,
           "punctuation": 0,
           "tone": 0,
-          "script": 0,
+          "formulaic": 0,
           "length": 0
         }
       },
@@ -117,7 +117,7 @@
           "facts": 0,
           "punctuation": 0,
           "tone": 0,
-          "script": 0,
+          "formulaic": 0,
           "length": 0
         }
       },
@@ -154,7 +154,7 @@
           "facts": 1,
           "punctuation": 0,
           "tone": 0,
-          "script": 0,
+          "formulaic": 0,
           "length": 0
         }
       },
@@ -191,7 +191,7 @@
           "facts": 1,
           "punctuation": 1,
           "tone": 0,
-          "script": 0,
+          "formulaic": 0,
           "length": 1
         }
       },
@@ -228,7 +228,7 @@
           "facts": 0,
           "punctuation": 0,
           "tone": 0,
-          "script": 0,
+          "formulaic": 0,
           "length": 0
         }
       }

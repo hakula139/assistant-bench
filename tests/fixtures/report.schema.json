@@ -104,7 +104,7 @@
         "facts",
         "punctuation",
         "tone",
-        "script",
+        "formulaic",
         "length"
       ],
       "type": "string"

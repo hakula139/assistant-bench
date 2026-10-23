@@ -15,7 +15,7 @@ from assistant_bench.scoring.ranking import Comparison
 
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
-type Defect = Literal['facts', 'punctuation', 'tone', 'script', 'length']
+type Defect = Literal['facts', 'punctuation', 'tone', 'formulaic', 'length']
 
 # Ties and both-bad votes count as half a win for each side.
 _LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}

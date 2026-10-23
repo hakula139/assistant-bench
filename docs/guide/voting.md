@@ -15,7 +15,7 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 | `a` / `b`  | A or B is better                                                                                       |
 | `t`        | Tie                                                                                                    |
 | `x`        | Both bad                                                                                               |
-| `1` to `5` | Toggle an issue on output A: wrong facts, punctuation, wrong tone, wrong script, too long              |
+| `1` to `5` | Toggle an issue on output A: wrong facts, punctuation, wrong tone, formulaic, too long                 |
 | `6` to `0` | Toggle the same issues on output B                                                                     |
 | `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field |
 | `Enter`    | Submit the vote and load the next pair, even with a vote control focused, which `Space` still presses  |

@@ -86,9 +86,9 @@ export const defectTerms: Record<Defect, Term> = {
     term: 'Wrong tone',
     definition: 'Too formal, too casual, or wrong for its reader.',
   },
-  script: {
-    term: 'Wrong script',
-    definition: 'Characters in another script, such as Traditional for Simplified.',
+  formulaic: {
+    term: 'Formulaic',
+    definition: 'Templated, boilerplate prose, such as 公文腔 in Chinese.',
   },
   length: {
     term: 'Too long',

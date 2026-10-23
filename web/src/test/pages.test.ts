@@ -371,7 +371,7 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain(
-      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Wrong script 0 0% Too long 1 1%",
+      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
     );
   });
 

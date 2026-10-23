@@ -47,7 +47,7 @@ class TestCreateApp:
             f'/api/pairs/{token}/vote',
             json={
                 'choice': 'both_bad',
-                'defects': {'a': ['script'], 'b': ['length']},
+                'defects': {'a': ['formulaic'], 'b': ['length']},
                 'note': 'Mixed.',
             },
             headers=ORIGIN,
@@ -56,7 +56,7 @@ class TestCreateApp:
         assert voted.json()['votes'] == 1
         (vote,) = store.votes('f')
         assert (vote.defects, vote.note) == (
-            Defects(a=frozenset({'script'}), b=frozenset({'length'})),
+            Defects(a=frozenset({'formulaic'}), b=frozenset({'length'})),
             'Mixed.',
         )
 

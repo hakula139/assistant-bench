@@ -34,7 +34,7 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 | `POST /api/pairs/{token}/vote` | Records `{"choice", "defects", "note"}` and returns the session's next pair   |
 | `POST /api/sessions/{id}/undo` | Withdraws the session's latest owner vote and shows its pair again            |
 
-`TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. `defects` maps `a` and `b` to lists drawn from `facts`, `punctuation`, `tone`, `script`, and `length`. A note holds at most 500 characters and never leaves the store, since it may quote a private case. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
+`TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. `defects` maps `a` and `b` to lists drawn from `facts`, `punctuation`, `tone`, `formulaic`, and `length`. A note holds at most 500 characters and never leaves the store, since it may quote a private case. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
 
 The vote page is `web/dist/vote/index.html`, and `bench serve` stops when the build leaves none. Every file served from `vote/` carries the vote page's policy, decided on the path after normalization, so a URL that doubles or percent-encodes a slash carries it too. The policy loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin:
 
