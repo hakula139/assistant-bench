@@ -1,6 +1,6 @@
 # Research Notes
 
-These notes document the external research behind assistant-bench's design, each sharing its topic name with a page in [`docs/design/`](../design/) where one exists.
+These notes document the external research behind assistant-bench's design.
 
 | Document            | Description                                                      |
 | ------------------- | ---------------------------------------------------------------- |

@@ -23,7 +23,7 @@ Entering the dev shell installs a [pre-commit](https://pre-commit.com) hook gene
 
 The hook runs the fast subset of the [verification](../../AGENTS.md#verification) checks on staged files: file hygiene, Nix formatting and lints, Ruff, shfmt, Prettier and Taplo formatting, `markdownlint`, `cspell`, actionlint on the workflows, lychee on local links and anchors, and the sort order of `.cspell/words.txt`, while mypy and pytest stay out of the hook because they take longer. Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-Run `pnpm install` and `uv sync` in each new checkout because the Node hooks run the tools pinned in `node_modules` and the Ruff hooks run the Ruff pinned in `uv.lock`. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
+The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 
 ## Where Settings Live
 
@@ -35,7 +35,7 @@ Commands stay minimal, and settings live in config files:
 | Systems under test                                                            | `systems.toml`                                                                                                        |
 | A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                                                                                       |
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
-| Session size, repeat share, seed votes, and the refit interval                | `arena/service.py` and `arena/scheduler.py`                                                                           |
+| Repeat share, seed votes, and the refit interval                              | `arena/scheduler.py`                                                                                                  |
 | The arena's loopback ports and render policy                                  | `arena/api.py`                                                                                                        |
 | Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                                                                                  |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
@@ -51,7 +51,6 @@ Environment variables carry only secrets and per-environment values: the `BENCH_
 - The flake pins the stable Nixpkgs channel, which supplies Node.js and the hooks, and takes uv from the unstable channel so that each flake lock update refreshes uv's list of Python releases. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`. On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](ci.md#checks) fails such a PR when the bump changes a system's fingerprint.
 - `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
-- `pyproject.toml` names PyPI as the default index and `.npmrc` names the npm registry, so both lockfiles resolve from public registries whatever the local package manager config says. A test fails if either lockfile names another host.
 
 ## The nixos-config Input
 
@@ -62,7 +61,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, so the system needs a new table name. [Authoring](../guide/authoring.md#systems) gives the recipe for keeping the old name on its old resolution.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, which [Systems](../design/systems.md#fingerprints) covers, and [Authoring](../guide/authoring.md#systems) gives the recipe for keeping the old name on its old resolution.
 
 ## Nix Style
 
@@ -73,4 +72,4 @@ A bump that changes a system's resolved prompt, route, or effort changes its fin
 
 ## Config Style
 
-Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wrap YAML, TOML, and shell files by hand. Keep comments within 100 columns and other lines within about 100, counting the indent, unless a line holds an unbreakable token such as a URL. The flake leaves every shfmt setting null because passing any formatting flag makes shfmt ignore `.editorconfig`, where it reads its layout.
+Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wrap YAML, TOML, and shell files by hand. Keep comments within 100 columns and other lines within about 100, counting the indent, unless a line holds an unbreakable token such as a URL.

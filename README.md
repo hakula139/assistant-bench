@@ -9,28 +9,18 @@ A benchmark of AI assistant systems on everyday work, run on [Harbor](https://gi
 
 ## Overview
 
-A system combines a model with its effort, harness, and system prompt. Every system in a family receives the same instructions, and the family scores their outputs either by the owner's blind pairwise votes or by each Harbor task's tests. Every output records its tokens, cost, latency, and the exact system configuration behind it.
+A system combines a model with its effort, harness, and system prompt. Every system in a family receives the same instructions, and the family scores their outputs either by the owner's blind pairwise votes or by each Harbor task's tests. Every output records its tokens, cost, latency, and the fingerprint of the system configuration behind it.
 
 Early development. The first families, `writing-zh` and `writing-en`, rank how systems write everyday prose in Chinese and in English, from technical documents and messages to blog posts, essays, reviews, and fiction.
 
 ## Usage
 
-Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists:
-
-```bash
-nix develop                                 # Dev shell with every tool
-uv sync                                     # Virtualenv with Harbor and the bench
-cp .env.example .env                        # Then fill in the endpoint variables
-uv run bench check smoke                        # Run Harbor's oracle and nop on the smoke task
-uv run bench run smoke-text --system <name>     # Send each smoke case to one listed system
-uv run bench serve                              # Vote on blind pairs at http://127.0.0.1:8790/vote/
-uv run bench close smoke-text                   # Write the family's report under reports/
-```
+Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists. Its [setup](docs/guide/quickstart.md#setup) prepares a checkout, and its [smoke walk-through](docs/guide/quickstart.md#the-smoke-families) runs and votes on the smoke families.
 
 ## Documentation
 
 - [User guide](docs/guide/): setup, running and voting on a family, and authoring cases, families, and systems
-- [Design](docs/design/): how systems, the arena, ranking, reports, and each family work
+- [Design](docs/design/): how systems, the arena, ranking, reports, the site, and each family work
 - [`AGENTS.md`](AGENTS.md): the entry point for contributors, linking the [conventions](docs/conventions/)
 
 ## License

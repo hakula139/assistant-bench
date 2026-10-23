@@ -11,11 +11,10 @@ The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
 - Each row is weighted by the share of a vote it counts, and its design holds +1 for A's system and −1 for B's, plus a left-side intercept that absorbs position bias and is reported as `position`. A settled result holds 0 in the intercept column, since no pane showed it.
 - An L2 penalty of 0.01 on the system strengths keeps a system that wins every vote finite, without penalizing the intercept.
 - Strengths are centered at mean zero, and a fit that fails to converge raises.
-- A test fits 3,000 simulated votes with fractional outcomes and a covariate, and checks the strength gaps, the intercept, and the coefficient against statsmodels' `Logit` within 0.002.
 
 ## Scores and Intervals
 
-Scores sit on an Elo-like scale, 400 / ln 10 points per logit. The fit is rooted at the most-voted system, which has the most comparisons behind its estimate, and the board then shifts the scale so that the family's `reference` sits at 1000 when the round ranks it. When the reference does not rank, the root stands at 1000, and the report records the system at 1000 as the round's `anchor`. Within a round the anchor is a pure shift, so it changes no gap, rank, or interval. The root decides which systems each resample keeps, so a different root can change an interval where resample connectivity sets its bound.
+Scores sit on an Elo-like scale, 400 / ln 10 points per logit. The fit is rooted at the most-voted system, which has the most comparisons behind its estimate, and the board then shifts the scale so that the family's `reference` sits at 1,000 when the round ranks it. When the reference does not rank, the root stands at 1,000, and the report records the system at 1,000 as the round's `anchor`. Within a round the anchor is a pure shift, so it changes no gap, rank, or interval. The root decides which systems each resample keeps, so a different root can change an interval where resample connectivity sets its bound.
 
 Strengths compare only within one connected component of the comparison graph, because the penalty centers each component on its own. The board, each category board, and each half of the split-half fit therefore keep the systems that comparisons connect to their own root, found with SciPy's `connected_components`, and the report lists the other voted systems as `unranked`, without a score, together with the systems whose interval is unbounded.
 

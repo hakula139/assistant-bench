@@ -2,12 +2,12 @@
 
 Conventions specific to assistant-bench's code, data, tests, and tooling, with [`AGENTS.md`](../../AGENTS.md) holding the rules for every change and linking each area here.
 
-| Document                      | Description                                                                                         |
-| ----------------------------- | --------------------------------------------------------------------------------------------------- |
-| [Python](python.md)           | Enforced by tooling, architecture, errors, modules, dependencies                                    |
-| [TypeScript](typescript.md)   | Enforced by tooling, layout, reports, components, charts, the vote page                             |
-| [Data](data.md)               | Data classes, the data directory, what may be committed or published, public names, secrets         |
-| [Testing](testing.md)         | Placement, models and Harbor, Docker trials, coverage                                               |
-| [GitHub](github.md)           | Pull requests, issues                                                                               |
-| [Development](development.md) | Dev shell, pre-commit hooks, where settings live, toolchain and pins, the nixos-config input, style |
-| [CI](ci.md)                   | Checks, the deploy and its previews, workflow steps                                                 |
+| Document                      | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| [Python](python.md)           | Conventions for Python code beyond what the tooling enforces |
+| [TypeScript](typescript.md)   | Conventions for the site beyond what the tooling enforces    |
+| [Data](data.md)               | Data classes and the data directory                          |
+| [Testing](testing.md)         | How the test suite is placed, run, and measured              |
+| [GitHub](github.md)           | Pull requests and issues                                     |
+| [Development](development.md) | How the dev environment, hooks, and toolchain are configured |
+| [CI](ci.md)                   | What CI checks, previews, and deploys                        |

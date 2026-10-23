@@ -1,6 +1,6 @@
 # Architecture
 
-assistant-bench limits its code to the parts Harbor lacks: resolving systems, rendering cases into Harbor tasks, the single-call agent, collecting trials into output records, the voting arena, and the ranking and reports, while Harbor schedules trials, runs containers and verifiers, retries failures, and records every job.
+assistant-bench limits its code to the parts Harbor lacks: resolving systems, rendering cases into Harbor tasks, the `Generate` and `Terminus` agents, collecting trials into output records, the voting arena, and the ranking and reports, while Harbor schedules trials, runs containers and verifiers, retries failures, and records every job.
 
 ## Module Map
 
@@ -39,7 +39,7 @@ Imports point downward through these layers, so a module never imports one above
 1. `cli`
 2. `jobs`, `revisions`, and `report`
 3. `arena`
-4. `scoring`, `harnesses`, and `outputs`
+4. `outputs`, `harnesses`, and `scoring`
 5. `families` and `catalog`
 6. `paths`
 
@@ -66,6 +66,6 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 
 ## Reruns
 
-Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Each rendered task's version carries a hash of the bench's own task inputs as build metadata on `jobs.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. `bench ingest` keeps only trials of each case's installed task. A change to the instruction, the stock image, or the agent timeout changes the affected versions and reruns those cases. A Harbor upgrade that changes a task.toml default leaves the versions alone while the digests change, so the job aborts, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
+Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config, and adding a system to `family.toml` and rerunning therefore generates only the new system's trials. Each rendered task's version carries a hash of the bench's own task inputs as build metadata on `jobs.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. `bench ingest` keeps only trials of each case's installed task. A change to the instruction, the stock image, or the agent timeout changes the affected versions and reruns those cases. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
 
 Reused trials stay in their original job, so ingest reads every job directory of the family. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns. Within a slot it prefers a successful trial whose recorded agent kwargs equal what `case_job` sends now, then the oldest, so a changed request replaces what an earlier job produced while a rerun of the same request keeps the outputs its votes refer to, and an errored trial drops out once a rerun replaces it.

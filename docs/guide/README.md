@@ -2,9 +2,9 @@
 
 How to run and extend assistant-bench.
 
-| Document                    | Description                                                                                                    |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [Quickstart](quickstart.md) | Dev shell, `.env`, the smoke families                                                                          |
-| [Running](running.md)       | The model endpoint, checking and running a family, reruns, ingest, voting, closing a round, the data directory |
-| [Authoring](authoring.md)   | Adding a family, a case, a task, or a system, with every `family.toml` field                                   |
-| [Voting](voting.md)         | Opening the vote page, keys and issues, the Markdown view, HTML outputs                                        |
+| Document                    | Description                                     |
+| --------------------------- | ----------------------------------------------- |
+| [Quickstart](quickstart.md) | Set up a checkout and run the smoke families    |
+| [Running](running.md)       | How to run a family and close its round         |
+| [Voting](voting.md)         | How to vote on blind pairs and read the outputs |
+| [Authoring](authoring.md)   | How to add a family and the systems it runs     |

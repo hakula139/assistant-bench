@@ -4,9 +4,9 @@ Guides for running assistant-bench, along with the conventions, design, and rese
 
 ## Contents
 
-| Directory                      | Description                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------- |
-| [`conventions/`](conventions/) | Contributor conventions: Python, TypeScript, data, testing, GitHub, development, CI          |
-| [`design/`](design/)           | Architecture, the arena, ranking, and reports, and the decisions behind systems and families |
-| [`guide/`](guide/)             | Quickstart, running and voting on a family, authoring cases, families, and systems           |
-| [`research/`](research/)       | External research: Harbor                                                                    |
+| Directory                      | Description                                                |
+| ------------------------------ | ---------------------------------------------------------- |
+| [`conventions/`](conventions/) | Contributor conventions for code, data, tests, and tooling |
+| [`design/`](design/)           | How the bench is built and why each part works as it does  |
+| [`guide/`](guide/)             | How to run, vote, and author with the bench                |
+| [`research/`](research/)       | External research behind the design                        |
