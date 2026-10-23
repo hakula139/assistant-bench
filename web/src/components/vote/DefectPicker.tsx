@@ -38,12 +38,7 @@ export function DefectPicker({ side, tagged, keys, onToggle }: DefectPickerProps
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        collisionPadding={16}
-        className="w-80 max-w-[calc(100vw-2rem)]"
-        aria-label={`Issues in output ${side}`}
-      >
+      <PopoverContent align="end" collisionPadding={16} aria-label={`Issues in output ${side}`}>
         <ul className="space-y-2">
           {defects.map((defect, index) => {
             const key = `${id}-${defect}`;
