@@ -1,7 +1,7 @@
 """System harness names, each mapped to the Harbor agent that runs it.
 
-Harbor records the agent of every trial in the job's `config.json`, where
-`harbor job resume` reads it back, so an import path never changes.
+Harbor records each trial's agent and environment in the job's `config.json`,
+where `harbor job resume` reads them back, so an import path never changes.
 """
 
 from collections.abc import Callable
@@ -21,7 +21,8 @@ class Harness:
     and the job sends the system's route after `model_prefix` as the model name.
     `sends_prompt` says whether the agent sends a system's prompt, and
     `single_call` says whether it makes one request and never acts in the
-    task's environment, so it cannot solve a task family's tasks.
+    task's environment, so it cannot solve a task family's tasks. A job with
+    only `single_call` harnesses runs in `HOST_ENVIRONMENT` without a container.
     """
 
     import_path: str
@@ -30,6 +31,8 @@ class Harness:
     sends_prompt: bool = False
     single_call: bool = False
 
+
+HOST_ENVIRONMENT = 'assistant_bench.harnesses.host:HostEnvironment'
 
 HARNESSES: dict[str, Harness] = {
     'generate': Harness(

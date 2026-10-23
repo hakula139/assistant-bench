@@ -18,16 +18,18 @@ Votes and scores pool only within one fingerprint. Altering a system's route, ef
 
 `System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder returns the agent's kwargs from a system and the family's settings, and the job sends the system's route after its `model_prefix` as the model name.
 
-| Harness      | Agent                                         | Model name       |
-| ------------ | --------------------------------------------- | ---------------- |
-| `generate`   | `assistant_bench.harnesses.generate:Generate` | `<route>`        |
-| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | `openai/<route>` |
+| Harness      | Agent                                         | Model name       | Environment                                      |
+| ------------ | --------------------------------------------- | ---------------- | ------------------------------------------------ |
+| `generate`   | `assistant_bench.harnesses.generate:Generate` | `<route>`        | `assistant_bench.harnesses.host:HostEnvironment` |
+| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | `openai/<route>` | Harbor's Docker environment                      |
+
+Harbor gives every trial of a job the same environment. A job whose harnesses are all `single_call` runs in `HostEnvironment`, which starts no container and refuses every command and file transfer, and any other job runs in Harbor's Docker environment. `bench check`'s oracle and nop jobs run in Docker, since both act in the task's container.
 
 `systems.toml` has no `harness` key, so a case family runs every system as `generate`, the single-call agent, while a task family runs every system it lists under the family's `harness`, which must be an agent that acts in the task's environment, so `terminus-2` is the one a task family takes today. A harness that cannot send a system's prompt, which `terminus-2` cannot, makes `bench check` and `bench run` refuse the family while it lists a system with one. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry.
 
 `terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its prompt and loop ship inside Harbor, so a Harbor upgrade can change them under the same agent config, and each output records the Harbor version that ran it as `harness_version`, which the collection summary reports when a family's outputs span several. The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`. `bench` loads the first `.env` in the working directory or a parent, then sets `LITELLM_MODE=PRODUCTION`, which Harbor inherits, so LiteLLM never loads a `.env` of its own.
 
-Harbor records each trial's agent import path in the job's `config.json`, and `harbor job resume` imports it from there, so an import path must never change once a job uses it.
+Harbor records each trial's agent and environment import paths in the job's `config.json`, and `harbor job resume` imports them from there, so an import path must never change once a job uses it.
 
 ## The nixos-config Export
 

@@ -54,31 +54,6 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None
     )
 
 
-def test_generate_answers_each_case_once_across_reruns(
-    endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for name, value in endpoint.env.items():
-        monkeypatch.setenv(name, value)
-    family = load_family('smoke-text')
-    cases = load_cases(family)
-    system = make_system()
-
-    for _ in range(2):
-        tasks = jobs.render_tasks(family, cases)
-        jobs.run_job(jobs.job(family, [system], tasks))
-
-    outputs = jobs.collect(family, {system.name: system})
-    assert [
-        (output.case, output.error, output.text, output.output_tokens)
-        for output in outputs
-    ] == [
-        ('en-greeting', None, 'Hello there.', 40),
-        ('zh-greeting', None, 'Hello there.', 40),
-    ]
-    prompts = [request.body['messages'][0]['content'] for request in endpoint.requests]
-    assert sorted(prompts) == sorted(case.instruction for case in cases)
-
-
 def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
     export: NixosConfigExport,

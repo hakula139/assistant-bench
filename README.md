@@ -15,7 +15,7 @@ Early development. The first families, `writing-zh` and `writing-en`, rank how s
 
 ## Usage
 
-Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists. Its [setup](docs/guide/quickstart.md#setup) prepares a checkout, and its [smoke walk-through](docs/guide/quickstart.md#the-smoke-families) runs and votes on the smoke families.
+Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon for task families, and an OpenAI-compatible endpoint, as the [quickstart](docs/guide/quickstart.md#requirements) lists. Its [setup](docs/guide/quickstart.md#setup) prepares a checkout, and its [smoke walk-through](docs/guide/quickstart.md#the-smoke-families) runs and votes on the smoke families.
 
 ## Documentation
 

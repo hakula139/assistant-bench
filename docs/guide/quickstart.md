@@ -6,7 +6,7 @@ Set up a checkout and run the two smoke families.
 
 - [Nix](https://nixos.org/download) with flakes enabled, which provides the other tools, while uv downloads CPython.
 - On NixOS, [nix-ld](https://github.com/nix-community/nix-ld) enabled through `programs.nix-ld.enable`, as [Development](../conventions/development.md#toolchain-and-pins) explains.
-- A running Docker daemon, since Harbor starts a container for every trial.
+- A running Docker daemon for task families, whose trials each start a container. A case family's trials run on the host.
 - An OpenAI-compatible endpoint and API key, for families that call models.
 
 ## Setup

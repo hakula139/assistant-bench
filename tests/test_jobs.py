@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import shutil
 import subprocess
 import sys
@@ -14,10 +13,11 @@ import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
+from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
-from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.config import AgentConfig, EnvironmentConfig
 from harbor.models.trial.result import TimingInfo
 
 from assistant_bench import jobs
@@ -32,7 +32,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
-from assistant_bench.harnesses import options
+from assistant_bench.harnesses import HOST_ENVIRONMENT, options
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_task_family, write_trial
@@ -86,30 +86,13 @@ class TestRenderTaskConfig:
     def test_pins_the_version_of_a_known_task(self) -> None:
         config = jobs.render_task_config('smoke-text/en-greeting', 'Hi.')
 
-        assert version(config) == '1.0.0+2fe836d90551'
+        assert version(config) == '1.0.0+79766602577d'
 
-    @pytest.mark.parametrize(
-        ('target', 'attribute', 'value'),
-        [
-            pytest.param(jobs, 'STOCK_IMAGE', 'debian:forky-slim', id='stock-image'),
-            pytest.param(jobs, 'AGENT_TIMEOUT_SEC', 60.0, id='agent-timeout'),
-            pytest.param(
-                task_config,
-                'EnvironmentConfig',
-                functools.partial(task_config.EnvironmentConfig, cpus=2),
-                id='another-environment-setting',
-            ),
-        ],
-    )
-    def test_changes_the_version_with_each_setting_it_renders(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        target: object,
-        attribute: str,
-        value: Any,
+    def test_changes_the_version_with_the_agent_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         before = version(jobs.render_task_config('f/a', 'Hi.'))
-        monkeypatch.setattr(target, attribute, value)
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 60.0)
 
         after = version(jobs.render_task_config('f/a', 'Hi.'))
 
@@ -117,7 +100,7 @@ class TestRenderTaskConfig:
 
 
 class TestRenderTasks:
-    def test_writes_a_versioned_task_on_the_stock_image(self, data_dir: Path) -> None:
+    def test_writes_a_versioned_task(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
 
@@ -127,9 +110,7 @@ class TestRenderTasks:
         assert installed_version(path) == version(
             jobs.render_task_config('smoke-text/en-greeting', case.instruction)
         )
-        task = Task(path, disable_verification=True)
-        assert task.config.environment.docker_image == jobs.STOCK_IMAGE
-        assert task.instruction == case.instruction
+        assert Task(path, disable_verification=True).instruction == case.instruction
 
     def test_reruns_an_edited_case_and_reuses_an_unedited_one(
         self, data_dir: Path
@@ -349,6 +330,7 @@ class TestJob:
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_TRIALS
         assert job.retry.max_retries == 1
         assert job.verifier.disable
+        assert job.environment == EnvironmentConfig(import_path=HOST_ENVIRONMENT)
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
@@ -378,6 +360,7 @@ class TestJob:
         }
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert not job.verifier.disable
+        assert job.environment == EnvironmentConfig(type=EnvironmentType.DOCKER)
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
@@ -649,6 +632,7 @@ class TestCheckJob:
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert [t.path for t in job.tasks] == [task]
         assert not job.verifier.disable
+        assert job.environment == EnvironmentConfig(type=EnvironmentType.DOCKER)
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
 
@@ -840,7 +824,7 @@ class TestCollect:
             instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
-        monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 60.0)
 
         (output,) = jobs.collect(family, {})
 
