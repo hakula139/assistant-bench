@@ -58,7 +58,7 @@ class TestLoadFamily:
     def test_reads_a_case_family_scored_by_votes(self, families_dir: Path) -> None:
         write_family(
             families_dir,
-            'f',
+            'writing-f',
             """\
             scorer = "votes"
             aspect = "writing"
@@ -74,10 +74,10 @@ class TestLoadFamily:
             tasks=False,
         )
 
-        family = load_family('f')
+        family = load_family('writing-f')
 
         assert family == Family(
-            name='f',
+            name='writing-f',
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
@@ -100,6 +100,41 @@ class TestLoadFamily:
                 scorer='tests', display_name='Smoke Test · Tasks', samples=1
             ),
         )
+
+    @pytest.mark.parametrize(
+        ('name', 'aspect', 'message'),
+        [
+            ('f', '', "family 'f': a public family needs an aspect"),
+            (
+                'writingf',
+                'aspect = "writing"',
+                "family 'writingf': a public family ID starts with its aspect, "
+                'as in writing-<name>',
+            ),
+        ],
+    )
+    def test_requires_a_public_family_id_under_its_aspect(
+        self, families_dir: Path, name: str, aspect: str, message: str
+    ) -> None:
+        write_family(
+            families_dir,
+            name,
+            f"""\
+            scorer = "votes"
+            display_name = "Family F"
+            systems = ["large"]
+            samples = 1
+            max_output_tokens = 300
+            reference = "large"
+            public = true
+            {aspect}
+            """,
+            cases=True,
+            tasks=False,
+        )
+
+        with pytest.raises(ValueError, match=message):
+            load_family(name)
 
     def test_names_a_missing_family(self, families_dir: Path) -> None:
         with pytest.raises(ValueError, match="^no family named 'nope'$"):

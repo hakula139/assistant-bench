@@ -23,7 +23,7 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
   return { round: report.round, results: report.results };
 }
 
-const BOARD = '/writing/chinese/';
+const BOARD = '/writing/arena/';
 
 function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
@@ -56,7 +56,7 @@ describe('VotesBoard', () => {
   test('lists the ranked systems by score, best first', async () => {
     const html = render(await load());
 
-    const systems = [...html.matchAll(/href="\/writing\/chinese\/([^/]+)\/"/g)].map(
+    const systems = [...html.matchAll(/href="\/writing\/arena\/([^/]+)\/"/g)].map(
       (match) => match[1],
     );
 

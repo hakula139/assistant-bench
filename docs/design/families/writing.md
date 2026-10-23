@@ -1,10 +1,10 @@
-# Prose
+# Writing
 
-`prose-zh` and `prose-en` measure how each system writes everyday technical prose in Chinese and in English when it receives the instruction alone, without a system prompt. Both are case families ranked by the owner's blind pairwise votes, and they share the categories, sourcing, and gates below, differing only in language and gate bounds.
+`writing-zh` and `writing-en` measure how each system writes everyday technical prose in Chinese and in English when it receives the instruction alone, without a system prompt. Both are case families ranked by the owner's blind pairwise votes, and they share the categories, sourcing, and gates below, differing only in language and gate bounds.
 
 ## Systems and Samples
 
-Both families send every case to the systems each [`family.toml`](../../../families/prose-zh/family.toml) lists, each at the effort it resolves to, so a model without `requiresEffort` receives no `reasoning_effort`, as [Systems](../systems.md#resolution) describes. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash` is the reference whose score anchors both boards at 1000 when a round ranks it.
+Both families send every case to the systems each [`family.toml`](../../../families/writing-zh/family.toml) lists, each at the effort it resolves to, so a model without `requiresEffort` receives no `reasoning_effort`, as [Systems](../systems.md#resolution) describes. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash` is the reference whose score anchors both boards at 1000 when a round ranks it.
 
 ## Categories
 
@@ -25,7 +25,7 @@ Most instructions supply a list of facts and ask for those facts alone, so a vot
 
 The committed `cases.jsonl` of each family holds 30 synthetic cases, five per category. The data directory's `cases/<family>.jsonl` holds the rest, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, and passes gitleaks before it enters the file, since every system receives it. A committed case derived from such a task keeps only its scenario type, never its text.
 
-Chinese cases are written in Chinese and keep code, paths, and commands in their original form. Code-comment cases in `prose-zh` ask for Chinese comments.
+Chinese cases are written in Chinese and keep code, paths, and commands in their original form. Code-comment cases in `writing-zh` ask for Chinese comments.
 
 ## Gates
 
@@ -39,7 +39,7 @@ Chinese cases are written in Chinese and keep code, paths, and commands in their
 | `language`  | The output's dominant language differs from the family's `language`                              | `language`                       |
 | `script`    | The output holds Traditional-only characters that the case instruction lacks                     | `[gates] script = "hans"`        |
 
-The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `prose-zh`'s is half of `prose-en`'s, since English takes about two to three times as many characters as Chinese for the same content. The maximums sit far above every length a case asks for, so they catch only runaway output that stays under the token cap.
+The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `writing-zh`'s is half of `writing-en`'s, since English takes about two to three times as many characters as Chinese for the same content. The maximums sit far above every length a case asks for, so they catch only runaway output that stays under the token cap.
 
 The language gate parses the output as CommonMark with markdown-it-py and compares Han characters with Latin words in its natural language. That is the inline text without inline code or URLs, and a fence tagged `markdown`, `md`, `text`, or `txt`, such as a fenced README section or commit message, is parsed the same way. Every other fenced or indented code block contributes only its comments: lines opened by `#` and a space or by `//`, `/* */` blocks, and triple-quoted strings. Code-comment outputs are therefore judged by the language of their comments, while `#include`, CSS colors, shebangs, and `#[attribute]` lines count as code. An output with as many Han characters as Latin words, including one with neither, passes.
 

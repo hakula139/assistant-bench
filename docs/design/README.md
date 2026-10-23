@@ -10,4 +10,4 @@ Architecture decisions for assistant-bench. Each page covers the current design 
 | [Ranking](ranking.md)           | Bradley-Terry with ties, the clustered bootstrap, rank spread, the decision, diagnostics   |
 | [Reports](reports.md)           | Closing a round, the report schema and its scorer variants, what is published, the fixture |
 | [Site](site.md)                 | The results pages, the vote page, the charts, the design direction                         |
-| [Prose](families/prose.md)      | `prose-zh` and `prose-en`: systems, categories, case sourcing, gates, verdicts             |
+| [Writing](families/writing.md)  | `writing-zh` and `writing-en`: systems, categories, case sourcing, gates, verdicts         |

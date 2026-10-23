@@ -37,7 +37,7 @@ uv run bench run smoke-text
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. To regenerate a case, give it a new ID.
 
-To run only some of the listed systems, name each with `--system`, as in `uv run bench run prose-zh --system kimi-k3 --system opus-5.5`, and a later run without the option generates the other systems' trials alone. Voting can start once two systems have outputs, and those votes keep counting after the rest join. `bench close` anchors the board at the family's reference when the round ranks it, and otherwise at the most-voted system.
+To run only some of the listed systems, name each with `--system`, as in `uv run bench run writing-zh --system kimi-k3 --system opus-5.5`, and a later run without the option generates the other systems' trials alone. Voting can start once two systems have outputs, and those votes keep counting after the rest join. `bench close` anchors the board at the family's reference when the round ranks it, and otherwise at the most-voted system.
 
 ## Collecting Outputs
 
@@ -45,7 +45,7 @@ To run only some of the listed systems, name each with `--system`, as in `uv run
 uv run bench ingest smoke-text
 ```
 
-`bench ingest` reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint and preferring successful trials, so a rerun replaces an earlier error. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/prose.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
+`bench ingest` reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint and preferring successful trials, so a rerun replaces an earlier error. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
 
 ## Voting
 
@@ -58,7 +58,7 @@ uv run bench serve
 ## Closing a Round
 
 ```bash
-uv run bench close prose-zh
+uv run bench close writing-zh
 ```
 
 `bench close` fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
