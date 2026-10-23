@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -7,7 +7,7 @@ import { VoteApp } from '@/components/vote/VoteApp';
 import type { FamilyView, SessionView } from '@/lib/arena';
 
 const FAMILY: FamilyView = {
-  name: 'prose-zh',
+  name: 'fixture',
   aspect: 'writing',
   display_name: 'Chinese',
 };
@@ -28,36 +28,49 @@ interface StubOptions {
 }
 
 /**
- * A stand-in for the arena API that serves numbered pairs in session `s1`, each with `brief` when
- * it is given, and records each session start, resume, vote, and undo.
+ * A stand-in for the arena API that keeps one open pair in session `s1` until it is voted on or
+ * undone, and records each session start, resume, vote, and undo.
  */
 function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
-  const starts: unknown[] = [];
+  const starts: { family: string }[] = [];
   const resumes: string[] = [];
   const casts: Cast[] = [];
   let undos = 0;
   let served = 0;
+  let open: string | null = null;
+
+  const votes = () => prior + casts.length - undos;
+
+  const pairOf = (token: string) => ({
+    token,
+    instruction: `Instruction ${token}`,
+    checklist: [],
+    ...brief,
+    a: { render: 'text' as const, text: `Output A${token.slice(1)}` },
+    b: { render: 'text' as const, text: `Output B${token.slice(1)}` },
+  });
+
   const view = (): SessionView => {
-    served += 1;
-    const votes = prior + casts.length - undos;
+    const count = votes();
+    if (count >= cases) {
+      open = null;
+    } else {
+      open ??= `t${++served}`;
+    }
     return {
       id: 's1',
       family: FAMILY,
-      votes,
-      remaining: cases - votes,
-      pair:
-        votes === cases
-          ? null
-          : {
-              token: `t${served}`,
-              instruction: `Instruction ${served}`,
-              checklist: [],
-              ...brief,
-              a: { render: 'text', text: `Output A${served}` },
-              b: { render: 'text', text: `Output B${served}` },
-            },
+      votes: count,
+      remaining: cases - count,
+      pair: open === null ? null : pairOf(open),
     };
   };
+
+  const draw = (): SessionView => {
+    open = `t${++served}`;
+    return view();
+  };
+
   const respond = (value: unknown, status = 200) =>
     Promise.resolve(new Response(JSON.stringify(value), { status }));
 
@@ -66,8 +79,9 @@ function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
       return respond([FAMILY]);
     }
     if (path === '/api/sessions') {
-      starts.push(JSON.parse(init?.body as string));
-      return respond(view(), 201);
+      const { family } = JSON.parse(init?.body as string) as { family: string };
+      starts.push({ family });
+      return family === FAMILY.name ? respond(draw(), 201) : respond({ detail: 'not found' }, 404);
     }
     const resume = /^\/api\/sessions\/([^/]+)\/pair$/.exec(path);
     if (resume) {
@@ -75,17 +89,36 @@ function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
       return resume[1] === 's1' ? respond(view()) : respond({ detail: 'not found' }, 404);
     }
     if (path === '/api/sessions/s1/undo') {
+      if (votes() === 0) {
+        return respond({ detail: 'no vote to undo' }, 409);
+      }
       undos += 1;
-      return respond(view());
+      open = null;
+      return respond(draw());
     }
     const vote = /^\/api\/pairs\/([^/]+)\/vote$/.exec(path);
     if (vote) {
+      if (vote[1] !== open) {
+        return respond({ detail: 'not found' }, 404);
+      }
       casts.push({ token: vote[1], ...(JSON.parse(init?.body as string) as Omit<Cast, 'token'>) });
-      return respond(view());
+      open = null;
+      return respond(draw());
     }
     return respond({ detail: `unexpected ${path}` }, 404);
   });
-  return { starts, resumes, casts, undos: () => undos };
+  return {
+    starts,
+    resumes,
+    casts,
+    undos: () => undos,
+    /** Votes the open pair in another tab, which retires it for this one. */
+    elsewhere: () => {
+      casts.push({ token: open as string, choice: 'tie', flags: [], note: null });
+      open = null;
+      draw();
+    },
+  };
 }
 
 /** The session's status line above the prompt, such as "Writing · Chinese, 2 votes". */
@@ -107,7 +140,10 @@ describe('VoteApp', () => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
 
   test('submits from the note by chord, then takes the next key as a shortcut', async () => {
     const api = stubApi();
@@ -168,7 +204,7 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('button', { name: 'Start another session' }));
 
     await vi.waitFor(() => {
-      expect(api.starts).toEqual([{ family: 'prose-zh' }, { family: 'prose-zh' }]);
+      expect(api.starts).toEqual([{ family: FAMILY.name }, { family: FAMILY.name }]);
     });
   });
 
@@ -189,20 +225,65 @@ describe('VoteApp', () => {
   test('shows that each vote saved, then clears the notice', async () => {
     stubApi();
     const user = await startSession();
+    await user.keyboard('a');
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Submit vote/ }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByRole('status').textContent).toBe('Saved');
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  test('clears the saved notice when a vote is undone', async () => {
+    stubApi();
+    const user = await startSession();
 
     await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    expect(screen.getByRole('status').textContent).toBe('Saved');
 
-    expect((await screen.findByRole('status')).textContent).toBe('Saved');
-    await vi.waitFor(
-      () => {
-        expect(screen.getByRole('status').textContent).toBe('');
-      },
-      { timeout: 3000 },
+    await user.keyboard('u');
+    await screen.findByText('Output A3');
+
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  test('follows the session when another tab has voted on the open pair', async () => {
+    const api = stubApi();
+    const user = await startSession();
+    api.elsewhere();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.resumes).toEqual(['s1']);
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['tie']);
+    expect(screen.getByRole('status').textContent).toBe('This pair changed in another tab.');
+  });
+
+  test('clears a family the arena does not have, and names it', async () => {
+    history.replaceState(null, '', '/vote/?family=unknown');
+    localStorage.setItem('bench-session:unknown', 'retired');
+    const api = stubApi();
+
+    render(<VoteApp />);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'No family named unknown to vote on.',
     );
+    expect(window.location.search).toBe('');
+    expect(localStorage.getItem('bench-session:unknown')).toBeNull();
+    expect(api.starts).toEqual([{ family: 'unknown' }]);
   });
 
   test("resumes the family's session from an earlier visit, and again on a reload", async () => {
-    localStorage.setItem('bench-session:prose-zh', 's1');
+    localStorage.setItem(`bench-session:${FAMILY.name}`, 's1');
     const api = stubApi({ prior: 3 });
     const user = await startSession();
     const resumed = statusLine();
@@ -211,7 +292,7 @@ describe('VoteApp', () => {
     cleanup();
 
     render(<VoteApp />);
-    await screen.findByText('Output A3');
+    await screen.findByText('Output A2');
 
     expect(resumed).toBe('Writing · Chinese, 3 votes');
     expect(statusLine()).toBe('Writing · Chinese, 4 votes');
@@ -220,14 +301,27 @@ describe('VoteApp', () => {
   });
 
   test('starts a session when the arena no longer has the stored one', async () => {
-    localStorage.setItem('bench-session:prose-zh', 'retired');
+    localStorage.setItem(`bench-session:${FAMILY.name}`, 'retired');
     const api = stubApi();
 
     await startSession();
 
     expect(api.resumes).toEqual(['retired']);
-    expect(api.starts).toEqual([{ family: 'prose-zh' }]);
-    expect(localStorage.getItem('bench-session:prose-zh')).toBe('s1');
+    expect(api.starts).toEqual([{ family: FAMILY.name }]);
+    expect(localStorage.getItem(`bench-session:${FAMILY.name}`)).toBe('s1');
+  });
+
+  test('opens the prompt for each pair, even after the previous one was collapsed', async () => {
+    stubApi();
+    const user = await startSession();
+
+    await user.click(screen.getByRole('button', { name: 'Prompt' }));
+    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'false');
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'true');
   });
 
   test('renders the prompt as Markdown and sets the checklist apart under its own heading', async () => {
