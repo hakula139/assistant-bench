@@ -312,7 +312,7 @@ class TestClose:
         while view.pair is not None:
             view = arena.vote(view.pair.token, 'a', Defects(), None)
         cases = families_dir / 'f' / 'cases.jsonl'
-        cases.write_text(cases.read_text().replace('"c1"', '"c1-v2"'))
+        cases.write_text(cases.read_text().replace('"c1"', '"c4"'))
         restarted = Arena(
             store, load_families(), RENDER_ORIGIN, clock, np.random.default_rng(0)
         )
