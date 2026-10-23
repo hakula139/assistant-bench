@@ -1,4 +1,4 @@
-"""Output records of a family's trials, as `bench collect` writes them."""
+"""Output records of a family's trials, collected into the data directory."""
 
 from pathlib import Path
 

@@ -98,7 +98,7 @@ assistant-bench/
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
-├── outputs/<family>.jsonl                  # Records written by `bench run` and `bench collect`
+├── outputs/<family>.jsonl                  # Records written by `bench run`, `bench collect`, `bench serve`, and `bench close`
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 └── votes.sqlite                            # Sessions, votes, and undos from `bench serve`
 ```

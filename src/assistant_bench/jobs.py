@@ -40,7 +40,7 @@ from assistant_bench.scoring.gates import failed_gates
 
 
 STOCK_IMAGE = 'debian:trixie-slim'
-# Collect matches each trial's version exactly, while Harbor reuses a trial whose
+# Collection matches each trial's version exactly, while Harbor reuses a trial whose
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
@@ -249,7 +249,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     The oracle must pass every task while the untouched repository must fail it.
     Each agent runs `CHECK_ATTEMPTS` times on each task, which catches a task that
     passes or fails only sometimes. Its trials go under `checks/`, apart from the
-    jobs that `bench collect` reads.
+    jobs that `collect` reads.
     """
     return _job(
         family,
@@ -328,7 +328,7 @@ def run_job(config: JobConfig) -> Path:
     return job_path(config)
 
 
-# ── Collect ──
+# ── Collection ──
 
 
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
