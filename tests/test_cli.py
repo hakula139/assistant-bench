@@ -1,8 +1,10 @@
 import asyncio
 import shutil
+import sqlite3
 import subprocess
 import textwrap
 from collections import defaultdict
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from typer.testing import CliRunner
 
 from assistant_bench import catalog, cli, jobs, report, revisions
 from assistant_bench.arena import api
-from assistant_bench.arena.store import VoteStore
+from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Gate, load_cases, load_family
@@ -54,6 +56,13 @@ def write_cases_family(families_dir: Path, systems: str) -> None:
         )
     )
     (directory / 'cases.jsonl').write_text('')
+
+
+def write_version_one_store() -> None:
+    path = votes_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as db:
+        db.execute('PRAGMA user_version = 1')
 
 
 @pytest.fixture
@@ -410,6 +419,21 @@ class TestServe:
         assert exit_code == 1
         assert 'No family scored by votes has outputs yet' in message
 
+    def test_reports_a_store_of_another_schema_version(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
+        write_version_one_store()
+        monkeypatch.setattr(
+            subprocess, 'run', lambda *args, **options: pytest.fail('built the site')
+        )
+
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 1
+        assert 'has schema version 1, while this bench reads version 2' in message
+
 
 class TestClose:
     def test_writes_the_family_report(
@@ -436,6 +460,18 @@ class TestClose:
 
         assert exit_code == 2
         assert "family 'f' has no votes" in message
+
+    def test_reports_a_store_of_another_schema_version(
+        self, families_dir: Path
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        write_version_one_store()
+
+        exit_code, message = invoke('close', 'f')
+
+        assert exit_code == 1
+        assert 'has schema version 1, while this bench reads version 2' in message
+        assert 'Invalid value for' not in message
 
 
 class TestFingerprints:

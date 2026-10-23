@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } fr
 import { AspectTitle } from '@/components/site/Method';
 import { pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
 import { Hint } from '@/components/site/Term';
+import { DefectPicker, type DefectKeys } from '@/components/vote/DefectPicker';
 import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
@@ -26,10 +27,11 @@ import {
   type FamilyView,
   type PairView,
   type SessionView,
+  type TaggedDefects,
 } from '@/lib/arena';
 import { familyTitle, groupByAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
-import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
+import { defects, type Defect } from '@/lib/report';
 
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
@@ -43,6 +45,27 @@ const CHOICES: { value: Choice; label: string; key: string; className?: string }
   { value: 'both_bad', label: 'Both bad', key: 'x', className: 'max-sm:order-1' },
   { value: 'b', label: 'B is better', key: 'b' },
 ];
+
+/** The two panes, with the tagged state and keys each one reads. */
+const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
+  { side: 'A', key: 'a' },
+  { side: 'B', key: 'b' },
+];
+
+const UNTAGGED: TaggedDefects = { a: [], b: [] };
+
+/** The digits that tag each defect, the left half on output A and the right half on B. */
+const DEFECT_KEYS: Record<keyof TaggedDefects, DefectKeys> = {
+  a: ['1', '2', '3', '4', '5'],
+  b: ['6', '7', '8', '9', '0'],
+};
+
+/** The defect each digit toggles, on the side that owns it. */
+const KEYED_DEFECTS = new Map(
+  SIDES.flatMap(({ key }) =>
+    DEFECT_KEYS[key].map((digit, index) => [digit, { key, defect: defects[index] }] as const),
+  ),
+);
 
 const sessionKey = (family: string) => `bench-session:${family}`;
 
@@ -245,7 +268,7 @@ export function VoteApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [choice, setChoice] = useState<Choice | null>(null);
-  const [flags, setFlags] = useState<Flag[]>([]);
+  const [tagged, setTagged] = useState<TaggedDefects>(UNTAGGED);
   const [note, setNote] = useState('');
   const [asMarkdown, setAsMarkdown] = useState(false);
   const [viewport, setViewport] = useState<number>(VIEWPORTS[2]);
@@ -270,7 +293,7 @@ export function VoteApp() {
     history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
     setSession(next);
     setChoice(null);
-    setFlags([]);
+    setTagged(UNTAGGED);
     setNote('');
     setError(null);
     setNotice(null);
@@ -356,7 +379,10 @@ export function VoteApp() {
       return;
     }
     const text = note.trim();
-    void run(() => castVote(pair.token, { choice, flags, note: text === '' ? null : text }), true);
+    void run(
+      () => castVote(pair.token, { choice, defects: tagged, note: text === '' ? null : text }),
+      true,
+    );
   };
 
   const undo = () => {
@@ -366,10 +392,11 @@ export function VoteApp() {
     void run(() => undoVote(session.id));
   };
 
-  const toggleFlag = (flag: Flag) => {
-    setFlags((current) =>
-      current.includes(flag) ? current.filter((item) => item !== flag) : [...current, flag],
-    );
+  const toggleDefect = (side: keyof TaggedDefects, defect: Defect) => {
+    setTagged((current) => ({
+      ...current,
+      [side]: defects.filter((item) => (item === defect) !== current[side].includes(item)),
+    }));
   };
 
   // Enter on a focused control outside the pair, such as a header link, keeps its own action.
@@ -405,11 +432,11 @@ export function VoteApp() {
       return;
     }
     const picked = CHOICES.find((item) => item.key === key);
-    const flag = flagNames[Number(event.key) - 1] as Flag | undefined;
+    const keyed = KEYED_DEFECTS.get(event.key);
     if (picked) {
       setChoice(picked.value);
-    } else if (flag) {
-      toggleFlag(flag);
+    } else if (keyed !== undefined) {
+      toggleDefect(keyed.key, keyed.defect);
     } else if (key === 'n') {
       noteField.current?.focus();
     } else if (event.key === 'Enter' && !outside(target)) {
@@ -537,20 +564,25 @@ export function VoteApp() {
         )}
       >
         <Brief pair={pair} status={status} stacked={hasFrames} />
-        <OutputPane
-          key={`a-${pair.token}`}
-          side="A"
-          pane={pair.a}
-          asMarkdown={asMarkdown}
-          viewport={viewport}
-        />
-        <OutputPane
-          key={`b-${pair.token}`}
-          side="B"
-          pane={pair.b}
-          asMarkdown={asMarkdown}
-          viewport={viewport}
-        />
+        {SIDES.map(({ side, key }) => (
+          <OutputPane
+            key={`${key}-${pair.token}`}
+            side={side}
+            pane={pair[key]}
+            asMarkdown={asMarkdown}
+            viewport={viewport}
+            controls={
+              <DefectPicker
+                side={side}
+                tagged={tagged[key]}
+                keys={DEFECT_KEYS[key]}
+                onToggle={(defect) => {
+                  toggleDefect(key, defect);
+                }}
+              />
+            }
+          />
+        ))}
       </div>
 
       <div className="space-y-3">
@@ -562,39 +594,19 @@ export function VoteApp() {
         )}
         <ErrorAlert error={error} />
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Flags">
-            {flagNames.map((value, index) => (
-              <Toggle
-                key={value}
-                variant="outline"
-                pressed={flags.includes(value)}
-                aria-keyshortcuts={String(index + 1)}
-                onPressedChange={() => {
-                  toggleFlag(value);
-                }}
-              >
-                {flagLabels[value]}
-                <Kbd aria-hidden="true">{index + 1}</Kbd>
-              </Toggle>
-            ))}
-          </div>
-
-          <Textarea
-            ref={noteField}
-            size="line"
-            rows={1}
-            aria-label="Note"
-            aria-keyshortcuts="N"
-            placeholder="Note (N), ⌘↵ or Ctrl+↵ submits"
-            maxLength={500}
-            value={note}
-            onChange={(event) => {
-              setNote(event.target.value);
-            }}
-            className="min-w-64 flex-1"
-          />
-        </div>
+        <Textarea
+          ref={noteField}
+          size="line"
+          rows={1}
+          aria-label="Note"
+          aria-keyshortcuts="N"
+          placeholder="Note (N), ⌘↵ or Ctrl+↵ submits"
+          maxLength={500}
+          value={note}
+          onChange={(event) => {
+            setNote(event.target.value);
+          }}
+        />
       </div>
 
       <div className="grid gap-2 max-md:sticky max-md:bottom-0 max-md:-mx-4 max-md:border-t max-md:bg-background max-md:px-4 max-md:py-3 sm:grid-cols-[1fr_auto] sm:max-md:-mx-6 sm:max-md:px-6">

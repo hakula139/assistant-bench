@@ -15,12 +15,12 @@ from assistant_bench.scoring.ranking import Comparison
 
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
-type Flag = Literal['meaning', 'punctuation', 'register', 'script', 'length']
+type Defect = Literal['facts', 'punctuation', 'tone', 'formulaic', 'length']
 
 # Ties and both-bad votes count as half a win for each side.
 _LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS votes (
   b_job TEXT NOT NULL,
   b_trial TEXT NOT NULL,
   choice TEXT NOT NULL CHECK (choice IN ('a', 'b', 'tie', 'both_bad')),
-  flags TEXT NOT NULL,
+  a_defects TEXT NOT NULL,
+  b_defects TEXT NOT NULL,
   note TEXT,
   duration_sec REAL NOT NULL,
   repeat_of INTEGER REFERENCES votes (id),
@@ -73,7 +74,8 @@ _VOTE_COLUMNS = (
         for key in ('system', 'fingerprint', 'job', 'trial')
     ),
     'choice',
-    'flags',
+    'a_defects',
+    'b_defects',
     'note',
     'duration_sec',
     'repeat_of',
@@ -109,6 +111,15 @@ class Side(BaseModel):
         )
 
 
+class Defects(BaseModel):
+    """The defects the owner tagged on each side's output."""
+
+    model_config = ConfigDict(frozen=True, extra='forbid')
+
+    a: frozenset[Defect] = frozenset()
+    b: frozenset[Defect] = frozenset()
+
+
 class Ballot(BaseModel):
     """An owner's vote to record, with side A shown on the left.
 
@@ -123,7 +134,7 @@ class Ballot(BaseModel):
     a: Side
     b: Side
     choice: Choice
-    flags: frozenset[Flag] = frozenset()
+    defects: Defects = Defects()
     note: str | None = None
     duration_sec: float
     repeat_of: int | None = None
@@ -208,7 +219,8 @@ class VoteStore:
                 *(getattr(ballot.a, key) for key in Side.model_fields),
                 *(getattr(ballot.b, key) for key in Side.model_fields),
                 ballot.choice,
-                json.dumps(sorted(ballot.flags)),
+                json.dumps(sorted(ballot.defects.a)),
+                json.dumps(sorted(ballot.defects.b)),
                 ballot.note,
                 ballot.duration_sec,
                 ballot.repeat_of,
@@ -256,7 +268,10 @@ def _vote(row: sqlite3.Row) -> Vote:
         session=row['session'],
         case=row['case_id'],
         choice=row['choice'],
-        flags=frozenset(json.loads(row['flags'])),
+        defects=Defects(
+            a=frozenset(json.loads(row['a_defects'])),
+            b=frozenset(json.loads(row['b_defects'])),
+        ),
         note=row['note'],
         duration_sec=row['duration_sec'],
         repeat_of=row['repeat_of'],

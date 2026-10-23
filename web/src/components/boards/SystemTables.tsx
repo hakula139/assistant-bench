@@ -16,8 +16,8 @@ import {
   formatScore,
   formatSeconds,
 } from '@/lib/format';
-import { terms } from '@/lib/glossary';
-import { flagLabels, flags, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
+import { defectTerms, terms } from '@/lib/glossary';
+import { defects, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 // ── System Page Tables ──
@@ -120,22 +120,29 @@ export function DistributionTable({
   );
 }
 
-export function FlagsTable({ standing }: { standing: Standing }) {
+export function DefectsTable({ standing }: { standing: Standing }) {
   return (
     <Table className="max-w-md">
       <TableHeader>
         <TableRow>
-          <TableHead>Flag</TableHead>
+          <TableHead>Issue</TableHead>
           <TableHead numeric>Votes</TableHead>
+          <TableHead numeric>Share</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {flags.map((flag) => (
-          <TableRow key={flag}>
-            <TableCell>{flagLabels[flag]}</TableCell>
-            <TableCell numeric>{standing.flags[flag] ?? 0}</TableCell>
-          </TableRow>
-        ))}
+        {defects.map((defect) => {
+          const count = standing.defects[defect] ?? 0;
+          return (
+            <TableRow key={defect}>
+              <TableCell>{defectTerms[defect].term}</TableCell>
+              <TableCell numeric>{count}</TableCell>
+              <TableCell numeric>
+                {formatPercent(standing.votes === 0 ? null : count / standing.votes)}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

@@ -14,7 +14,7 @@ from assistant_bench.arena.scheduler import Board, Draw, Pool, draw
 from assistant_bench.arena.store import (
     Ballot,
     Choice,
-    Flag,
+    Defects,
     Session,
     Side,
     Vote,
@@ -194,7 +194,7 @@ class Arena:
         return self._view(self._session(session_id))
 
     def vote(
-        self, token: str, choice: Choice, flags: frozenset[Flag], note: str | None
+        self, token: str, choice: Choice, defects: Defects, note: str | None
     ) -> SessionView:
         issued = self._retire(token)
         self._store.record(
@@ -204,7 +204,7 @@ class Arena:
                 a=Side.of(issued.draw.a),
                 b=Side.of(issued.draw.b),
                 choice=choice,
-                flags=flags,
+                defects=defects,
                 note=note,
                 duration_sec=(self._clock() - issued.served_at).total_seconds(),
                 repeat_of=issued.draw.repeat_of,

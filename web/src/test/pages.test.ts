@@ -363,6 +363,18 @@ describe('system page', () => {
     );
   });
 
+  test("counts each issue tagged on the system's outputs, with its share of the votes", async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-mini',
+      boards: [],
+    });
+
+    expect(text(html)).toContain(
+      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
+    );
+  });
+
   test('marks a round whose anchor differs from the reference', async () => {
     const arena = await family();
     const earlier = arena.rounds[0].results;
@@ -404,6 +416,7 @@ describe('system page', () => {
       'Acme Tiny Preliminary Score 233 (81–321) Rank 6 Votes 0 (0 decisive)',
     );
     expect(html).not.toContain('Head to head');
+    expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
   });
 });
 

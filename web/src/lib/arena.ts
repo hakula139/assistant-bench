@@ -1,7 +1,7 @@
 import { z } from 'astro/zod';
 
 import { aspectIds } from '@/lib/aspects';
-import type { Flag } from '@/lib/report';
+import type { Defect } from '@/lib/report';
 
 // The vote page's policy forbids eval, which Zod otherwise probes for to compile its parsers.
 z.config({ jitless: true });
@@ -37,6 +37,7 @@ const sessionView = z.object({
   pair: pairView.nullable(),
 });
 
+export type TaggedDefects = Record<'a' | 'b', Defect[]>;
 export type FamilyView = z.infer<typeof familyView>;
 export type Pane = z.infer<typeof pane>;
 export type PairView = z.infer<typeof pairView>;
@@ -90,5 +91,5 @@ export const undoVote = (id: string) =>
 
 export const castVote = (
   token: string,
-  vote: { choice: Choice; flags: Flag[]; note: string | null },
+  vote: { choice: Choice; defects: TaggedDefects; note: string | null },
 ) => request(sessionView, 'POST', `/pairs/${encodeURIComponent(token)}/vote`, vote);

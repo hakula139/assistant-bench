@@ -16,7 +16,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from assistant_bench.arena.resolution import MatchedVote, reconcile, settled
-from assistant_bench.arena.store import Choice, Flag, Vote, VoteStore
+from assistant_bench.arena.store import Choice, Defect, Vote, VoteStore
 from assistant_bench.families import (
     Family,
     TaskTestsSettings,
@@ -68,9 +68,9 @@ class Standing(_Model):
     """One system's row on a board scored by votes.
 
     `rank` orders the scores, while `best_rank` and `worst_rank` span the ranks
-    its interval allows. `preliminary` marks fewer than 40 decisive votes. Flags
-    count against the side a vote did not prefer, so a tie or both-bad vote
-    counts them against both.
+    its interval allows. `preliminary` marks fewer than 40 decisive votes.
+    `defects` counts the votes that tagged this system's output with each defect,
+    whichever side won.
     """
 
     system: str
@@ -90,7 +90,7 @@ class Standing(_Model):
     p50_latency_sec: float | None
     output_tokens: Distribution | None
     latency_sec: Distribution | None
-    flags: dict[Flag, int]
+    defects: dict[Defect, int]
 
 
 class HeadToHead(_Model):
@@ -396,8 +396,12 @@ def _standing(
     outputs: list[Output],
 ) -> Standing:
     choices = Counter(vote.choice for vote in votes)
-    flags = Counter(
-        flag for vote in votes for flag in vote.flags if _flagged(vote, system)
+    defects = Counter(
+        defect
+        for vote in votes
+        for side, tagged in ((vote.a, vote.defects.a), (vote.b, vote.defects.b))
+        if side.system == system
+        for defect in tagged
     )
     finished = [output for output in outputs if output.error is None]
     gated = [output.gate_failures for output in finished]
@@ -420,20 +424,8 @@ def _standing(
         p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
         latency_sec=_distribution(output.latency_sec for output in finished),
-        flags={flag: flags[flag] for flag in get_args(Flag.__value__)},
+        defects={defect: defects[defect] for defect in get_args(Defect.__value__)},
     )
-
-
-def _flagged(vote: Vote, system: str) -> bool:
-    match vote.choice:
-        case 'a':
-            return vote.b.system == system
-        case 'b':
-            return vote.a.system == system
-        case 'tie' | 'both_bad':
-            return True
-        case _:
-            assert_never(vote.choice)
 
 
 def _head_to_head(votes: list[Vote], systems: Iterable[str]) -> list[HeadToHead]:

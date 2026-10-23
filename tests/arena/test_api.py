@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena, HtmlPane
-from assistant_bench.arena.store import VoteStore
+from assistant_bench.arena.store import Defects, VoteStore
 from support import Clock, make_arena
 
 
@@ -27,7 +27,9 @@ def client(arena: Arena) -> TestClient:
 
 
 class TestCreateApp:
-    def test_runs_a_session_from_start_to_undo(self, client: TestClient) -> None:
+    def test_runs_a_session_from_start_to_undo(
+        self, client: TestClient, store: VoteStore
+    ) -> None:
         family = {
             'name': 'f',
             'aspect': 'writing',
@@ -43,11 +45,20 @@ class TestCreateApp:
 
         voted = client.post(
             f'/api/pairs/{token}/vote',
-            json={'choice': 'both_bad', 'flags': ['script'], 'note': 'Mixed.'},
+            json={
+                'choice': 'both_bad',
+                'defects': {'a': ['formulaic'], 'b': ['length']},
+                'note': 'Mixed.',
+            },
             headers=ORIGIN,
         )
         assert voted.status_code == 200
         assert voted.json()['votes'] == 1
+        (vote,) = store.votes('f')
+        assert (vote.defects, vote.note) == (
+            Defects(a=frozenset({'formulaic'}), b=frozenset({'length'})),
+            'Mixed.',
+        )
 
         undone = client.post(f'/api/sessions/{session["id"]}/undo', headers=ORIGIN)
         assert undone.json()['votes'] == 0
@@ -107,6 +118,21 @@ class TestCreateApp:
                 }
             ]
         }
+
+    @pytest.mark.parametrize(
+        'body',
+        [
+            {'choice': 'a', 'defects': {'c': []}},
+            {'choice': 'a', 'flags': ['length']},
+        ],
+        ids=['unknown-side', 'old-key'],
+    )
+    def test_rejects_a_body_the_models_forbid(
+        self, client: TestClient, body: dict[str, Any]
+    ) -> None:
+        response = client.post('/api/pairs/nope/vote', json=body, headers=ORIGIN)
+
+        assert response.status_code == 422
 
     def test_refuses_to_undo_an_empty_session(self, client: TestClient) -> None:
         session = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)

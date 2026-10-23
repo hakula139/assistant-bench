@@ -6,7 +6,7 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import numpy as np
 from harbor.job_plan import JobPlan
@@ -28,7 +28,8 @@ from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import (
     Ballot,
     Choice,
-    Flag,
+    Defect,
+    Defects,
     Side,
     Vote,
     VoteStore,
@@ -438,7 +439,7 @@ _SWAPPED: dict[Choice, Choice] = {
     'tie': 'tie',
     'both_bad': 'both_bad',
 }
-_FLAGS: list[Flag] = ['meaning', 'punctuation', 'register', 'script', 'length']
+_DEFECTS: list[Defect] = list(get_args(Defect.__value__))
 
 
 def _simulated_vote(
@@ -454,13 +455,16 @@ def _simulated_vote(
         choice = 'both_bad'
     else:
         choice = 'a' if rng.random() < 1 / (1 + np.exp(-gap)) else 'b'
-    flags = frozenset({_FLAGS[rng.integers(5)]}) if rng.random() < 0.2 else frozenset()
+    tagged = (
+        frozenset({_DEFECTS[rng.integers(5)]}) if rng.random() < 0.2 else frozenset()
+    )
+    defects = Defects(b=tagged) if choice == 'a' else Defects(a=tagged)
     return Ballot(
         session=session,
         case=a.case,
         a=Side.of(a),
         b=Side.of(b),
         choice=choice,
-        flags=flags,
+        defects=defects,
         duration_sec=float(rng.uniform(15, 120)),
     )

@@ -20,7 +20,7 @@ from assistant_bench.arena.service import (
     SessionView,
     UnknownItem,
 )
-from assistant_bench.arena.store import Choice, Flag
+from assistant_bench.arena.store import Choice, Defects
 
 
 HOST = '127.0.0.1'
@@ -57,7 +57,7 @@ class VoteRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     choice: Choice
-    flags: frozenset[Flag] = frozenset()
+    defects: Defects = Defects()
     note: str | None = Field(default=None, max_length=NOTE_MAX_CHARS)
 
 
@@ -115,7 +115,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     @writes.post('/pairs/{token}/vote')
     async def vote(token: str, body: VoteRequest) -> SessionView:
         """Record a vote on a pair and return the session's next pair."""
-        return arena.vote(token, body.choice, body.flags, body.note)
+        return arena.vote(token, body.choice, body.defects, body.note)
 
     router.include_router(writes)
     app.include_router(router)
