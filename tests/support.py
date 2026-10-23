@@ -36,7 +36,7 @@ from assistant_bench.arena.store import (
 )
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Gate
-from assistant_bench.jobs import TASK_VERSION
+from assistant_bench.jobs import task_version
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 
@@ -72,16 +72,20 @@ def write_trial(
     output: str | None = None,
     instruction: str | None = 'Hi.',
     digest: str = f'sha256:{"0" * 64}',
-    version: str = TASK_VERSION,
+    version: str | None = None,
 ) -> None:
     """Write a trial's result and lock, its job's files, and its task's instruction.
 
     An `instruction` of `None` leaves a task that `render_tasks` wrote untouched.
+    The version follows the installed task's content unless it is given.
     """
     if instruction is not None:
         task_dir = data_dir() / 'tasks' / task
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / 'instruction.md').write_text(instruction)
+    if version is None:
+        installed = (data_dir() / 'tasks' / task / 'instruction.md').read_text()
+        version = task_version(task, installed)
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:

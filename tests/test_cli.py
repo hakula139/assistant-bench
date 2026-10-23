@@ -178,33 +178,20 @@ class TestCheck:
 
         assert exit_code == 5
 
-    @pytest.mark.parametrize(
-        ('edited', 'expected'),
-        [
-            (
-                ['en-greeting'],
-                "family 'smoke-text': case 'en-greeting' changed, give it a new ID",
-            ),
-            (
-                ['en-greeting', 'zh-greeting'],
-                "family 'smoke-text': cases 'en-greeting', 'zh-greeting' changed, "
-                'give each a new ID',
-            ),
-        ],
-        ids=['one-case', 'two-cases'],
-    )
-    def test_rejects_cases_whose_task_differs_from_a_recorded_trial(
-        self, data_dir: Path, edited: list[str], expected: str
-    ) -> None:
+    def test_accepts_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'smoke-text' / 'job-1'
-        for case_id in edited:
-            agent = AgentConfig(name='oracle')
-            write_trial(job_dir, f'{case_id}__1', agent, task=f'smoke-text/{case_id}')
+        write_trial(
+            job_dir,
+            'en-greeting__1',
+            AgentConfig(name='oracle'),
+            task='smoke-text/en-greeting',
+            version=jobs.TASK_VERSION,
+        )
 
         exit_code, message = invoke('check', 'smoke-text')
 
-        assert exit_code == 2
-        assert expected in message
+        assert exit_code == 0, message
+        assert 'smoke-text: 2 valid cases' in message
 
     def test_rejects_a_local_case_that_reuses_a_committed_id(
         self, data_dir: Path

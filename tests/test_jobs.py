@@ -1,15 +1,20 @@
+import asyncio
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
+from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial.config import AgentConfig
-from harbor.publisher.packager import Packager
 
 from assistant_bench import jobs
+from assistant_bench.arena.resolution import reconcile
+from assistant_bench.arena.store import Ballot, Side, VoteStore
 from assistant_bench.catalog import System
 from assistant_bench.families import (
     Case,
@@ -24,7 +29,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses.generate import GenerateOptions
 from assistant_bench.outputs import Output
 from assistant_bench.paths import REPO_ROOT
-from support import make_system, write_trial
+from support import finish_job, make_system, write_trial
 
 
 VOTES = Family(
@@ -57,17 +62,11 @@ def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
     ).model_dump()
 
 
-def record(data_dir: Path, task: Path, version: str = jobs.TASK_VERSION) -> None:
-    content_hash, _ = Packager.compute_content_hash(task)
-    write_trial(
-        data_dir / 'jobs' / 'smoke-text' / 'job-1',
-        f'{task.name}__1',
-        AgentConfig(name='oracle'),
-        task=f'smoke-text/{task.name}',
-        instruction=None,
-        digest=f'sha256:{content_hash}',
-        version=version,
-    )
+def installed_version(path: Path) -> str:
+    config = Task(path, disable_verification=True).config
+    assert config.task is not None
+    assert config.task.version is not None
+    return config.task.version
 
 
 class TestRenderTasks:
@@ -78,67 +77,59 @@ class TestRenderTasks:
         (path,) = jobs.render_tasks(family, [case])
 
         assert path == data_dir / 'tasks' / 'smoke-text' / 'en-greeting'
-        task = Task(path, disable_verification=True)
-        assert task.config.task is not None
-        assert (task.config.task.name, task.config.task.version) == (
-            'smoke-text/en-greeting',
-            jobs.TASK_VERSION,
+        assert installed_version(path) == jobs.task_version(
+            'smoke-text/en-greeting', case.instruction
         )
+        task = Task(path, disable_verification=True)
         assert task.config.environment.docker_image == jobs.STOCK_IMAGE
         assert task.instruction == case.instruction
 
-    def test_rejects_a_case_edited_after_a_trial_ran_it(self, data_dir: Path) -> None:
+    def test_reruns_an_edited_case_and_reuses_an_unedited_one(
+        self, data_dir: Path
+    ) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
-        for task in jobs.render_tasks(family, cases):
-            record(data_dir, task)
-        edited = [
-            cases[0].model_copy(update={'instruction': 'Reworded.'}),
-            cases[1],
-            cases[1].model_copy(update={'id': 'zh-greeting-2', 'instruction': 'New.'}),
-        ]
-
-        with pytest.raises(ValueError) as error:
-            jobs.render_tasks(family, edited)
-
-        assert str(error.value) == (
-            "family 'smoke-text': case 'en-greeting' changed, give it a new ID"
+        first = finish_job(
+            jobs.case_job(family, [make_system()], jobs.render_tasks(family, cases))
         )
-        tasks = data_dir / 'tasks' / 'smoke-text'
-        assert (tasks / 'en-greeting' / 'instruction.md').read_text() == (
-            cases[0].instruction
-        )
-        assert not (tasks / 'zh-greeting-2').exists()
+        edited = [cases[0].model_copy(update={'instruction': 'Reworded.'}), cases[1]]
 
-    def test_rejects_every_task_when_the_stock_image_changes(
+        job = jobs.case_job(family, [make_system()], jobs.render_tasks(family, edited))
+        plan = asyncio.run(JobPlan.from_config(job))
+        (source,) = job.source_jobs
+        diff = compare_job_trials(plan, load_source_trials([(source, first)]))
+
+        assert {trial.task_name: trial.action for trial in diff.trials} == {
+            'smoke-text/en-greeting': DiffAction.RERUN,
+            'smoke-text/zh-greeting': DiffAction.REUSE,
+        }
+
+    def test_reruns_every_task_when_the_stock_image_changes(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
-        for task in jobs.render_tasks(family, cases):
-            record(data_dir, task)
+        before = [installed_version(path) for path in jobs.render_tasks(family, cases)]
         monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
 
-        with pytest.raises(ValueError) as error:
-            jobs.render_tasks(family, cases)
+        after = [installed_version(path) for path in jobs.render_tasks(family, cases)]
 
-        assert str(error.value) == (
-            "family 'smoke-text': cases 'en-greeting', 'zh-greeting' changed, "
-            'give each a new ID'
-        )
+        assert all(new != old for new, old in zip(after, before, strict=True))
 
-    def test_replaces_a_task_whose_trials_ran_another_version(
+    def test_prunes_tasks_for_cases_the_family_no_longer_has(
         self, data_dir: Path
     ) -> None:
         family = load_family('smoke-text')
-        (case, _) = load_cases(family)
-        (task,) = jobs.render_tasks(family, [case])
-        record(data_dir, task, version='0.9.0')
-        edited = case.model_copy(update={'instruction': 'Reworded.'})
+        stale = data_dir / 'tasks' / 'smoke-text' / 'en-greeting-v2'
+        stale.mkdir(parents=True)
+        (stale / 'instruction.md').write_text('Old.')
+        (stale.parent / 'stray.md').write_text('Stray.')
 
-        (path,) = jobs.render_tasks(family, [edited])
+        jobs.render_tasks(family, load_cases(family))
 
-        assert (path / 'instruction.md').read_text() == 'Reworded.'
+        assert sorted(
+            path.name for path in (data_dir / 'tasks' / 'smoke-text').iterdir()
+        ) == ['en-greeting', 'zh-greeting']
 
 
 class TestDriftedSystems:
@@ -329,6 +320,81 @@ class TestRunJob:
 
 
 class TestIngest:
+    def test_keeps_only_trials_of_the_current_task(
+        self, data_dir: Path, store: VoteStore
+    ) -> None:
+        family = load_family('smoke-text')
+        job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
+        agents = {
+            side: AgentConfig(
+                import_path='x:Y', kwargs={'system': side, 'fingerprint': f'fp-{side}'}
+            )
+            for side in ('a', 'b')
+        }
+        write_trial(
+            job,
+            'en-greeting__a-old',
+            agents['a'],
+            task='smoke-text/en-greeting',
+            output='old',
+            version=jobs.TASK_VERSION,
+        )
+        for case, side in (
+            ('en-greeting', 'b'),
+            ('zh-greeting', 'a'),
+            ('zh-greeting', 'b'),
+        ):
+            write_trial(
+                job,
+                f'{case}__{side}',
+                agents[side],
+                task=f'smoke-text/{case}',
+                output=f'{case} {side}',
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+
+        outputs = jobs.ingest(family, {})
+
+        assert {(output.case, output.system) for output in outputs} == {
+            ('en-greeting', 'b'),
+            ('zh-greeting', 'a'),
+            ('zh-greeting', 'b'),
+        }
+        at = datetime(2026, 10, 22, tzinfo=UTC)
+        session = store.start_session(family.name, at)
+        by_key = {(output.case, output.system): output for output in outputs}
+        store.record(
+            Ballot(
+                session=session.id,
+                case='en-greeting',
+                a=Side(
+                    system='a',
+                    fingerprint='fp-a',
+                    job='job-1',
+                    trial='en-greeting__a-old',
+                ),
+                b=Side.of(by_key['en-greeting', 'b']),
+                choice='a',
+                duration_sec=1.0,
+            ),
+            at,
+        )
+        kept = store.record(
+            Ballot(
+                session=session.id,
+                case='zh-greeting',
+                a=Side.of(by_key['zh-greeting', 'a']),
+                b=Side.of(by_key['zh-greeting', 'b']),
+                choice='a',
+                duration_sec=1.0,
+            ),
+            at,
+        )
+
+        assert [
+            matched.vote.id for matched in reconcile(store.votes(family.name), outputs)
+        ] == [kept.id]
+
     def test_collects_generations_and_errors(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
         system = make_system()
@@ -624,8 +690,7 @@ class TestIngest:
         case = Case(
             id='a', category='reply', source='held-out', instruction='介绍臺北。'
         )
-        (task,) = jobs.render_tasks(family, [case])
-        content_hash, _ = Packager.compute_content_hash(task)
+        jobs.render_tasks(family, [case])
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
@@ -633,13 +698,8 @@ class TestIngest:
             task='f/a',
             output='臺北今天很热。',
             instruction=None,
-            digest=f'sha256:{content_hash}',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
-        with pytest.raises(ValueError, match="case 'a' changed"):
-            jobs.render_tasks(
-                family, [case.model_copy(update={'instruction': '介绍台北。'})]
-            )
 
         (output,) = jobs.ingest(family, {})
 
@@ -652,7 +712,7 @@ class TestIngest:
             AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
             output='Hi.',
-            instruction=None,
+            instruction='',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
