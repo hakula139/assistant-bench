@@ -1,6 +1,6 @@
 import { getCollection } from 'astro:content';
 
-import { aspectIds, familyTitle, type Aspect } from '@/lib/aspects';
+import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
@@ -63,16 +63,12 @@ export function systemPath(family: Family, system: string): string {
   return `${boardPath(family)}${system}/`;
 }
 
-/** The site's top-level path segments, which a family ID may not take. */
-const reservedNames = new Set<string>([...aspectIds, 'methodology', 'vote']);
-
 /**
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, when a family ID names an
- *   aspect or a top-level page, when a public family has no aspect, or when two public families
- *   share a board path.
+ * @throws Error when two families, listed or not, share a full name, when a public family has no
+ *   aspect, or when two public families share a board path.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -87,9 +83,6 @@ export function listFamilies(
       throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
-    if (reservedNames.has(name)) {
-      throw new Error(`family ${name} takes the name of a top-level path`);
-    }
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
   const families = configs
