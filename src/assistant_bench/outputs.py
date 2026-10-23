@@ -13,7 +13,13 @@ class Output(BaseModel):
 
     `gate_failures` lists the gates a voted output fails, so an empty list admits
     it to votes and any failure resolves its pairs automatically. It is `None` for
-    an errored trial and for a family whose scorer has no gates.
+    an output without a verdict and for a family whose scorer has no gates. A
+    rendered case has no verdict when its trial errored, and a task has none when
+    its tests recorded no reward.
+
+    On a task of a family scored by votes, `text` is the diff of the solution its
+    tests graded. `harness_version` is the Harbor version whose terminal agent
+    wrote a task's solution, which the single-call agent leaves unset.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
@@ -40,6 +46,7 @@ class Output(BaseModel):
     response_model: str | None
     request_id: str | None
     nixos_config_rev: str | None
+    harness_version: str | None
 
 
 def read_outputs(family: str) -> list[Output]:

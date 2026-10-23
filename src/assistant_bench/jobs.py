@@ -8,32 +8,38 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, assert_never
+from uuid import UUID
 
-from harbor.job_diff import load_source_trials
+import semver
+from harbor.job_diff import SourceTrial, load_source_trials
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.task import config as task_config
+from harbor.models.task.artifacts import source_host_path
 from harbor.models.task.verifier_mode import resolve_task_verifier_mode
 from harbor.models.trial import config as trial_config
+from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
+from harbor.publisher.packager import Packager
 from harbor.trial.network_policy import resolve_trial_network_plan
 from pydantic import ValidationError
 
 from assistant_bench.catalog import System
+from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
     Family,
     Gate,
-    Settings,
     TaskTestsSettings,
     VotesSettings,
     case_task,
+    load_cases,
     task_location,
     tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE
-from assistant_bench.messages import error_lines
+from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
@@ -44,8 +50,11 @@ STOCK_IMAGE = 'debian:trixie-slim'
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
+WORKSPACE = '/app'
 
 N_CONCURRENT_TRIALS = 8
+# Caps task trials, each of which can hold an agent and a verifier container.
+N_CONCURRENT_CONTAINERS = 4
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
@@ -113,14 +122,45 @@ def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
     return task_dir
 
 
+def family_systems(family: Family, systems: list[System]) -> list[System]:
+    """Return the systems as the family runs them.
+
+    A task family runs every system under its `harness`, which enters the
+    system's fingerprint, while a case family runs each system as it resolves.
+
+    Raises
+    ------
+    ValueError
+        The family names an unknown harness, or a system has a prompt that the
+        harness cannot send.
+    """
+    harness = family.settings.harness
+    if harness is None:
+        return systems
+    if harness not in HARNESSES:
+        raise ValueError(
+            f'Family `{family.name}`: harness `{harness}` is not one of '
+            f'{code(HARNESSES)}.'
+        )
+    if not HARNESSES[harness].system_prompt:
+        prompted = [system.name for system in systems if system.prompt is not None]
+        if prompted:
+            raise ValueError(
+                f'Family `{family.name}` lists {code(prompted)}, whose prompt the '
+                f'`{harness}` harness cannot send. Remove them from `systems`.'
+            )
+    return [system.model_copy(update={'harness': harness}) for system in systems]
+
+
 def drifted_systems(
     family: Family, systems: list[System]
 ) -> list[tuple[str, str, str]]:
     """Return each selected system whose earlier trials recorded another fingerprint.
 
-    An entry names the system, the fingerprint an earlier trial recorded, and the
-    fingerprint the system resolves to now. A system can contribute one entry per
-    recorded fingerprint, and the list is sorted by system name.
+    The systems are as `family_systems` returns them. An entry names the system,
+    the fingerprint an earlier trial recorded, and the fingerprint the system
+    resolves to now. A system can contribute one entry per recorded fingerprint,
+    and the list is sorted by system name.
 
     Raises
     ------
@@ -154,15 +194,18 @@ def _agent_config(family: Family, system: System) -> trial_config.AgentConfig:
     )
 
 
-def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
-    """Build a job that runs every system on every case task.
+def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
+    """Build a job that runs every system on every task of the family.
 
-    The job diffs against the family's earlier jobs, so Harbor runs only the trials
-    that none of them completed with the same task version and agent config. A case
-    family is scored by votes, so its verifier stays disabled.
+    The systems are as `family_systems` returns them. The job diffs against the
+    family's earlier jobs, so Harbor runs only the trials that none of them
+    completed with the same task version and agent config. A task's tests grade
+    its trials whatever the scorer, while a rendered case has no tests, so the
+    verifier runs only for a task family, which also runs fewer trials at once.
     """
     agents = [_agent_config(family, system) for system in systems]
     sources = [source for source, _ in _sources(family)]
+    tasks_source = family.source == 'tasks'
     return _job(
         family,
         data_dir() / 'jobs' / family.name,
@@ -170,8 +213,41 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
         tasks,
         sources,
         n_attempts=family.settings.samples,
-        verify=False,
+        n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
+        verify=tasks_source,
     )
+
+
+def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
+    """Return each task whose content changed since a trial recorded its version.
+
+    Harbor aborts a job whose task has an earlier trial at the same version but
+    another digest. An entry names the task and that version, sorted by task.
+
+    Raises
+    ------
+    ValueError
+        A source job is not a job directory, or a trial record is unreadable.
+    """
+    current: dict[str, tuple[str | None, str]] = {}
+    for task in tasks:
+        content_hash, _ = Packager.compute_content_hash(task)
+        current[f'{family.name}/{task.name}'] = (
+            _task_version(task),
+            f'sha256:{content_hash}',
+        )
+    changed = set()
+    for trial in load_source_trials(_sources(family)):
+        if trial.task_name not in current:
+            continue
+        version, digest = current[trial.task_name]
+        if (
+            version is not None
+            and trial.lock.task.version == version
+            and trial.lock.task.digest != digest
+        ):
+            changed.add((trial.task_name.removeprefix(f'{family.name}/'), version))
+    return sorted(changed)
 
 
 def check_tasks(family: Family, tasks: list[Path]) -> None:
@@ -231,10 +307,10 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
             if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
                 problems.append(f'{location}: the {phase} phase needs `no-network`.')
     if not any(
-        (artifact if isinstance(artifact, str) else artifact.source) == '/app'
+        (artifact if isinstance(artifact, str) else artifact.source) == WORKSPACE
         for artifact in config.artifacts
     ):
-        problems.append(f'{location}: list `"/app"` under `[[artifacts]]`.')
+        problems.append(f'{location}: list `"{WORKSPACE}"` under `[[artifacts]]`.')
     for field in ('cpus', 'memory_mb'):
         if getattr(config.environment, field) is None:
             problems.append(f'{location}: set `[environment] {field}`.')
@@ -258,6 +334,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
         tasks,
         [],
         n_attempts=CHECK_ATTEMPTS,
+        n_concurrent=N_CONCURRENT_CONTAINERS,
         verify=True,
     )
 
@@ -288,12 +365,13 @@ def _job(
     sources: list[SourceJobConfig],
     *,
     n_attempts: int,
+    n_concurrent: int,
     verify: bool,
 ) -> JobConfig:
     return JobConfig(
         jobs_dir=jobs_dir,
         n_attempts=n_attempts,
-        n_concurrent_trials=N_CONCURRENT_TRIALS,
+        n_concurrent_trials=n_concurrent,
         quiet=True,
         retry=RetryConfig(max_retries=1),
         verifier=trial_config.VerifierConfig(disable=not verify),
@@ -334,29 +412,34 @@ def run_job(config: JobConfig) -> Path:
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
-    A case family keeps only trials of each case's installed task. Each case, system,
-    and fingerprint keeps at most `samples` outputs, preferring a successful trial
-    whose recorded request matches the family's current settings, and otherwise the
-    oldest. Costs come from the current catalog price, so a system missing from
-    `systems` or without a price reports as unpriced.
+    A case family keeps only trials of each case's installed task. A task family
+    keeps only trials of its current tasks whose version matches the task's in
+    major and minor, so a patch bump keeps the trials Harbor reused, while a minor
+    bump keeps only their regrades. Each case, system, and fingerprint keeps at
+    most `samples` outputs, preferring a successful trial whose recorded request
+    matches what the family sends a listed system now, and otherwise the oldest.
+    Costs come from the current catalog price, so a system missing from `systems`
+    or without a price reports as unpriced.
+
+    A regraded trial yields the output of the trial whose agent wrote its
+    solution, with the regrade's verdict, so the votes on that output stay.
 
     Raises
     ------
     ValueError
-        A source job is not a job directory, or a trial record is unreadable.
+        A source job is not a job directory, a trial record is unreadable, a
+        task is invalid, or the family's systems are, as `family_systems` says.
     """
-    expected = (
-        {
-            name: HARNESSES[system.harness].options(system, family.settings)
-            for name, system in systems.items()
-        }
-        if family.source == 'cases'
-        else {}
-    )
-    versions = _installed_versions(family) if family.source == 'cases' else None
+    listed = [systems[name] for name in family.settings.systems if name in systems]
+    expected = {
+        system.name: HARNESSES[system.harness].options(system, family.settings)
+        for system in family_systems(family, listed)
+    }
     candidates = [
         (output, kwargs == expected.get(output.system))
-        for output, kwargs in _read_trials(family, _sources(family), systems, versions)
+        for output, kwargs in _read_trials(
+            family, _sources(family), systems, _current_versions(family)
+        )
     ]
     candidates.sort(
         key=lambda candidate: (
@@ -403,32 +486,71 @@ def _read_trials(
 ) -> list[tuple[Output, dict[str, Any]]]:
     """Return each kept trial's output and the agent kwargs it recorded.
 
-    A `versions` mapping drops a trial whose task is not the case's installed task
-    before an output reads that task.
+    A `versions` mapping drops a trial whose task version is not current before
+    an output reads that task.
     """
+    trials = load_source_trials(sources)
+    by_id = {trial.id: trial for trial in trials}
     records = []
-    for trial in load_source_trials(sources):
-        case = trial.result.task_name.removeprefix(f'{family.name}/')
-        if versions is not None and trial.lock.task.version != versions.get(case):
+    for trial in trials:
+        case = trial.task_name.removeprefix(f'{family.name}/')
+        if versions is not None and not _is_current(
+            family, trial.lock.task.version, versions.get(case)
+        ):
             continue
-        output = _output(family, trial.trial_dir, trial.result, case, systems)
+        output = _output(family, trial, _origin(trial, by_id), case, systems)
         records.append((output, trial.result.config.agent.kwargs))
     return records
 
 
-def _installed_versions(family: Family) -> dict[str, str]:
-    """Return each installed task's version, keyed by the case ID."""
-    directory = tasks_dir(family)
-    if not directory.is_dir():
-        return {}
-    versions = {}
-    for task in directory.iterdir():
-        if not (task / 'task.toml').is_file():
-            continue
-        package = _task_config(task).task
-        if package is not None and package.version is not None:
-            versions[task.name] = package.version
-    return versions
+def _current_versions(family: Family) -> dict[str, str]:
+    """Return the version of each current task, keyed by the case ID."""
+    match family.source:
+        case 'cases':
+            directory = tasks_dir(family)
+            tasks = list(directory.iterdir()) if directory.is_dir() else []
+        case 'tasks':
+            tasks = [case_task(family, case.id) for case in load_cases(family)]
+        case _:
+            assert_never(family.source)
+    return {
+        task.name: version
+        for task in tasks
+        if (task / 'task.toml').is_file() and (version := _task_version(task))
+    }
+
+
+def _is_current(family: Family, version: str | None, current: str | None) -> bool:
+    """Return whether a trial's task version matches its task's current version.
+
+    A rendered case matches exactly, since its build metadata hashes its content,
+    while a task matches in major and minor, the levels Harbor reruns or regrades.
+    """
+    if version is None or current is None:
+        return False
+    if family.source == 'cases':
+        return version == current
+    recorded = semver.Version.parse(version)
+    installed = semver.Version.parse(current)
+    return (recorded.major, recorded.minor) == (installed.major, installed.minor)
+
+
+def _origin(trial: SourceTrial, trials: dict[UUID, SourceTrial]) -> SourceTrial:
+    """Return the trial whose agent wrote the trial's solution.
+
+    A regrade names its source trial, which may be a regrade itself. A source
+    outside `trials` ends the chain, since the regrade holds a copy of its record.
+    """
+    while (source := trial.result.config.source_trial) is not None and (
+        source.trial_id in trials
+    ):
+        trial = trials[source.trial_id]
+    return trial
+
+
+def _task_version(task_dir: Path) -> str | None:
+    package = _task_config(task_dir).task
+    return package.version if package is not None else None
 
 
 def _task_config(task_dir: Path) -> task_config.TaskConfig:
@@ -439,71 +561,116 @@ def _task_config(task_dir: Path) -> task_config.TaskConfig:
 
 def _output(
     family: Family,
-    trial_dir: Path,
-    result: TrialResult,
+    trial: SourceTrial,
+    origin: SourceTrial,
     case: str,
     systems: dict[str, System],
 ) -> Output:
+    """Return the output that `origin` wrote, with the verdict `trial` recorded."""
+    result = origin.result
     kwargs = result.config.agent.kwargs
     system = kwargs.get('system', result.agent_info.name)
     context = result.agent_result or AgentContext()
     metadata = context.metadata or {}
-    exception = result.exception_info
-    output_file = trial_dir / 'agent' / OUTPUT_FILE
-    text = output_file.read_text() if output_file.exists() else None
+    exception = trial.result.exception_info
+    reward = _reward(trial.result) if family.source == 'tasks' else None
+    text = _text(family, origin, case, reward)
     finish_reason = metadata.get('finish_reason')
 
     return Output(
         trial=result.trial_name,
-        job=trial_dir.parent.name,
+        job=origin.trial_dir.parent.name,
         case=case,
         system=system,
         fingerprint=kwargs.get('fingerprint'),
         nixos_config_rev=metadata.get('nixos_config_rev'),
+        harness_version=metadata.get('harbor_version'),
         error=exception.exception_type if exception else None,
         text=text,
-        reward=_reward(family.settings, result),
-        gate_failures=None
-        if exception
-        else _gate_failures(family, case, text or '', finish_reason),
+        reward=reward,
+        gate_failures=_gate_failures(
+            family, case, text, finish_reason, reward, errored=exception is not None
+        ),
         finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
         output_tokens=context.n_output_tokens,
         reasoning_tokens=metadata.get('reasoning_tokens'),
         cost_usd=_cost(systems.get(system), context),
-        latency_sec=metadata.get('latency_sec'),
+        latency_sec=_latency(result, metadata),
         response_model=metadata.get('response_model'),
         request_id=metadata.get('request_id'),
     )
 
 
-def _reward(settings: Settings, result: TrialResult) -> float | None:
-    match settings:
-        case VotesSettings():
-            return None
-        case TaskTestsSettings():
-            rewards = result.verifier_result and result.verifier_result.rewards
-            return rewards.get('reward') if rewards else None
+def _reward(result: TrialResult) -> float | None:
+    rewards = result.verifier_result and result.verifier_result.rewards
+    return rewards.get('reward') if rewards else None
+
+
+def _text(
+    family: Family, origin: SourceTrial, case: str, reward: float | None
+) -> str | None:
+    """Return a case's reply, or the diff of a graded solution on a voted task."""
+    match family.source:
+        case 'cases':
+            output_file = origin.trial_dir / 'agent' / OUTPUT_FILE
+            return output_file.read_text() if output_file.exists() else None
+        case 'tasks':
+            if not isinstance(family.settings, VotesSettings) or reward is None:
+                return None
+            artifacts = TrialPaths(origin.trial_dir).artifacts_dir
+            return workspace_diff(
+                case_task(family, case) / 'environment' / 'app',
+                source_host_path(artifacts, WORKSPACE),
+            )
         case _:
-            assert_never(settings)
+            assert_never(family.source)
 
 
 def _gate_failures(
-    family: Family, case: str, text: str, finish_reason: str | None
+    family: Family,
+    case: str,
+    text: str | None,
+    finish_reason: str | None,
+    reward: float | None,
+    *,
+    errored: bool,
 ) -> list[Gate] | None:
+    """Return the gates a voted output fails, or `None` when it has no verdict.
+
+    A task's tests give the verdict even when its agent errored, as on a timeout,
+    since Harbor still runs the verifier.
+    """
     match family.settings:
         case VotesSettings(gates=gates):
+            if family.source == 'tasks':
+                if reward is None:
+                    return None
+                return [Gate.TESTS] if reward < 1 else []
+            if errored:
+                return None
             instruction = (
                 (case_task(family, case) / 'instruction.md').read_text()
                 if gates.script
                 else ''
             )
-            return failed_gates(family.settings, text, finish_reason, instruction)
+            return failed_gates(family.settings, text or '', finish_reason, instruction)
         case TaskTestsSettings():
             return None
         case _:
             assert_never(family.settings)
+
+
+def _latency(result: TrialResult, metadata: dict[str, Any]) -> float | None:
+    """Return the latency the agent recorded, or else its execution time."""
+    latency: float | None = metadata.get('latency_sec')
+    timing = result.agent_execution
+    if latency is not None or timing is None:
+        return latency
+    if timing.started_at is None or timing.finished_at is None:
+        return None
+    return round((timing.finished_at - timing.started_at).total_seconds(), 3)
 
 
 def _cost(system: System | None, context: AgentContext) -> float | None:

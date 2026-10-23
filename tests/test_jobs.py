@@ -4,6 +4,7 @@ import subprocess
 import sys
 import textwrap
 import tomllib
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.result import TimingInfo
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System
@@ -24,7 +26,6 @@ from assistant_bench.families import (
     Family,
     Gate,
     Gates,
-    TaskTestsSettings,
     VotesSettings,
     case_task,
     load_cases,
@@ -48,11 +49,7 @@ VOTES = Family(
         reference='acme-large',
     ),
 )
-TESTS = Family(
-    name='g',
-    source='tasks',
-    settings=TaskTestsSettings(scorer='tests', display_name='Family G', samples=1),
-)
+START = datetime(2026, 10, 21, tzinfo=UTC)
 
 
 def votes_family(**settings: Any) -> Family:
@@ -135,11 +132,11 @@ class TestRenderTasks:
         family = load_family('smoke-text')
         cases = load_cases(family)
         first = finish_job(
-            jobs.case_job(family, [make_system()], jobs.render_tasks(family, cases))
+            jobs.job(family, [make_system()], jobs.render_tasks(family, cases))
         )
         edited = [cases[0].model_copy(update={'instruction': 'Reworded.'}), cases[1]]
 
-        job = jobs.case_job(family, [make_system()], jobs.render_tasks(family, edited))
+        job = jobs.job(family, [make_system()], jobs.render_tasks(family, edited))
         plan = asyncio.run(JobPlan.from_config(job))
         (source,) = job.source_jobs
         diff = compare_job_trials(plan, load_source_trials([(source, first)]))
@@ -163,6 +160,68 @@ class TestRenderTasks:
         assert sorted(
             path.name for path in (data_dir / 'tasks' / 'smoke-text').iterdir()
         ) == ['en-greeting', 'zh-greeting']
+
+
+def voted_tasks(families_dir: Path, *task_ids: str) -> Family:
+    """Write task family `f`, scored by votes, that runs `acme-large` as terminus-2."""
+    write_task_family(families_dir, *task_ids, systems=('acme-large',))
+    return load_family('f')
+
+
+def with_settings(family: Family, **settings: Any) -> Family:
+    """Return the family with these settings replaced."""
+    return family.model_copy(
+        update={'settings': family.settings.model_copy(update=settings)}
+    )
+
+
+class TestFamilySystems:
+    def test_runs_every_system_of_a_task_family_under_its_harness(
+        self, families_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir)
+        system = make_system()
+
+        (run,) = jobs.family_systems(family, [system])
+
+        assert run == system.model_copy(update={'harness': 'terminus-2'})
+        assert run.fingerprint != system.fingerprint
+
+    def test_keeps_the_systems_of_a_case_family(self) -> None:
+        systems = [make_system(prompt='Be brief.')]
+
+        run = jobs.family_systems(VOTES, systems)
+
+        assert run == systems
+
+    @pytest.mark.parametrize(
+        ('harness', 'system', 'message'),
+        [
+            pytest.param(
+                'claude-code',
+                make_system(),
+                'Family `f`: harness `claude-code` is not one of `generate`, '
+                '`terminus-2`.',
+                id='unknown-harness',
+            ),
+            pytest.param(
+                'terminus-2',
+                make_system(prompt='Be brief.'),
+                'Family `f` lists `acme-large`, whose prompt the `terminus-2` '
+                'harness cannot send. Remove them from `systems`.',
+                id='unsent-prompt',
+            ),
+        ],
+    )
+    def test_rejects_a_system_the_harness_cannot_run(
+        self, families_dir: Path, harness: str, system: System, message: str
+    ) -> None:
+        family = with_settings(voted_tasks(families_dir), harness=harness)
+
+        with pytest.raises(ValueError) as error:
+            jobs.family_systems(family, [system])
+
+        assert str(error.value) == message
 
 
 class TestDriftedSystems:
@@ -234,18 +293,15 @@ class TestDriftedSystems:
         ]
 
 
-class TestCaseJob:
-    def test_runs_each_system_through_its_harness_in_its_route_group(
+class TestJob:
+    def test_runs_each_case_system_through_generate_in_its_route_group(
         self, data_dir: Path
     ) -> None:
         large = make_system(prompt='Be brief.')
         small = make_system(name='small', route='acme/small', effort=None)
-        terminus = make_system(
-            name='acme-terminus', route='acme/terminus', harness='terminus-2'
-        )
         task = data_dir / 'tasks' / 'f' / 'c'
 
-        job = jobs.case_job(VOTES, [large, small, terminus], [task])
+        job = jobs.job(VOTES, [large, small], [task])
 
         assert [
             (agent.import_path, agent.model_name, agent.concurrency_group)
@@ -253,11 +309,6 @@ class TestCaseJob:
         ] == [
             ('assistant_bench.harnesses.generate:Generate', 'acme/large', 'acme/large'),
             ('assistant_bench.harnesses.generate:Generate', 'acme/small', 'acme/small'),
-            (
-                'assistant_bench.harnesses.terminus:Terminus',
-                'openai/acme/terminus',
-                'acme/terminus',
-            ),
         ]
         assert job.agents[0].kwargs == {
             'system': 'acme-large',
@@ -266,17 +317,39 @@ class TestCaseJob:
             'system_prompt': 'Be brief.',
             'max_output_tokens': 300,
         }
-        assert job.agents[2].kwargs == {
-            'system': 'acme-terminus',
-            'fingerprint': terminus.fingerprint,
-            'llm_call_kwargs': {'max_completion_tokens': 300},
+        assert job.n_attempts == 2
+        assert job.n_concurrent_trials == jobs.N_CONCURRENT_TRIALS
+        assert job.retry.max_retries == 1
+        assert job.verifier.disable
+        assert job.jobs_dir == data_dir / 'jobs' / 'f'
+        assert [t.path for t in job.tasks] == [task]
+
+    def test_runs_a_task_family_under_its_harness_with_the_verifier(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        systems = jobs.family_systems(family, [make_system()])
+        task = case_task(family, 'echo')
+
+        job = jobs.job(family, systems, [task])
+
+        (agent,) = job.agents
+        assert (agent.import_path, agent.model_name, agent.concurrency_group) == (
+            'assistant_bench.harnesses.terminus:Terminus',
+            'openai/acme/large',
+            'acme/large',
+        )
+        assert agent.kwargs == {
+            'system': 'acme-large',
+            'fingerprint': systems[0].fingerprint,
+            'max_turns': 4,
+            'llm_call_kwargs': {'max_completion_tokens': 64},
             'reasoning_effort': 'medium',
             'record_terminal_session': False,
             'suppress_max_turns_warning': True,
         }
-        assert job.n_attempts == 2
-        assert job.retry.max_retries == 1
-        assert job.verifier.disable
+        assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
+        assert not job.verifier.disable
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
@@ -287,12 +360,46 @@ class TestCaseJob:
         for name in ('job-1', 'job-3'):
             (jobs_dir / name / 'result.json').write_text('{}')
 
-        job = jobs.case_job(VOTES, [make_system()], [])
+        job = jobs.job(VOTES, [make_system()], [])
 
         assert job.source_jobs == [
             SourceJobConfig(action='diff', type='local', path=jobs_dir / name)
             for name in ('job-1', 'job-3')
         ]
+
+
+class TestChangedTasks:
+    @pytest.mark.parametrize(
+        ('edit', 'bump', 'expected'),
+        [
+            pytest.param(False, None, [], id='unedited'),
+            pytest.param(True, None, [('echo', '1.0.0')], id='edited-without-a-bump'),
+            pytest.param(True, '1.0.1', [], id='edited-with-a-bump'),
+        ],
+    )
+    def test_names_a_task_edited_under_a_version_a_trial_recorded(
+        self,
+        families_dir: Path,
+        edit: bool,
+        bump: str | None,
+        expected: list[tuple[str, str]],
+    ) -> None:
+        family = voted_tasks(families_dir, 'again', 'echo')
+        tasks = [case_task(family, task_id) for task_id in ('again', 'echo')]
+        finish_job(
+            jobs.job(family, jobs.family_systems(family, [make_system()]), tasks)
+        )
+        retired = tasks[0] / 'tests' / 'test.sh'
+        retired.write_text(retired.read_text() + '# Edited.\n')
+        test = tasks[1] / 'tests' / 'test.sh'
+        if edit:
+            test.write_text(test.read_text() + '# Edited.\n')
+        if bump:
+            break_setting(tasks[1], ('task', 'version'), bump)
+
+        changed = jobs.changed_tasks(family, tasks[1:])
+
+        assert changed == expected
 
 
 def task_family(families_dir: Path, *task_ids: str) -> tuple[Family, list[Path]]:
@@ -739,6 +846,7 @@ class TestCollect:
             'system': 'acme-large',
             'fingerprint': system.fingerprint,
             'nixos_config_rev': 'rev-a',
+            'harness_version': None,
             'text': 'Hi.',
             'reward': None,
             'gate_failures': [],
@@ -953,7 +1061,10 @@ class TestCollect:
 
         assert output.gate_failures == []
 
-    def test_reads_the_reward_only_for_a_tests_scorer(self, data_dir: Path) -> None:
+    def test_reads_the_reward_only_for_a_task_family(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        write_task_family(families_dir, 'a', name='g')
         oracle = AgentConfig(name='oracle')
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1', 'a__1', oracle, task='f/a', reward=1.0
@@ -965,15 +1076,210 @@ class TestCollect:
             task='g/a',
             reward=1.0,
             instruction=None,
-            version=jobs.TASK_VERSION,
+            version='1.0.0',
+            workspace={'greeting.txt': 'hello'},
         )
 
-        (scored,) = jobs.collect(TESTS, {})
+        (scored,) = jobs.collect(load_family('g'), {})
         (voted,) = jobs.collect(VOTES, {})
 
         assert (scored.case, scored.system, scored.reward) == ('a', 'oracle', 1.0)
-        assert scored.gate_failures is None
+        assert (scored.text, scored.gate_failures) == (None, None)
         assert voted.reward is None
+
+    @pytest.mark.parametrize(
+        ('current', 'kept'),
+        [
+            pytest.param('1.0.0', True, id='same-version'),
+            pytest.param('1.0.3', True, id='patch-bump'),
+            pytest.param('1.1.0', False, id='minor-bump'),
+            pytest.param('2.0.0', False, id='major-bump'),
+        ],
+    )
+    def test_keeps_trials_of_current_tasks_at_their_major_and_minor(
+        self, families_dir: Path, data_dir: Path, current: str, kept: bool
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        break_setting(case_task(family, 'echo'), ('task', 'version'), current)
+        for task in ('echo', 'deleted'):
+            write_trial(
+                data_dir / 'jobs' / 'f' / 'job-1',
+                f'{task}__1',
+                AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'}),
+                task=f'f/{task}',
+                reward=1.0,
+                instruction=None,
+                version='1.0.0',
+            )
+
+        outputs = jobs.collect(family, {})
+
+        assert [output.case for output in outputs] == (['echo'] if kept else [])
+
+    @pytest.mark.parametrize(
+        ('reward', 'error', 'verdict', 'diff'),
+        [
+            pytest.param(1.0, None, [], True, id='passed'),
+            pytest.param(0.0, None, [Gate.TESTS], True, id='failed'),
+            pytest.param(0.5, None, [Gate.TESTS], True, id='partial'),
+            pytest.param(1.0, 'AgentTimeoutError', [], True, id='graded-timeout'),
+            pytest.param(None, 'RuntimeError', None, False, id='never-graded'),
+        ],
+    )
+    def test_gates_a_voted_task_by_its_tests_and_diffs_its_workspace(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        reward: float | None,
+        error: str | None,
+        verdict: list[Gate] | None,
+        diff: bool,
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        base = case_task(family, 'echo') / 'environment' / 'app'
+        base.mkdir()
+        (base / 'README.md').write_text('Echo.\n')
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'echo__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'}),
+            task='f/echo',
+            reward=reward,
+            error=error,
+            instruction=None,
+            version='1.0.0',
+            workspace={'README.md': 'Echo.\n', 'greeting.txt': 'hello\n'},
+        )
+
+        (output,) = jobs.collect(family, {})
+
+        assert (output.error, output.reward, output.gate_failures) == (
+            error,
+            reward,
+            verdict,
+        )
+        assert output.text == (
+            '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
+            if diff
+            else None
+        )
+
+    @pytest.mark.parametrize(
+        ('regrades', 'verdict'),
+        [
+            pytest.param(1, [], id='regrade'),
+            pytest.param(2, [Gate.TESTS], id='regrade-of-a-regrade'),
+        ],
+    )
+    def test_gives_a_regrade_the_output_of_the_trial_that_wrote_its_solution(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        regrades: int,
+        verdict: list[Gate],
+    ) -> None:
+        rewards = [0.0, 1.0, 0.5]
+        family = voted_tasks(families_dir, 'echo')
+        system = make_system()
+        agent = AgentConfig(
+            import_path='x:Y', kwargs={'system': system.name, 'fingerprint': 'fp'}
+        )
+        source = write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'echo__origin',
+            agent,
+            task='f/echo',
+            reward=rewards[0],
+            instruction=None,
+            version='1.0.0',
+            workspace={'greeting.txt': 'hello\n'},
+            context=AgentContext(
+                n_input_tokens=1_000,
+                n_output_tokens=500,
+                metadata={'latency_sec': 30.0, 'harbor_version': '0.24.0'},
+            ),
+        )
+        for minor in range(1, regrades + 1):
+            source = write_trial(
+                data_dir / 'jobs' / 'f' / f'job-{minor + 1}',
+                f'echo__regrade-{minor}',
+                agent,
+                task='f/echo',
+                reward=rewards[minor],
+                instruction=None,
+                version=f'1.{minor}.0',
+                workspace={'greeting.txt': 'hello\n'},
+                context=AgentContext(n_input_tokens=1, n_output_tokens=1),
+                source=source,
+            )
+        break_setting(case_task(family, 'echo'), ('task', 'version'), f'1.{regrades}.0')
+
+        (output,) = jobs.collect(family, {system.name: system})
+
+        assert output.model_dump(
+            include={
+                'job',
+                'trial',
+                'text',
+                'input_tokens',
+                'cost_usd',
+                'latency_sec',
+                'harness_version',
+                'reward',
+                'gate_failures',
+            }
+        ) == {
+            'job': 'job-1',
+            'trial': 'echo__origin',
+            'text': '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n',
+            'input_tokens': 1_000,
+            'cost_usd': pytest.approx((1_000 * 2.0 + 500 * 10.0) / 1e6),
+            'latency_sec': 30.0,
+            'harness_version': '0.24.0',
+            'reward': rewards[regrades],
+            'gate_failures': verdict,
+        }
+
+    @pytest.mark.parametrize(
+        ('metadata', 'timing', 'latency'),
+        [
+            pytest.param(
+                {'latency_sec': 1.5},
+                TimingInfo(started_at=START, finished_at=START + timedelta(seconds=9)),
+                1.5,
+                id='recorded-by-the-agent',
+            ),
+            pytest.param(
+                {},
+                TimingInfo(
+                    started_at=START, finished_at=START + timedelta(seconds=12.25)
+                ),
+                12.25,
+                id='agent-execution',
+            ),
+            pytest.param({}, TimingInfo(started_at=START), None, id='unfinished'),
+            pytest.param({}, None, None, id='no-timing'),
+        ],
+    )
+    def test_takes_the_latency_from_the_agent_or_its_execution_time(
+        self,
+        data_dir: Path,
+        metadata: dict[str, Any],
+        timing: TimingInfo | None,
+        latency: float | None,
+    ) -> None:
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='f/a',
+            context=AgentContext(metadata=metadata),
+            agent_execution=timing,
+        )
+
+        (output,) = jobs.collect(VOTES, {})
+
+        assert output.latency_sec == latency
 
     def test_leaves_a_system_missing_from_the_catalog_unpriced(
         self, data_dir: Path

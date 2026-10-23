@@ -241,7 +241,7 @@ def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
     if not outputs:
         step = (
             f' Run `uv run bench run {family.name}` first.'
-            if family.source == 'cases'
+            if family.settings.systems
             else ''
         )
         raise ValueError(

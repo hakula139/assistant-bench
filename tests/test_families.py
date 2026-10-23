@@ -114,7 +114,27 @@ class TestLoadFamily:
                 display_name='Smoke Test · Tasks',
                 samples=1,
                 categories=['smoke'],
+            ),
+        )
+
+    def test_reads_a_task_family_scored_by_votes(self, families_dir: Path) -> None:
+        write_task_family(families_dir, systems=('large', 'small'))
+
+        family = load_family('f')
+
+        assert family == Family(
+            name='f',
+            source='tasks',
+            settings=VotesSettings(
+                scorer='votes',
+                display_name='Family f',
+                systems=['large', 'small'],
+                reference='large',
+                samples=1,
+                harness='terminus-2',
+                max_turns=4,
                 max_output_tokens=64,
+                categories=['smoke'],
             ),
         )
 
@@ -212,7 +232,8 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.',
+                'Family `f`: score a `cases.jsonl` family by `votes`, since only a '
+                '`tasks/` family has tests.',
                 id='cases-scored-by-tests',
             ),
             pytest.param(
@@ -222,12 +243,69 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
+                max_output_tokens = 300
                 reference = "large"
+                harness = "terminus-2"
+                max_turns = 10
+                """,
+                True,
+                False,
+                'Family `f`: a `cases.jsonl` family runs every system as `generate`, '
+                'so remove `harness`, `max_turns`.',
+                id='cases-with-an-agent-harness',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                harness = "terminus-2"
+                max_turns = 10
+                render = "text"
+                language = "en"
+
+                [gates]
                 """,
                 False,
                 True,
-                'Family `f`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.',
-                id='tasks-scored-by-votes',
+                "Family `f`: a `tasks/` family's tests are its only gate and its "
+                'outputs are diffs, so remove `render`, `language`, `gates`.',
+                id='tasks-with-case-gates',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
+                harness = "terminus-2"
+                """,
+                False,
+                True,
+                'Family `f`: a `tasks/` family that lists systems needs `max_turns`, '
+                '`max_output_tokens`.',
+                id='tasks-without-a-turn-budget',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                max_turns = 10
+                max_output_tokens = 300
+                """,
+                False,
+                True,
+                'Family `f`: a `tasks/` family that lists systems needs `harness`.',
+                id='tests-without-a-harness',
             ),
             pytest.param(
                 'f',

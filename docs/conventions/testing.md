@@ -22,7 +22,7 @@ Drop a test once another covers everything it checks.
 - `conftest.py` sets the environment `bench` gives Harbor before any test module imports LiteLLM, so no import, fixture, or test loads a local `.env`. An autouse fixture points `BENCH_DATA_DIR` at a scratch directory, runs each test from it, and clears the endpoint and proxy variables the shell exports, so no test reads the real data directory or endpoint.
 - Tests reach models only through the `endpoint` fixture or its variants: a chat-completions server on 127.0.0.1 that records each request and returns a configurable response, `tls_endpoint`, the same server behind a test CA, and `ipv6_endpoint`, the same server on `::1`.
 - The `export` fixture points `BENCH_NIXOS_CONFIG` at `tests/fixtures/nixos-config.json`. The CLI tests and the test of the committed `systems.toml` read the dev shell's real export, so the suite runs inside `nix develop`.
-- CLI tests replace `jobs.run_job` with a recorder to check the submitted job config without starting Harbor, and `write_trial` writes the trial records Harbor would, including the `lock.json` its diff reads. `finish_job` writes a successful trial for each trial Harbor plans for a submitted job, with the locks from Harbor's own plan, so a test can check what a later job's diff reuses.
+- CLI tests replace `jobs.run_job` with a recorder to check the submitted job config without starting Harbor, and `write_trial` writes the trial records Harbor would, including the `lock.json` its diff reads. `finish_job` writes a successful trial for each trial Harbor plans for a submitted job, with reward 1 when its verifier runs, with the locks from Harbor's own plan, so a test can check what a later job's diff reuses.
 
 ## Cross-Checks and the Report Fixture
 
@@ -31,7 +31,7 @@ Drop a test once another covers everything it checks.
 
 ## Docker Trials
 
-Tests marked `docker` run real Harbor jobs: `bench check` over the smoke family's oracle and nop, `Generate` on the `smoke-text` cases against the stub endpoint, run twice to check that the rerun sends nothing, and `Terminus` on the `smoke` task, which checks the endpoint's headers and token budget and that no job file holds the key. `pyproject.toml` deselects them by default, and the Harbor Smoke CI job selects them with `uv run pytest -m docker`. They need a running Docker daemon and pull a stock image on first use.
+Tests marked `docker` run real Harbor jobs: `bench check` over the smoke family's oracle and nop, `Generate` on the `smoke-text` cases against the stub endpoint, run twice to check that the rerun sends nothing, and `Terminus` on a votes family around a copy of the `smoke` task, run twice to check that the rerun sends nothing and then once more after a tests-only minor bump, which must regrade with no request and keep the collected output, diff and all. It also checks the endpoint's headers and token budget and that no job file holds the key. `pyproject.toml` deselects them by default, and the Harbor Smoke CI job selects them with `uv run pytest -m docker`. They need a running Docker daemon and pull a stock image on first use.
 
 ## Coverage
 

@@ -18,8 +18,10 @@ def generate(system: System, settings: Settings) -> dict[str, Any]:
 
 def terminus(system: System, settings: Settings) -> dict[str, Any]:
     """Return the kwargs that run `system` as terminus-2."""
+    assert settings.max_turns is not None
     assert settings.max_output_tokens is not None
     values = _labels(system) | {
+        'max_turns': settings.max_turns,
         'llm_call_kwargs': {'max_completion_tokens': settings.max_output_tokens},
         'record_terminal_session': False,
         'suppress_max_turns_warning': True,

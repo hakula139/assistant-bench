@@ -71,6 +71,7 @@ strconv
 tamasfe
 taplo
 threadpoolctl
+tofile
 tokei
 tomli
 triu

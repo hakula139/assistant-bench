@@ -98,9 +98,7 @@ def check(families: FamilyNames = None) -> None:
             cases = len(_render_tasks(family))
             typer.echo(f'Family `{family.name}`: {cases} valid cases.')
             continue
-        tasks = [case_task(family, case.id) for case in _load_cases(family)]
-        _check_tasks(family, tasks)
-        task_families.append((family, tasks))
+        task_families.append((family, _task_dirs(family)))
 
     failed = False
     for family, tasks in task_families:
@@ -137,19 +135,20 @@ def run(
     """
     prepared = []
     for family, systems in _run_targets(families, names):
-        if family.source != 'cases':
+        if not systems:
             _fail(
-                f'Family `{family.name}` holds `tasks/`, and `bench run` runs only '
-                'families with `cases.jsonl`. Validate its tasks with '
-                f'`uv run bench check {family.name}`.'
+                f'Family `{family.name}` lists no systems. Add them to `systems` in '
+                f'`families/{family.name}/family.toml`.'
             )
         _refuse_drift(family, systems)
-        tasks = _render_tasks(family)
+        tasks = (
+            _render_tasks(family) if family.source == 'cases' else _task_dirs(family)
+        )
         prepared.append((family, systems, tasks))
 
     for family, systems, tasks in prepared:
         try:
-            _run(jobs.case_job(family, systems, tasks))
+            _run(jobs.job(family, systems, tasks))
         finally:
             _collect(family)
 
@@ -306,11 +305,27 @@ def _render_tasks(family: Family) -> list[Path]:
     return jobs.render_tasks(family, _load_cases(family))
 
 
-def _check_tasks(family: Family, tasks: list[Path]) -> None:
+def _task_dirs(family: Family) -> list[Path]:
+    """Return a task family's task directories once each is fit to run."""
+    tasks = [case_task(family, case.id) for case in _load_cases(family)]
     try:
         jobs.check_tasks(family, tasks)
+        changed = jobs.changed_tasks(family, tasks)
     except ValueError as error:
         _fail(str(error))
+    if changed:
+        detail = '\n'.join(
+            f'Task `{task}` changed since a trial ran it at version `{version}`.'
+            for task, version in changed
+        )
+        _fail(
+            f'Family `{family.name}` has tasks to bump:\n{detail}\nBump each '
+            "task's `[task] version`: the patch for a change no trial depends on, "
+            'such as its solution, the minor for a change to `tests/` alone, '
+            'which regrades its trials, or the major for anything the agent '
+            'sees, which reruns them.'
+        )
+    return tasks
 
 
 def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
@@ -355,7 +370,12 @@ def _family_systems(family: Family) -> list[System]:
             f'does not define. Add a table to `{SYSTEMS_FILE}` or fix the name in '
             f'`families/{family.name}/family.toml`.'
         )
-    return [known[name] for name in family.settings.systems]
+    try:
+        return jobs.family_systems(
+            family, [known[name] for name in family.settings.systems]
+        )
+    except ValueError as error:
+        _fail(str(error))
 
 
 def _named_systems(
@@ -458,6 +478,13 @@ def _collect(family: Family) -> None:
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}.')
+    graded = {output.case for output in outputs if output.reward is not None}
+    solved = {output.case for output in outputs if (output.reward or 0) >= 1}
+    if unsolved := sorted(graded - solved):
+        typer.echo(f'No system solved {code(unsolved)}.')
+    versions = sorted({o.harness_version for o in outputs if o.harness_version})
+    if len(versions) > 1:
+        typer.echo(f'The outputs span Harbor versions {code(versions)}.')
 
 
 def _run(job: JobConfig) -> Path:
