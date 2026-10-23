@@ -26,9 +26,11 @@ import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
+import { boardLabels } from '@/lib/method';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
+  configOf,
   getFamilies,
   systemPaths,
   votesRounds,
@@ -49,6 +51,7 @@ interface Props {
 
 const { family, system, boards } = Astro.props;
 const rounds = votesRounds(family);
+const { usage } = boardLabels(configOf(family, 'votes'));
 const names = family.systemNames;
 const name = (item: string) => systemName(names, item);
 const appearances = rounds.flatMap(({ round, results }) => {
@@ -159,8 +162,8 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
       </Section>
     )}
 
-    <Section title="Output length and latency">
-      <p class={note}>Each system's median and 10th to 90th percentile range.</p>
+    <Section title={usage.title}>
+      <p class={note}>{usage.note}</p>
       <div class="grid gap-6 lg:grid-cols-2">
         {tokenRows.length > 0 && (
           <DotRangePlot client:visible rows={tokenRows} label="Output tokens" format="tokens" />

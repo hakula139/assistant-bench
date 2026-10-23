@@ -29,18 +29,20 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
   ) : (
     <div class="flex flex-col gap-6">
       {marks.length > 0 && <ForestLegend marks={marks} />}
-      {groupByAspect(families).map(({ aspect, members }) => (
-        <section class="flex flex-col gap-6" aria-labelledby={aspect}>
-          <h2 id={aspect} class:list={[groupTitle, 'flex items-center gap-2']}>
-            <AspectTitle aspect={aspect} />
-          </h2>
-          <div class="grid gap-12 lg:grid-cols-2">
-            {members.map((family) => (
-              <FamilyPanel family={family} />
-            ))}
-          </div>
-        </section>
-      ))}
+      <div class="flex flex-col gap-20">
+        {groupByAspect(families).map(({ aspect, members }) => (
+          <section class="flex flex-col gap-6" aria-labelledby={aspect}>
+            <h2 id={aspect} class:list={[groupTitle, 'flex items-center gap-2']}>
+              <AspectTitle aspect={aspect} />
+            </h2>
+            <div class="grid gap-12 lg:grid-cols-2">
+              {members.map((family) => (
+                <FamilyPanel family={family} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   )}
 </Base>

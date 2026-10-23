@@ -73,6 +73,8 @@ interface LeaderboardProps {
   anchorTerm: Term;
   /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
+  /** The gate-failure column's label and meaning. */
+  gateFailures: Term;
 }
 
 const ROW_HEIGHT = 48;
@@ -169,8 +171,8 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
  * The figures of a row's `detail` columns, which its score opens on tap, click, or Enter, since
  * narrow screens leave those columns out.
  */
-function rowDetails(row: LeaderboardRow, ranked: boolean): Term {
-  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${terms.gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
+function rowDetails(row: LeaderboardRow, ranked: boolean, gateFailures: Term): Term {
+  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
   return {
     term: row.name,
     definition: `${formatCountOf(row.votes, 'vote')}, ${rates}${ranked ? '' : ' across all categories'}.`,
@@ -199,7 +201,14 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
  * table leaves that column out, keeping each interval as text under its score, and below `md` it
  * also leaves out the `detail` columns, which each score opens, so the table fits without scrolling.
  */
-export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: LeaderboardProps) {
+export function Leaderboard({
+  rows,
+  ranked,
+  anchorSystem,
+  anchorTerm,
+  href,
+  gateFailures,
+}: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
   const anchor = anchorScore(rows, anchorSystem);
 
@@ -260,7 +269,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: true,
         cell: ({ row }) => (
           <span className="flex flex-col items-end leading-tight">
-            <Hint term={rowDetails(row.original, ranked)}>
+            <Hint term={rowDetails(row.original, ranked, gateFailures)}>
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
             <span className="text-xs text-muted-foreground">
@@ -285,14 +294,14 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
       }),
       helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
         id: 'gate-failures',
-        header: familyWide(terms.gateFailures.term),
+        header: familyWide(gateFailures.term),
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: terms.gateFailures, detail: true },
+        meta: { numeric: true, term: gateFailures, detail: true },
       }),
     ]);
-  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href]);
+  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href, gateFailures]);
 
   const table = useTable({
     features,

@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { VotesBoard } from '@/components/boards/VotesBoard';
+import { boardLabels } from '@/lib/method';
 import { reportSchema } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -30,11 +31,18 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
 
 const BOARD = '/writing/arena/';
 
-function render({ round, results }: VotesRound, names = FIXTURE_NAMES): string {
+const CASES = boardLabels({ render: 'text' });
+
+function render({ round, results }: VotesRound, names = FIXTURE_NAMES, labels = CASES): string {
   // The fixture lists standings by score, so reversing them leaves the board to sort.
   const reversed = { ...results, standings: results.standings.toReversed() };
   return renderToString(
-    <VotesBoard base={BOARD} rounds={[{ round, results: reversed }]} names={names} />,
+    <VotesBoard
+      base={BOARD}
+      rounds={[{ round, results: reversed }]}
+      names={names}
+      labels={labels}
+    />,
   );
 }
 
@@ -111,6 +119,21 @@ describe('VotesBoard', () => {
     ]);
   });
 
+  test.each([
+    ['text', 'Length bias', 'Gate failures', 'output'],
+    ['diff', 'Diff length bias', 'Failed tests', 'solution'],
+  ] as const)(
+    'labels the length bias, the gate failures, and the cost of a %s family',
+    async (output, lengthBias, gateFailures, unit) => {
+      const html = render(await load(), FIXTURE_NAMES, boardLabels({ render: output }));
+
+      expect(stats(html).at(-1)?.[0]).toBe(lengthBias);
+      expect(text(head(html))).toContain(`${gateFailures} What ${gateFailures} means`);
+      expect(text(html)).toContain(`Mean cost per ${unit}`);
+      expect(text(html)).toContain(`Cost / ${unit}`);
+    },
+  );
+
   test('leaves out the left-out count and the length bias when the round has neither', async () => {
     const round = await load();
     round.results.dropped_votes = 0;
@@ -171,7 +194,14 @@ describe('VotesBoard', () => {
     const { round, results } = await load();
     results.reference = 'acme-new';
     stubPlotFrame();
-    renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+    renderInDom(
+      <VotesBoard
+        base={BOARD}
+        rounds={[{ round, results }]}
+        names={FIXTURE_NAMES}
+        labels={CASES}
+      />,
+    );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
 
@@ -262,7 +292,14 @@ describe('VotesBoard', () => {
   test('writes the category picked to the address', async () => {
     const { round, results } = await load();
     stubPlotFrame();
-    renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+    renderInDom(
+      <VotesBoard
+        base={BOARD}
+        rounds={[{ round, results }]}
+        names={FIXTURE_NAMES}
+        labels={CASES}
+      />,
+    );
 
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'message' } });
 
@@ -310,15 +347,23 @@ describe('VotesBoard', () => {
   });
 
   test.each([
-    ['all', '1,004', '114 votes, both bad 5%, gate failures 2%.'],
-    ['message', '972', '34 votes, both bad 5%, gate failures 2% across all categories.'],
-  ])(
-    "opens a system's votes and rates from its score on the %s board",
-    async (category, score, details) => {
+    ['all', '1,004', 'text', '114 votes, both bad 5%, gate failures 2%.'],
+    ['message', '972', 'text', '34 votes, both bad 5%, gate failures 2% across all categories.'],
+    ['all', '1,004', 'diff', '114 votes, both bad 5%, failed tests 2%.'],
+  ] as const)(
+    "opens a system's votes and rates from its score on the %s board of a %s family",
+    async (category, score, render, details) => {
       search.set('category', category);
       const { round, results } = await load();
       stubPlotFrame();
-      renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+      renderInDom(
+        <VotesBoard
+          base={BOARD}
+          rounds={[{ round, results }]}
+          names={FIXTURE_NAMES}
+          labels={boardLabels({ render })}
+        />,
+      );
 
       await userEvent.setup().click(screen.getByRole('button', { name: score }));
 
@@ -334,7 +379,12 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
+      <VotesBoard
+        base={BOARD}
+        rounds={[{ round, results }]}
+        names={FIXTURE_NAMES}
+        labels={CASES}
+      />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -368,7 +418,12 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />,
+      <VotesBoard
+        base={BOARD}
+        rounds={[{ round, results }]}
+        names={FIXTURE_NAMES}
+        labels={CASES}
+      />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>

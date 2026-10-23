@@ -25,8 +25,13 @@ vi.mock(import('@/lib/reports'), async (importOriginal) => ({
   getFamilies: () => Promise.resolve(listed.families),
 }));
 
-/** The fixture's systems and the family itself, whose table and directory names pages hide. */
-const SLUGS = { ...FIXTURE_NAMES, 'writing-arena': 'Arena Writing' };
+/** The fixture's systems and families, whose table and directory names pages hide. */
+const SLUGS = {
+  ...FIXTURE_NAMES,
+  'writing-arena': 'Arena Writing',
+  'writing-smoke': 'Smoke Tasks',
+  'coding-repo': 'Repository Tasks',
+};
 
 const arenaConfig: VotesConfig = {
   scorer: 'votes',
@@ -63,6 +68,21 @@ async function family(): Promise<Family> {
   return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
 }
 
+/** A coding family over the fixture's rounds, whose systems' solutions render as diffs. */
+async function codingFamily(): Promise<Family> {
+  const config: VotesConfig = {
+    ...arenaConfig,
+    aspect: 'coding',
+    display_name: 'Repository Tasks',
+    render: 'diff',
+    language: undefined,
+    gates: {},
+    harness: 'terminus-2',
+    max_turns: 40,
+  };
+  return listedFamily('coding-repo', config, (await family()).rounds);
+}
+
 /** The page header's figures as `label value`, read as the page shows them. */
 function headerStats(html: string): string[] {
   return [...new JSDOM(html).window.document.querySelectorAll('header dl dt')].map(
@@ -70,12 +90,15 @@ function headerStats(html: string): string[] {
   );
 }
 
-/** A family as `publicFamilies` lists it under the writing aspect. */
+/** A family as `publicFamilies` lists it under its aspect. */
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
+  if (config.aspect === undefined) {
+    throw new Error(`family ${name} has no aspect`);
+  }
   return {
     name,
     title: familyTitle(config),
-    aspect: 'writing',
+    aspect: config.aspect,
     config,
     rounds,
     systemNames: FIXTURE_NAMES,
@@ -99,7 +122,7 @@ async function render(
 const text = (html: string) =>
   html
     .replace(/<[^>]+>/g, ' ')
-    .replaceAll('&#x27;', "'")
+    .replace(/&#(?:x27|39);/g, "'")
     .replace(/\s+/g, ' ');
 
 /** A family scored by tests, with one round that lists the weaker system first. */
@@ -269,10 +292,23 @@ describe('family page', () => {
     expect(text(html)).toContain('Acme Pro 75% 4 1');
   });
 
+  test("draws a coding family's steps and names its gate-failure column for the tests", async () => {
+    const html = await render(FamilyPage, { family: await codingFamily(), boards: [] });
+
+    expect(text(html)).toContain(
+      'Run same tasks for all Tests failing solutions lose Blind pairs system names hidden Scores ranked from votes',
+    );
+    expect(html).toContain('lucide-file-diff');
+    expect(stepHints(html)).toHaveLength(4);
+    expect(text(html)).toContain(`${terms.failedTests.term} What ${terms.failedTests.term} means`);
+    expect(text(html)).not.toContain(terms.gateFailures.term);
+  });
+
   test.each([
     ['with rounds', family],
     ['before its first round', async () => ({ ...(await family()), rounds: [] })],
     ['scored by tests', () => Promise.resolve(testsFamily())],
+    ['on coding', codingFamily],
   ])('names the family and its systems by display name %s', async (_, load) => {
     const loaded = await load();
 
@@ -280,33 +316,37 @@ describe('family page', () => {
 
     expect(html).toContain(`<title>${loaded.title} | HAKULA†BENCH</title>`);
     expect(text(html)).toContain(`${loaded.title} Run `);
-    expect(shownSlugs(html, { ...SLUGS, 'writing-smoke': 'Smoke Tasks' })).toEqual([]);
+    expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
   test.each([
-    ['votes', family],
-    ['tests', () => Promise.resolve(testsFamily())],
-  ])("links the %s board to its scorer's methodology section", async (scorer, load) => {
-    const methodology = await render(MethodologyPage, {});
+    ['votes', family, 'votes', 'Cases', 'Ranked by blind pairwise votes'],
+    ['tests', () => Promise.resolve(testsFamily()), 'tests', 'Tasks', 'Scored by automated tests'],
+    [
+      'coding',
+      codingFamily,
+      'tests-then-votes',
+      'Tasks',
+      'Ranked by hidden tests, then blind pairwise votes',
+    ],
+  ])(
+    'describes the %s board and links its methodology section and its inputs',
+    async (_, load, section, inputs, summary) => {
+      const loaded = await load();
+      const methodology = await render(MethodologyPage, {});
 
-    const html = await render(FamilyPage, { family: await load(), boards: [] });
+      const html = await render(FamilyPage, { family: loaded, boards: [] });
 
-    expect(guide(html)).toBe(scorer);
-    expect(methodology).toContain(`id="${scorer}"`);
-  });
-
-  test.each([
-    ['votes', family, 'Cases'],
-    ['tests', () => Promise.resolve(testsFamily()), 'Tasks'],
-  ])("links the %s board's inputs to the family's directory", async (_, load, label) => {
-    const loaded = await load();
-
-    const html = await render(FamilyPage, { family: loaded, boards: [] });
-
-    const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
-    const link = new JSDOM(html).window.document.querySelector(`a[href="${href}"]`);
-    expect(link?.textContent.trim()).toBe(label);
-  });
+      const document = new JSDOM(html).window.document;
+      const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
+      expect(guide(html)).toBe(section);
+      expect(methodology).toContain(`id="${section}"`);
+      expect(document.querySelector(`a[href="${href}"]`)?.textContent.trim()).toBe(inputs);
+      expect(document.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(
+        `${loaded.title}: ${summary}.`,
+      );
+    },
+  );
 });
 
 describe('methodology page', () => {
@@ -322,6 +362,23 @@ describe('methodology page', () => {
 
     expect(text(html)).toContain('95% intervals 1,000 bootstraps resampling whole cases');
     expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
+  });
+
+  test('defines the terms a board of diffs uses in its own section', async () => {
+    const html = await render(MethodologyPage, {});
+
+    const section = new JSDOM(html).window.document.getElementById(
+      'tests-then-votes',
+    )?.parentElement;
+    const rows = [...(section?.querySelectorAll('tbody tr') ?? [])].map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => cell.textContent),
+    );
+    expect(rows).toEqual(
+      [terms.failedTests, terms.solutionCostLatency, terms.diffLengthBias].map((term) => [
+        term.term,
+        term.definition,
+      ]),
+    );
   });
 
   test("keeps the last words of a glossary term's meaning on one line", async () => {
@@ -345,12 +402,20 @@ describe('home page', () => {
     expect(text(legend).trim()).toBe('Anchor, 1,000 Unbounded');
   });
 
-  test("titles each aspect's section with the anchor its breadcrumbs link", async () => {
-    listed.families = [await family()];
+  test("titles each aspect's section with its icon and the anchor its breadcrumbs link", async () => {
+    listed.families = [await codingFamily(), await family()];
 
     const html = await render(HomePage, {});
 
-    expect(html).toMatch(/<h2 id="writing"[^>]*>[\s\S]*?Writing\s*<\/h2>/);
+    const headings = [...new JSDOM(html).window.document.querySelectorAll('h2')].map((heading) => [
+      heading.id,
+      heading.querySelector('svg')?.classList[1],
+      heading.textContent,
+    ]);
+    expect(headings).toEqual([
+      ['writing', 'lucide-pen-line', 'Writing'],
+      ['coding', 'lucide-square-terminal', 'Coding'],
+    ]);
   });
 });
 
@@ -399,7 +464,7 @@ describe('family panel', () => {
     const html = await render(FamilyPanel, { family: loaded });
 
     expect(text(html)).toContain(`${loaded.config.display_name} `);
-    expect(shownSlugs(html, { ...SLUGS, 'writing-smoke': 'Smoke Tasks' })).toEqual([]);
+    expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
   test("lists a tests family's systems by pass rate, best first", async () => {
@@ -410,6 +475,23 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test.each([
+    [
+      'cases',
+      family,
+      "Output length and latency Each system's median and 10th to 90th percentile range.",
+    ],
+    [
+      'diffs',
+      codingFamily,
+      "Output tokens and latency Each system's median and 10th to 90th percentile range, where latency spans the agent's whole run.",
+    ],
+  ])("titles the token and latency ranges of a family's %s", async (_, load, heading) => {
+    const html = await render(SystemPage, { family: await load(), system: 'acme-pro', boards: [] });
+
+    expect(text(html)).toContain(heading);
+  });
+
   test("summarizes the system's own standing in its latest round", async () => {
     const html = await render(SystemPage, {
       family: await family(),

@@ -1,5 +1,5 @@
 ---
-import { scorerViews } from '@/components/scorers';
+import { renderSections, scorerViews } from '@/components/scorers';
 import { partId } from '@/components/scorers/parts';
 import { intro, list, PageHeader, Section, stack } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
@@ -8,18 +8,27 @@ import { scorers } from '@/lib/method';
 import { REPOSITORY } from '@/lib/site';
 
 const docs = `${REPOSITORY}/blob/main/docs/design`;
-const sections = Object.entries(scorerViews).map(([scorer, view]) => ({
-  scorer: scorer as Scorer,
-  ...view,
-}));
+const sections = [
+  ...Object.entries(scorerViews).map(([scorer, { Method, parts }]) => ({
+    id: scorer,
+    title: scorers[scorer as Scorer].title,
+    Method,
+    parts: Object.entries(parts).map(([part, title]) => ({
+      id: partId(scorer as Scorer, part),
+      title,
+    })),
+  })),
+  ...Object.entries(renderSections).map(([id, { title, Method }]) => ({
+    id,
+    title,
+    Method,
+    parts: [],
+  })),
+];
 
 const contents = [
   { id: 'systems', title: 'Systems and rounds', parts: [] },
-  ...sections.map(({ scorer, parts }) => ({
-    id: scorer,
-    title: scorers[scorer].title,
-    parts: Object.entries(parts).map(([part, title]) => ({ id: partId(scorer, part), title })),
-  })),
+  ...sections,
   { id: 'limits', title: 'Known limits', parts: [] },
 ];
 ---
@@ -72,8 +81,8 @@ const contents = [
         </p>
       </Section>
 
-      {sections.map(({ scorer, Method }) => (
-        <Section id={scorer} title={scorers[scorer].title}>
+      {sections.map(({ id, title, Method }) => (
+        <Section id={id} title={title}>
           <Method />
         </Section>
       ))}

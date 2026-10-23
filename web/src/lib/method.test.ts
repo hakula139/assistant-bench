@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
-import { gateRule, methodSteps } from '@/lib/method';
+import { boardGuide, boardLabels, gateRule, methodSteps } from '@/lib/method';
 
 const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
   scorer: 'votes',
@@ -46,13 +46,26 @@ describe('gateRule', () => {
 
 describe('methodSteps', () => {
   test.each([
-    ['text', 'text: Every system answers each case in text.'],
-    ['html', 'html: Every system answers each case with an HTML page.'],
-  ] as const)('names the run of a family that renders %s', (render, run) => {
-    const [step] = methodSteps('votes', config({ render }));
+    ['text', { render: 'text' }, 'text: Every system answers each case in text.'],
+    ['html', { render: 'html' }, 'html: Every system answers each case with an HTML page.'],
+    [
+      'diffs under an agent and a turn budget',
+      { render: 'diff', harness: 'terminus-2', max_turns: 40 },
+      "diff: Every system changes each task's repository through the Terminus 2 agent, within 40 turns.",
+    ],
+    [
+      'diffs before it lists systems, and so an agent',
+      { render: 'diff', systems: [] },
+      "diff: Every system changes each task's repository.",
+    ],
+  ] satisfies [string, Partial<VotesConfig>, string][])(
+    'names the run of a family that renders %s',
+    (_, overrides, run) => {
+      const [step] = methodSteps('votes', config(overrides));
 
-    expect(`${step.step}: ${step.hint ?? ''}`).toBe(run);
-  });
+      expect(`${step.step}: ${step.hint ?? ''}`).toBe(run);
+    },
+  );
 
   test("keeps a voted family's specifics in the hints, under the details every board shows", () => {
     const family = config({ gates: { min_chars: 40 } });
@@ -66,6 +79,31 @@ describe('methodSteps', () => {
       gateRule(family),
       'One rater votes on two outputs for a case without seeing which systems wrote them.',
       "Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at 1,000.",
+    ]);
+  });
+
+  test('gates the solutions of a family that renders diffs on their tests', () => {
+    const family = config({ render: 'diff', harness: 'terminus-2', max_turns: 40 });
+
+    const steps = methodSteps('votes', family);
+
+    expect(steps.map(({ title }) => title)).toEqual(['Run', 'Tests', 'Blind pairs', 'Scores']);
+    expect(steps.slice(0, 3).map(({ step, detail, hint }) => [step, detail, hint])).toEqual([
+      [
+        'diff',
+        'same tasks for all',
+        "Every system changes each task's repository through the Terminus 2 agent, within 40 turns.",
+      ],
+      [
+        'tests',
+        'failing solutions lose',
+        "A solution that fails the task's hidden tests loses to each passing one without a vote.",
+      ],
+      [
+        'pairs',
+        'system names hidden',
+        'One rater votes on the diffs of two passing solutions to a task without seeing which systems wrote them.',
+      ],
     ]);
   });
 
@@ -90,6 +128,32 @@ describe('methodSteps', () => {
     'gives the %s steps no hints without a config',
     (scorer) => {
       expect(methodSteps(scorer).filter(({ hint }) => hint !== undefined)).toEqual([]);
+    },
+  );
+});
+
+describe('boardGuide and boardLabels', () => {
+  test.each([
+    [
+      'cases',
+      config(),
+      ['Ranked by blind pairwise votes', 'Cases', 'votes'],
+      ['Gate failures', 'Length bias', 'output'],
+    ],
+    [
+      'diffs',
+      config({ render: 'diff' }),
+      ['Ranked by hidden tests, then blind pairwise votes', 'Tasks', 'tests-then-votes'],
+      ['Failed tests', 'Diff length bias', 'solution'],
+    ],
+  ] as const)(
+    'describe and label the board of a voted family that renders %s',
+    (_, family, guide, labels) => {
+      const { summary, inputs, section } = boardGuide(family);
+      const { gateFailures, lengthBias, unit } = boardLabels(family);
+
+      expect([summary, inputs, section]).toEqual(guide);
+      expect([gateFailures.term, lengthBias.term, unit]).toEqual(labels);
     },
   );
 });

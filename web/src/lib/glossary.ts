@@ -44,9 +44,19 @@ export const terms = {
     definition:
       'The share of its outputs that failed an automatic check, such as being blank or in the wrong language, and so lost their pairs without a vote.',
   },
+  failedTests: {
+    term: 'Failed tests',
+    definition:
+      "The share of its solutions that failed the task's hidden tests, and so lost their pairs without a vote.",
+  },
   costLatency: {
     term: 'Cost / output and p50 latency',
     definition: 'The mean cost at list prices and the median time to the complete response.',
+  },
+  solutionCostLatency: {
+    term: 'Cost / solution and p50 latency',
+    definition:
+      "The mean cost of a solution at list prices and the median time of the agent's whole run on a task.",
   },
   leader: {
     term: 'Leader',
@@ -74,6 +84,11 @@ export const terms = {
     term: 'Length bias',
     definition:
       "How far the rater's votes lean toward the longer or the shorter output, in score points per standard deviation of the pair's relative length difference.",
+  },
+  diffLengthBias: {
+    term: 'Diff length bias',
+    definition:
+      "How far the rater's votes lean toward the longer or the shorter diff, in score points per standard deviation of the pair's relative length difference.",
   },
   passRate: {
     term: 'Pass rate',
