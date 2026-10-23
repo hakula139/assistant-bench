@@ -5,6 +5,7 @@
   "results": {
     "scorer": "votes",
     "reference": "acme-large",
+    "anchor": "acme-large",
     "votes": 34,
     "dropped_votes": 2,
     "sessions": 1,
@@ -15,7 +16,7 @@
         "score": 1000.0,
         "interval": {
           "lower": 861.2164675230583,
-          "upper": 1285.2174377709005
+          "upper": 1285.2174377709002
         },
         "rank": 1,
         "best_rank": 1,
@@ -88,8 +89,8 @@
         "fingerprint": "fp-acme-small",
         "score": 907.5338351500827,
         "interval": {
-          "lower": 695.9274930308495,
-          "upper": 1288.1832084419332
+          "lower": 695.9274930308494,
+          "upper": 1288.183208441933
         },
         "rank": 3,
         "best_rank": 1,
@@ -125,7 +126,7 @@
         "fingerprint": "fp-acme-flash",
         "score": 792.9801778550425,
         "interval": {
-          "lower": 644.8212720766492,
+          "lower": 644.821272076649,
           "upper": 956.5232527962994
         },
         "rank": 4,
@@ -160,9 +161,9 @@
       {
         "system": "acme-mini",
         "fingerprint": "fp-acme-mini",
-        "score": 665.8538126173473,
+        "score": 665.8538126173474,
         "interval": {
-          "lower": 440.97339519397826,
+          "lower": 440.9733951939784,
           "upper": 795.9900869883514
         },
         "rank": 5,
@@ -199,8 +200,8 @@
         "fingerprint": "fp-acme-tiny",
         "score": 135.01992233828094,
         "interval": {
-          "lower": -107.95777703015165,
-          "upper": 222.47998276083115
+          "lower": -107.95777703015158,
+          "upper": 222.479982760831
         },
         "rank": 6,
         "best_rank": 6,
@@ -467,7 +468,7 @@
             "system": "acme-flash",
             "score": 822.0061623420172,
             "interval": {
-              "lower": 394.1969950471977,
+              "lower": 394.19699504719773,
               "upper": 1147.0912141173812
             },
             "votes": 3,
@@ -485,9 +486,9 @@
           },
           {
             "system": "acme-mini",
-            "score": 738.3077249456964,
+            "score": 738.3077249456962,
             "interval": {
-              "lower": 15.802291769938051,
+              "lower": 15.802291769937995,
               "upper": 1027.5581821785427
             },
             "votes": 4,
@@ -497,8 +498,8 @@
             "system": "acme-pro",
             "score": 1291.2965729184875,
             "interval": {
-              "lower": 1012.6863744140552,
-              "upper": 2422.1255867665523
+              "lower": 1012.6863744140551,
+              "upper": 2422.125586766552
             },
             "votes": 5,
             "preliminary": true
@@ -507,7 +508,7 @@
             "system": "acme-small",
             "score": 930.7057973862356,
             "interval": {
-              "lower": 263.7833322203692,
+              "lower": 263.78333222036923,
               "upper": 1822.856521451945
             },
             "votes": 5,
@@ -515,7 +516,7 @@
           },
           {
             "system": "acme-tiny",
-            "score": 248.26114098903463,
+            "score": 248.26114098903452,
             "interval": {
               "lower": -357.25372470006255,
               "upper": 381.54531388382077
@@ -532,7 +533,7 @@
         "standings": [
           {
             "system": "acme-flash",
-            "score": 114.79056436874714,
+            "score": 114.79056436874725,
             "interval": {
               "lower": -185.43595502148082,
               "upper": 313.26544221944414
@@ -545,7 +546,7 @@
             "score": 1000.0,
             "interval": {
               "lower": 647.7687213280187,
-              "upper": 1749.6421537505837
+              "upper": 1749.642153750584
             },
             "votes": 3,
             "preliminary": true
@@ -555,7 +556,7 @@
             "score": 72.80564918341884,
             "interval": {
               "lower": -537.7197693060434,
-              "upper": 1293.377139087134
+              "upper": 1293.3771390871343
             },
             "votes": 4,
             "preliminary": true
@@ -565,27 +566,27 @@
             "score": 281.2692252343468,
             "interval": {
               "lower": -369.33841189869554,
-              "upper": 1238.7744981705107
+              "upper": 1238.774498170511
             },
             "votes": 5,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 274.3703976913738,
+            "score": 274.3703976913739,
             "interval": {
               "lower": 67.886071969623,
-              "upper": 644.4403336300201
+              "upper": 644.4403336300202
             },
             "votes": 2,
             "preliminary": true
           },
           {
             "system": "acme-tiny",
-            "score": -452.601466032959,
+            "score": -452.6014660329589,
             "interval": {
               "lower": -970.7412830670485,
-              "upper": -362.33613699491434
+              "upper": -362.3361369949142
             },
             "votes": 0,
             "preliminary": true
@@ -605,7 +606,7 @@
             "score": 1119.2652833608677,
             "interval": {
               "lower": 728.4699451432875,
-              "upper": 1881.9623214122198
+              "upper": 1881.9623214122196
             },
             "votes": 5,
             "preliminary": true
@@ -622,9 +623,9 @@
           },
           {
             "system": "acme-mini",
-            "score": 645.7457908578876,
+            "score": 645.7457908578878,
             "interval": {
-              "lower": -30.43642516627824,
+              "lower": -30.436425166278042,
               "upper": 968.4044309836382
             },
             "votes": 3,
@@ -652,10 +653,10 @@
           },
           {
             "system": "acme-tiny",
-            "score": 73.37282132361804,
+            "score": 73.37282132361815,
             "interval": {
               "lower": -520.6412398271543,
-              "upper": 143.943595878147
+              "upper": 143.94359587814705
             },
             "votes": 0,
             "preliminary": true

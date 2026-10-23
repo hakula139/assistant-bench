@@ -18,7 +18,7 @@ export const terms = {
   },
   reference: {
     term: 'Reference',
-    definition: `The system every score is relative to, fixed at ${reference}.`,
+    definition: `The system every score is relative to, fixed at ${reference}. When a round cannot rank it, the most-voted system stands in.`,
   },
   preliminary: {
     term: 'Preliminary',
@@ -28,7 +28,7 @@ export const terms = {
   unranked: {
     term: 'Unranked',
     definition:
-      'Listed below the table without a score until enough comparisons connect it to the reference.',
+      'Listed below the table without a score until enough comparisons connect it to the anchor.',
   },
   votes: {
     term: 'Votes',
@@ -71,6 +71,14 @@ export const terms = {
     definition: "A trial's mean cost at list prices and its median time.",
   },
 } satisfies Record<string, Term>;
+
+/** The anchor's definition in a round that cannot rank the reference, naming what it stands in for. */
+export function fallbackAnchor(referenceName: string): Term {
+  return {
+    term: 'Anchor',
+    definition: `The most-voted system, fixed at ${reference} because the reference, ${referenceName}, is not ranked yet.`,
+  };
+}
 
 /** What each gate rejects, in the order `failed_gates` checks them. */
 export const gates = {

@@ -93,7 +93,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
           detail: 'ranked from votes',
           hint:
             votes &&
-            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The reference system is fixed at ${formatScore(REFERENCE_SCORE)}.`,
+            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at ${formatScore(REFERENCE_SCORE)}.`,
         },
       ];
     }

@@ -65,7 +65,7 @@ describe('methodSteps', () => {
     expect(steps.slice(1).map(({ hint }) => hint)).toEqual([
       gateRule(family),
       'One rater votes on two outputs for a case without seeing which systems wrote them.',
-      'Elo-like scores from a Bradley-Terry fit, with 95% intervals. The reference system is fixed at 1,000.',
+      "Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at 1,000.",
     ]);
   });
 

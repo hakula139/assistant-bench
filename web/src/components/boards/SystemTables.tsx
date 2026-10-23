@@ -142,23 +142,29 @@ export function FlagsTable({ standing }: { standing: Standing }) {
 /** Lists the system's standing in each round it appeared in, given oldest first. */
 export function RoundsTable({
   appearances,
+  names,
 }: {
-  appearances: { round: string; standing: Standing }[];
+  appearances: { round: string; anchor: string; standing: Standing }[];
+  names: SystemNames;
 }) {
+  const anchors = new Set(appearances.map((appearance) => appearance.anchor));
+  const showAnchor = anchors.size > 1;
   return (
     <Table className="max-w-xl">
       <TableHeader>
         <TableRow>
           <TableHead>Round</TableHead>
+          {showAnchor && <TableHead>Anchor</TableHead>}
           <TableHead numeric>Score</TableHead>
           <TableHead numeric>95% interval</TableHead>
           <TableHead numeric>Votes</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {appearances.toReversed().map(({ round, standing: past }) => (
+        {appearances.toReversed().map(({ round, anchor, standing: past }) => (
           <TableRow key={round}>
             <TableCell>{round}</TableCell>
+            {showAnchor && <TableCell>{systemName(names, anchor)}</TableCell>}
             <TableCell numeric>{formatScore(past.score)}</TableCell>
             <TableCell numeric>{formatInterval(past.interval)}</TableCell>
             <TableCell numeric>{past.votes}</TableCell>

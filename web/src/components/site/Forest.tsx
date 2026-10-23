@@ -29,13 +29,13 @@ interface ForestProps {
   large?: boolean;
 }
 
-const reference = formatScore(REFERENCE_SCORE);
+const anchor = formatScore(REFERENCE_SCORE);
 
 const unplacedText = {
   'reference': {
-    interval: `Fixed at ${reference} as the reference`,
-    score: reference,
-    summary: `the reference, fixed at ${reference}`,
+    interval: `Fixed at ${anchor} as the anchor`,
+    score: anchor,
+    summary: `the anchor, fixed at ${anchor}`,
   },
   'unranked': {
     interval: 'Unbounded, too few comparisons to place it',
@@ -90,8 +90,8 @@ function Unbounded() {
   );
 }
 
-/** The rule a forest plot draws at the reference score. */
-const referenceRule = 'bg-faint/40';
+/** The rule a forest plot draws at the anchor score. */
+const anchorRule = 'bg-faint/40';
 
 const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   score: {
@@ -122,8 +122,8 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
     ),
   },
   reference: {
-    label: `Reference, ${reference}`,
-    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', referenceRule)} />,
+    label: `Anchor, ${anchor}`,
+    mark: <span className={cn('absolute inset-y-0 left-1/2 w-px', anchorRule)} />,
   },
   unbounded: { label: 'Unbounded', mark: <Unbounded /> },
 };
@@ -211,7 +211,7 @@ export function Forest({ rows, domain, caption, large = false }: ForestProps) {
                       key={tick}
                       className={cn(
                         'absolute inset-y-0 w-px',
-                        tick === REFERENCE_SCORE ? referenceRule : 'bg-chart-grid',
+                        tick === REFERENCE_SCORE ? anchorRule : 'bg-chart-grid',
                       )}
                       style={{ left: position(tick) }}
                     />

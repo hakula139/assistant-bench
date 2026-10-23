@@ -84,7 +84,8 @@ class Gates(BaseModel):
 class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes.
 
-    `reference` names the listed system whose score anchors the board at 1000,
+    `reference` names the listed system whose score anchors the board at 1000
+    when the round ranks it; otherwise the most-voted system anchors in its place.
     `render` says whether the vote page shows outputs as text or as sandboxed
     HTML, and `language` is the language every output must be written in, which
     the gates check when it is set.

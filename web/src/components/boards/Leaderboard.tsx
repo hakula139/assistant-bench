@@ -69,7 +69,9 @@ interface LeaderboardProps {
   /** Whether the rows are the family board's, with its ranks, or a category's refits. */
   ranked: boolean;
   /** The system the scores are relative to, marked by name and ruled on the axis at its score. */
-  referenceSystem: string;
+  anchorSystem: string;
+  /** The mark's definition, which names the reference when the anchor stands in for it. */
+  anchorTerm: Term;
   /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
 }
@@ -114,11 +116,11 @@ function ForestAxis({ domain }: { domain: [number, number] }) {
 function ForestRow({
   row,
   domain,
-  reference,
+  anchor,
 }: {
   row: LeaderboardRow;
   domain: [number, number];
-  reference: number | undefined;
+  anchor: number | undefined;
 }) {
   const plot = useCallback(
     (): Plot.PlotOptions => ({
@@ -129,16 +131,16 @@ function ForestRow({
       color: { type: 'identity' },
       marks: [
         Plot.gridX(forestTicks(domain), { stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
-        reference === undefined
+        anchor === undefined
           ? null
-          : Plot.ruleX([reference], { stroke: 'var(--faint)', strokeOpacity: 0.4 }),
+          : Plot.ruleX([anchor], { stroke: 'var(--faint)', strokeOpacity: 0.4 }),
         forestMarks(
           [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
           domain,
         ),
       ],
     }),
-    [row, domain, reference],
+    [row, domain, anchor],
   );
 
   const summary = `${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`;
@@ -159,11 +161,11 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   return null;
 }
 
-const referenceScore = (rows: LeaderboardRow[], referenceSystem: string) =>
-  rows.find((row) => row.system === referenceSystem)?.score;
+const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
+  rows.find((row) => row.system === anchorSystem)?.score;
 
 /** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
-export function leaderboardMarks(rows: LeaderboardRow[], referenceSystem: string): LegendMark[] {
+export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): LegendMark[] {
   return legendMarks(
     rows.map((row) => ({
       system: row.system,
@@ -172,14 +174,14 @@ export function leaderboardMarks(rows: LeaderboardRow[], referenceSystem: string
       preliminary: row.preliminary,
     })),
     forestDomain(rows),
-    referenceScore(rows, referenceSystem) !== undefined,
+    anchorScore(rows, anchorSystem) !== undefined,
   );
 }
 
 /** The leaderboard table, whose interval column is a forest plot on one shared axis. */
-export function Leaderboard({ rows, ranked, referenceSystem, href }: LeaderboardProps) {
+export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
-  const reference = referenceScore(rows, referenceSystem);
+  const anchor = anchorScore(rows, anchorSystem);
 
   const columns = useMemo(() => {
     const familyWide = (label: string) =>
@@ -218,7 +220,9 @@ export function Leaderboard({ rows, ranked, referenceSystem, href }: Leaderboard
             ) : (
               <span className="font-medium whitespace-nowrap">{original.name}</span>
             )}
-            {original.system === referenceSystem && <StatusMark status="reference" />}
+            {original.system === anchorSystem && (
+              <StatusMark status="reference" term={anchorTerm} />
+            )}
             {original.preliminary && <StatusMark status="preliminary" />}
           </span>
         ),
@@ -227,7 +231,7 @@ export function Leaderboard({ rows, ranked, referenceSystem, href }: Leaderboard
       helper.display({
         id: 'interval',
         header: () => <ForestAxis domain={domain} />,
-        cell: ({ row }) => <ForestRow row={row.original} domain={domain} reference={reference} />,
+        cell: ({ row }) => <ForestRow row={row.original} domain={domain} anchor={anchor} />,
         meta: { forest: true },
       }),
       helper.accessor('score', {
@@ -281,7 +285,7 @@ export function Leaderboard({ rows, ranked, referenceSystem, href }: Leaderboard
         meta: { numeric: true },
       }),
     ]);
-  }, [ranked, domain, reference, referenceSystem, href]);
+  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href]);
 
   const table = useTable({
     features,

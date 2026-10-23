@@ -87,6 +87,7 @@ const decision = z.strictObject({
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   reference: z.string(),
+  anchor: z.string(),
   votes: z.int(),
   dropped_votes: z.int(),
   sessions: z.int(),

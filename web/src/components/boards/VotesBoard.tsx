@@ -37,7 +37,7 @@ import {
   formatLeaderNote,
   formatTau,
 } from '@/lib/format';
-import { terms } from '@/lib/glossary';
+import { fallbackAnchor, terms } from '@/lib/glossary';
 import type { CategoryBoard, Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { systemName, type SystemNames } from '@/lib/systems';
@@ -172,6 +172,10 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
   const href = (system: string) => `${base}${system}/`;
+  const anchorTerm =
+    results.anchor === results.reference
+      ? terms.reference
+      : fallbackAnchor(systemName(names, results.reference));
 
   return (
     <div className={stack}>
@@ -204,7 +208,8 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
         <Leaderboard
           rows={rows}
           ranked={activeCategory === ALL}
-          referenceSystem={results.reference}
+          anchorSystem={results.anchor}
+          anchorTerm={anchorTerm}
           href={href}
         />
         {unranked.length > 0 && (
@@ -216,7 +221,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
               .join(', ')}`}
           </p>
         )}
-        <ForestLegend marks={leaderboardMarks(rows, results.reference)} />
+        <ForestLegend marks={leaderboardMarks(rows, results.anchor)} />
       </div>
 
       {categories.length > 0 && (

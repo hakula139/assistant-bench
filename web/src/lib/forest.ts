@@ -17,7 +17,7 @@ export interface Estimate {
  */
 export const AXIS_SPAN_BELOW_TOP = 600;
 
-/** The axis of a family with no closed round: its reference at 1,000 and room on either side. */
+/** The axis of a family with no closed round: its anchor at 1,000 and room on either side. */
 export const EMPTY_DOMAIN: [number, number] = [600, 1400];
 
 const TICKS = 5;
@@ -115,7 +115,7 @@ export function clip({ score, interval }: Estimate, [start]: [number, number]): 
 
 /**
  * Why a row has no estimate: the reference before any round closes, a system whose votes do not
- * yet connect it to the reference, or a system with no votes.
+ * yet connect it to the anchor, or a system with no votes.
  */
 export type Unplaced = 'reference' | 'unranked' | 'no-votes';
 

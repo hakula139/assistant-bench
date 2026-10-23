@@ -115,7 +115,7 @@ class CategoryStanding(_Model):
 
 
 class CategoryBoard(_Model):
-    """A refit on one category's votes, anchored at the same reference.
+    """A refit on one category's votes, anchored at the same system as the board.
 
     `unranked` lists the systems voted on in the category that have no score, for
     the same reasons as on the board.
@@ -154,18 +154,22 @@ class VotesResults(_Model):
 
     `votes` counts the votes that compare current outputs needing a vote, while
     `dropped_votes` counts the rest: votes on retired cases, on outputs that left
-    or now fail a gate, and on pairs that the outputs now settle. `unranked` lists
-    the voted systems that no comparison connects to the reference, or that so
-    many resamples leave unconnected that their interval is unbounded. `position` is
-    the left pane's advantage, and `length` the score change per standard
-    deviation of the relative length difference, both in score points, where
-    `length` is absent when no connected vote varies that difference.
-    `split_half_tau` compares the orders fit to odd and even sessions, and
-    `decision` is absent while a system tied with the top one is preliminary.
+    or now fail a gate, and on pairs that the outputs now settle. `reference` is
+    the system the family names to anchor the board, while `anchor` is the system
+    the round actually fixed at 1000, which is the most-voted system when the
+    reference does not rank. `unranked` lists the voted systems that no
+    comparison connects to the anchor, or that so many resamples leave
+    unconnected that their interval is unbounded. `position` is the left pane's
+    advantage, and `length` the score change per standard deviation of the
+    relative length difference, both in score points, where `length` is absent
+    when no connected vote varies that difference. `split_half_tau` compares the
+    orders fit to odd and even sessions, and `decision` is absent while a system
+    tied with the top one is preliminary.
     """
 
     scorer: Literal['votes']
     reference: str
+    anchor: str
     votes: int
     dropped_votes: int
     sessions: int
@@ -229,15 +233,21 @@ def close(
         The family has nothing to report, or a system has several fingerprints.
     """
     outputs = read_outputs(family.name)
-    fingerprints = _fingerprints(outputs)
     results: Results
     match family.settings:
         case VotesSettings():
+            categories = {case.id: case.category for case in load_cases(family)}
+            outputs = [output for output in outputs if output.case in categories]
             results = _votes_results(
-                family, family.settings, store, outputs, fingerprints
+                family,
+                family.settings,
+                store,
+                outputs,
+                _fingerprints(outputs),
+                categories,
             )
         case TaskTestsSettings():
-            results = _tests_results(family, outputs, fingerprints)
+            results = _tests_results(family, outputs, _fingerprints(outputs))
         case _:
             assert_never(family.settings)
     return Report(
@@ -282,14 +292,13 @@ def _votes_results(
     store: VoteStore,
     outputs: list[Output],
     fingerprints: dict[str, str | None],
+    categories: dict[str, str],
 ) -> VotesResults:
     """Fit the current case set, where votes and outputs on retired cases drop out.
 
     The systems with recorded votes enter the board, through the votes that
     `reconcile` keeps and the results their current outputs settle.
     """
-    categories = {case.id: case.category for case in load_cases(family)}
-    outputs = [output for output in outputs if output.case in categories]
     recorded = store.votes(family.name)
     if not recorded:
         raise ValueError(f'family {family.name!r} has no votes')
@@ -301,19 +310,13 @@ def _votes_results(
         if {comparison.left, comparison.right} <= voted
     ]
     everything = ranking.Matchups.build(comparisons)
-    if settings.reference not in everything.systems:
-        dropped = sum(
-            settings.reference in (vote.a.system, vote.b.system) for vote in recorded
-        )
-        reason = f'on its current outputs ({dropped} dropped)' if dropped else ''
-        raise ValueError(
-            f'family {family.name!r}: reference {settings.reference!r} '
-            f'has no votes {reason}'.rstrip()
-        )
+    if not everything.systems:
+        raise ValueError(f'family {family.name!r} has no votes on its current outputs')
+    root = _root(everything, votes, settings.systems)
 
-    ratings = ranking.rate(
-        everything.component(settings.reference), settings.reference
-    ).bounded()
+    ratings = ranking.rate(everything.component(root), root).bounded()
+    anchor = settings.reference if settings.reference in ratings.systems else root
+    ratings = ratings.anchored(anchor)
     ranked = set(ratings.systems)
     best, worst = ranking.rank_spread(ratings.lower, ratings.upper)
     connected = [m for m in votes if _systems([m]) <= ranked]
@@ -345,19 +348,39 @@ def _votes_results(
     return VotesResults(
         scorer='votes',
         reference=settings.reference,
+        anchor=anchor,
         votes=len(votes),
         dropped_votes=len(recorded) - len(votes),
         sessions=len({m.vote.session for m in votes}),
         standings=standings,
         unranked=sorted(voted - ranked),
         head_to_head=_head_to_head([m.vote for m in votes], sorted(voted)),
-        categories=_categories(categories, settings.reference, votes, comparisons),
+        categories=_categories(
+            categories, anchor, votes, comparisons, settings.systems
+        ),
         position=ratings.position,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
         separability=ranking.separability(ratings.lower, ratings.upper),
-        split_half_tau=_split_half_tau(votes, sessions, settings.reference),
+        split_half_tau=_split_half_tau(votes, sessions, root),
         rater_agreement=_rater_agreement(recorded),
         decision=decide(standings, ratings),
+    )
+
+
+def _root(
+    matchups: ranking.Matchups, votes: list[MatchedVote], systems: list[str]
+) -> str:
+    """Return the system whose component the fit roots at.
+
+    The most-voted system roots it, since its own estimate is the most precise and
+    it is the least likely to detach in a resample. A tie follows the family's
+    `systems` order, then the name.
+    """
+    counts = Counter(side.system for m in votes for side in (m.vote.a, m.vote.b))
+    order = {system: i for i, system in enumerate(systems)}
+    return min(
+        matchups.systems,
+        key=lambda system: (-counts[system], order.get(system, len(order)), system),
     )
 
 
@@ -447,11 +470,12 @@ def _head_to_head(votes: list[Vote], systems: Iterable[str]) -> list[HeadToHead]
 
 def _categories(
     category: dict[str, str],
-    reference: str,
+    anchor: str,
     votes: list[MatchedVote],
     comparisons: list[ranking.Comparison],
+    systems: list[str],
 ) -> list[CategoryBoard]:
-    """Refit each category whose votes include the reference system."""
+    """Refit each category whose own root connects it to the board's anchor."""
     by_category: defaultdict[str, list[MatchedVote]] = defaultdict(list)
     for m in votes:
         by_category[category[m.vote.case]].append(m)
@@ -459,12 +483,14 @@ def _categories(
     boards = []
     for name, category_votes in sorted(by_category.items()):
         voted = _systems(category_votes)
-        if reference not in voted:
-            continue
         matchups = ranking.Matchups.build(
             [c for c in comparisons if category[c.case] == name]
-        ).component(reference)
-        ratings = ranking.rate(matchups, reference).bounded()
+        )
+        root = _root(matchups, category_votes, systems)
+        ratings = ranking.rate(matchups.component(root), root).bounded()
+        if anchor not in ratings.systems:
+            continue
+        ratings = ratings.anchored(anchor)
         standings = []
         for i, system in enumerate(ratings.systems):
             mine = [m.vote for m in category_votes if system in _systems([m])]
@@ -516,21 +542,19 @@ def text_length(text: str) -> int:
 
 
 def _split_half_tau(
-    votes: list[MatchedVote], sessions: list[str], reference: str
+    votes: list[MatchedVote], sessions: list[str], root: str
 ) -> float | None:
-    """Compare the systems both halves connect to the reference, if each has it."""
+    """Compare the systems both halves connect to the root, if each has it."""
     parity = {session: i % 2 for i, session in enumerate(sessions)}
     halves = [
         [m.vote.comparison() for m in votes if parity[m.vote.session] == half]
         for half in (0, 1)
     ]
-    if not all(any(reference in (c.left, c.right) for c in half) for half in halves):
+    if not all(any(root in (c.left, c.right) for c in half) for half in halves):
         return None
     first, second = (
         dict(zip(fitted.systems, ranking.fit(fitted).strength, strict=True))
-        for fitted in (
-            ranking.Matchups.build(half).component(reference) for half in halves
-        )
+        for fitted in (ranking.Matchups.build(half).component(root) for half in halves)
     )
     shared = sorted(first.keys() & second.keys())
     return ranking.rank_agreement(

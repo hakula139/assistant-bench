@@ -5,6 +5,7 @@
   "results": {
     "scorer": "votes",
     "reference": "acme-large",
+    "anchor": "acme-large",
     "votes": 340,
     "dropped_votes": 20,
     "sessions": 10,
@@ -14,7 +15,7 @@
         "fingerprint": "fp-acme-pro",
         "score": 1004.1217310594122,
         "interval": {
-          "lower": 955.0305764887752,
+          "lower": 955.0305764887751,
           "upper": 1064.9074399484082
         },
         "rank": 1,
@@ -86,9 +87,9 @@
       {
         "system": "acme-small",
         "fingerprint": "fp-acme-small",
-        "score": 965.8397089859631,
+        "score": 965.839708985963,
         "interval": {
-          "lower": 909.6024126384283,
+          "lower": 909.6024126384282,
           "upper": 1026.003117979761
         },
         "rank": 3,
@@ -123,9 +124,9 @@
       {
         "system": "acme-flash",
         "fingerprint": "fp-acme-flash",
-        "score": 882.9146016062631,
+        "score": 882.914601606263,
         "interval": {
-          "lower": 832.8191284344841,
+          "lower": 832.819128434484,
           "upper": 944.2843255112643
         },
         "rank": 4,
@@ -160,9 +161,9 @@
       {
         "system": "acme-mini",
         "fingerprint": "fp-acme-mini",
-        "score": 825.3295812822464,
+        "score": 825.3295812822463,
         "interval": {
-          "lower": 773.0210583190956,
+          "lower": 773.0210583190955,
           "upper": 889.5392298920123
         },
         "rank": 5,
@@ -199,7 +200,7 @@
         "fingerprint": "fp-acme-tiny",
         "score": 233.4026342656914,
         "interval": {
-          "lower": 81.38503391172117,
+          "lower": 81.38503391172108,
           "upper": 320.99849080335446
         },
         "rank": 6,
@@ -532,10 +533,10 @@
         "standings": [
           {
             "system": "acme-flash",
-            "score": 902.6212501930219,
+            "score": 902.6212501930218,
             "interval": {
-              "lower": 810.3612175951122,
-              "upper": 1020.0420268030986
+              "lower": 810.3612175951121,
+              "upper": 1020.0420268030985
             },
             "votes": 44,
             "preliminary": true
@@ -544,7 +545,7 @@
             "system": "acme-large",
             "score": 1000.0,
             "interval": {
-              "lower": 930.0614972349271,
+              "lower": 930.061497234927,
               "upper": 1087.2711061855534
             },
             "votes": 38,
@@ -552,7 +553,7 @@
           },
           {
             "system": "acme-mini",
-            "score": 890.4459732436384,
+            "score": 890.4459732436383,
             "interval": {
               "lower": 797.7280284237047,
               "upper": 1044.454516263172
@@ -562,17 +563,17 @@
           },
           {
             "system": "acme-pro",
-            "score": 972.0269238843031,
+            "score": 972.026923884303,
             "interval": {
-              "lower": 908.7614849525202,
-              "upper": 1040.3667789013232
+              "lower": 908.76148495252,
+              "upper": 1040.366778901323
             },
             "votes": 34,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 976.0056184184515,
+            "score": 976.0056184184514,
             "interval": {
               "lower": 898.7693849053494,
               "upper": 1064.8128944871025
@@ -582,9 +583,9 @@
           },
           {
             "system": "acme-tiny",
-            "score": 287.62346492554195,
+            "score": 287.62346492554184,
             "interval": {
-              "lower": 85.35139982153589,
+              "lower": 85.35139982153564,
               "upper": 393.6865333618065
             },
             "votes": 0,
@@ -604,7 +605,7 @@
             "system": "acme-flash",
             "score": 867.2060804708531,
             "interval": {
-              "lower": 798.2736189938583,
+              "lower": 798.2736189938582,
               "upper": 967.7973689998939
             },
             "votes": 40,
@@ -614,7 +615,7 @@
             "system": "acme-large",
             "score": 1000.0,
             "interval": {
-              "lower": 938.808963345553,
+              "lower": 938.8089633455529,
               "upper": 1118.6238751580406
             },
             "votes": 37,
@@ -625,37 +626,37 @@
             "score": 788.811891233896,
             "interval": {
               "lower": 696.908395204473,
-              "upper": 906.0548059923088
+              "upper": 906.0548059923087
             },
             "votes": 44,
             "preliminary": true
           },
           {
             "system": "acme-pro",
-            "score": 911.0551682561612,
+            "score": 911.0551682561611,
             "interval": {
               "lower": 814.3157059791763,
-              "upper": 1018.5406111892595
+              "upper": 1018.5406111892594
             },
             "votes": 39,
             "preliminary": true
           },
           {
             "system": "acme-small",
-            "score": 925.8930784750304,
+            "score": 925.8930784750303,
             "interval": {
               "lower": 836.3946329302039,
-              "upper": 1065.8026746968603
+              "upper": 1065.80267469686
             },
             "votes": 38,
             "preliminary": true
           },
           {
             "system": "acme-tiny",
-            "score": 66.47936490729842,
+            "score": 66.4793649072983,
             "interval": {
-              "lower": -205.78439792336076,
-              "upper": 203.25139273781053
+              "lower": -205.78439792336084,
+              "upper": 203.25139273781048
             },
             "votes": 0,
             "preliminary": true
