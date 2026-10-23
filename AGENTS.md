@@ -9,7 +9,7 @@ uv run bench check smoke                    # Validate a family, running Harbor'
 uv run bench run smoke-text                 # Generate a family's missing trials for every system it lists
 uv run bench ingest smoke-text              # Collect a family's trials into outputs/<family>.jsonl
 uv run bench serve                          # Serve the vote page for every family with outputs
-uv run bench close prose-zh                 # Write a family's report to reports/<family>/<round>.json
+uv run bench close writing-zh               # Write a family's report to reports/<family>/<round>.json
 ```
 
 ## Project Layout
@@ -32,19 +32,19 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Read Before You Edit
 
-| When the change touches                             | Read                                                                                                       |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Python code                                         | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)          |
-| The site under `web/`                               | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                               |
-| Tests                                               | [Testing](docs/conventions/testing.md)                                                                     |
-| A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page, such as [Prose](docs/design/families/prose.md) |
-| Cases, outputs, fixtures, or log lines              | [Data](docs/conventions/data.md)                                                                           |
-| Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                          |
-| The scheduler, the vote store, or the vote API      | [Arena](docs/design/arena.md)                                                                              |
-| Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                    |
-| PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                       |
-| The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                             |
-| A workflow, a failing check, or the deploy          | [CI](docs/conventions/ci.md)                                                                               |
+| When the change touches                             | Read                                                                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Python code                                         | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)              |
+| The site under `web/`                               | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                                   |
+| Tests                                               | [Testing](docs/conventions/testing.md)                                                                         |
+| A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page, such as [Writing](docs/design/families/writing.md) |
+| Cases, outputs, fixtures, or log lines              | [Data](docs/conventions/data.md)                                                                               |
+| Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                              |
+| The scheduler, the vote store, or the vote API      | [Arena](docs/design/arena.md)                                                                                  |
+| Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                        |
+| PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                           |
+| The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                                 |
+| A workflow, a failing check, or the deploy          | [CI](docs/conventions/ci.md)                                                                                   |
 
 ## Rules for Every Change
 

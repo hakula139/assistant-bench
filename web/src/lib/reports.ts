@@ -32,24 +32,20 @@ export interface Family {
 }
 
 /**
- * A family's path segment under its aspect: its short name in kebab case, with accents dropped.
+ * A family's path segment under its aspect: its ID without the aspect prefix.
  *
- * @throws Error when the short name has no ASCII letter or digit to build the segment from.
+ * @throws Error when the ID does not start with its aspect and a hyphen.
  */
-export function boardSlug({ display_name: name }: FamilyConfig): string {
-  const slug = name
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (!slug) {
-    throw new Error(`the short name ${name} has no ASCII letter or digit for its board path`);
+export function boardSlug(name: string, aspect: Aspect): string {
+  const prefix = `${aspect}-`;
+  if (!name.startsWith(prefix)) {
+    throw new Error(`family ${name} does not start with its aspect ${aspect}-`);
   }
-  return slug;
+  return name.slice(prefix.length);
 }
 
 function boardParams(family: Family): { aspect: Aspect; board: string } {
-  return { aspect: family.aspect, board: boardSlug(family.config) };
+  return { aspect: family.aspect, board: boardSlug(family.name, family.aspect) };
 }
 
 /** A family's board path, which every link to the board and its system pages starts with. */
@@ -68,7 +64,7 @@ export function systemPath(family: Family, system: string): string {
  * without `public = true` stay off the site together with their reports.
  *
  * @throws Error when two families, listed or not, share a full name, when a public family has no
- *   aspect, or when two public families share a board path.
+ *   aspect, or when a public family's ID does not start with its aspect.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -91,6 +87,7 @@ export function listFamilies(
       if (config.aspect === undefined) {
         throw new Error(`public family ${name} has no aspect`);
       }
+      boardSlug(name, config.aspect);
       return {
         name,
         title: familyTitle(config),
@@ -103,15 +100,6 @@ export function listFamilies(
       };
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
-  const holders = new Map<string, string>();
-  for (const family of families) {
-    const path = boardPath(family);
-    const holder = holders.get(path);
-    if (holder !== undefined) {
-      throw new Error(`families ${holder} and ${family.name} share the board path ${path}`);
-    }
-    holders.set(path, family.name);
-  }
   return families;
 }
 

@@ -23,7 +23,7 @@ vi.mock(import('@/lib/reports'), async (importOriginal) => ({
 }));
 
 /** The fixture's systems and the family itself, whose table and directory names pages hide. */
-const SLUGS = { ...FIXTURE_NAMES, arena: 'Arena Writing' };
+const SLUGS = { ...FIXTURE_NAMES, 'writing-arena': 'Arena Writing' };
 
 const arenaConfig: VotesConfig = {
   scorer: 'votes',
@@ -49,7 +49,7 @@ async function family(): Promise<Family> {
   for (const standing of earlier.results.standings) {
     standing.score = 900;
   }
-  return listedFamily('arena', arenaConfig, [earlier, latest]);
+  return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
 }
 
 /** A family as `listFamilies` lists it under the writing aspect. */
@@ -87,7 +87,7 @@ const text = (html: string) =>
 /** A family scored by tests, with one round that lists the weaker system first. */
 function testsFamily(): Family {
   const report = reportSchema.parse({
-    family: 'smoke',
+    family: 'writing-smoke',
     round: '2026-10-21',
     closed_at: '2026-10-21T18:00:00Z',
     results: {
@@ -115,7 +115,7 @@ function testsFamily(): Family {
     },
   });
   return listedFamily(
-    'smoke',
+    'writing-smoke',
     {
       scorer: 'tests',
       aspect: 'writing',
@@ -234,7 +234,7 @@ describe('family page', () => {
 
     expect(html).toContain(`<title>${loaded.title} | HAKULA†BENCH</title>`);
     expect(text(html)).toContain(`${loaded.title} Run `);
-    expect(shownSlugs(html, { ...SLUGS, smoke: 'Smoke Tasks' })).toEqual([]);
+    expect(shownSlugs(html, { ...SLUGS, 'writing-smoke': 'Smoke Tasks' })).toEqual([]);
   });
 
   test.each([
@@ -317,7 +317,7 @@ describe('family panel', () => {
     const html = await render(FamilyPanel, { family: loaded });
 
     expect(text(html)).toContain(`${loaded.config.display_name} `);
-    expect(shownSlugs(html, { ...SLUGS, smoke: 'Smoke Tasks' })).toEqual([]);
+    expect(shownSlugs(html, { ...SLUGS, 'writing-smoke': 'Smoke Tasks' })).toEqual([]);
   });
 
   test("lists a tests family's systems by pass rate, best first", async () => {
@@ -439,7 +439,7 @@ describe('header', () => {
     const arena = await family();
     listed.families = Array.from({ length: count }, (_, index) =>
       listedFamily(
-        `arena-${index}`,
+        `writing-arena-${index}`,
         { ...arenaConfig, display_name: `Arena ${index}` },
         arena.rounds,
       ),
@@ -457,11 +457,11 @@ describe('header', () => {
     const arena = await family();
 
     const pages = [
-      await render(FamilyPage, { family: arena, boards: [] }, '/writing/arena-writing/'),
+      await render(FamilyPage, { family: arena, boards: [] }, '/writing/arena/'),
       await render(
         SystemPage,
         { family: arena, system: 'acme-pro', boards: [] },
-        '/writing/arena-writing/acme-pro/',
+        '/writing/arena/acme-pro/',
       ),
     ];
 
@@ -489,8 +489,12 @@ describe('board switcher', () => {
     const arena = await family();
     return [
       arena,
-      listedFamily('arena-en', { ...arenaConfig, display_name: 'Arena English' }, arena.rounds),
-      listedFamily('arena-ja', { ...arenaConfig, display_name: 'Arena Japanese' }, []),
+      listedFamily(
+        'writing-arena-en',
+        { ...arenaConfig, display_name: 'Arena English' },
+        arena.rounds,
+      ),
+      listedFamily('writing-arena-ja', { ...arenaConfig, display_name: 'Arena Japanese' }, []),
     ];
   }
 
@@ -499,13 +503,13 @@ describe('board switcher', () => {
 
     const html = await render(
       FamilyPage,
-      propsAt(familyPaths(families), { aspect: 'writing', board: 'arena-english' }),
+      propsAt(familyPaths(families), { aspect: 'writing', board: 'arena-en' }),
     );
 
     expect(navLinks(html, 'Writing boards')).toEqual([
-      ['/writing/arena-writing/', 'Arena Writing', null],
-      ['/writing/arena-english/', 'Arena English', 'page'],
-      ['/writing/arena-japanese/', 'Arena Japanese', null],
+      ['/writing/arena/', 'Arena Writing', null],
+      ['/writing/arena-en/', 'Arena English', 'page'],
+      ['/writing/arena-ja/', 'Arena Japanese', null],
     ]);
   });
 
@@ -516,14 +520,14 @@ describe('board switcher', () => {
       SystemPage,
       propsAt(systemPaths(families), {
         aspect: 'writing',
-        board: 'arena-writing',
+        board: 'arena',
         system: 'acme-pro',
       }),
     );
 
     expect(navLinks(html, 'Writing boards')).toEqual([
-      ['/writing/arena-writing/acme-pro/', 'Arena Writing', 'page'],
-      ['/writing/arena-english/acme-pro/', 'Arena English', null],
+      ['/writing/arena/acme-pro/', 'Arena Writing', 'page'],
+      ['/writing/arena-en/acme-pro/', 'Arena English', null],
     ]);
   });
 
@@ -532,7 +536,7 @@ describe('board switcher', () => {
 
     const html = await render(
       FamilyPage,
-      propsAt(familyPaths([arena]), { aspect: 'writing', board: 'arena-writing' }),
+      propsAt(familyPaths([arena]), { aspect: 'writing', board: 'arena' }),
     );
 
     expect(navLinks(html, 'Writing boards')).toEqual([]);
@@ -549,7 +553,7 @@ describe('system page breadcrumb', () => {
 
     expect(navLinks(html, 'breadcrumb')).toEqual([
       ['/#writing', 'Writing', null],
-      ['/writing/arena-writing/', 'Arena Writing', null],
+      ['/writing/arena/', 'Arena Writing', null],
     ]);
   });
 });

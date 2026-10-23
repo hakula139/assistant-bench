@@ -21,10 +21,10 @@ class _Settings(BaseModel):
     """Settings every family shares.
 
     `aspect` names the skill the family measures, which the site groups families
-    by and validates, and `display_name` is the family's short name within its
-    aspect, or its whole name without one. `categories` lists the categories its
-    cases may carry, which reports publish, and `public` says whether the public
-    site lists the family.
+    by and validates, and a public family's ID starts with it. `display_name` is
+    the family's short name within its aspect, or its whole name without one.
+    `categories` lists the categories its cases may carry, which reports publish,
+    and `public` says whether the public site lists the family.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
@@ -151,8 +151,10 @@ def load_family(name: str) -> Family:
     ------
     ValueError
         No family has the name, the family holds both or neither of
-        `cases.jsonl` and `tasks/`, a case family sets no `max_output_tokens`, or
-        a family scored by tests holds cases, which have no tests to run.
+        `cases.jsonl` and `tasks/`, a public family sets no aspect or names
+        itself without that aspect's prefix, a case family sets no
+        `max_output_tokens`, or a family scored by tests holds cases, which have
+        no tests to run.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -165,6 +167,14 @@ def load_family(name: str) -> Family:
 
     with (directory / 'family.toml').open('rb') as file:
         settings = _SETTINGS.validate_python(tomllib.load(file))
+    if settings.public:
+        if settings.aspect is None:
+            raise ValueError(f'family {name!r}: a public family needs an aspect')
+        if not name.startswith(f'{settings.aspect}-'):
+            raise ValueError(
+                f'family {name!r}: a public family ID starts with its aspect, '
+                f'as in {settings.aspect}-<name>'
+            )
     if has_cases and settings.max_output_tokens is None:
         raise ValueError(f'family {name!r}: case families need max_output_tokens')
     if has_cases and isinstance(settings, TaskTestsSettings):

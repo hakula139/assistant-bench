@@ -22,28 +22,24 @@ async function report(family: string, round: string, closedAt: string): Promise<
 }
 
 describe('boardSlug', () => {
-  test.each([
-    ['Chinese', 'chinese'],
-    ['C++ / Rust (beta)', 'c-rust-beta'],
-    ['Café Essays', 'cafe-essays'],
-  ])('names the board of %s by its short name in kebab case', (name, slug) => {
-    expect(boardSlug(votes(true, name))).toBe(slug);
+  test('names a board by the family ID under its aspect', () => {
+    expect(boardSlug('writing-zh', 'writing')).toBe('zh');
   });
 
-  test('rejects a short name with no ASCII letter or digit', () => {
-    expect(() => boardSlug(votes(true, '日本語'))).toThrow(
-      'the short name 日本語 has no ASCII letter or digit for its board path',
+  test('rejects a family ID that does not start with its aspect', () => {
+    expect(() => boardSlug('zh', 'writing')).toThrow(
+      'family zh does not start with its aspect writing-',
     );
   });
 });
 
 describe('listFamilies', () => {
   test('pairs each public family with its rounds, oldest first', async () => {
-    const later = await report('prose', '2026-10-21', '2026-10-21T18:00:00Z');
-    const earlier = await report('prose', '2026-10-07', '2026-10-07T18:00:00Z');
+    const later = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
+    const earlier = await report('writing-prose', '2026-10-07', '2026-10-07T18:00:00Z');
 
     const families = listFamilies(
-      [{ name: 'prose', config: votes(true) }],
+      [{ name: 'writing-prose', config: votes(true) }],
       [later, earlier],
       FIXTURE_NAMES,
     );
@@ -56,22 +52,26 @@ describe('listFamilies', () => {
   test('lists the families by name', () => {
     const families = listFamilies(
       [
-        { name: 'prose-zh', config: votes(true, 'Chinese Prose') },
-        { name: 'prose-en', config: votes(true, 'English Prose') },
+        { name: 'writing-zh', config: votes(true, 'Chinese Prose') },
+        { name: 'writing-en', config: votes(true, 'English Prose') },
       ],
       [],
       FIXTURE_NAMES,
     );
 
-    expect(families.map((family) => family.name)).toEqual(['prose-en', 'prose-zh']);
+    expect(families.map((family) => family.name)).toEqual(['writing-en', 'writing-zh']);
   });
 
   test('lists a public family before its first round closes', () => {
-    const families = listFamilies([{ name: 'prose', config: votes(true) }], [], FIXTURE_NAMES);
+    const families = listFamilies(
+      [{ name: 'writing-prose', config: votes(true) }],
+      [],
+      FIXTURE_NAMES,
+    );
 
     expect(families).toEqual([
       {
-        name: 'prose',
+        name: 'writing-prose',
         title: 'Writing · Prose',
         aspect: 'writing',
         config: votes(true),
@@ -87,29 +87,31 @@ describe('listFamilies', () => {
     const families = listFamilies(
       [
         { name: 'smoke-text', config: votes(false, 'Smoke') },
-        { name: 'prose', config: votes(true) },
+        { name: 'writing-prose', config: votes(true) },
       ],
       [smoke],
       FIXTURE_NAMES,
     );
 
-    expect(families.map((family) => [family.name, family.rounds.length])).toEqual([['prose', 0]]);
+    expect(families.map((family) => [family.name, family.rounds.length])).toEqual([
+      ['writing-prose', 0],
+    ]);
   });
 
   test('rejects two families sharing a full name, even one that is not public', () => {
     const configs = [
-      { name: 'prose', config: votes(true, 'English') },
+      { name: 'writing-prose', config: votes(true, 'English') },
       { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'writing' } },
     ] satisfies { name: string; config: FamilyConfig }[];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose and smoke-text share the full name Writing · English',
+      'families writing-prose and smoke-text share the full name Writing · English',
     );
   });
 
   test('accepts a short name that a family without an aspect already uses', () => {
     const configs = [
-      { name: 'prose', config: votes(true, 'English') },
+      { name: 'writing-prose', config: votes(true, 'English') },
       { name: 'smoke-text', config: votes(false, 'English') },
     ];
 
@@ -126,33 +128,23 @@ describe('listFamilies', () => {
     );
   });
 
-  test('rejects two public families sharing a board path', () => {
-    const configs = [
-      { name: 'cpp', config: votes(true, 'C++') },
-      { name: 'csharp', config: votes(true, 'C#') },
-    ];
+  test('rejects a public family ID that does not start with its aspect', () => {
+    const configs = [{ name: 'zh', config: votes(true) }];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families cpp and csharp share the board path /writing/c/',
+      'family zh does not start with its aspect writing-',
     );
-  });
-
-  test('accepts a hidden family on a public board path', () => {
-    const configs = [
-      { name: 'cpp', config: votes(true, 'C++') },
-      { name: 'csharp', config: { ...votes(false, 'C#'), aspect: 'writing' } },
-    ] satisfies { name: string; config: FamilyConfig }[];
-
-    const families = listFamilies(configs, [], FIXTURE_NAMES);
-
-    expect(families.map((family) => family.name)).toEqual(['cpp']);
   });
 });
 
 describe('systemPages', () => {
   test('gives a page to every system a voted round placed', async () => {
-    const round = await report('prose', '2026-10-21', '2026-10-21T18:00:00Z');
-    const [family] = listFamilies([{ name: 'prose', config: votes(true) }], [round], FIXTURE_NAMES);
+    const round = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
+    const [family] = listFamilies(
+      [{ name: 'writing-prose', config: votes(true) }],
+      [round],
+      FIXTURE_NAMES,
+    );
 
     const pages = systemPages(family);
 

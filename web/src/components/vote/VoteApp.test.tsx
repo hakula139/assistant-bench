@@ -406,7 +406,7 @@ describe('VoteApp', () => {
     const families: FamilyView[] = [
       { name: 'smoke-text', aspect: null, display_name: 'Smoke' },
       FAMILY,
-      { name: 'prose-en', aspect: 'writing', display_name: 'English' },
+      { name: 'writing-en', aspect: 'writing', display_name: 'English' },
     ];
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(families))));
 

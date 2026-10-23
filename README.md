@@ -11,7 +11,7 @@ A benchmark of AI assistant systems on everyday work, run on [Harbor](https://gi
 
 A system combines a model with its effort, harness, and system prompt. Every system in a family receives the same instructions, and the family scores their outputs either by the owner's blind pairwise votes or by each Harbor task's tests. Every output records its tokens, cost, latency, and the exact system configuration behind it.
 
-Early development. The first families, `prose-zh` and `prose-en`, rank how systems write everyday technical prose in Chinese and in English.
+Early development. The first families, `writing-zh` and `writing-en`, rank how systems write everyday technical prose in Chinese and in English.
 
 ## Usage
 
