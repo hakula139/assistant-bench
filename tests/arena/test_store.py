@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from assistant_bench.arena.store import Ballot, Choice, Side, VoteStore, votes_file
+from assistant_bench.arena.store import (
+    Ballot,
+    Choice,
+    Defects,
+    Side,
+    VoteStore,
+    votes_file,
+)
 from assistant_bench.scoring.ranking import Comparison
 
 
@@ -52,7 +59,9 @@ class TestVoteStore:
         recorded = store.record(
             ballot(
                 session.id,
-                flags={'punctuation', 'length'},
+                defects=Defects(
+                    a=frozenset({'tone', 'length'}), b=frozenset({'facts'})
+                ),
                 note='Drops a fact.',
                 duration_sec=12.5,
             ),
@@ -65,16 +74,17 @@ class TestVoteStore:
         assert reopened.votes('f') == [recorded]
         assert reopened.session(session.id) == session
         reopened.close()
-        assert recorded.flags == {'punctuation', 'length'}
         assert recorded.recorded_at == AT + timedelta(seconds=30)
 
     def test_refuses_a_store_of_another_schema_version(self, data_dir: Path) -> None:
         path = data_dir / 'votes.sqlite'
         path.parent.mkdir(parents=True)
         with closing(sqlite3.connect(path)) as db:
-            db.execute('PRAGMA user_version = 2')
+            db.execute('PRAGMA user_version = 1')
 
-        with pytest.raises(ValueError, match='has schema version 2, while this'):
+        with pytest.raises(
+            ValueError, match='has schema version 1, while this bench reads version 2'
+        ):
             VoteStore(path)
 
     def test_reads_only_the_family_s_votes(self, store: VoteStore) -> None:
@@ -105,7 +115,8 @@ class TestVoteStore:
             'DELETE FROM votes',
             'INSERT OR REPLACE INTO votes SELECT id, session, case_id, a_system, '
             'a_fingerprint, a_job, a_trial, b_system, b_fingerprint, b_job, b_trial, '
-            "'b', flags, note, duration_sec, repeat_of, recorded_at FROM votes",
+            "'b', a_defects, b_defects, note, duration_sec, repeat_of, recorded_at "
+            'FROM votes',
         ],
         ids=['update', 'delete', 'replace'],
     )

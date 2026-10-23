@@ -13,7 +13,7 @@ from assistant_bench.arena.service import (
     UnknownItem,
     load_families,
 )
-from assistant_bench.arena.store import Side, VoteStore
+from assistant_bench.arena.store import Defects, Side, VoteStore
 from assistant_bench.outputs import Output, read_outputs, write_outputs
 from support import (
     ARENA_CASES,
@@ -87,14 +87,16 @@ class TestArena:
         assert first.pair is not None
         clock.now += timedelta(seconds=42)
 
-        second = arena.vote(first.pair.token, 'b', frozenset({'register'}), 'Stiff.')
+        second = arena.vote(
+            first.pair.token, 'b', Defects(a=frozenset({'tone'})), 'Stiff.'
+        )
 
         (vote,) = store.votes('f')
         assert isinstance(first.pair.a, TextPane)
         assert vote.a.system in first.pair.a.text
-        assert (vote.choice, vote.flags, vote.note) == (
+        assert (vote.choice, vote.defects, vote.note) == (
             'b',
-            frozenset({'register'}),
+            Defects(a=frozenset({'tone'})),
             'Stiff.',
         )
         assert vote.duration_sec == 42
@@ -102,7 +104,7 @@ class TestArena:
         assert second.pair is not None
         assert second.pair.token != first.pair.token
         with pytest.raises(UnknownItem):
-            arena.vote(first.pair.token, 'a', frozenset(), None)
+            arena.vote(first.pair.token, 'a', Defects(), None)
 
     @pytest.mark.parametrize(
         ('options'),
@@ -133,7 +135,7 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         first = arena.start('f')
         assert first.pair is not None
-        arena.vote(first.pair.token, 'a', frozenset(), None)
+        arena.vote(first.pair.token, 'a', Defects(), None)
 
         undone = arena.undo(first.id)
 
@@ -150,13 +152,13 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         first = arena.start('f')
         assert first.pair is not None
-        second = arena.vote(first.pair.token, 'a', frozenset(), None)
+        second = arena.vote(first.pair.token, 'a', Defects(), None)
         assert second.pair is not None
 
         arena.undo(first.id)
 
         with pytest.raises(UnknownItem):
-            arena.vote(second.pair.token, 'a', frozenset(), None)
+            arena.vote(second.pair.token, 'a', Defects(), None)
 
     def test_undo_keeps_a_repeat_a_repeat(
         self,
@@ -168,17 +170,17 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         first = arena.start('f')
         assert first.pair is not None
-        arena.vote(first.pair.token, 'a', frozenset(), None)
+        arena.vote(first.pair.token, 'a', Defects(), None)
         (original,) = store.votes('f')
         clock.now += timedelta(days=1)
         monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
         repeat = arena.start('f')
         assert repeat.pair is not None
-        arena.vote(repeat.pair.token, 'b', frozenset(), None)
+        arena.vote(repeat.pair.token, 'b', Defects(), None)
 
         undone = arena.undo(repeat.id)
         assert undone.pair is not None
-        arena.vote(undone.pair.token, 'b', frozenset(), None)
+        arena.vote(undone.pair.token, 'b', Defects(), None)
 
         *_, recast = store.votes('f')
         assert recast.repeat_of == original.id
@@ -189,7 +191,7 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         first = arena.start('f')
         assert first.pair is not None
-        arena.vote(first.pair.token, 'a', frozenset(), None)
+        arena.vote(first.pair.token, 'a', Defects(), None)
         (vote,) = store.votes('f')
         write_outputs('f', [o for o in read_outputs('f') if Side.of(o) != vote.a])
         restarted = Arena(store, load_families(), RENDER_ORIGIN, clock)
@@ -226,7 +228,7 @@ class TestArena:
 
         while view.pair is not None:
             remaining.append(view.remaining)
-            view = arena.vote(view.pair.token, 'tie', frozenset(), None)
+            view = arena.vote(view.pair.token, 'tie', Defects(), None)
 
         assert remaining == list(range(len(cases), 0, -1))
         assert (view.votes, view.remaining) == (len(cases), 0)
@@ -237,7 +239,7 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         first = arena.start('f')
         assert first.pair is not None
-        arena.vote(first.pair.token, 'a', frozenset(), None)
+        arena.vote(first.pair.token, 'a', Defects(), None)
         restarted = Arena(store, load_families(), RENDER_ORIGIN, clock)
 
         resumed = restarted.resume(first.id)
@@ -275,14 +277,14 @@ class TestArena:
         arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
         view = arena.start('f')
         while view.pair is not None:
-            view = arena.vote(view.pair.token, 'a', frozenset(), None)
+            view = arena.vote(view.pair.token, 'a', Defects(), None)
         write_outputs('f', outputs(['ref', *ARENA_SYSTEMS]))
         clock.now += timedelta(hours=1)
         arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
 
         joining = arena.start('f')
         assert joining.pair is not None
-        arena.vote(joining.pair.token, 'a', frozenset(), None)
+        arena.vote(joining.pair.token, 'a', Defects(), None)
 
         *earlier, joined = store.votes('f')
         assert len(earlier) == len(cases)
@@ -302,12 +304,12 @@ class TestArena:
         arena = make_arena(families_dir, clock, store)
         seeded = arena.start('f')
         assert seeded.pair is not None
-        arena.vote(seeded.pair.token, 'a', frozenset(), None)
+        arena.vote(seeded.pair.token, 'a', Defects(), None)
         monkeypatch.setattr(scheduler, 'SEED_VOTES_PER_SIDE', 0)
 
         view = arena.start('f')
         assert view.pair is not None
-        arena.vote(view.pair.token, 'a', frozenset(), None)
+        arena.vote(view.pair.token, 'a', Defects(), None)
         arena.start('f')
 
         assert fits == [1, 2]
@@ -346,7 +348,7 @@ class TestArena:
         documents = [url.rsplit('/', 1)[1] for url in urls]
 
         served = {arena.document(document) for document in documents}
-        arena.vote(view.pair.token, 'a', frozenset(), None)
+        arena.vote(view.pair.token, 'a', Defects(), None)
 
         assert served == {'<p>L</p>', '<p>S</p>'}
         with pytest.raises(UnknownItem):

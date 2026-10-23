@@ -43,7 +43,11 @@ class TestCreateApp:
 
         voted = client.post(
             f'/api/pairs/{token}/vote',
-            json={'choice': 'both_bad', 'flags': ['script'], 'note': 'Mixed.'},
+            json={
+                'choice': 'both_bad',
+                'defects': {'a': ['script'], 'b': ['length']},
+                'note': 'Mixed.',
+            },
             headers=ORIGIN,
         )
         assert voted.status_code == 200
@@ -107,6 +111,21 @@ class TestCreateApp:
                 }
             ]
         }
+
+    @pytest.mark.parametrize(
+        'body',
+        [
+            {'choice': 'a', 'defects': {'c': []}},
+            {'choice': 'a', 'flags': ['length']},
+        ],
+        ids=['unknown-side', 'old-key'],
+    )
+    def test_rejects_a_body_the_models_forbid(
+        self, client: TestClient, body: dict[str, Any]
+    ) -> None:
+        response = client.post('/api/pairs/nope/vote', json=body, headers=ORIGIN)
+
+        assert response.status_code == 422
 
     def test_refuses_to_undo_an_empty_session(self, client: TestClient) -> None:
         session = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)

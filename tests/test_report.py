@@ -10,7 +10,14 @@ import pytest
 
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
-from assistant_bench.arena.store import Ballot, Choice, Flag, Side, Vote, VoteStore
+from assistant_bench.arena.store import (
+    Ballot,
+    Choice,
+    Defects,
+    Side,
+    Vote,
+    VoteStore,
+)
 from assistant_bench.families import Family, Gate, load_family
 from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.report import (
@@ -40,6 +47,7 @@ from support import (
 
 
 AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
+UNTAGGED = Defects()
 ROUNDS = pytest.mark.parametrize(
     ('fixture', 'sessions', 'closed_at'),
     [
@@ -67,7 +75,8 @@ def record(
     a: Output,
     b: Output,
     choice: Choice,
-    flags: frozenset[Flag] = frozenset(),
+    defects: Defects = UNTAGGED,
+    note: str | None = None,
 ) -> Vote:
     return store.record(
         Ballot(
@@ -76,7 +85,8 @@ def record(
             a=Side.of(a),
             b=Side.of(b),
             choice=choice,
-            flags=flags,
+            defects=defects,
+            note=note,
             duration_sec=10.0,
         ),
         AT,
@@ -137,26 +147,34 @@ def small_family(families_dir: Path, store: VoteStore) -> Family:
     write_outputs('f', outputs)
     by_trial = {output.trial: output for output in outputs}
     session = store.start_session('f', AT)
-    votes: list[tuple[str, str, str, Choice, frozenset[Flag]]] = [
-        ('c1', 'large', 'medium', 'a', frozenset({'length'})),
-        ('c1', 'medium', 'small', 'tie', frozenset({'register'})),
-        ('c2', 'small', 'large', 'both_bad', frozenset()),
-        ('c2', 'large', 'small', 'b', frozenset()),
-        ('c3', 'medium', 'small', 'a', frozenset()),
+    votes: list[tuple[str, str, str, Choice, Defects, str | None]] = [
+        (
+            'c1',
+            'large',
+            'medium',
+            'a',
+            Defects(a=frozenset({'length'})),
+            'Drops a fact.',
+        ),
+        ('c1', 'medium', 'small', 'tie', Defects(b=frozenset({'tone'})), None),
+        ('c2', 'small', 'large', 'both_bad', Defects(), None),
+        ('c2', 'large', 'small', 'b', Defects(), None),
+        ('c3', 'medium', 'small', 'a', Defects(), None),
     ]
     for case in ties:
         votes += [
-            (case, 'large', 'medium', 'tie', frozenset()),
-            (case, 'small', 'large', 'tie', frozenset()),
+            (case, 'large', 'medium', 'tie', Defects(), None),
+            (case, 'small', 'large', 'tie', Defects(), None),
         ]
-    for case, left, right, choice, flags in votes:
+    for case, left, right, choice, defects, note in votes:
         record(
             store,
             session.id,
             by_trial[f'{case}__{left}'],
             by_trial[f'{case}__{right}'],
             choice,
-            flags,
+            defects,
+            note,
         )
     return load_family('f')
 
@@ -207,10 +225,18 @@ class TestClose:
 
         closed = close(family, store, AT).model_dump_json()
 
-        for private in ('c1', 'c3', 'job-1', '__', 'Write about', '一二三'):
+        for private in (
+            'c1',
+            'c3',
+            'job-1',
+            '__',
+            'Write about',
+            '一二三',
+            'Drops a fact.',
+        ):
             assert private not in closed
 
-    def test_tallies_flags_against_the_side_a_vote_did_not_prefer(
+    def test_tallies_each_defect_against_the_output_it_tags(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         family = small_family(families_dir, store)
@@ -218,10 +244,11 @@ class TestClose:
         results = close(family, store, AT).results
 
         assert results.scorer == 'votes'
-        flags = {standing.system: standing.flags for standing in results.standings}
-        assert flags['large']['length'] == 0
-        assert flags['medium']['length'] == 1
-        assert flags['medium']['register'] == flags['small']['register'] == 1
+        defects = {standing.system: standing.defects for standing in results.standings}
+        assert defects['large']['length'] == 1
+        assert defects['medium']['length'] == 0
+        assert defects['small']['tone'] == 1
+        assert defects['medium']['tone'] == 0
         both_bad = {s.system: s.both_bad_rate for s in results.standings}
         assert both_bad == {'large': 1 / 13, 'medium': 0.0, 'small': 1 / 9}
         large_small = next(
@@ -283,7 +310,7 @@ class TestClose:
         arena = make_arena(families_dir, clock, store)
         view = arena.start('f')
         while view.pair is not None:
-            view = arena.vote(view.pair.token, 'a', frozenset(), None)
+            view = arena.vote(view.pair.token, 'a', Defects(), None)
         cases = families_dir / 'f' / 'cases.jsonl'
         cases.write_text(cases.read_text().replace('"c1"', '"c1-v2"'))
         restarted = Arena(
@@ -294,7 +321,7 @@ class TestClose:
         shown = []
         while view.pair is not None:
             shown.append(view.pair.instruction)
-            view = restarted.vote(view.pair.token, 'a', frozenset(), None)
+            view = restarted.vote(view.pair.token, 'a', Defects(), None)
         results = close(load_family('f'), store, AT).results
 
         assert sorted(shown) == ['Write about c2.', 'Write about c3.']
@@ -862,7 +889,7 @@ class TestDecide:
                 p50_latency_sec=latency,
                 output_tokens=None,
                 latency_sec=None,
-                flags={},
+                defects={},
             )
             for system, score, spread, cost, latency, preliminary in rows
         ]

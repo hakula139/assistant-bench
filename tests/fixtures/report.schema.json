@@ -99,6 +99,16 @@
       "title": "Decision",
       "type": "object"
     },
+    "Defect": {
+      "enum": [
+        "facts",
+        "punctuation",
+        "tone",
+        "script",
+        "length"
+      ],
+      "type": "string"
+    },
     "Distribution": {
       "additionalProperties": false,
       "properties": {
@@ -122,16 +132,6 @@
       ],
       "title": "Distribution",
       "type": "object"
-    },
-    "Flag": {
-      "enum": [
-        "meaning",
-        "punctuation",
-        "register",
-        "script",
-        "length"
-      ],
-      "type": "string"
     },
     "HeadToHead": {
       "additionalProperties": false,
@@ -254,7 +254,7 @@
     },
     "Standing": {
       "additionalProperties": false,
-      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than 40 decisive votes. Flags\ncount against the side a vote did not prefer, so a tie or both-bad vote\ncounts them against both.",
+      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than 40 decisive votes.\n`defects` counts the votes that tagged this system's output with each defect,\nwhichever side won.",
       "properties": {
         "system": {
           "title": "System",
@@ -370,14 +370,14 @@
             }
           ]
         },
-        "flags": {
+        "defects": {
           "additionalProperties": {
             "type": "integer"
           },
           "propertyNames": {
-            "$ref": "#/$defs/Flag"
+            "$ref": "#/$defs/Defect"
           },
-          "title": "Flags",
+          "title": "Defects",
           "type": "object"
         }
       },
@@ -399,7 +399,7 @@
         "p50_latency_sec",
         "output_tokens",
         "latency_sec",
-        "flags"
+        "defects"
       ],
       "title": "Standing",
       "type": "object"
