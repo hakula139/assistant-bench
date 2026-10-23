@@ -44,7 +44,7 @@ Commands stay minimal, and settings live in config files:
 | The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
 | Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
 
-Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory), and `BENCH_LOCAL`, which `bench serve` sets for its own build of the vote page. The bench sets `HARBOR_TELEMETRY=off` for each Harbor run because Harbor reads that setting from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
+Environment variables carry only secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory), and `BENCH_LOCAL`, which `bench serve` sets for its own build of the vote page. `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else. Job configs are generated per run and never committed, and Harbor copies each one into its job directory as `config.json`.
 
 ## Toolchain and Pins
 

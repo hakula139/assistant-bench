@@ -8,31 +8,34 @@ from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from assistant_bench.catalog import NixosConfigExport
-from assistant_bench.families import TaskTestsSettings
+from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.terminus import Terminus
-from support import StubEndpoint, make_system
+from support import TASK_SETTINGS, StubEndpoint, make_system
 
-
-SETTINGS = TaskTestsSettings(
-    scorer='tests', display_name='Family', samples=1, max_output_tokens=64
-)
 
 pytestmark = pytest.mark.usefixtures('export')
+
+OPTIONS = {'system': 's', 'fingerprint': 'f'}
 
 
 class TestTerminus:
     class TestPreflight:
-        OPTIONS = {'system': 's', 'fingerprint': 'f'}
-
         def test_rejects_an_effort_the_agent_does_not_accept(
             self, endpoint: StubEndpoint
         ) -> None:
             with pytest.raises(ValueError, match='reasoning_effort'):
                 Terminus.preflight(
-                    self.OPTIONS | {'reasoning_effort': 'turbo'}, endpoint.env
+                    OPTIONS | {'reasoning_effort': 'turbo'}, endpoint.env
                 )
+
+        def test_checks_the_endpoint_variables(
+            self, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            monkeypatch.delenv(EXPORT_VAR)
+
+            with pytest.raises(ValueError, match='^Set `BENCH_API_BASE_URL`'):
+                Terminus.preflight(OPTIONS, {})
 
     class TestRun:
         def test_keeps_its_metadata_when_the_parent_raises(
@@ -46,7 +49,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name='openai/acme/large',
                 extra_env=endpoint.env,
-                **options.terminus(make_system(harness='terminus-2'), SETTINGS),
+                **options.terminus(make_system(harness='terminus-2'), TASK_SETTINGS),
             )
             context = AgentContext()
 

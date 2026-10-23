@@ -27,7 +27,7 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 `smoke` contains one Harbor task with tests and a reference solution, and `smoke-text` contains two short cases that every system answers:
 
 ```bash
-uv run bench check smoke                        # Run the oracle and nop on the smoke task, which needs no endpoint
+uv run bench check smoke                        # Run the reference solution and a do-nothing agent on the smoke task, which needs no endpoint
 uv run bench run smoke-text --system <name>     # Send each smoke case to one listed system
 uv run bench serve                              # Vote on the outputs the run collected
 ```

@@ -1,7 +1,6 @@
 """Harbor task rendering, job configs, runs, and ingest of trials."""
 
 import hashlib
-import os
 import shutil
 import subprocess
 import sys
@@ -13,7 +12,6 @@ from typing import Any, assert_never
 from harbor.job_diff import load_source_trials
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
-from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
 from harbor.models.task.verifier_mode import resolve_task_verifier_mode
 from harbor.models.trial import config as trial_config
@@ -35,6 +33,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.messages import error_lines
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
@@ -45,36 +44,37 @@ STOCK_IMAGE = 'debian:trixie-slim'
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 900.0
+
 N_CONCURRENT_TRIALS = 8
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
 CHECK_ATTEMPTS = 3
+# LiteLLM loads a .env above its own install unless its mode is PRODUCTION, and
+# bench loads the working directory's .env itself.
+HARBOR_ENV = {'HARBOR_TELEMETRY': 'off', 'LITELLM_MODE': 'PRODUCTION'}
 
 
 # ── Jobs ──
 
 
-def task_version(name: str, instruction: str) -> str:
-    """Return the version that `render_tasks` writes for a task named `name`.
-
-    The hash covers only the inputs the bench controls, so a Harbor upgrade that
-    changes its default task.toml values leaves every version unchanged.
-    """
-    digest = hashlib.sha256()
-    for value in (name, instruction, STOCK_IMAGE, repr(AGENT_TIMEOUT_SEC)):
-        digest.update(f'{value}\0'.encode())
-    return f'{TASK_VERSION}+{digest.hexdigest()[:12]}'
-
-
 def render_task_config(name: str, instruction: str) -> task_config.TaskConfig:
-    """Return the Harbor task config that `render_tasks` writes for a task."""
-    return task_config.TaskConfig(
-        task=task_config.PackageInfo(
-            name=name, version=task_version(name, instruction)
-        ),
+    """Return the Harbor task config that `render_tasks` writes for a task.
+
+    The version's build metadata hashes the instruction and the settings set here,
+    so a Harbor upgrade that changes a task.toml default keeps every version.
+    """
+    package = task_config.PackageInfo(name=name)
+    config = task_config.TaskConfig(
+        task=package,
         agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
         environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
+    )
+    settings = config.model_dump_json(exclude_unset=True)
+    digest = hashlib.sha256(f'{instruction}\0{settings}'.encode()).hexdigest()
+    version = f'{TASK_VERSION}+{digest[:12]}'
+    return config.model_copy(
+        update={'task': package.model_copy(update={'version': version})}
     )
 
 
@@ -143,19 +143,14 @@ def drifted_systems(
     )
 
 
-def _request_kwargs(family: Family, system: System) -> dict[str, Any]:
-    """Return the kwargs a system's harness builds from the family's settings."""
-    return HARNESSES[system.harness].options(system, family.settings)
-
-
 def _agent_config(family: Family, system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
-        model_name=harness.model_name(system),
+        model_name=f'{harness.model_prefix}{system.route}',
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
-        kwargs=_request_kwargs(family, system),
+        kwargs=harness.options(system, family.settings),
     )
 
 
@@ -190,34 +185,36 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
     """
     problems = []
     for task in tasks:
-        location = f'{task_location(family, task)}/task.toml'
+        location = f'`{task_location(family, task)}/task.toml`'
         try:
             config = _task_config(task)
         except ValidationError as error:
-            problems.append(f'{location} is not valid: {error}')
+            problems.append(error_lines(error, location))
             continue
         problems.extend(_task_problems(config, location))
     if problems:
-        raise ValueError(f'family {family.name!r}:\n' + '\n'.join(problems))
+        raise ValueError(
+            f'Family `{family.name}` has tasks to fix:\n' + '\n'.join(problems)
+        )
 
 
 def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
     problems = []
     if config.task is None or config.task.version is None:
-        problems.append(f'{location}: set [task] version')
+        problems.append(f'{location}: set `[task] version`.')
     if (
         config.verifier.environment_mode
         is not task_config.VerifierEnvironmentMode.SEPARATE
     ):
-        problems.append(f'{location}: set [verifier] environment_mode = "separate"')
+        problems.append(f'{location}: set `[verifier] environment_mode = "separate"`.')
     if config.verifier.environment is not None:
         problems.append(
-            f'{location}: do not set [verifier.environment], since the verifier '
-            "uses the task's environment"
+            f'{location}: remove `[verifier.environment]`, since the verifier '
+            "uses the task's environment."
         )
     if config.steps:
         problems.append(
-            f'{location}: do not set [[steps]], whose overrides the check cannot prove'
+            f'{location}: remove `[[steps]]`, whose overrides the check cannot prove.'
         )
     if config.verifier.environment is None and not config.steps:
         plan = resolve_trial_network_plan(
@@ -232,26 +229,27 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
             ('verifier', plan.verifier_phase),
         ):
             if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
-                problems.append(f'{location}: the {phase} phase needs no-network')
+                problems.append(f'{location}: the {phase} phase needs `no-network`.')
     if not any(
         (artifact if isinstance(artifact, str) else artifact.source) == '/app'
         for artifact in config.artifacts
     ):
-        problems.append(f'{location}: list "/app" under [[artifacts]]')
+        problems.append(f'{location}: list `"/app"` under `[[artifacts]]`.')
     for field in ('cpus', 'memory_mb'):
         if getattr(config.environment, field) is None:
-            problems.append(f'{location}: set [environment] {field}')
+            problems.append(f'{location}: set `[environment] {field}`.')
     if config.agent.timeout_sec is None:
-        problems.append(f'{location}: set [agent] timeout_sec')
+        problems.append(f'{location}: set `[agent] timeout_sec`.')
     return problems
 
 
 def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     """Build a job that runs the oracle and the nop on every task of the family.
 
-    The oracle must pass every task while the untouched repository must fail it,
-    so the job runs both agents three times on each. Its trials go under
-    `checks/`, apart from the jobs that ingest reads.
+    The oracle must pass every task while the untouched repository must fail it.
+    Each agent runs `CHECK_ATTEMPTS` times on each task, which catches a task that
+    passes or fails only sometimes. Its trials go under `checks/`, apart from the
+    jobs that ingest reads.
     """
     return _job(
         family,
@@ -275,10 +273,11 @@ def _family_jobs(family: Family) -> list[Path]:
 
 
 def _sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
-    return [
-        (SourceJobConfig(action='diff', type='local', path=job_dir), job_dir)
-        for job_dir in _family_jobs(family)
-    ]
+    return [_source(job_dir) for job_dir in _family_jobs(family)]
+
+
+def _source(job_dir: Path) -> tuple[SourceJobConfig, Path]:
+    return SourceJobConfig(action='diff', type='local', path=job_dir), job_dir
 
 
 def _job(
@@ -304,8 +303,15 @@ def _job(
     )
 
 
+def job_path(config: JobConfig) -> Path:
+    """Return the directory Harbor writes the job to."""
+    return config.jobs_dir / config.job_name
+
+
 def run_job(config: JobConfig) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
+
+    Harbor inherits the process environment, which must hold `HARBOR_ENV`.
 
     Raises
     ------
@@ -318,12 +324,8 @@ def run_job(config: JobConfig) -> Path:
     ) as file:
         file.write(config.model_dump_json())
         file.close()
-        subprocess.run(
-            [harbor, 'run', '--config', file.name, '--yes'],
-            check=True,
-            env={**os.environ, 'HARBOR_TELEMETRY': 'off'},
-        )
-    return config.jobs_dir / config.job_name
+        subprocess.run([harbor, 'run', '--config', file.name, '--yes'], check=True)
+    return job_path(config)
 
 
 # ── Ingest ──
@@ -337,22 +339,33 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     whose recorded request matches the family's current settings, and otherwise the
     oldest. Costs come from the current catalog price, so a system missing from
     `systems` or without a price reports as unpriced.
+
+    Raises
+    ------
+    ValueError
+        A source job is not a job directory, or a trial record is unreadable.
     """
     expected = (
-        {name: _request_kwargs(family, system) for name, system in systems.items()}
+        {
+            name: HARNESSES[system.harness].options(system, family.settings)
+            for name, system in systems.items()
+        }
         if family.source == 'cases'
         else {}
     )
     versions = _installed_versions(family) if family.source == 'cases' else None
     candidates = [
         (output, kwargs == expected.get(output.system))
-        for job_dir in _family_jobs(family)
-        for output, kwargs in _read_trials(family, job_dir, systems, versions)
+        for output, kwargs in _read_trials(family, _sources(family), systems, versions)
     ]
-    candidates.sort(key=lambda candidate: candidate[0].trial)
-    candidates.sort(key=lambda candidate: candidate[0].job)
-    candidates.sort(key=lambda candidate: not candidate[1])
-    candidates.sort(key=lambda candidate: candidate[0].error is not None)
+    candidates.sort(
+        key=lambda candidate: (
+            candidate[0].error is not None,
+            not candidate[1],
+            candidate[0].job,
+            candidate[0].trial,
+        )
+    )
     groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
     for output, _ in candidates:
         groups[(output.case, output.system, output.fingerprint)].append(output)
@@ -372,13 +385,19 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
 def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
-    """Return one output per finished trial of a job."""
-    return [output for output, _ in _read_trials(family, job_dir, systems)]
+    """Return one output per finished trial of a job.
+
+    Raises
+    ------
+    ValueError
+        The directory is not a job directory, or a trial record is unreadable.
+    """
+    return [output for output, _ in _read_trials(family, [_source(job_dir)], systems)]
 
 
 def _read_trials(
     family: Family,
-    job_dir: Path,
+    sources: list[tuple[SourceJobConfig, Path]],
     systems: dict[str, System],
     versions: dict[str, str] | None = None,
 ) -> list[tuple[Output, dict[str, Any]]]:
@@ -388,17 +407,12 @@ def _read_trials(
     before an output reads that task.
     """
     records = []
-    for result_path in sorted(job_dir.glob('*/result.json')):
-        trial_dir = result_path.parent
-        result = TrialResult.model_validate_json(result_path.read_bytes())
-        if versions is not None:
-            lock = TrialLock.model_validate_json((trial_dir / 'lock.json').read_text())
-            case = result.task_name.removeprefix(f'{family.name}/')
-            if lock.task.version != versions.get(case):
-                continue
-        records.append(
-            (_output(family, trial_dir, result, systems), result.config.agent.kwargs)
-        )
+    for trial in load_source_trials(sources):
+        case = trial.result.task_name.removeprefix(f'{family.name}/')
+        if versions is not None and trial.lock.task.version != versions.get(case):
+            continue
+        output = _output(family, trial.trial_dir, trial.result, case, systems)
+        records.append((output, trial.result.config.agent.kwargs))
     return records
 
 
@@ -424,7 +438,11 @@ def _task_config(task_dir: Path) -> task_config.TaskConfig:
 
 
 def _output(
-    family: Family, trial_dir: Path, result: TrialResult, systems: dict[str, System]
+    family: Family,
+    trial_dir: Path,
+    result: TrialResult,
+    case: str,
+    systems: dict[str, System],
 ) -> Output:
     kwargs = result.config.agent.kwargs
     system = kwargs.get('system', result.agent_info.name)
@@ -433,7 +451,6 @@ def _output(
     exception = result.exception_info
     output_file = trial_dir / 'agent' / OUTPUT_FILE
     text = output_file.read_text() if output_file.exists() else None
-    case = result.task_name.removeprefix(f'{family.name}/')
     finish_reason = metadata.get('finish_reason')
 
     return Output(

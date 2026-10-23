@@ -1,5 +1,9 @@
 import json
+import os
 import re
+import subprocess
+import sys
+import textwrap
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -146,3 +150,99 @@ def test_hosts_reads_the_url_authority(
 )
 def test_lockfiles_name_only_their_public_registry(lockfile: Path) -> None:
     assert hosts(lockfile) <= registry(lockfile.name)
+
+
+def run_pytest(
+    directory: Path, test: str, *args: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run `test` under the project's pytest config, with only PATH and `env` set."""
+    path = directory / 'test_inner.py'
+    path.write_text(textwrap.dedent(test))
+    return subprocess.run(
+        [
+            *(sys.executable, '-m', 'pytest', '-c', str(REPO_ROOT / 'pyproject.toml')),
+            *('--rootdir', str(directory), '--no-cov', '-p', 'no:cacheprovider'),
+            *(*args, str(path)),
+        ],
+        capture_output=True,
+        env={'PATH': os.environ['PATH'], **env},
+        text=True,
+    )
+
+
+def test_a_failing_test_report_leaves_out_the_environment(tmp_path: Path) -> None:
+    secret = 'sentinel-secret-value'
+
+    report = run_pytest(
+        tmp_path,
+        """\
+        import sys
+        from pathlib import Path
+
+        import pytest
+        from harbor.models.job.config import JobConfig
+
+        from assistant_bench import jobs
+
+
+        def test_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+            harbor = tmp_path / 'harbor'
+            harbor.write_text('#!/bin/sh\\nexit 3\\n')
+            harbor.chmod(0o755)
+            monkeypatch.setattr(sys, 'executable', str(tmp_path / 'python'))
+            jobs.run_job(JobConfig())
+        """,
+        env={'BENCH_TEST_SECRET': secret},
+    )
+    assert 'CalledProcessError' in report.stdout, report.stdout
+
+    assert secret not in report.stdout + report.stderr
+
+
+def test_tests_never_see_a_dotenv_above_litellm(tmp_path: Path) -> None:
+    (tmp_path / '.env').write_text('BENCH_TEST_SECRET=from-dotenv\n')
+    litellm = tmp_path / 'site' / 'litellm'
+    litellm.mkdir(parents=True)
+    # Mirrors LiteLLM, which loads the first .env above its own install.
+    (litellm / '__init__.py').write_text(
+        textwrap.dedent(
+            """\
+            import os
+
+            import dotenv
+
+            if os.getenv('LITELLM_MODE', 'DEV') == 'DEV':
+                dotenv.load_dotenv()
+            """
+        )
+    )
+
+    report = run_pytest(
+        tmp_path,
+        """\
+        import os
+
+        import litellm  # noqa: F401
+        import pytest
+
+        AT_IMPORT = os.environ.get('BENCH_TEST_SECRET')
+
+
+        @pytest.fixture(scope='session')
+        def at_session() -> str | None:
+            return os.environ.get('BENCH_TEST_SECRET')
+
+
+        @pytest.fixture(scope='module')
+        def at_module() -> str | None:
+            return os.environ.get('BENCH_TEST_SECRET')
+
+
+        def test_sees_no_dotenv(at_session: str | None, at_module: str | None) -> None:
+            assert (AT_IMPORT, at_session, at_module) == (None, None, None)
+        """,
+        *('-p', 'conftest'),
+        env={'PYTHONPATH': f'{tmp_path / "site"}:{REPO_ROOT / "tests"}'},
+    )
+
+    assert report.returncode == 0, report.stdout

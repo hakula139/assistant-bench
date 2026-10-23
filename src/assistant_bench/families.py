@@ -15,7 +15,11 @@ from pydantic import (
     model_validator,
 )
 
+from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+
+
+# ── Settings ──
 
 
 class _Settings(BaseModel):
@@ -77,7 +81,7 @@ class Gates(BaseModel):
             and self.min_chars > self.max_chars
         ):
             raise ValueError(
-                f'min_chars {self.min_chars} exceeds max_chars {self.max_chars}'
+                f'`min_chars` {self.min_chars} exceeds `max_chars` {self.max_chars}'
             )
         return self
 
@@ -85,11 +89,11 @@ class Gates(BaseModel):
 class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes.
 
-    `reference` names the listed system whose score anchors the board at 1000
-    when the round ranks it, and otherwise the most-voted system anchors in its place.
-    `render` says whether the vote page shows outputs as text or as sandboxed
-    HTML, and `language` is the language every output must be written in, which
-    the gates check when it is set.
+    `reference` names the listed system whose score anchors the board at
+    `ranking.ANCHOR` when the round ranks it, and otherwise the most-voted
+    system anchors in its place. `render` says whether the vote page shows
+    outputs as text or as sandboxed HTML, and `language` is the language every
+    output must be written in, which the gates check when it is set.
     """
 
     scorer: Literal['votes']
@@ -101,7 +105,7 @@ class VotesSettings(_Settings):
     @model_validator(mode='after')
     def _check_reference(self) -> Self:
         if self.reference not in self.systems:
-            raise ValueError(f'reference {self.reference!r} is not in systems')
+            raise ValueError(f'reference `{self.reference}` is not in `systems`')
         return self
 
 
@@ -116,6 +120,12 @@ type Settings = Annotated[
 ]
 
 _SETTINGS = TypeAdapter[Settings](Settings)
+
+
+# ── Families and Cases ──
+
+
+type CaseSource = Literal['synthetic', 'public', 'transcript', 'held-out']
 
 
 class Family(BaseModel):
@@ -135,7 +145,7 @@ class Case(BaseModel):
 
     id: str = Field(pattern=r'^[a-z0-9][a-z0-9-]*$')
     category: str
-    source: Literal['synthetic', 'public', 'transcript', 'held-out']
+    source: CaseSource
     instruction: str
     checklist: list[str] = []
 
@@ -146,7 +156,7 @@ class _TaskMetadata(BaseModel):
     model_config = ConfigDict(extra='ignore', frozen=True)
 
     category: str
-    source: Literal['synthetic', 'public', 'transcript', 'held-out']
+    source: CaseSource
 
 
 class _TaskSection(BaseModel):
@@ -169,6 +179,9 @@ class _TaskManifest(BaseModel):
     metadata: _TaskMetadata
 
 
+# ── Loading ──
+
+
 def family_names() -> list[str]:
     """Return the name of every directory under `families/` holding a `family.toml`."""
     return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
@@ -181,36 +194,46 @@ def load_family(name: str) -> Family:
     ------
     ValueError
         No family has the name, the family holds both or neither of
-        `cases.jsonl` and `tasks/`, a public family sets no aspect or names
-        itself without that aspect's prefix, a case family sets no
-        `max_output_tokens`, or a family scored by tests holds cases, which have
-        no tests to run.
+        `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
+        public family sets no aspect or names itself without that aspect's
+        prefix, a case family sets no `max_output_tokens`, or the scorer does not
+        fit the source: `votes` ranks cases, and `tests` runs each task's tests.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
-        raise ValueError(f'no family named {name!r}')
+        raise ValueError(
+            f'No family named `{name}`. Choose among {code(family_names())}.'
+        )
     has_cases = (directory / 'cases.jsonl').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
-            f'family {name!r}: expected exactly one of cases.jsonl and tasks/'
+            f'Family `{name}`: expected exactly one of `cases.jsonl` and `tasks/`.'
         )
 
-    with (directory / 'family.toml').open('rb') as file:
-        settings = _SETTINGS.validate_python(tomllib.load(file))
+    prefix = f'Family `{name}`: `family.toml`'
+    try:
+        with (directory / 'family.toml').open('rb') as file:
+            settings = _SETTINGS.validate_python(tomllib.load(file))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
+    except ValidationError as error:
+        # The first part of each error's path is the scorer's tag.
+        raise ValueError(error_lines(error, prefix, skip=1)) from error
     if settings.public:
         if settings.aspect is None:
-            raise ValueError(f'family {name!r}: a public family needs an aspect')
+            raise ValueError(f'Family `{name}`: a public family needs an `aspect`.')
         if not name.startswith(f'{settings.aspect}-'):
             raise ValueError(
-                f'family {name!r}: a public family ID starts with its aspect, '
-                f'as in {settings.aspect}-<name>'
+                f'Family `{name}`: a public family ID starts with its aspect, '
+                f'as in `{settings.aspect}-<name>`.'
             )
     if has_cases and settings.max_output_tokens is None:
-        raise ValueError(f'family {name!r}: case families need max_output_tokens')
-    if has_cases and isinstance(settings, TaskTestsSettings):
         raise ValueError(
-            f'family {name!r}: scorer "tests" needs tasks/ with their own tests, '
-            'so score cases.jsonl by "votes"'
+            f'Family `{name}`: a `cases.jsonl` family needs `max_output_tokens`.'
+        )
+    if has_cases != isinstance(settings, VotesSettings):
+        raise ValueError(
+            f'Family `{name}`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.'
         )
     return Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
@@ -233,20 +256,21 @@ def load_cases(family: Family) -> list[Case]:
     """
     entries = _task_entries(family) if family.source == 'tasks' else _case_lines(family)
     cases: dict[str, Case] = {}
-    sources: dict[str, str] = {}
+    locations: dict[str, str] = {}
     for location, case in entries:
         if case.id in cases:
             raise ValueError(
-                f'family {family.name!r}: case {case.id!r} appears at '
-                f'{sources[case.id]} and {location}'
+                f'Family `{family.name}`: case `{case.id}` appears at '
+                f'`{locations[case.id]}` and `{location}`.'
             )
         if case.category not in family.settings.categories:
             raise ValueError(
-                f'family {family.name!r}: case {case.id!r} at {location} has '
-                f'category {case.category!r}, which categories does not list'
+                f'Family `{family.name}`: case `{case.id}` at `{location}` has '
+                f'category `{case.category}`, missing from `categories` in '
+                '`family.toml`.'
             )
         cases[case.id] = case
-        sources[case.id] = location
+        locations[case.id] = location
     return list(cases.values())
 
 
@@ -266,13 +290,13 @@ def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
                 case = Case.model_validate_json(line)
             except ValidationError as error:
                 raise ValueError(
-                    f'family {family.name!r}: {location} is not a valid case: {error}'
+                    error_lines(error, f'Family `{family.name}`: `{location}`')
                 ) from error
             yield location, case
 
 
 def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
-    for root, prefix in task_roots(family):
+    for root, prefix in _task_roots(family):
         if not root.is_dir():
             continue
         for directory in sorted(path for path in root.iterdir() if path.is_dir()):
@@ -284,30 +308,27 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
     config_path = directory / 'task.toml'
     if not config_path.is_file():
         raise ValueError(
-            f'family {family.name!r}: task {directory.name!r} at {location} '
-            'has no task.toml'
+            f'Family `{family.name}`: task `{directory.name}` at `{location}` '
+            'has no `task.toml`.'
         )
+    prefix = f'Family `{family.name}`: `{location}/task.toml`'
     try:
         manifest = _TaskManifest.model_validate(tomllib.loads(config_path.read_text()))
     except tomllib.TOMLDecodeError as error:
-        raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not valid TOML: {error}'
-        ) from error
+        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
     except ValidationError as error:
-        raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not valid: {error}'
-        ) from error
+        raise ValueError(error_lines(error, prefix)) from error
     expected = f'{family.name}/{directory.name}'
     if manifest.task.name != expected:
         raise ValueError(
-            f'family {family.name!r}: set [task] name to "{expected}" in '
-            f'{location}/task.toml'
+            f'Family `{family.name}`: set `[task] name` to `"{expected}"` in '
+            f'`{location}/task.toml`.'
         )
     instruction_path = directory / 'instruction.md'
     if not instruction_path.is_file():
         raise ValueError(
-            f'family {family.name!r}: task {directory.name!r} at {location} '
-            'has no instruction.md'
+            f'Family `{family.name}`: task `{directory.name}` at `{location}` '
+            'has no `instruction.md`.'
         )
     try:
         return Case(
@@ -318,11 +339,14 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
         )
     except ValidationError as error:
         raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not a valid case: {error}'
+            error_lines(error, f'Family `{family.name}`: `{location}`')
         ) from error
 
 
-def task_roots(family: Family) -> list[tuple[Path, str]]:
+# ── Task Paths ──
+
+
+def _task_roots(family: Family) -> list[tuple[Path, str]]:
     """Return each root of a task family's tasks and the label it reports with."""
     return [
         (FAMILIES_DIR / family.name / 'tasks', 'tasks'),
@@ -334,7 +358,7 @@ def task_location(family: Family, task: Path) -> str:
     """Return the label that a task's own directory reports with."""
     return next(
         f'{prefix}/{task.name}'
-        for root, prefix in task_roots(family)
+        for root, prefix in _task_roots(family)
         if task.parent == root
     )
 
@@ -352,7 +376,7 @@ def case_task(family: Family, case_id: str) -> Path:
     """
     if family.source == 'cases':
         return tasks_dir(family) / case_id
-    committed, local = task_roots(family)
-    if (committed[0] / case_id).is_dir():
-        return committed[0] / case_id
-    return local[0] / case_id
+    (committed, _), (local, _) = _task_roots(family)
+    if (committed / case_id).is_dir():
+        return committed / case_id
+    return local / case_id

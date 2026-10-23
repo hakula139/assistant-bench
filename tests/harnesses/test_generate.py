@@ -1,4 +1,5 @@
 import asyncio
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -8,8 +9,15 @@ import pytest
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from assistant_bench.harnesses.generate import Generate
+from assistant_bench.catalog import EXPORT_VAR
+from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
+from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from support import StubEndpoint, completion
+
+
+pytestmark = pytest.mark.usefixtures('export')
+
+OPTIONS: dict[str, Any] = {'system': 's', 'fingerprint': 'f', 'max_output_tokens': 1}
 
 
 def run_agent(
@@ -32,26 +40,30 @@ def run_agent(
     )
     context = AgentContext()
     asyncio.run(agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context))
-    return context, logs_dir / 'output.txt'
-
-
-pytestmark = pytest.mark.usefixtures('export')
+    return context, logs_dir / OUTPUT_FILE
 
 
 class TestGenerate:
-    class TestPreflight:
-        OPTIONS = {
-            'system': 's',
-            'fingerprint': 'f',
-            'max_output_tokens': 1,
-        }
+    class TestVersion:
+        def test_reports_the_bench_version(self, tmp_path: Path) -> None:
+            agent = Generate(logs_dir=tmp_path, model_name='acme/large', **OPTIONS)
 
+            version = agent.version()
+
+            assert version == metadata.version('assistant-bench')
+
+    class TestPreflight:
         def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:
             with pytest.raises(ValueError, match="Unknown option 'temperature'"):
-                Generate.preflight(
-                    self.OPTIONS | {'temperature': 0},
-                    endpoint.env,
-                )
+                Generate.preflight(OPTIONS | {'temperature': 0}, endpoint.env)
+
+        def test_checks_the_endpoint_variables(
+            self, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            monkeypatch.delenv(EXPORT_VAR)
+
+            with pytest.raises(ValueError, match='^Set `BENCH_API_BASE_URL`'):
+                Generate.preflight(OPTIONS, {})
 
     class TestRun:
         def test_sends_one_request_and_records_the_reply(
@@ -158,7 +170,7 @@ class TestGenerate:
                 run_agent(endpoint, tmp_path)
 
             assert len(endpoint.requests) == 1
-            assert not (tmp_path / 'output.txt').exists()
+            assert not (tmp_path / OUTPUT_FILE).exists()
 
         def test_reaches_an_ipv6_endpoint_without_a_local_address(
             self, ipv6_endpoint: StubEndpoint, tmp_path: Path
@@ -173,11 +185,9 @@ class TestGenerate:
         ) -> None:
             # 192.0.2.1 is reserved for documentation, so no host owns it.
             with pytest.raises(openai.APIConnectionError):
-                run_agent(
-                    endpoint, tmp_path, env={'BENCH_API_LOCAL_ADDRESS': '192.0.2.1'}
-                )
+                run_agent(endpoint, tmp_path, env={LOCAL_ADDRESS_VAR: '192.0.2.1'})
             _, output = run_agent(
-                endpoint, tmp_path, env={'BENCH_API_LOCAL_ADDRESS': '127.0.0.1'}
+                endpoint, tmp_path, env={LOCAL_ADDRESS_VAR: '127.0.0.1'}
             )
 
             assert output.read_text() == 'Hello there.'
@@ -193,7 +203,7 @@ class TestGenerate:
             _, output = run_agent(
                 tls_endpoint,
                 tmp_path,
-                env={'BENCH_API_CA_FILE': str(tls_endpoint.ca_file)},
+                env={CA_FILE_VAR: str(tls_endpoint.ca_file)},
             )
 
             assert output.read_text() == 'Hello there.'

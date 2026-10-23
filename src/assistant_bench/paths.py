@@ -14,8 +14,7 @@ DATA_DIR_VAR = 'BENCH_DATA_DIR'
 def data_dir() -> Path:
     """Return the home of data kept out of Git.
 
-    `BENCH_DATA_DIR` names it when set, and it defaults to
-    `$XDG_DATA_HOME/assistant-bench`.
+    `BENCH_DATA_DIR` names it, and `$XDG_DATA_HOME/assistant-bench` is the default.
     """
     if path := os.environ.get(DATA_DIR_VAR):
         return Path(path)

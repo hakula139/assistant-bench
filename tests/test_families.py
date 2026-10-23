@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 import tomli_w
-from pydantic import ValidationError
 
 from assistant_bench.families import (
     Family,
@@ -16,6 +15,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
+from support import write_case_family, write_task_family
 
 
 def write_family(
@@ -41,7 +41,7 @@ def write_task(
     directory: Path,
     *,
     name: str,
-    category: str | None = 'message',
+    category: str | None = 'smoke',
     source: str | None = 'synthetic',
     instruction: str | None = 'Hi.',
     task_name: bool = True,
@@ -63,42 +63,6 @@ def write_task(
         )
     if instruction is not None:
         (directory / 'instruction.md').write_text(instruction)
-
-
-def write_task_family(families_dir: Path) -> None:
-    """Write family `f` with an empty tasks directory and the `message` category."""
-    write_family(
-        families_dir,
-        'f',
-        """\
-        scorer = "tests"
-        display_name = "Family F"
-        samples = 1
-        categories = ["message"]
-        """,
-        cases=False,
-        tasks=True,
-    )
-
-
-def write_case_family(families_dir: Path) -> Path:
-    """Write family `f` listing the `message` category, returning its cases file."""
-    write_family(
-        families_dir,
-        'f',
-        """\
-        scorer = "votes"
-        display_name = "Family F"
-        systems = ["large"]
-        samples = 1
-        max_output_tokens = 300
-        categories = ["message"]
-        reference = "large"
-        """,
-        cases=True,
-        tasks=False,
-    )
-    return families_dir / 'f' / 'cases.jsonl'
 
 
 class TestLoadFamily:
@@ -140,7 +104,9 @@ class TestLoadFamily:
         )
 
     def test_reads_a_task_family_scored_by_tests(self) -> None:
-        assert load_family('smoke') == Family(
+        family = load_family('smoke')
+
+        assert family == Family(
             name='smoke',
             source='tasks',
             settings=TaskTestsSettings(
@@ -152,12 +118,17 @@ class TestLoadFamily:
             ),
         )
 
-    def test_names_a_missing_family(self, families_dir: Path) -> None:
-        with pytest.raises(ValueError, match="^no family named 'nope'$"):
+    def test_names_a_missing_family_and_the_choices(self, families_dir: Path) -> None:
+        write_task_family(families_dir, name='f')
+        write_task_family(families_dir, name='g')
+
+        with pytest.raises(ValueError) as error:
             load_family('nope')
 
+        assert str(error.value) == 'No family named `nope`. Choose among `f`, `g`.'
+
     @pytest.mark.parametrize(
-        ('name', 'settings', 'cases', 'tasks', 'error', 'message'),
+        ('name', 'settings', 'cases', 'tasks', 'message'),
         [
             pytest.param(
                 'f',
@@ -172,8 +143,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                ValueError,
-                "family 'f': a public family needs an aspect",
+                'Family `f`: a public family needs an `aspect`.',
                 id='public-without-an-aspect',
             ),
             pytest.param(
@@ -190,9 +160,8 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                ValueError,
-                "family 'writingf': a public family ID starts with its aspect, "
-                'as in writing-<name>',
+                'Family `writingf`: a public family ID starts with its aspect, '
+                'as in `writing-<name>`.',
                 id='public-id-outside-its-aspect',
             ),
             pytest.param(
@@ -204,8 +173,7 @@ class TestLoadFamily:
                 """,
                 True,
                 True,
-                ValueError,
-                'expected exactly one of cases.jsonl',
+                'Family `f`: expected exactly one of `cases.jsonl` and `tasks/`.',
                 id='cases-and-tasks',
             ),
             pytest.param(
@@ -217,8 +185,7 @@ class TestLoadFamily:
                 """,
                 False,
                 False,
-                ValueError,
-                'expected exactly one of cases.jsonl',
+                'Family `f`: expected exactly one of `cases.jsonl` and `tasks/`.',
                 id='no-task-source',
             ),
             pytest.param(
@@ -232,9 +199,35 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                ValueError,
-                'case families need max_output_tokens',
+                'Family `f`: a `cases.jsonl` family needs `max_output_tokens`.',
                 id='cases-without-an-output-bound',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                display_name = "Family F"
+                samples = 1
+                max_output_tokens = 300
+                """,
+                True,
+                False,
+                'Family `f`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.',
+                id='cases-scored-by-tests',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
+                """,
+                False,
+                True,
+                'Family `f`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.',
+                id='tasks-scored-by-votes',
             ),
             pytest.param(
                 'f',
@@ -248,8 +241,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                ValidationError,
-                "reference 'medium' is not in",
+                'Family `f`: `family.toml`: reference `medium` is not in `systems`.',
                 id='reference-outside-the-systems',
             ),
             pytest.param(
@@ -268,8 +260,8 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                ValidationError,
-                'min_chars 500 exceeds max_chars 400',
+                'Family `f`: `family.toml`: `gates`: `min_chars` 500 exceeds '
+                '`max_chars` 400.',
                 id='inverted-length-bounds',
             ),
             pytest.param(
@@ -281,21 +273,30 @@ class TestLoadFamily:
                 """,
                 False,
                 True,
-                ValidationError,
-                "tag 'judges' found using 'scorer'",
+                "Family `f`: `family.toml`: Input tag 'judges' found using 'scorer' "
+                "does not match any of the expected tags: 'votes', 'tests'.",
                 id='unknown-scorer',
             ),
             pytest.param(
                 'f',
                 """\
                 scorer = "tests"
-                samples = 1
+                samples = 0
                 """,
                 False,
                 True,
-                ValidationError,
-                'display_name',
-                id='no-display-name',
+                'Family `f`: `family.toml`: `display_name`: Field required.\n'
+                'Family `f`: `family.toml`: `samples`: Input should be greater than '
+                'or equal to 1.',
+                id='one-line-per-error',
+            ),
+            pytest.param(
+                'f',
+                'scorer = "tests',
+                False,
+                True,
+                'Family `f`: `family.toml` is not valid TOML:',
+                id='malformed-toml',
             ),
         ],
     )
@@ -306,35 +307,14 @@ class TestLoadFamily:
         settings: str,
         cases: bool,
         tasks: bool,
-        error: type[Exception],
         message: str,
     ) -> None:
         write_family(families_dir, name, settings, cases=cases, tasks=tasks)
 
-        with pytest.raises(error, match=message):
+        with pytest.raises(ValueError) as error:
             load_family(name)
 
-    def test_rejects_cases_scored_by_tests(self, families_dir: Path) -> None:
-        write_family(
-            families_dir,
-            'f',
-            """\
-            scorer = "tests"
-            display_name = "Family F"
-            samples = 1
-            max_output_tokens = 300
-            """,
-            cases=True,
-            tasks=False,
-        )
-
-        with pytest.raises(ValueError) as error:
-            load_family('f')
-
-        assert str(error.value) == (
-            'family \'f\': scorer "tests" needs tasks/ with their own tests, '
-            'so score cases.jsonl by "votes"'
-        )
+        assert str(error.value).startswith(message)
 
     def test_accepts_equal_length_bounds(self, families_dir: Path) -> None:
         write_family(
@@ -388,44 +368,47 @@ class TestLoadCases:
             load_cases(load_family('smoke-text'))
 
         assert str(error.value) == (
-            f"family 'smoke-text': case 'en-greeting' appears at {committed}:1 "
-            f'and {local}:2'
+            f'Family `smoke-text`: case `en-greeting` appears at `{committed}:1` '
+            f'and `{local}:2`.'
         )
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
-        path = write_case_family(families_dir)
+        path = write_case_family(families_dir, ['large'])
         path.write_text(case_line('a') + '\n' + case_line('a'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f"family 'f': case 'a' appears at {path}:1 and {path}:3"
+            f'Family `f`: case `a` appears at `{path}:1` and `{path}:3`.'
         )
 
-    def test_names_the_line_of_an_invalid_case(self, families_dir: Path) -> None:
-        path = write_case_family(families_dir)
+    def test_names_the_line_and_field_of_an_invalid_case(
+        self, families_dir: Path
+    ) -> None:
+        path = write_case_family(families_dir, ['large'])
         path.write_text(case_line('a') + case_line('B'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
-        assert str(error.value).startswith(
-            f"family 'f': {path}:2 is not a valid case: 1 validation error for Case\nid"
+        assert str(error.value) == (
+            f'Family `f`: `{path}:2`: `id`: String should match pattern '
+            "'^[a-z0-9][a-z0-9-]*$'."
         )
 
     def test_rejects_a_category_the_family_does_not_list(
         self, families_dir: Path
     ) -> None:
-        path = write_case_family(families_dir)
+        path = write_case_family(families_dir, ['large'])
         path.write_text(case_line('a') + case_line('b', category='private-topic'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f"family 'f': case 'b' at {path}:2 has category 'private-topic', "
-            'which categories does not list'
+            f'Family `f`: case `b` at `{path}:2` has category `private-topic`, '
+            'missing from `categories` in `family.toml`.'
         )
 
     def test_reads_a_task_family_from_its_task_directories(
@@ -448,8 +431,8 @@ class TestLoadCases:
         assert [
             (case.id, case.category, case.source, case.checklist) for case in cases
         ] == [
-            ('a', 'message', 'synthetic', []),
-            ('b', 'message', 'public', []),
+            ('a', 'smoke', 'synthetic', []),
+            ('b', 'smoke', 'public', []),
         ]
         assert cases[0].instruction == 'Do it.'
 
@@ -478,76 +461,95 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            "family 'f': case 'a' appears at tasks/a and cases/f/a"
+            'Family `f`: case `a` appears at `tasks/a` and `cases/f/a`.'
         )
 
     @pytest.mark.parametrize(
-        ('options', 'message'),
+        ('directory', 'options', 'message'),
         [
             pytest.param(
+                'a',
                 {'task_toml': False},
-                "family 'f': task 'a' at tasks/a has no task.toml",
+                'Family `f`: task `a` at `tasks/a` has no `task.toml`.',
                 id='no-task-toml',
             ),
             pytest.param(
+                'a',
                 {'instruction': None},
-                "family 'f': task 'a' at tasks/a has no instruction.md",
+                'Family `f`: task `a` at `tasks/a` has no `instruction.md`.',
                 id='no-instruction',
             ),
             pytest.param(
+                'a',
                 {'name': 'f/other'},
-                'family \'f\': set [task] name to "f/a" in tasks/a/task.toml',
+                'Family `f`: set `[task] name` to `"f/a"` in `tasks/a/task.toml`.',
                 id='name-apart-from-its-directory',
             ),
             pytest.param(
+                'a',
                 {'task_name': False},
-                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
-                'for _TaskManifest\ntask.name',
+                'Family `f`: `tasks/a/task.toml`: `task.name`: Field required.',
                 id='no-name',
             ),
             pytest.param(
+                'a',
                 {'category': None},
-                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
-                'for _TaskManifest\nmetadata.category',
+                'Family `f`: `tasks/a/task.toml`: `metadata.category`: Field required.',
                 id='no-category',
             ),
             pytest.param(
+                'a',
                 {'source': None},
-                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
-                'for _TaskManifest\nmetadata.source',
+                'Family `f`: `tasks/a/task.toml`: `metadata.source`: Field required.',
                 id='no-source',
             ),
             pytest.param(
+                'a',
                 {'source': 'private'},
-                "family 'f': tasks/a/task.toml is not valid: 1 validation error "
-                'for _TaskManifest\nmetadata.source',
+                'Family `f`: `tasks/a/task.toml`: `metadata.source`: Input should be '
+                "'synthetic', 'public', 'transcript' or 'held-out'.",
                 id='unknown-source',
             ),
             pytest.param(
+                'a',
                 {'category': 'other'},
-                "family 'f': case 'a' at tasks/a has category 'other', "
-                'which categories does not list',
+                'Family `f`: case `a` at `tasks/a` has category `other`, '
+                'missing from `categories` in `family.toml`.',
                 id='unlisted-category',
+            ),
+            pytest.param(
+                'Bad',
+                {'name': 'f/Bad'},
+                'Family `f`: `tasks/Bad`: `id`: String should match pattern '
+                "'^[a-z0-9][a-z0-9-]*$'.",
+                id='id-outside-the-slug-pattern',
             ),
         ],
     )
     def test_rejects_a_task_that_breaks_a_rule(
-        self, families_dir: Path, options: dict[str, Any], message: str
+        self,
+        families_dir: Path,
+        directory: str,
+        options: dict[str, Any],
+        message: str,
     ) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', **({'name': 'f/a'} | options))
+        write_task(
+            families_dir / 'f' / 'tasks' / directory,
+            **({'name': f'f/{directory}'} | options),
+        )
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
-        assert str(error.value).startswith(message)
+        assert str(error.value) == message
 
     @pytest.mark.parametrize(
         ('text', 'message'),
         [
             pytest.param(
                 '[task',
-                "family 'f': tasks/a/task.toml is not valid TOML:",
+                'Family `f`: `tasks/a/task.toml` is not valid TOML:',
                 id='malformed-toml',
             ),
             pytest.param(
@@ -557,7 +559,7 @@ class TestLoadCases:
                 version = "1.0.0"
                 metadata = "category source"
                 """,
-                "family 'f': tasks/a/task.toml is not valid:",
+                'Family `f`: `tasks/a/task.toml`: `metadata`: Field required.',
                 id='metadata-as-a-string',
             ),
             pytest.param(
@@ -565,10 +567,11 @@ class TestLoadCases:
                 task = "f/a"
 
                 [metadata]
-                category = "message"
+                category = "smoke"
                 source = "synthetic"
                 """,
-                "family 'f': tasks/a/task.toml is not valid:",
+                'Family `f`: `tasks/a/task.toml`: `task`: Input should be a valid '
+                'dictionary or instance of _TaskSection.',
                 id='task-as-a-string',
             ),
         ],
@@ -596,16 +599,6 @@ class TestLoadCases:
 
         assert [case.id for case in cases] == ['a']
 
-    def test_rejects_a_task_id_that_is_not_a_slug(self, families_dir: Path) -> None:
-        write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'Bad', name='f/Bad')
-
-        with pytest.raises(ValueError) as error:
-            load_cases(load_family('f'))
-
-        assert 'tasks/Bad/task.toml is not a valid case:' in str(error.value)
-        assert 'id' in str(error.value)
-
 
 class TestCaseTask:
     def test_finds_a_committed_task_and_a_local_one(
@@ -616,8 +609,8 @@ class TestCaseTask:
         local = data_dir / 'cases' / 'f' / 'b'
         write_task(committed, name='f/a')
         write_task(local, name='f/b', source='held-out')
-
         family = load_family('f')
 
-        assert case_task(family, 'a') == committed
-        assert case_task(family, 'b') == local
+        found = (case_task(family, 'a'), case_task(family, 'b'))
+
+        assert found == (committed, local)

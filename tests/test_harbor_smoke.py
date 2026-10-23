@@ -39,7 +39,9 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None
     job_dir = jobs.run_job(jobs.check_job(family, tasks))
 
     outputs = jobs.read_trials(family, job_dir, {})
-    assert Counter((o.system, o.error, o.reward) for o in outputs) == Counter(
+    assert Counter(
+        (output.system, output.error, output.reward) for output in outputs
+    ) == Counter(
         {
             ('oracle', None, 1.0): jobs.CHECK_ATTEMPTS,
             ('nop', None, 0.0): jobs.CHECK_ATTEMPTS,
@@ -61,7 +63,10 @@ def test_generate_answers_each_case_once_across_reruns(
         jobs.run_job(jobs.case_job(family, [system], tasks))
 
     outputs = jobs.ingest(family, {system.name: system})
-    assert [(o.case, o.error, o.text, o.output_tokens) for o in outputs] == [
+    assert [
+        (output.case, output.error, output.text, output.output_tokens)
+        for output in outputs
+    ] == [
         ('en-greeting', None, 'Hello there.', 40),
         ('zh-greeting', None, 'Hello there.', 40),
     ]

@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from assistant_bench.catalog import EXPORT_VAR
+from assistant_bench.messages import code
 
 
 BASE_URL_VAR = 'BENCH_API_BASE_URL'
@@ -24,6 +25,13 @@ KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
 CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
 LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
+ENDPOINT_VARS = (
+    BASE_URL_VAR,
+    KEY_FILE_VAR,
+    CA_FILE_VAR,
+    HEADERS_VAR,
+    LOCAL_ADDRESS_VAR,
+)
 
 
 class Endpoint(BaseModel):
@@ -44,15 +52,8 @@ class Endpoint(BaseModel):
     @classmethod
     def read(cls, env: Callable[[str], str | None]) -> Endpoint:
         """Validate the value `env` returns for each endpoint variable."""
-        names = (
-            BASE_URL_VAR,
-            KEY_FILE_VAR,
-            CA_FILE_VAR,
-            HEADERS_VAR,
-            LOCAL_ADDRESS_VAR,
-        )
         return cls.model_validate(
-            {name: value for name in names if (value := env(name))}
+            {name: value for name in ENDPOINT_VARS if (value := env(name))}
         )
 
     def api_key(self) -> str:
@@ -87,12 +88,16 @@ def preflight(env: Mapping[str, str] | None = None) -> None:
     The endpoint must also resolve to a usable one. `env` overrides the process
     environment, as an agent's `env` does.
     """
-    merged = {**os.environ, **(env or {})}
+    overrides = env or {}
+
+    def lookup(var: str) -> str | None:
+        return overrides.get(var, os.environ.get(var))
+
     required = (BASE_URL_VAR, KEY_FILE_VAR, EXPORT_VAR)
-    missing = [var for var in required if not merged.get(var)]
+    missing = [var for var in required if not lookup(var)]
     if missing:
         raise ValueError(
-            f'{", ".join(missing)} unset. '
-            'Copy .env.example to .env, and run inside `nix develop`.'
+            f'Set {code(missing)}. Copy `.env.example` to `.env`, and run inside '
+            '`nix develop`.'
         )
-    Endpoint.read(merged.get).verify()
+    Endpoint.read(lookup).verify()
