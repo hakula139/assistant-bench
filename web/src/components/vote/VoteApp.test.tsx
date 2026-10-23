@@ -376,15 +376,39 @@ describe('VoteApp', () => {
     const outputB = screen.getByRole('region', { name: 'Output B' });
     expect(within(outputA).getByRole('button', { name: 'Issues 1' })).toBeDefined();
     await user.click(within(outputB).getByRole('button', { name: 'Issues 1' }));
-    await user.click(await screen.findByRole('checkbox', { name: 'Wrong tone' }));
+    expect(screen.getByRole('checkbox', { name: 'Too long' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(screen.getByRole('checkbox', { name: 'Punctuation' })).toHaveProperty(
+      'ariaChecked',
+      'false',
+    );
+    const tone = await screen.findByRole('checkbox', { name: 'Wrong tone' });
+    expect(tone.getAttribute('aria-keyshortcuts')).toBe('8');
+    await user.click(tone);
+    expect(within(outputB).getByRole('button', { name: 'Issues 2' })).toBeDefined();
     await user.keyboard('{Escape}');
+
+    await user.click(within(outputA).getByRole('button', { name: 'Issues 1' }));
+    expect(screen.getByRole('checkbox', { name: 'Punctuation' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(
+      screen.getByRole('checkbox', { name: 'Too long' }).getAttribute('aria-keyshortcuts'),
+    ).toBe('5');
+    await user.click(screen.getByRole('checkbox', { name: 'Too long' }));
+    expect(within(outputA).getByRole('button', { name: 'Issues 2' })).toBeDefined();
+    await user.keyboard('{Escape}');
+
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
     await user.keyboard('b{Enter}');
     await screen.findByText('Output A3');
 
     expect(api.casts.map((cast) => cast.defects)).toEqual([
-      { a: ['punctuation'], b: ['tone', 'length'] },
+      { a: ['punctuation', 'length'], b: ['tone', 'length'] },
       { a: [], b: [] },
     ]);
   });
