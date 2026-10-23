@@ -4,7 +4,7 @@ Learn how to vote on pairs by keyboard, read outputs as Markdown, and keep HTML 
 
 ## Opening the Vote Page
 
-`bench serve` builds the site, so run `pnpm install` once in the checkout first. Open `http://127.0.0.1:8790/vote/`, or follow the Vote link in the header of the local site, and pick a family, listed under its aspect, to start a session. A reload resumes the session in the same tab.
+`bench serve` builds the site, so run `pnpm install` once in the checkout first. Open `http://127.0.0.1:8790/vote/`, or follow the Vote link in the header of the local site, and pick a family, listed under its aspect, to start a session. The session runs until every case has your vote, and the browser keeps one per family, so picking the family again or reloading the page resumes where you left off. Each vote saves as you submit it, and the count of votes above the prompt opens how many pairs are left.
 
 ## Casting a Vote
 

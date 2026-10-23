@@ -1,5 +1,5 @@
 import { cn } from 'cn';
-import { ChevronDown, CircleCheck } from 'lucide-react';
+import { Check, ChevronDown, CircleCheck } from 'lucide-react';
 import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Kbd } from '@/components/ui/kbd';
-import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -32,7 +31,8 @@ import { familyTitle, groupByAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
 import { flagLabels, flags as flagNames, type Flag } from '@/lib/report';
 
-const SESSION_KEY = 'bench-session';
+const FAMILY_PARAM = 'family';
+const SAVED_MS = 1500;
 const VIEWPORTS = [375, 768, 1280] as const;
 
 /** The verdicts from left to right. On phones, two to a row, A and B share the first. */
@@ -42,6 +42,23 @@ const CHOICES: { value: Choice; label: string; key: string; className?: string }
   { value: 'both_bad', label: 'Both bad', key: 'x', className: 'max-sm:order-1' },
   { value: 'b', label: 'B is better', key: 'b' },
 ];
+
+const sessionKey = (family: string) => `bench-session:${family}`;
+
+/** Resumes the family's session from this browser, or starts one if the arena has no such session. */
+async function enterFamily(family: string): Promise<SessionView> {
+  const stored = localStorage.getItem(sessionKey(family));
+  if (stored !== null) {
+    try {
+      return await resumeSession(stored);
+    } catch (reason) {
+      if (!(reason instanceof ApiError && reason.status === 404)) {
+        throw reason;
+      }
+    }
+  }
+  return startSession(family);
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -191,9 +208,12 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
 /** The local vote page: blinded pairs from the arena API, voted on by keyboard or pointer. */
 export function VoteApp() {
   const [session, setSession] = useState<SessionView | null>(null);
-  // The page renders only in the browser, so the stored session is readable on the first render.
-  const [resuming, setResuming] = useState(() => sessionStorage.getItem(SESSION_KEY));
+  // The page renders only in the browser, so its URL is readable on the first render.
+  const [resuming, setResuming] = useState(() =>
+    new URLSearchParams(window.location.search).get(FAMILY_PARAM),
+  );
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [choice, setChoice] = useState<Choice | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [note, setNote] = useState('');
@@ -216,7 +236,8 @@ export function VoteApp() {
   }, [pair]);
 
   const show = (next: SessionView) => {
-    sessionStorage.setItem(SESSION_KEY, next.id);
+    localStorage.setItem(sessionKey(next.family.name), next.id);
+    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
     setSession(next);
     setChoice(null);
     setFlags([]);
@@ -224,12 +245,15 @@ export function VoteApp() {
     setError(null);
   };
 
+  /** Shows the session that `action` returns, and returns whether it succeeded. */
   const run = async (action: () => Promise<SessionView>) => {
     setBusy(true);
     try {
       show(await action());
+      return true;
     } catch (reason) {
       setError(message(reason));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -239,18 +263,26 @@ export function VoteApp() {
     if (resuming === null) {
       return;
     }
-    resumeSession(resuming)
+    enterFamily(resuming)
       .then(show, (reason: unknown) => {
-        if (reason instanceof ApiError && reason.status === 404) {
-          sessionStorage.removeItem(SESSION_KEY);
-        } else {
-          setError(message(reason));
-        }
+        setError(message(reason));
       })
       .finally(() => {
         setResuming(null);
       });
   }, [resuming]);
+
+  useEffect(() => {
+    if (savedAt === null) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSavedAt(null);
+    }, SAVED_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [savedAt]);
 
   useEffect(() => {
     const onBlur = () => {
@@ -272,7 +304,13 @@ export function VoteApp() {
       return;
     }
     const text = note.trim();
-    void run(() => castVote(pair.token, { choice, flags, note: text === '' ? null : text }));
+    void run(() => castVote(pair.token, { choice, flags, note: text === '' ? null : text })).then(
+      (saved) => {
+        if (saved) {
+          setSavedAt(Date.now());
+        }
+      },
+    );
   };
 
   const undo = () => {
@@ -353,7 +391,7 @@ export function VoteApp() {
         busy={busy}
         error={error}
         onStart={(family) => {
-          void run(() => startSession(family));
+          void run(() => enterFamily(family));
         }}
       />
     );
@@ -385,14 +423,25 @@ export function VoteApp() {
 
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-      <span className="whitespace-nowrap tabular-nums">
-        {familyTitle(session.family)}, pair {session.votes + 1} of {session.size}
+      <span role="status" className="flex items-center gap-1">
+        {savedAt !== null && (
+          <>
+            <Check className="size-4" aria-hidden="true" />
+            Saved
+          </>
+        )}
       </span>
-      <Progress
-        value={session.size === 0 ? 0 : (100 * session.votes) / session.size}
-        aria-label="Session progress"
-        className={cn('w-32 max-sm:hidden', !hasFrames && 'xl:hidden')}
-      />
+      <span className="whitespace-nowrap tabular-nums">
+        {familyTitle(session.family)},{' '}
+        <Hint
+          term={{
+            term: 'This session',
+            definition: `${formatCountOf(session.remaining, 'pair')} left to vote on.`,
+          }}
+        >
+          {formatCountOf(session.votes, 'vote')}
+        </Hint>
+      </span>
 
       {hasText && (
         <Toggle size="sm" variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
@@ -429,7 +478,7 @@ export function VoteApp() {
       ref={pairView}
       tabIndex={-1}
       role="group"
-      aria-label={`Pair ${session.votes + 1} of ${session.size}`}
+      aria-label={`Pair ${session.votes + 1}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
       <div

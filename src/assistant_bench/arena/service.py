@@ -31,9 +31,6 @@ from assistant_bench.families import (
 from assistant_bench.outputs import Output, read_outputs
 
 
-SESSION_VOTES = 30
-
-
 class UnknownItem(LookupError):
     """A session, pair, or document that the arena never issued or has retired."""
 
@@ -85,15 +82,16 @@ class FamilyView(BaseModel):
 
 
 class SessionView(BaseModel):
-    """A session's progress and the pair to show, absent once the session ends.
+    """A session's votes and the pair to show, absent once no case remains.
 
-    `size` is the number of votes the session can still reach.
+    `remaining` counts the cases the session has yet to vote on, the open pair's
+    included.
     """
 
     id: str
     family: FamilyView
     votes: int
-    size: int
+    remaining: int
     pair: PairView | None
 
 
@@ -264,7 +262,7 @@ class Arena:
             id=session.id,
             family=self._family_view(session.family),
             votes=len(votes),
-            size=min(SESSION_VOTES, len(votes) + len(open_cases)),
+            remaining=len(open_cases),
             pair=None if token is None else self._pairs[token].view,
         )
 
@@ -276,10 +274,7 @@ class Arena:
 
     def _next(self, session: Session) -> None:
         votes = self._store.votes(session.family)
-        mine = [vote for vote in votes if vote.session == session.id]
-        if len(mine) >= SESSION_VOTES:
-            return
-        used = {vote.case for vote in mine}
+        used = {vote.case for vote in votes if vote.session == session.id}
         pool = self._families[session.family].pool
         matched = reconcile(votes, pool.outputs)
         board = self._boards[session.family]

@@ -19,25 +19,34 @@ interface Cast {
   note: string | null;
 }
 
+interface StubOptions {
+  /** The cases the session `s1` can show, which end it once each has a vote. */
+  cases?: number;
+  /** The votes `s1` already holds, as a session cast in an earlier visit does. */
+  prior?: number;
+  brief?: { instruction: string; checklist: string[] };
+}
+
 /**
- * A stand-in for the arena API that serves numbered pairs, each with `brief` when it is given,
- * until a session of `size` votes is complete, and records each session start, vote, and undo.
+ * A stand-in for the arena API that serves numbered pairs in session `s1`, each with `brief` when
+ * it is given, and records each session start, resume, vote, and undo.
  */
-function stubApi(size = 30, brief?: { instruction: string; checklist: string[] }) {
+function stubApi({ cases = 40, prior = 0, brief }: StubOptions = {}) {
   const starts: unknown[] = [];
+  const resumes: string[] = [];
   const casts: Cast[] = [];
   let undos = 0;
   let served = 0;
   const view = (): SessionView => {
     served += 1;
-    const votes = casts.length - undos;
+    const votes = prior + casts.length - undos;
     return {
       id: 's1',
       family: FAMILY,
       votes,
-      size,
+      remaining: cases - votes,
       pair:
-        votes === size
+        votes === cases
           ? null
           : {
               token: `t${served}`,
@@ -60,6 +69,11 @@ function stubApi(size = 30, brief?: { instruction: string; checklist: string[] }
       starts.push(JSON.parse(init?.body as string));
       return respond(view(), 201);
     }
+    const resume = /^\/api\/sessions\/([^/]+)\/pair$/.exec(path);
+    if (resume) {
+      resumes.push(resume[1]);
+      return resume[1] === 's1' ? respond(view()) : respond({ detail: 'not found' }, 404);
+    }
     if (path === '/api/sessions/s1/undo') {
       undos += 1;
       return respond(view());
@@ -71,8 +85,12 @@ function stubApi(size = 30, brief?: { instruction: string; checklist: string[] }
     }
     return respond({ detail: `unexpected ${path}` }, 404);
   });
-  return { starts, casts, undos: () => undos };
+  return { starts, resumes, casts, undos: () => undos };
 }
+
+/** The session's status line above the prompt, such as "Writing · Chinese, 2 votes". */
+const statusLine = () =>
+  screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
 
 async function startSession(page = <VoteApp />) {
   const user = userEvent.setup();
@@ -84,7 +102,8 @@ async function startSession(page = <VoteApp />) {
 
 describe('VoteApp', () => {
   beforeEach(() => {
-    sessionStorage.clear();
+    localStorage.clear();
+    history.replaceState(null, '', '/vote/');
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
@@ -106,7 +125,7 @@ describe('VoteApp', () => {
       'true',
     );
     expect(screen.getByRole('textbox')).toHaveProperty('value', '');
-    expect(document.activeElement).toBe(screen.getByRole('group', { name: 'Pair 2 of 30' }));
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: 'Pair 2' }));
   });
 
   test('submits on Enter after a click on Undo instead of undoing again', async () => {
@@ -127,7 +146,7 @@ describe('VoteApp', () => {
   });
 
   test('takes a shortcut typed in upper case, and undoes from the completed session', async () => {
-    const api = stubApi(1);
+    const api = stubApi({ cases: 1 });
     const user = await startSession();
 
     await user.keyboard('{Shift>}A{/Shift}{Enter}');
@@ -140,9 +159,9 @@ describe('VoteApp', () => {
   });
 
   test('starts the family it shows by short name, and names it in full in the session', async () => {
-    const api = stubApi(1);
+    const api = stubApi({ cases: 1 });
     const user = await startSession();
-    expect(screen.getByText('Writing · Chinese, pair 1 of 1')).toBeDefined();
+    expect(statusLine()).toBe('Writing · Chinese, 0 votes');
 
     await user.keyboard('a{Enter}');
     await screen.findByText('1 vote recorded on Writing · Chinese.');
@@ -153,10 +172,70 @@ describe('VoteApp', () => {
     });
   });
 
+  test('counts the votes so far, with the pairs left behind the count', async () => {
+    stubApi();
+    const user = await startSession();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    await user.click(screen.getByRole('button', { name: '1 vote' }));
+
+    expect(statusLine()).toBe('Writing · Chinese, 1 vote');
+    expect(screen.getByRole('dialog', { name: 'This session' }).textContent).toContain(
+      '39 pairs left to vote on.',
+    );
+  });
+
+  test('shows that each vote saved, then clears the notice', async () => {
+    stubApi();
+    const user = await startSession();
+
+    await user.keyboard('a{Enter}');
+
+    expect((await screen.findByRole('status')).textContent).toBe('Saved');
+    await vi.waitFor(
+      () => {
+        expect(screen.getByRole('status').textContent).toBe('');
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  test("resumes the family's session from an earlier visit, and again on a reload", async () => {
+    localStorage.setItem('bench-session:prose-zh', 's1');
+    const api = stubApi({ prior: 3 });
+    const user = await startSession();
+    const resumed = statusLine();
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    cleanup();
+
+    render(<VoteApp />);
+    await screen.findByText('Output A3');
+
+    expect(resumed).toBe('Writing · Chinese, 3 votes');
+    expect(statusLine()).toBe('Writing · Chinese, 4 votes');
+    expect(api.resumes).toEqual(['s1', 's1']);
+    expect(api.starts).toEqual([]);
+  });
+
+  test('starts a session when the arena no longer has the stored one', async () => {
+    localStorage.setItem('bench-session:prose-zh', 'retired');
+    const api = stubApi();
+
+    await startSession();
+
+    expect(api.resumes).toEqual(['retired']);
+    expect(api.starts).toEqual([{ family: 'prose-zh' }]);
+    expect(localStorage.getItem('bench-session:prose-zh')).toBe('s1');
+  });
+
   test('renders the prompt as Markdown and sets the checklist apart under its own heading', async () => {
-    stubApi(30, {
-      instruction: 'Use only these facts:\n\n- The build passed.\n- `make test` ran.',
-      checklist: ['Names `make test` and both facts'],
+    stubApi({
+      brief: {
+        instruction: 'Use only these facts:\n\n- The build passed.\n- `make test` ran.',
+        checklist: ['Names `make test` and both facts'],
+      },
     });
 
     await startSession();
