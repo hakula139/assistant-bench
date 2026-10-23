@@ -233,6 +233,26 @@ def resolve_system(
     )
 
 
+def pin(system: System) -> SystemConfig:
+    """Return the `route` table that resolves to `system`, keeping its fingerprint.
+
+    Raises
+    ------
+    ValueError
+        The system has a prompt, which a `route` table cannot pin.
+    """
+    if system.prompt is not None:
+        raise ValueError(
+            f'system {system.name!r}: a prompt cannot be pinned with a `route` table'
+        )
+    return SystemConfig(
+        route=system.route,
+        effort=system.effort,
+        price=system.price,
+        display_name=system.display_name,
+    )
+
+
 def _prompt(name: str, reference: str | None, export: NixosConfigExport) -> str | None:
     if reference is None:
         return None

@@ -63,6 +63,7 @@ strconv
 taplo
 threadpoolctl
 tokei
+tomli
 triu
 trixie
 trustme
