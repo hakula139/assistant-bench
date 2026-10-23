@@ -150,7 +150,7 @@ export function RoundsTable({
   names: SystemNames;
 }) {
   return (
-    <Table className="max-w-xl">
+    <Table className="max-w-xl text-xs sm:text-sm">
       <TableHeader>
         <TableRow>
           <TableHead>Round</TableHead>

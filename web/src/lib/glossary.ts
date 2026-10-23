@@ -18,7 +18,7 @@ export const terms = {
   },
   anchor: {
     term: 'Anchor',
-    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
+    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
   },
   preliminary: {
     term: 'Preliminary',
@@ -27,7 +27,7 @@ export const terms = {
   },
   unranked: {
     term: 'Unranked',
-    definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
+    definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
   },
   votes: {
     term: 'Votes',
