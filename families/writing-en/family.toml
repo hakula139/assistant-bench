@@ -15,8 +15,8 @@ reference = "gemini-3.8-flash"
 language = "en"
 samples = 2
 max_output_tokens = 16000
-categories = ["code-comment", "docs", "explanation", "message", "pr-description", "reply"]
+categories = ["docs", "essay", "fiction", "message", "reply", "review"]
 
 [gates]
 min_chars = 80
-max_chars = 10000
+max_chars = 20000
