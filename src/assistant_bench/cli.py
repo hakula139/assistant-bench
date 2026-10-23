@@ -111,6 +111,15 @@ def ingest(family: str) -> None:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}')
 
 
+def _vote_store() -> VoteStore:
+    """Open the vote store, reporting a schema mismatch."""
+    try:
+        return VoteStore(votes_file())
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+
+
 @app.command()
 def serve() -> None:
     """Build the local vote page and serve it for every family with outputs."""
@@ -118,24 +127,25 @@ def serve() -> None:
     if not families:
         typer.echo('No family scored by votes has outputs yet', err=True)
         raise typer.Exit(1)
-    try:
-        subprocess.run(
-            ['pnpm', '--filter', 'web', 'build'],
-            check=True,
-            cwd=REPO_ROOT,
-            env={**os.environ, LOCAL_SITE_VAR: '1'},
-        )
-    except subprocess.CalledProcessError as error:
-        raise typer.Exit(error.returncode) from error
-    page = SITE_DIR / api.VOTE_DIR / 'index.html'
-    if not page.is_file():
-        typer.echo(
-            f'No vote page at {page}. Build the site with '
-            f'`{LOCAL_SITE_VAR}=1 pnpm --filter web build` and fix what it reports.',
-            err=True,
-        )
-        raise typer.Exit(1)
-    with closing(VoteStore(votes_file())) as store:
+    with closing(_vote_store()) as store:
+        try:
+            subprocess.run(
+                ['pnpm', '--filter', 'web', 'build'],
+                check=True,
+                cwd=REPO_ROOT,
+                env={**os.environ, LOCAL_SITE_VAR: '1'},
+            )
+        except subprocess.CalledProcessError as error:
+            raise typer.Exit(error.returncode) from error
+        page = SITE_DIR / api.VOTE_DIR / 'index.html'
+        if not page.is_file():
+            typer.echo(
+                f'No vote page at {page}. Build the site with '
+                f'`{LOCAL_SITE_VAR}=1 pnpm --filter web build` and fix what it '
+                'reports.',
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.echo(
             f'Voting on {", ".join(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/'
         )
@@ -146,11 +156,11 @@ def serve() -> None:
 def close(family: str) -> None:
     """Write the family's report to `reports/<family>/<round>.json`."""
     selected = _load_family(family)
-    try:
-        with closing(VoteStore(votes_file())) as store:
+    with closing(_vote_store()) as store:
+        try:
             closed = report.close(selected, store, datetime.now(UTC))
-    except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+        except ValueError as error:
+            raise typer.BadParameter(str(error), param_hint='FAMILY') from error
     typer.echo(f'Report written to {report.write_report(closed)}')
 
 
