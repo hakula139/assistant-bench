@@ -153,13 +153,13 @@ describe('family page', () => {
     expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
   });
 
-  test("draws the family's gates and reference, then the round summary", async () => {
+  test("draws the family's steps, then the round summary", async () => {
     const html = await render(FamilyPage, { family: await family(), boards: [] });
 
     expect(text(html)).toContain(
-      'Gates finished, not blank, 40–6,000 characters, in Chinese, Simplified script',
+      'Run same cases for all Gates bad outputs dropped Blind pairs system names hidden Scores ranked from votes',
     );
-    expect(text(html)).toContain('Scores Bradley-Terry, reference at 1,000, 95% intervals');
+    expect(text(html)).not.toContain('6,000 characters');
     expect(text(html)).toContain(
       'Leader Acme Large tied with the top score, chosen by the lower cost',
     );
@@ -186,7 +186,7 @@ describe('family page', () => {
     expect(html).not.toContain('Score, 95% interval');
   });
 
-  test('names the output a family renders as pages', async () => {
+  test('draws the run of a family that renders pages as a page', async () => {
     const pages: Family = {
       ...(await family()),
       config: { ...arenaConfig, render: 'html' },
@@ -195,14 +195,14 @@ describe('family page', () => {
 
     const html = await render(FamilyPage, { family: pages, boards: [] });
 
-    expect(text(html)).toContain('Run an HTML page per case');
+    expect(html).toContain('lucide-app-window');
   });
 
   test("draws a tests family's steps and its pass rates", async () => {
     const html = await render(FamilyPage, { family: testsFamily(), boards: [] });
 
     expect(text(html)).toContain(
-      "Run one trial per task Tests the task's own tests Pass rate errored trials fail",
+      "Run same tasks for all Tests each task's own tests Pass rate share of tasks passed",
     );
     expect(text(html)).toContain('Acme Pro 75% 4 1');
   });

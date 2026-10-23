@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { Hint } from '@/components/site/Term';
 import { aspects, type Aspect } from '@/lib/aspects';
 import type { Scorer, VotesConfig } from '@/lib/family';
 import { methodSteps, scorers, type MethodStep } from '@/lib/method';
@@ -74,7 +75,7 @@ export function MethodStrip({
       aria-label={`${scorers[scorer].title} scoring steps`}
       className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-sm:flex-col max-sm:items-start"
     >
-      {methodSteps(scorer, config).map(({ step, title, detail }, i) => {
+      {methodSteps(scorer, config).map(({ step, title, detail, hint }, i) => {
         const Icon = stepIcons[step];
         const href = links[step];
         return (
@@ -93,7 +94,9 @@ export function MethodStrip({
                 <span className="block font-medium">
                   {href ? <a href={href}>{title}</a> : title}
                 </span>
-                <span className="block text-xs text-muted-foreground">{detail}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {hint ? <Hint term={hint}>{detail}</Hint> : detail}
+                </span>
               </span>
             </span>
           </li>

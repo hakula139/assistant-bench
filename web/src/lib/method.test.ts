@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { VotesConfig } from '@/lib/family';
-import { gateLabels, methodSteps } from '@/lib/method';
+import { gateRule, methodSteps } from '@/lib/method';
 
 const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
   scorer: 'votes',
@@ -14,49 +14,59 @@ const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
   ...overrides,
 });
 
-describe('gateLabels', () => {
+describe('gateRule', () => {
   test.each([
-    ['both bounds', { min_chars: 40, max_chars: 6000 }, '40–6,000 characters'],
-    ['a lower bound alone', { min_chars: 1200 }, 'at least 1,200 characters'],
-    ['an upper bound alone', { max_chars: 800 }, 'at most 800 characters'],
+    ['both bounds', { min_chars: 40, max_chars: 6000 }, 'outside 40–6,000 characters'],
+    ['a lower bound alone', { min_chars: 1200 }, 'shorter than 1,200 characters'],
+    ['an upper bound alone', { max_chars: 800 }, 'longer than 800 characters'],
   ])('names %s', (_, gates, length) => {
-    expect(gateLabels(config({ gates }))).toEqual(['finished, not blank', length]);
-  });
-
-  test('names only the gates every family runs when the family sets none', () => {
-    expect(gateLabels(config())).toEqual(['finished, not blank']);
-  });
-
-  test('names the language and the script after the length', () => {
-    const labels = gateLabels(
-      config({ language: 'zh', gates: { max_chars: 800, script: 'hans' } }),
+    expect(gateRule(config({ gates }))).toBe(
+      `An output is dropped when it is blank, unfinished, or ${length}.`,
     );
+  });
 
-    expect(labels).toEqual([
-      'finished, not blank',
-      'at most 800 characters',
-      'in Chinese',
-      'Simplified script',
-    ]);
+  test('names only blank and unfinished output when the family sets no gates', () => {
+    expect(gateRule(config())).toBe('An output is dropped when it is blank or unfinished.');
+  });
+
+  test.each([
+    ['a language', { language: 'en' }, 'not in English'],
+    [
+      'a language and its script',
+      { language: 'zh', gates: { script: 'hans' } },
+      'not in Simplified Chinese',
+    ],
+    ['a script alone', { gates: { script: 'hans' } }, 'not in Simplified script'],
+  ] as const)('names %s last', (_, overrides, written) => {
+    expect(gateRule(config(overrides))).toBe(
+      `An output is dropped when it is blank, unfinished, or ${written}.`,
+    );
   });
 });
 
 describe('methodSteps', () => {
-  test("fills a voted family's run and gates in from its config", () => {
-    const steps = methodSteps('votes', config({ render: 'html', gates: { min_chars: 40 } }));
+  test("keeps a family's specifics in the hints, under the same details as every family", () => {
+    const family = config({ render: 'html', gates: { min_chars: 40 } });
 
-    expect(steps.map(({ title, detail }) => `${title}: ${detail}`)).toEqual([
-      'Run: an HTML page per case',
-      'Gates: finished, not blank, at least 40 characters',
-      'Blind pairs: one rater',
-      'Scores: Bradley-Terry, reference at 1,000, 95% intervals',
+    const steps = methodSteps('votes', family);
+
+    expect(steps.map(({ detail }) => detail)).toEqual(
+      methodSteps('votes').map(({ detail }) => detail),
+    );
+    expect(steps.map(({ step, hint }) => `${step}: ${hint?.definition ?? ''}`)).toEqual([
+      'html: Every system answers each case with an HTML page.',
+      `gates: ${gateRule(family)}`,
+      'pairs: One rater picks the better of two outputs on a case without seeing which systems wrote them.',
+      'scores: Bradley-Terry scores with 95% intervals. The reference system stays at 1,000.',
     ]);
   });
 
-  test('describes the votes steps in general without a config', () => {
-    const [run, gates] = methodSteps('votes');
-
-    expect(run.detail).toBe('an output per case');
-    expect(gates.detail).toBe('checked before any vote');
+  test('gives no hints without a config', () => {
+    expect(methodSteps('votes').map(({ hint }) => hint)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

@@ -8,7 +8,7 @@ The site lists the families whose `family.toml` sets `public = true`, which [Aut
 
 The header links Leaderboards and Methodology at any family count, so the home page is the one index of boards. It groups the families under their aspects, each section reachable at `/#<aspect>`. A family page links its aspect's other boards by their short names once the aspect lists two, a system page links the same system on those boards where it has a page, and a system page's breadcrumb leads back to its aspect and family.
 
-Every family page opens with its scorer's steps, filled in with the family's render, gates, and reference, and links the methodology's section for that scorer. The home panels, each family board, and the methodology's example figure sit beside a legend of the marks they draw. The leaderboard marks the reference and preliminary systems with badges that open their definitions on tap, click, or Enter, as the summary's diagnostics and the Gate failures column do.
+Every family page opens with its scorer's steps in a few words each, alike on every board, where each step opens the family's specifics, such as its exact gates, on tap, click, or Enter, and links the methodology's section for that scorer. The home panels, each family board, and the methodology's example figure sit beside a legend of the marks they draw. The leaderboard marks the reference and preliminary systems with badges that open their definitions on tap, click, or Enter, as the summary's diagnostics and the Gate failures column do.
 
 Each family scored by votes gets a page at `/<aspect>/<slug>/` showing one round, with the round and category filters kept in the URL:
 
