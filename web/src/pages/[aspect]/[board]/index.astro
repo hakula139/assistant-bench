@@ -7,7 +7,7 @@ import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { MethodStrip } from '@/components/site/Method';
 import { PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
-import { boardGuide, scorers } from '@/lib/method';
+import { boardGuide } from '@/lib/method';
 import { familyPaths, getFamilies, type BoardLink, type Family } from '@/lib/reports';
 import { REPOSITORY } from '@/lib/site';
 
@@ -26,11 +26,7 @@ const { Board } = scorerViews[config.scorer];
 const guide = boardGuide(config);
 ---
 
-<Base
-  title={title}
-  description={`${title}: ${scorers[config.scorer].summary}.`}
-  section="leaderboards"
->
+<Base title={title} description={`${title}: ${guide.summary}.`} section="leaderboards">
   <PageHeader title={title}>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip client:load scorer={config.scorer} config={config} />

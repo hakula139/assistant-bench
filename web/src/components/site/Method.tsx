@@ -36,10 +36,7 @@ const stepIcons: Record<MethodStep['step'], LucideIcon> = {
 
 const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConical };
 
-const aspectIcons: Record<Aspect, LucideIcon> = {
-  writing: PenLine,
-  coding: SquareTerminal,
-};
+const aspectIcons: Record<Aspect, LucideIcon> = { writing: PenLine, coding: SquareTerminal };
 
 /** An aspect's icon, which decorates the aspect's title beside it. */
 export function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {

@@ -122,7 +122,7 @@ async function render(
 const text = (html: string) =>
   html
     .replace(/<[^>]+>/g, ' ')
-    .replaceAll('&#x27;', "'")
+    .replace(/&#(?:x27|39);/g, "'")
     .replace(/\s+/g, ' ');
 
 /** A family scored by tests, with one round that lists the weaker system first. */
@@ -320,31 +320,33 @@ describe('family page', () => {
   });
 
   test.each([
-    ['votes', 'votes', family],
-    ['tests', 'tests', () => Promise.resolve(testsFamily())],
-    ['coding', 'coding', codingFamily],
-  ])("links the %s board to the methodology's %s section", async (_, section, load) => {
-    const methodology = await render(MethodologyPage, {});
+    ['votes', family, 'votes', 'Cases', 'Ranked by blind pairwise votes'],
+    ['tests', () => Promise.resolve(testsFamily()), 'tests', 'Tasks', 'Scored by automated tests'],
+    [
+      'coding',
+      codingFamily,
+      'tests-then-votes',
+      'Tasks',
+      'Ranked by hidden tests, then blind pairwise votes',
+    ],
+  ])(
+    'describes the %s board and links its methodology section and its inputs',
+    async (_, load, section, inputs, summary) => {
+      const loaded = await load();
+      const methodology = await render(MethodologyPage, {});
 
-    const html = await render(FamilyPage, { family: await load(), boards: [] });
+      const html = await render(FamilyPage, { family: loaded, boards: [] });
 
-    expect(guide(html)).toBe(section);
-    expect(methodology).toContain(`id="${section}"`);
-  });
-
-  test.each([
-    ['votes', family, 'Cases'],
-    ['tests', () => Promise.resolve(testsFamily()), 'Tasks'],
-    ['coding', codingFamily, 'Tasks'],
-  ])("links the %s board's inputs to the family's directory", async (_, load, label) => {
-    const loaded = await load();
-
-    const html = await render(FamilyPage, { family: loaded, boards: [] });
-
-    const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
-    const link = new JSDOM(html).window.document.querySelector(`a[href="${href}"]`);
-    expect(link?.textContent.trim()).toBe(label);
-  });
+      const document = new JSDOM(html).window.document;
+      const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
+      expect(guide(html)).toBe(section);
+      expect(methodology).toContain(`id="${section}"`);
+      expect(document.querySelector(`a[href="${href}"]`)?.textContent.trim()).toBe(inputs);
+      expect(document.querySelector('meta[name="description"]')?.getAttribute('content')).toBe(
+        `${loaded.title}: ${summary}.`,
+      );
+    },
+  );
 });
 
 describe('methodology page', () => {
@@ -360,6 +362,23 @@ describe('methodology page', () => {
 
     expect(text(html)).toContain('95% intervals 1,000 bootstraps resampling whole cases');
     expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
+  });
+
+  test('defines the terms a board of diffs uses in its own section', async () => {
+    const html = await render(MethodologyPage, {});
+
+    const section = new JSDOM(html).window.document.getElementById(
+      'tests-then-votes',
+    )?.parentElement;
+    const rows = [...(section?.querySelectorAll('tbody tr') ?? [])].map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => cell.textContent),
+    );
+    expect(rows).toEqual(
+      [terms.failedTests, terms.solutionCostLatency, terms.diffLengthBias].map((term) => [
+        term.term,
+        term.definition,
+      ]),
+    );
   });
 
   test("keeps the last words of a glossary term's meaning on one line", async () => {
@@ -456,6 +475,23 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test.each([
+    [
+      'cases',
+      family,
+      "Output length and latency Each system's median and 10th to 90th percentile range.",
+    ],
+    [
+      'diffs',
+      codingFamily,
+      "Output tokens and latency Each system's median and 10th to 90th percentile range, where latency spans the agent's whole run.",
+    ],
+  ])("titles the token and latency ranges of a family's %s", async (_, load, heading) => {
+    const html = await render(SystemPage, { family: await load(), system: 'acme-pro', boards: [] });
+
+    expect(text(html)).toContain(heading);
+  });
+
   test("summarizes the system's own standing in its latest round", async () => {
     const html = await render(SystemPage, {
       family: await family(),

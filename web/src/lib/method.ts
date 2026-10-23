@@ -1,11 +1,11 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatCountOf, formatScore } from '@/lib/format';
-import { terms } from '@/lib/glossary';
+import { terms, type Term } from '@/lib/glossary';
 import { ANCHOR_SCORE } from '@/lib/ranking';
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
-  /** The stage, where a run's stage names what it yields: a text output, a page, a diff, or a trial. */
+  /** The stage, where a run's stage names what it yields: text, a page, a diff, or a trial. */
   step: 'text' | 'html' | 'diff' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
   title: string;
   detail: string;
@@ -69,30 +69,55 @@ function agentRule({ harness, max_turns: turns }: VotesConfig): string {
 /** A step whose hint `rule` writes from the family's config. */
 type RuledStep = Omit<MethodStep, 'hint'> & { rule: (config: VotesConfig) => string };
 
-const caseRun = { title: 'Run', detail: 'same cases for all' };
-const caseGate: RuledStep = {
-  step: 'gates',
-  title: 'Gates',
-  detail: 'failing outputs lose',
-  rule: gateRule,
+/** The methodology sections on a render's own protocol, each linked from that render's boards. */
+export type RenderSection = 'tests-then-votes';
+
+/** What a voted family's board calls its outputs and their figures. */
+export interface BoardLabels {
+  /** One output, as cost labels such as "Cost / output" name it. */
+  unit: 'output' | 'solution';
+  gateFailures: Term;
+  lengthBias: Term;
+  /** The system page's section on output tokens and latency, and the note under its title. */
+  usage: { title: string; note: string };
+}
+
+/** How a voted family's board differs by what its `render` says the systems produce. */
+interface RenderView {
+  run: RuledStep;
+  gate: RuledStep;
+  /** What one blind pair shows the rater. */
+  pair: string;
+  /** What the render changes in its scorer's board guide. */
+  guide: Partial<BoardGuide> & { section?: RenderSection };
+  labels: BoardLabels;
+}
+
+const range = "Each system's median and 10th to 90th percentile range";
+
+/** A case family's run, which yields a `step` of text or a page. */
+const caseRun = (step: 'text' | 'html', answer: string): RuledStep => ({
+  step,
+  title: 'Run',
+  detail: 'same cases for all',
+  rule: () => `Every system answers each case ${answer}.`,
+});
+
+const cases: Omit<RenderView, 'run'> = {
+  gate: { step: 'gates', title: 'Gates', detail: 'failing outputs lose', rule: gateRule },
+  pair: 'two outputs for a case',
+  guide: {},
+  labels: {
+    unit: 'output',
+    gateFailures: terms.gateFailures,
+    lengthBias: terms.lengthBias,
+    usage: { title: 'Output length and latency', note: `${range}.` },
+  },
 };
 
-/** The steps of a voted family that differ by what its `render` says the systems produce. */
-const renders: Record<VotesConfig['render'], { run: RuledStep; gate: RuledStep; pair: string }> = {
-  text: {
-    run: { step: 'text', ...caseRun, rule: () => 'Every system answers each case in text.' },
-    gate: caseGate,
-    pair: 'two outputs for a case',
-  },
-  html: {
-    run: {
-      step: 'html',
-      ...caseRun,
-      rule: () => 'Every system answers each case with an HTML page.',
-    },
-    gate: caseGate,
-    pair: 'two outputs for a case',
-  },
+const renders: Record<VotesConfig['render'], RenderView> = {
+  text: { run: caseRun('text', 'in text'), ...cases },
+  html: { run: caseRun('html', 'with an HTML page'), ...cases },
   diff: {
     run: { step: 'diff', title: 'Run', detail: 'same tasks for all', rule: agentRule },
     gate: {
@@ -100,16 +125,29 @@ const renders: Record<VotesConfig['render'], { run: RuledStep; gate: RuledStep; 
       title: 'Tests',
       detail: 'failing solutions lose',
       rule: () =>
-        "A solution that fails the task's hidden tests loses its pairs without a vote, and two failing solutions tie.",
+        "A solution that fails the task's hidden tests loses to each passing one without a vote.",
     },
     pair: 'the diffs of two passing solutions to a task',
+    guide: {
+      summary: 'Ranked by hidden tests, then blind pairwise votes',
+      inputs: 'Tasks',
+      section: 'tests-then-votes',
+    },
+    labels: {
+      unit: 'solution',
+      gateFailures: terms.failedTests,
+      lengthBias: terms.diffLengthBias,
+      usage: {
+        title: 'Output tokens and latency',
+        note: `${range}, where latency spans the agent's whole run.`,
+      },
+    },
   },
 };
 
 /**
- * A scorer's stages in a few words each, alike on every board of the scorer whose systems produce
- * the same kind of output. Given a family's config, each step also carries a hint saying what it
- * means on that family's board.
+ * A scorer's stages in a few words each, alike on every board of one scorer and render. Given a
+ * family's config, each step also carries a hint saying what it means on that family's board.
  */
 export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[] {
   switch (scorer) {
@@ -165,19 +203,23 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
   }
 }
 
-const rendersDiffs = (config: FamilyConfig) =>
-  config.scorer === 'votes' && config.render === 'diff';
-
-/**
- * Where a family's board points its readers: the methodology section that explains the board, and
- * the name of what its systems answer.
- */
-export function boardGuide(config: FamilyConfig): { section: string; inputs: string } {
-  return rendersDiffs(config)
-    ? { section: 'coding', inputs: 'Tasks' }
-    : { section: config.scorer, inputs: scorers[config.scorer].inputs };
+/** How a family's board describes itself and where it points its readers. */
+export interface BoardGuide {
+  summary: string;
+  /** What its systems answer, as the link to them names it. */
+  inputs: string;
+  /** The methodology section that explains the board. */
+  section: Scorer | RenderSection;
 }
 
-/** The leaderboard's gate-failure column, which a family that renders diffs names for its tests. */
-export const gateFailuresTerm = (config: FamilyConfig) =>
-  rendersDiffs(config) ? terms.failedTests : terms.gateFailures;
+/** A family's board guide: its scorer's, with what its render changes. */
+export function boardGuide(config: FamilyConfig): BoardGuide {
+  const { summary, inputs } = scorers[config.scorer];
+  const guide = config.scorer === 'votes' ? renders[config.render].guide : {};
+  return { summary, inputs, section: config.scorer, ...guide };
+}
+
+/** What a voted family's board calls its outputs and their figures. */
+export function boardLabels({ render }: Pick<VotesConfig, 'render'>): BoardLabels {
+  return renders[render].labels;
+}

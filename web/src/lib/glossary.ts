@@ -53,6 +53,11 @@ export const terms = {
     term: 'Cost / output and p50 latency',
     definition: 'The mean cost at list prices and the median time to the complete response.',
   },
+  solutionCostLatency: {
+    term: 'Cost / solution and p50 latency',
+    definition:
+      "The mean cost of a solution at list prices and the median time of the agent's whole run on a task.",
+  },
   leader: {
     term: 'Leader',
     definition: `The top system, once every system tied with it has ${PRELIMINARY_VOTES} votes with a winner. A tie goes to the lower cost, then the lower latency, then the higher score.`,
@@ -79,6 +84,11 @@ export const terms = {
     term: 'Length bias',
     definition:
       "How far the rater's votes lean toward the longer or the shorter output, in score points per standard deviation of the pair's relative length difference.",
+  },
+  diffLengthBias: {
+    term: 'Diff length bias',
+    definition:
+      "How far the rater's votes lean toward the longer or the shorter diff, in score points per standard deviation of the pair's relative length difference.",
   },
   passRate: {
     term: 'Pass rate',

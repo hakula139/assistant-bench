@@ -1,0 +1,22 @@
+---
+import { Glossary } from '@/components/site/Glossary';
+import { KeptTail } from '@/components/site/Term';
+import { terms } from '@/lib/glossary';
+
+const columns = [terms.failedTests, terms.solutionCostLatency, terms.diffLengthBias];
+---
+
+<p>
+  <KeptTail text="A family whose outputs are diffs, as a coding family's are, gives every system the same tasks, each a developer's request and a small repository in a sandbox without network access. Every system works on each task through the same agent within the same turn budget, which the board's Run step names, and tests the agent never sees then grade the solution." />
+</p>
+<p>
+  <KeptTail text="The tests settle any pair they separate, so a passing solution beats a failing one without a vote. Two failing solutions tie without a vote, as do two passing solutions with identical diffs. The rater votes only between two passing solutions whose diffs differ, reading each diff without its commit history, as a reviewer reads a pull request." />
+</p>
+<p>
+  <KeptTail text="Each settled pair and each vote counts once in the fit, so the scores lean on the tests until the rater has voted on most pairs of passing solutions." />
+</p>
+<p>
+  The rest of the board reads as <a href="#votes">Votes</a> describes,{' '}
+  <KeptTail text="apart from these terms:" />
+</p>
+<Glossary heading="Term" entries={columns} />

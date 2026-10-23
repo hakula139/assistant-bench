@@ -41,6 +41,7 @@ import {
   MISSING,
 } from '@/lib/format';
 import { fallbackAnchor, terms, type Term } from '@/lib/glossary';
+import type { BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { AGREEMENT_FLOOR } from '@/lib/ranking';
 import type { Standing, VotesResults } from '@/lib/report';
@@ -54,8 +55,8 @@ interface VotesBoardProps {
   /** Closed rounds, oldest first. */
   rounds: VotesRound[];
   names: SystemNames;
-  /** The leaderboard's gate-failure column, as `gateFailuresTerm` names it for the family. */
-  gateTerm?: Term;
+  /** What the board calls its outputs and their figures, from `boardLabels`. */
+  labels: BoardLabels;
 }
 
 const ALL = 'all';
@@ -98,7 +99,15 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
   });
 }
 
-function RoundSummary({ results, names }: { results: VotesResults; names: SystemNames }) {
+function RoundSummary({
+  results,
+  names,
+  lengthBias,
+}: {
+  results: VotesResults;
+  names: SystemNames;
+  lengthBias: Term;
+}) {
   const { decision, rater_agreement: agreement, length } = results;
   return (
     <div className="flex flex-col gap-3">
@@ -132,7 +141,7 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
         </Stat>
         <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
         {length !== null && (
-          <Stat label={<Hint term={terms.lengthBias} />}>{formatLengthBias(length)}</Stat>
+          <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
         )}
       </dl>
       {agreement.below_floor && (
@@ -146,12 +155,7 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({
-  base,
-  rounds,
-  names,
-  gateTerm = terms.gateFailures,
-}: VotesBoardProps) {
+export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', ALL);
@@ -220,7 +224,7 @@ export function VotesBoard({
         )}
       </div>
 
-      <RoundSummary results={results} names={names} />
+      <RoundSummary results={results} names={names} lengthBias={labels.lengthBias} />
 
       <div className="flex flex-col gap-4">
         <Leaderboard
@@ -229,7 +233,7 @@ export function VotesBoard({
           anchorSystem={results.anchor}
           anchorTerm={anchorTerm}
           href={href}
-          gateTerm={gateTerm}
+          gateFailures={labels.gateFailures}
         />
         {unranked.length > 0 && (
           <p className={note}>
@@ -293,11 +297,15 @@ export function VotesBoard({
             {costPoints.length > 0 && (
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
-                  Mean cost per output
+                  Mean cost per {labels.unit}
                   {unpriced.length > 0 && `, leaving out the unpriced ${unpriced.join(', ')}`}
                   {activeCategory !== ALL && ', over all categories'}
                 </figcaption>
-                <ParetoScatter points={costPoints} label="Cost per output" format={formatCost} />
+                <ParetoScatter
+                  points={costPoints}
+                  label={`Cost per ${labels.unit}`}
+                  format={formatCost}
+                />
               </figure>
             )}
             {latencyPoints.length > 0 && (
@@ -315,7 +323,7 @@ export function VotesBoard({
                 <TableRow>
                   <TableHead>System</TableHead>
                   <TableHead numeric>Score</TableHead>
-                  <TableHead numeric>Cost / output</TableHead>
+                  <TableHead numeric>Cost / {labels.unit}</TableHead>
                   <TableHead numeric>p50 latency</TableHead>
                   <TableHead>On the frontier for</TableHead>
                 </TableRow>

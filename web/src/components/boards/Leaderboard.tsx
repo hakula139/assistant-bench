@@ -74,7 +74,7 @@ interface LeaderboardProps {
   /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
   /** The gate-failure column's label and meaning. */
-  gateTerm: Term;
+  gateFailures: Term;
 }
 
 const ROW_HEIGHT = 48;
@@ -171,8 +171,8 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
  * The figures of a row's `detail` columns, which its score opens on tap, click, or Enter, since
  * narrow screens leave those columns out.
  */
-function rowDetails(row: LeaderboardRow, ranked: boolean, gateTerm: Term): Term {
-  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateTerm.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
+function rowDetails(row: LeaderboardRow, ranked: boolean, gateFailures: Term): Term {
+  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
   return {
     term: row.name,
     definition: `${formatCountOf(row.votes, 'vote')}, ${rates}${ranked ? '' : ' across all categories'}.`,
@@ -207,7 +207,7 @@ export function Leaderboard({
   anchorSystem,
   anchorTerm,
   href,
-  gateTerm,
+  gateFailures,
 }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
   const anchor = anchorScore(rows, anchorSystem);
@@ -269,7 +269,7 @@ export function Leaderboard({
         sortDescFirst: true,
         cell: ({ row }) => (
           <span className="flex flex-col items-end leading-tight">
-            <Hint term={rowDetails(row.original, ranked, gateTerm)}>
+            <Hint term={rowDetails(row.original, ranked, gateFailures)}>
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
             <span className="text-xs text-muted-foreground">
@@ -294,14 +294,14 @@ export function Leaderboard({
       }),
       helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
         id: 'gate-failures',
-        header: familyWide(gateTerm.term),
+        header: familyWide(gateFailures.term),
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: gateTerm, detail: true },
+        meta: { numeric: true, term: gateFailures, detail: true },
       }),
     ]);
-  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href, gateTerm]);
+  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href, gateFailures]);
 
   const table = useTable({
     features,
