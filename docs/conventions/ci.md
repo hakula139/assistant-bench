@@ -12,7 +12,7 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov                 |
 | Build Site      | `pnpm build`, uploading `web/dist` as the `site-dist` artifact that the deploy jobs publish                                        |
 | Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check |
-| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle job that `bench check smoke` runs                                     |
+| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs                           |
 | CI Result       | Fails when any job above fails or is cancelled, so the `main` ruleset requires only this job and Codecov's `codecov/patch`         |
 
 The fingerprint check enforces the rule in [Systems](../design/systems.md#fingerprints) by running `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. Python Check checks out the full history with `fetch-depth: 0`, since the check builds the base commit's nixos-config export.

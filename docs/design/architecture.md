@@ -58,7 +58,7 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 4. `bench serve` collects every family scored by votes that has jobs, then serves the vote page for each that has outputs, and the [arena](arena.md) records each vote in `votes.sqlite` in the data directory.
 5. `bench close <family>` collects the family's trials, then fits the [ranking](ranking.md) over the family's votes on its current outputs, or aggregates a `tests` family's rewards, and writes the [report](reports.md) to `reports/<family>/<round>.json`.
 
-`bench check [<family>...]` validates each named family, or every family when none is named, and for a `tests` family it also runs Harbor's oracle on every task, placing its jobs under `checks/` so that ingest never reads them.
+`bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that ingest never reads them.
 
 ## Reruns
 

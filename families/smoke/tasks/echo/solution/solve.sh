@@ -2,4 +2,4 @@
 
 set -euo pipefail
 
-printf 'hello' >/tmp/greeting.txt
+printf 'hello' >/app/greeting.txt

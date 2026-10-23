@@ -5,11 +5,23 @@ name = "smoke/echo"
 description = "Write a fixed word to a file, which the oracle solution does and the test checks"
 version = "1.0.0"
 
+[metadata]
+category = "smoke"
+source = "synthetic"
+
 [agent]
 timeout_sec = 120.0
 
 [verifier]
+environment_mode = "separate"
 timeout_sec = 120.0
 
 [environment]
 build_timeout_sec = 300.0
+cpus = 2
+memory_mb = 2048
+network_mode = "no-network"
+
+[[artifacts]]
+source = "/app"
+exclude = ["__pycache__"]

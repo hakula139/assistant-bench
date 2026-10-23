@@ -31,7 +31,7 @@ Drop a test once another covers everything it checks.
 
 ## Docker Trials
 
-Tests marked `docker` run real Harbor jobs: the smoke family's oracle, and `Generate` on the `smoke-text` cases against the stub endpoint, run twice to check that the rerun sends nothing. `pyproject.toml` deselects them by default, and the Harbor Smoke CI job selects them with `uv run pytest -m docker`. They need a running Docker daemon and pull a stock image on first use.
+Tests marked `docker` run real Harbor jobs: `bench check` over the smoke family's oracle and nop, and `Generate` on the `smoke-text` cases against the stub endpoint, run twice to check that the rerun sends nothing. `pyproject.toml` deselects them by default, and the Harbor Smoke CI job selects them with `uv run pytest -m docker`. They need a running Docker daemon and pull a stock image on first use.
 
 ## Coverage
 

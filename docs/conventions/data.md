@@ -4,7 +4,7 @@ What the bench stores, where each kind of data lives, and what may be committed 
 
 ## Data Classes
 
-Each case declares its `source`, which determines where the case and everything generated from it may live:
+Each case or task declares its `source`, which determines where it and everything generated from it may live:
 
 | Source       | Meaning                                                        | Lives in                                    |
 | ------------ | -------------------------------------------------------------- | ------------------------------------------- |
@@ -13,7 +13,9 @@ Each case declares its `source`, which determines where the case and everything 
 | `transcript` | Derived from the owner's assistant transcripts                 | The data directory's `cases/<family>.jsonl` |
 | `held-out`   | Kept private so a leaderboard cannot be fit to it              | The data directory's `cases/<family>.jsonl` |
 
-`test_repository.py` fails when a committed case file holds a `transcript` or `held-out` case.
+A task in a task family declares its source the same way, in its `task.toml`'s `[metadata]`. A committed task is `synthetic` or `public` and lives in `families/<family>/tasks/<task>/`, while a `transcript` or `held-out` task lives under the data directory's `cases/<family>/<task>/`.
+
+`test_repository.py` fails when a committed case file or task holds a `transcript` or `held-out` source.
 
 ## The Data Directory
 
@@ -26,7 +28,7 @@ Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leav
 - Commit only synthetic or public cases, along with fixtures built from generic names such as `acme/large` and `example.com`.
 - Commit reports only as `bench close` writes them, holding the aggregates that [Reports](../design/reports.md#what-is-published) lists.
 - Keep the endpoint's hostname, its operator's name, headers specific to it, internal registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Committed text calls it an OpenAI-compatible endpoint configured in `.env`.
-- `pyproject.toml` and `.npmrc` name the public registries, and `test_repository.py` fails when `uv.lock` or `pnpm-lock.yaml` names any other host.
+- `pyproject.toml` and `.npmrc` name the public registries, and `test_repository.py` fails when any lockfile or requirements file in the repository or under `families/` names any other host.
 
 ## Public Names
 

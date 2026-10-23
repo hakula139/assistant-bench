@@ -25,7 +25,7 @@ uv run bench check
 uv run bench check smoke-text
 ```
 
-`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it runs Harbor's oracle on every task and fails unless each reference solution earns reward 1, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it checks each task's settings, then runs Harbor's oracle and nop agents three times on every task, and fails unless each reference solution earns reward 1 every time and the repository as committed earns 0 every time, which needs Docker but no endpoint.
 
 ## Running a Family
 
@@ -77,7 +77,8 @@ Everything a run produces stays out of Git in the data directory, which `BENCH_D
 ```text
 assistant-bench/
 ├── cases/<family>.jsonl                    # Local cases, appended to the committed ones
-├── checks/<family>/<job>/                  # Oracle jobs from `bench check`
+├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
+├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
 ├── outputs/<family>.jsonl                  # Records written by `bench run` and `bench ingest`
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases

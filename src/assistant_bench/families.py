@@ -1,6 +1,7 @@
 """Family settings, cases, and the merge of committed and local cases."""
 
 import tomllib
+from collections.abc import Iterator
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -139,6 +140,35 @@ class Case(BaseModel):
     checklist: list[str] = []
 
 
+class _TaskMetadata(BaseModel):
+    """The `[metadata]` slice of a task's `task.toml` that a case reads."""
+
+    model_config = ConfigDict(extra='ignore', frozen=True)
+
+    category: str
+    source: Literal['synthetic', 'public', 'transcript', 'held-out']
+
+
+class _TaskSection(BaseModel):
+    """The `[task]` slice of a task's `task.toml` that a case reads."""
+
+    model_config = ConfigDict(extra='ignore', frozen=True)
+
+    name: str
+
+
+class _TaskManifest(BaseModel):
+    """The slice of a task's `task.toml` that a case reads.
+
+    Harbor's other keys are ignored, since `jobs.check_tasks` validates them.
+    """
+
+    model_config = ConfigDict(extra='ignore', frozen=True)
+
+    task: _TaskSection
+    metadata: _TaskMetadata
+
+
 def family_names() -> list[str]:
     """Return the name of every directory under `families/` holding a `family.toml`."""
     return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
@@ -190,45 +220,123 @@ def load_family(name: str) -> Family:
 def load_cases(family: Family) -> list[Case]:
     """Return the committed cases followed by the local ones, if the family has any.
 
+    A task family's cases are its task directories, each taking its ID from the
+    directory name and its category, source, and instruction from the task.
+
     Raises
     ------
     ValueError
-        A line is not a valid case, two cases share an ID, within one file or
-        across both, or a case's category is missing from the family's
-        `categories`.
+        A line is not a valid case, a task has no `task.toml` or `instruction.md`
+        or names itself apart from its directory, two cases share an ID, within
+        one source or across both, or a case's category is missing from the
+        family's `categories`.
     """
+    entries = _task_entries(family) if family.source == 'tasks' else _case_lines(family)
+    cases: dict[str, Case] = {}
+    sources: dict[str, str] = {}
+    for location, case in entries:
+        if case.id in cases:
+            raise ValueError(
+                f'family {family.name!r}: case {case.id!r} appears at '
+                f'{sources[case.id]} and {location}'
+            )
+        if case.category not in family.settings.categories:
+            raise ValueError(
+                f'family {family.name!r}: case {case.id!r} at {location} has '
+                f'category {case.category!r}, which categories does not list'
+            )
+        cases[case.id] = case
+        sources[case.id] = location
+    return list(cases.values())
+
+
+def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',
         data_dir() / 'cases' / f'{family.name}.jsonl',
     ]
-    cases: dict[str, Case] = {}
-    sources: dict[str, str] = {}
     for path in paths:
         if not path.exists():
             continue
         for number, line in enumerate(path.read_text().splitlines(), start=1):
             if not line.strip():
                 continue
-            source = f'{path}:{number}'
+            location = f'{path}:{number}'
             try:
                 case = Case.model_validate_json(line)
             except ValidationError as error:
                 raise ValueError(
-                    f'family {family.name!r}: {source} is not a valid case: {error}'
+                    f'family {family.name!r}: {location} is not a valid case: {error}'
                 ) from error
-            if case.id in cases:
-                raise ValueError(
-                    f'family {family.name!r}: case {case.id!r} appears at '
-                    f'{sources[case.id]} and {source}'
-                )
-            if case.category not in family.settings.categories:
-                raise ValueError(
-                    f'family {family.name!r}: case {case.id!r} at {source} has '
-                    f'category {case.category!r}, which categories does not list'
-                )
-            cases[case.id] = case
-            sources[case.id] = source
-    return list(cases.values())
+            yield location, case
+
+
+def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
+    for root, prefix in task_roots(family):
+        if not root.is_dir():
+            continue
+        for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+            location = f'{prefix}/{directory.name}'
+            yield location, _task_case(family, directory, location)
+
+
+def _task_case(family: Family, directory: Path, location: str) -> Case:
+    config_path = directory / 'task.toml'
+    if not config_path.is_file():
+        raise ValueError(
+            f'family {family.name!r}: task {directory.name!r} at {location} '
+            'has no task.toml'
+        )
+    try:
+        manifest = _TaskManifest.model_validate(tomllib.loads(config_path.read_text()))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(
+            f'family {family.name!r}: {location}/task.toml is not valid TOML: {error}'
+        ) from error
+    except ValidationError as error:
+        raise ValueError(
+            f'family {family.name!r}: {location}/task.toml is not valid: {error}'
+        ) from error
+    expected = f'{family.name}/{directory.name}'
+    if manifest.task.name != expected:
+        raise ValueError(
+            f'family {family.name!r}: set [task] name to "{expected}" in '
+            f'{location}/task.toml'
+        )
+    instruction_path = directory / 'instruction.md'
+    if not instruction_path.is_file():
+        raise ValueError(
+            f'family {family.name!r}: task {directory.name!r} at {location} '
+            'has no instruction.md'
+        )
+    try:
+        return Case(
+            id=directory.name,
+            category=manifest.metadata.category,
+            source=manifest.metadata.source,
+            instruction=instruction_path.read_text(),
+        )
+    except ValidationError as error:
+        raise ValueError(
+            f'family {family.name!r}: {location}/task.toml is not a valid case: {error}'
+        ) from error
+
+
+def task_roots(family: Family) -> list[tuple[Path, str]]:
+    """Return each root of a task family's tasks and the label it reports with."""
+    return [
+        (FAMILIES_DIR / family.name / 'tasks', 'tasks'),
+        (data_dir() / 'cases' / family.name, f'cases/{family.name}'),
+    ]
+
+
+def task_location(family: Family, task: Path) -> str:
+    """Return the label that a task's own directory reports with."""
+    return next(
+        f'{prefix}/{task.name}'
+        for root, prefix in task_roots(family)
+        if task.parent == root
+    )
 
 
 def tasks_dir(family: Family) -> Path:
@@ -237,5 +345,14 @@ def tasks_dir(family: Family) -> Path:
 
 
 def case_task(family: Family, case_id: str) -> Path:
-    """Return the directory that `jobs.render_tasks` installs a case's task in."""
-    return tasks_dir(family) / case_id
+    """Return a case's Harbor task directory.
+
+    A case family's task is installed under the data directory, while a task
+    family's task is its own directory, committed or local.
+    """
+    if family.source == 'cases':
+        return tasks_dir(family) / case_id
+    committed, local = task_roots(family)
+    if (committed[0] / case_id).is_dir():
+        return committed[0] / case_id
+    return local[0] / case_id

@@ -16,7 +16,7 @@ Votes and scores pool only within one fingerprint. Altering a system's route, ef
 
 ## Harnesses
 
-`System.harness` names an entry in `harnesses.HARNESSES`, which maps it to a Harbor agent: either a bench agent by import path or an agent shipped with Harbor by name. Every system defaults to `generate`, the single-call agent, while `bench check` uses Harbor's `oracle`.
+`System.harness` names an entry in `harnesses.HARNESSES`, which maps it to a Harbor agent: either a bench agent by import path or an agent shipped with Harbor by name. Every system defaults to `generate`, the single-call agent, while `bench check` uses Harbor's `oracle` and `nop`.
 
 Harbor records each trial's agent import path in the job's `config.json`, and `harbor job resume` imports it from there, ensuring an import path never changes once a job uses it.
 

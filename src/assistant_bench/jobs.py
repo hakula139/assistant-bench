@@ -15,8 +15,11 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
+from harbor.models.task.verifier_mode import resolve_task_verifier_mode
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
+from harbor.trial.network_policy import resolve_trial_network_plan
+from pydantic import ValidationError
 
 from assistant_bench.catalog import System
 from assistant_bench.families import (
@@ -27,12 +30,13 @@ from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
     case_task,
+    task_location,
     tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
 
@@ -45,6 +49,7 @@ N_CONCURRENT_TRIALS = 8
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
+CHECK_ATTEMPTS = 3
 
 
 # ── Jobs ──
@@ -154,7 +159,8 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     """Build a job that runs every system on every case task.
 
     The job diffs against the family's earlier jobs, so Harbor runs only the trials
-    that none of them completed with the same task version and agent config.
+    that none of them completed with the same task version and agent config. A case
+    family is scored by votes, so its verifier stays disabled.
     """
     agents = [
         trial_config.AgentConfig(
@@ -168,46 +174,106 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
         for system in systems
     ]
     sources = [source for source, _ in _sources(family)]
-    return _job(family, data_dir() / 'jobs' / family.name, agents, tasks, sources)
+    return _job(
+        family,
+        data_dir() / 'jobs' / family.name,
+        agents,
+        tasks,
+        sources,
+        n_attempts=family.settings.samples,
+        verify=False,
+    )
 
 
-def oracle_job(family: Family) -> JobConfig:
-    """Build a job that runs Harbor's oracle on every task directory of the family.
-
-    Its trials go under `checks/`, apart from the jobs that ingest reads.
+def check_tasks(family: Family, tasks: list[Path]) -> None:
+    """Check that every task sets what a run needs.
 
     Raises
     ------
     ValueError
-        A task's `[task] name` is not `<family>/<directory>`, which trials report.
+        A task's `task.toml` does not parse, or it leaves a required setting at
+        its default, naming the task and the value to set.
     """
-    tasks = sorted((FAMILIES_DIR / family.name / 'tasks').iterdir())
-    misnamed = [
-        f'"{family.name}/{task.name}" in tasks/{task.name}/task.toml'
-        for task in tasks
-        if _task_name(task) != f'{family.name}/{task.name}'
-    ]
-    if misnamed:
-        raise ValueError(
-            f'family {family.name!r}: set [task] name to {", ".join(misnamed)}'
+    problems = []
+    for task in tasks:
+        location = f'{task_location(family, task)}/task.toml'
+        try:
+            config = _task_config(task)
+        except ValidationError as error:
+            problems.append(f'{location} is not valid: {error}')
+            continue
+        problems.extend(_task_problems(config, location))
+    if problems:
+        raise ValueError(f'family {family.name!r}:\n' + '\n'.join(problems))
+
+
+def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
+    problems = []
+    if config.task is None or config.task.version is None:
+        problems.append(f'{location}: set [task] version')
+    if (
+        config.verifier.environment_mode
+        is not task_config.VerifierEnvironmentMode.SEPARATE
+    ):
+        problems.append(f'{location}: set [verifier] environment_mode = "separate"')
+    if config.verifier.environment is not None:
+        problems.append(
+            f'{location}: do not set [verifier.environment], since the verifier '
+            "uses the task's environment"
         )
+    if config.steps:
+        problems.append(
+            f'{location}: do not set [[steps]], whose overrides the check cannot prove'
+        )
+    if config.verifier.environment is None and not config.steps:
+        plan = resolve_trial_network_plan(
+            config,
+            trial_config.AgentConfig(),
+            trial_config.EnvironmentConfig(),
+            None,
+            verifier_mode=resolve_task_verifier_mode(config),
+        )
+        for phase, policy in (
+            ('agent', plan.agent_phase),
+            ('verifier', plan.verifier_phase),
+        ):
+            if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
+                problems.append(f'{location}: the {phase} phase needs no-network')
+    if not any(
+        (artifact if isinstance(artifact, str) else artifact.source) == '/app'
+        for artifact in config.artifacts
+    ):
+        problems.append(f'{location}: list "/app" under [[artifacts]]')
+    for field in ('cpus', 'memory_mb'):
+        if getattr(config.environment, field) is None:
+            problems.append(f'{location}: set [environment] {field}')
+    if config.agent.timeout_sec is None:
+        problems.append(f'{location}: set [agent] timeout_sec')
+    return problems
+
+
+def check_job(family: Family, tasks: list[Path]) -> JobConfig:
+    """Build a job that runs the oracle and the nop on every task of the family.
+
+    The oracle must pass every task while the untouched repository must fail it,
+    so the job runs both agents three times on each. Its trials go under
+    `checks/`, apart from the jobs that ingest reads.
+    """
     return _job(
         family,
         data_dir() / 'checks' / family.name,
         [
             trial_config.AgentConfig(
-                name=HARNESSES['oracle'].name,
-                import_path=HARNESSES['oracle'].import_path,
+                name=HARNESSES[agent].name,
+                import_path=HARNESSES[agent].import_path,
             )
+            for agent in ('oracle', 'nop')
         ],
         tasks,
         [],
+        n_attempts=CHECK_ATTEMPTS,
+        verify=True,
     )
-
-
-def _task_name(task_dir: Path) -> str | None:
-    config = _installed_config(task_dir)
-    return config.task.name if config.task else None
 
 
 def has_jobs(family: Family) -> bool:
@@ -233,28 +299,21 @@ def _job(
     agents: list[trial_config.AgentConfig],
     tasks: list[Path],
     sources: list[SourceJobConfig],
+    *,
+    n_attempts: int,
+    verify: bool,
 ) -> JobConfig:
     return JobConfig(
         jobs_dir=jobs_dir,
-        n_attempts=family.settings.samples,
+        n_attempts=n_attempts,
         n_concurrent_trials=N_CONCURRENT_TRIALS,
         quiet=True,
         retry=RetryConfig(max_retries=1),
-        verifier=trial_config.VerifierConfig(disable=not _runs_tests(family.settings)),
+        verifier=trial_config.VerifierConfig(disable=not verify),
         agents=agents,
         tasks=[trial_config.TaskConfig(path=path) for path in tasks],
         source_jobs=sources,
     )
-
-
-def _runs_tests(settings: Settings) -> bool:
-    match settings:
-        case VotesSettings():
-            return False
-        case TaskTestsSettings():
-            return True
-        case _:
-            assert_never(settings)
 
 
 def run_job(config: JobConfig) -> Path:
@@ -364,13 +423,13 @@ def _installed_versions(family: Family) -> dict[str, str]:
     for task in directory.iterdir():
         if not (task / 'task.toml').is_file():
             continue
-        package = _installed_config(task).task
+        package = _task_config(task).task
         if package is not None and package.version is not None:
             versions[task.name] = package.version
     return versions
 
 
-def _installed_config(task_dir: Path) -> task_config.TaskConfig:
+def _task_config(task_dir: Path) -> task_config.TaskConfig:
     return task_config.TaskConfig.model_validate_toml(
         (task_dir / 'task.toml').read_text()
     )
