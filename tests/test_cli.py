@@ -60,6 +60,30 @@ def write_cases_family(families_dir: Path, systems: str, name: str = 'f') -> Non
     (directory / 'cases.jsonl').write_text('')
 
 
+def write_removed_case(families_dir: Path, data_dir: Path) -> None:
+    """Write a script-gated votes family whose trial ran a case that is then removed."""
+    write_votes_family(
+        families_dir, 'f', ['large', 'small'], {'a': 'reply', 'b': 'reply'}
+    )
+    config = families_dir / 'f' / 'family.toml'
+    config.write_text(config.read_text() + '\n[gates]\nscript = "hans"\n')
+    family = load_family('f')
+    cases = load_cases(family)
+    for task in jobs.render_tasks(family, cases):
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            f'{task.name}__large__1',
+            AgentConfig(
+                import_path='x:Y', kwargs={'system': 'large', 'fingerprint': 'fp'}
+            ),
+            task=f'f/{task.name}',
+            output='你好，世界。',
+            instruction=None,
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+        )
+    jobs.render_tasks(family, cases[:1])
+
+
 def write_version_one_store() -> None:
     path = votes_file()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,34 +201,6 @@ class TestCheck:
         exit_code, _ = invoke('check', 'smoke')
 
         assert exit_code == 5
-
-    @pytest.mark.parametrize(
-        ('edited', 'expected'),
-        [
-            (
-                ['en-greeting'],
-                "family 'smoke-text': case 'en-greeting' changed, give it a new ID",
-            ),
-            (
-                ['en-greeting', 'zh-greeting'],
-                "family 'smoke-text': cases 'en-greeting', 'zh-greeting' changed, "
-                'give each a new ID',
-            ),
-        ],
-        ids=['one-case', 'two-cases'],
-    )
-    def test_rejects_cases_whose_task_differs_from_a_recorded_trial(
-        self, data_dir: Path, edited: list[str], expected: str
-    ) -> None:
-        job_dir = data_dir / 'jobs' / 'smoke-text' / 'job-1'
-        for case_id in edited:
-            agent = AgentConfig(name='oracle')
-            write_trial(job_dir, f'{case_id}__1', agent, task=f'smoke-text/{case_id}')
-
-        exit_code, message = invoke('check', 'smoke-text')
-
-        assert exit_code == 2
-        assert expected in message
 
     def test_rejects_a_local_case_that_reuses_a_committed_id(
         self, data_dir: Path
@@ -651,6 +647,36 @@ class TestServe:
         assert served == [(['f'], site)]
         assert message == 'Voting on f at http://127.0.0.1:8790/vote/\n'
 
+    def test_serves_after_a_case_is_removed(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_removed_case(families_dir, data_dir)
+        site = tmp_path / 'dist'
+        served: list[list[str]] = []
+
+        def build(args: list[str], **options: Any) -> None:
+            (site / 'vote').mkdir(parents=True)
+            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+
+        monkeypatch.setattr(cli, 'SITE_DIR', site)
+        monkeypatch.setattr(subprocess, 'run', build)
+        monkeypatch.setattr(
+            api,
+            'serve',
+            lambda arena, site: served.append(
+                [family.name for family in arena.families()]
+            ),
+        )
+
+        exit_code, message = invoke('serve')
+
+        assert exit_code == 0, message
+        assert served == [['f']]
+
     def test_stops_when_the_build_leaves_no_vote_page(
         self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -820,6 +846,16 @@ class TestClose:
 
     def test_rejects_a_family_without_votes(self, families_dir: Path) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+
+        exit_code, message = invoke('close', 'f')
+
+        assert exit_code == 2
+        assert "family 'f' has no votes" in message
+
+    def test_closes_after_a_case_is_removed(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        write_removed_case(families_dir, data_dir)
 
         exit_code, message = invoke('close', 'f')
 
