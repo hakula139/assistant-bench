@@ -1,9 +1,7 @@
 import ssl
 from pathlib import Path
-from typing import Any
 
 import pytest
-from harbor.agents.base import BaseAgent
 from pydantic import ValidationError
 
 from assistant_bench.catalog import EXPORT_VAR
@@ -15,8 +13,6 @@ from assistant_bench.harnesses.endpoint import (
     LOCAL_ADDRESS_VAR,
     preflight,
 )
-from assistant_bench.harnesses.generate import Generate
-from assistant_bench.harnesses.terminus import Terminus
 from support import StubEndpoint
 
 
@@ -25,16 +21,12 @@ pytestmark = pytest.mark.usefixtures('export')
 
 class TestPreflight:
     def test_accepts_endpoint_variables_from_the_agent_env(
-        self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+        self, endpoint: StubEndpoint
     ) -> None:
-        monkeypatch.delenv(BASE_URL_VAR, raising=False)
-        monkeypatch.delenv(KEY_FILE_VAR, raising=False)
-
         preflight(endpoint.env)
 
     def test_names_each_missing_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        for name in (BASE_URL_VAR, KEY_FILE_VAR, EXPORT_VAR):
-            monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(EXPORT_VAR)
 
         with pytest.raises(ValueError) as error:
             preflight({})
@@ -78,28 +70,3 @@ class TestPreflight:
         empty = dict.fromkeys((CA_FILE_VAR, HEADERS_VAR, LOCAL_ADDRESS_VAR), '')
 
         preflight(endpoint.env | empty)
-
-
-class TestAgents:
-    @pytest.mark.parametrize(
-        ('agent', 'options'),
-        [
-            pytest.param(
-                Generate,
-                {'system': 's', 'fingerprint': 'f', 'max_output_tokens': 1},
-                id='generate',
-            ),
-            pytest.param(Terminus, {'system': 's', 'fingerprint': 'f'}, id='terminus'),
-        ],
-    )
-    def test_reaches_the_endpoint_check(
-        self,
-        agent: type[BaseAgent],
-        options: dict[str, Any],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        for name in (BASE_URL_VAR, KEY_FILE_VAR, EXPORT_VAR):
-            monkeypatch.delenv(name, raising=False)
-
-        with pytest.raises(ValueError, match='unset'):
-            agent.preflight(options, {})

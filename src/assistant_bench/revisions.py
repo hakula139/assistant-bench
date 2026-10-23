@@ -3,11 +3,13 @@
 import subprocess
 from pathlib import Path
 
-from assistant_bench.catalog import NixosConfigExport, System, parse_systems
+from assistant_bench.catalog import (
+    SYSTEMS_FILE,
+    NixosConfigExport,
+    System,
+    parse_systems,
+)
 from assistant_bench.paths import REPO_ROOT
-
-
-SYSTEMS_FILE = 'systems.toml'
 
 
 def systems_at(revision: str) -> dict[str, System]:

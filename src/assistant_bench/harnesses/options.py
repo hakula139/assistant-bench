@@ -9,9 +9,7 @@ from assistant_bench.families import Settings
 def generate(system: System, settings: Settings) -> dict[str, Any]:
     """Return the kwargs that send `system`'s request to the endpoint."""
     assert settings.max_output_tokens is not None
-    return {
-        'system': system.name,
-        'fingerprint': system.fingerprint,
+    return _labels(system) | {
         'effort': system.effort,
         'system_prompt': system.prompt,
         'max_output_tokens': settings.max_output_tokens,
@@ -21,9 +19,7 @@ def generate(system: System, settings: Settings) -> dict[str, Any]:
 def terminus(system: System, settings: Settings) -> dict[str, Any]:
     """Return the kwargs that run `system` as terminus-2."""
     assert settings.max_output_tokens is not None
-    values: dict[str, Any] = {
-        'system': system.name,
-        'fingerprint': system.fingerprint,
+    values = _labels(system) | {
         'llm_call_kwargs': {'max_completion_tokens': settings.max_output_tokens},
         'record_terminal_session': False,
         'suppress_max_turns_warning': True,
@@ -31,3 +27,8 @@ def terminus(system: System, settings: Settings) -> dict[str, Any]:
     if system.effort is not None:
         values['reasoning_effort'] = system.effort
     return values
+
+
+def _labels(system: System) -> dict[str, Any]:
+    """Return the `Labels` kwargs that name the trial's system for ingest."""
+    return {'system': system.name, 'fingerprint': system.fingerprint}

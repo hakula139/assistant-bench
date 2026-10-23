@@ -1,10 +1,17 @@
 """Builders and the stub endpoint shared by the tests."""
 
 import asyncio
+import ipaddress
 import json
+import shutil
+import socket
+import ssl
 import textwrap
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, get_args
 
@@ -36,10 +43,12 @@ from assistant_bench.arena.store import (
     VoteStore,
 )
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import Gate
+from assistant_bench.families import Gate, TaskTestsSettings
+from assistant_bench.harnesses.endpoint import BASE_URL_VAR, HEADERS_VAR, KEY_FILE_VAR
+from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.paths import data_dir
+from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -47,6 +56,60 @@ EXPORT_FILE = FIXTURES / 'nixos-config.json'
 REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
 REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
+
+
+# ── Families ──
+
+
+TASK_SETTINGS = TaskTestsSettings(
+    scorer='tests', display_name='Family', samples=1, max_output_tokens=64
+)
+
+
+def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -> Path:
+    """Write a case family in the `message` category, returning its empty cases file."""
+    directory = families_dir / name
+    directory.mkdir(parents=True)
+    (directory / 'family.toml').write_text(
+        textwrap.dedent(
+            f"""\
+            scorer = "votes"
+            display_name = "Family {name}"
+            systems = {json.dumps(systems)}
+            samples = 1
+            max_output_tokens = 64
+            categories = ["message"]
+            reference = "{systems[0]}"
+            """
+        )
+    )
+    cases = directory / 'cases.jsonl'
+    cases.write_text('')
+    return cases
+
+
+def write_task_family(families_dir: Path, *task_ids: str, name: str = 'f') -> None:
+    """Write a task family in the `smoke` category, copying the echo task per ID."""
+    directory = families_dir / name
+    (directory / 'tasks').mkdir(parents=True)
+    (directory / 'family.toml').write_text(
+        textwrap.dedent(
+            f"""\
+            scorer = "tests"
+            display_name = "Family {name}"
+            samples = 1
+            categories = ["smoke"]
+            """
+        )
+    )
+    for task_id in task_ids:
+        target = directory / 'tasks' / task_id
+        shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
+        config = target / 'task.toml'
+        config.write_text(config.read_text().replace('smoke/echo', f'{name}/{task_id}'))
+
+
+# ── Systems and Trials ──
 
 
 def make_system(**overrides: Any) -> System:
@@ -91,7 +154,7 @@ def write_trial(
     trial_dir = job_dir / name
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:
-        (trial_dir / 'agent' / 'output.txt').write_text(output)
+        (trial_dir / 'agent' / OUTPUT_FILE).write_text(output)
     exception = ExceptionInfo(
         exception_type=error or '',
         exception_message='',
@@ -223,7 +286,7 @@ class Request:
 
 @dataclass
 class StubEndpoint:
-    """A chat-completions server on 127.0.0.1 that records requests."""
+    """A chat-completions server on a loopback address that records requests."""
 
     url: str
     key_file: Path
@@ -235,10 +298,67 @@ class StubEndpoint:
     @property
     def env(self) -> dict[str, str]:
         return {
-            'BENCH_API_BASE_URL': f'{self.url}/v1',
-            'BENCH_API_KEY_FILE': str(self.key_file),
-            'BENCH_API_HEADERS': '{"x-trace": "bench"}',
+            BASE_URL_VAR: f'{self.url}/v1',
+            KEY_FILE_VAR: str(self.key_file),
+            HEADERS_VAR: '{"x-trace": "bench"}',
         }
+
+
+class IPv6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def serve_stub(
+    tmp_path: Path,
+    context: ssl.SSLContext | None = None,
+    ca_file: Path | None = None,
+    host: str = '127.0.0.1',
+) -> Iterator[StubEndpoint]:
+    """Serve the stub endpoint on `host` until the generator resumes."""
+    key_file = tmp_path / 'api-key'
+    key_file.write_text('test-key\n')
+    stub: StubEndpoint
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers['Content-Length'])
+            stub.requests.append(
+                Request(
+                    path=self.path,
+                    headers={k.lower(): v for k, v in self.headers.items()},
+                    body=json.loads(self.rfile.read(length)),
+                )
+            )
+            payload = json.dumps(stub.response).encode()
+            self.send_response(stub.status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.send_header('x-request-id', 'req-1')
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    ipv6 = ipaddress.ip_address(host).version == 6
+    server = (IPv6Server if ipv6 else ThreadingHTTPServer)((host, 0), Handler)
+    scheme = 'http'
+    if context is not None:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        scheme = 'https'
+    stub = StubEndpoint(
+        url=f'{scheme}://{f"[{host}]" if ipv6 else host}:{server.server_port}',
+        key_file=key_file,
+        ca_file=ca_file,
+    )
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True
+    )
+    thread.start()
+    yield stub
+    server.shutdown()
+    thread.join()
+    server.server_close()
 
 
 # ── Arena ──

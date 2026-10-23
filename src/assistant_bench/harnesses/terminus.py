@@ -1,4 +1,4 @@
-"""Harbor's Terminal-Bench agent, sending its model calls to the bench endpoint."""
+"""Harbor's terminus-2 agent, sending its model calls to the bench endpoint."""
 
 from collections.abc import Mapping
 from importlib import metadata
@@ -19,7 +19,7 @@ class TerminusOptions(Labels, Terminus2Options):
 
 
 class Terminus(Terminus2):
-    """Terminus 2 whose LiteLLM client comes from the bench's endpoint.
+    """Harbor's `Terminus2`, whose LiteLLM client comes from the bench's endpoint.
 
     The client carries the key file, the CA bundle, the extra headers, and the
     local address, so none of them enters the job's `kwargs`, `env`, or config.

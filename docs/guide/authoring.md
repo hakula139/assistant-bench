@@ -18,7 +18,7 @@ categories = ["message"]
 
 | Field               | Required        | Meaning                                                                                                                                                                                                                                                                     |
 | ------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`            | yes             | `votes` for outputs ranked by the owner's blind pairwise votes, or `tests` for the reward of each task's own tests, which only a `tasks/` family has                                                                                                                        |
+| `scorer`            | yes             | `votes` for a `cases.jsonl` family, whose outputs the owner's blind pairwise votes rank, or `tests` for a `tasks/` family, scored by the reward of each task's own tests. `bench` refuses any other pairing                                                                 |
 | `aspect`            | public families | The skill the family measures, one of the IDs in `web/src/lib/aspects.ts`, such as `writing`. A public family's ID then starts with the aspect, as in `writing-zh`                                                                                                          |
 | `display_name`      | yes             | The family's short name within its aspect, such as `English`, or its whole name without an aspect. Its full name, the aspect's title then the short name as in `Writing · English`, is unique across families                                                               |
 | `public`            | no              | Whether the public site lists the family, its systems, and its reports. `false` by default, so test families stay off the site                                                                                                                                              |
@@ -70,8 +70,6 @@ A task's directory name is its ID, unique across the family's committed and loca
 It then runs Harbor's oracle and nop agents three times on each task, and fails unless every oracle attempt earns reward 1 and every nop attempt earns 0, so the reference solution passes a task that the repository as committed fails.
 
 `bench run` runs only case families, so `bench check` validates a task family but nothing produces outputs for `bench close` ([#47](https://github.com/hakula139/assistant-bench/issues/47)).
-
-A task family scored by `votes` cannot pass `bench check` yet, since the bench reads the verifier's reward only for a family scored by `tests`.
 
 A local task is a directory under the data directory's `cases/<family>/`, which `bench check` reads beside the committed tasks. It carries `source = "held-out"` or `"transcript"`, as [Data](../conventions/data.md#data-classes) describes.
 

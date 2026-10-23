@@ -12,7 +12,7 @@ Conventions for Python code under `src/` and `tests/` that the tooling and the m
 
 ## Errors
 
-- Raise `ValueError` for input an author can fix, naming the item and the accepted values, as in `system 'x': effort 'medium' is not one of low, high`. The CLI turns the `ValueError` of an invalid family or case into `typer.BadParameter`.
+- Raise `ValueError` for input an author can fix, naming the item and the accepted values, as in `system 'x': effort 'medium' is not one of low, high`. The CLI prints the `ValueError` of an invalid family, case, task, or system to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family or system.
 - Let HTTP and Harbor errors propagate. Harbor records them on the trial, and its retry policy decides what reruns.
 
 ## Modules

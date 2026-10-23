@@ -1,6 +1,8 @@
 import asyncio
-import shutil
+import functools
 import subprocess
+import sys
+import textwrap
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, SourceJobConfig
+from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
 from harbor.models.trial.config import AgentConfig
 
@@ -30,7 +33,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import options
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
-from support import finish_job, make_system, write_trial
+from support import finish_job, make_system, write_task_family, write_trial
 
 
 VOTES = Family(
@@ -52,6 +55,13 @@ TESTS = Family(
 )
 
 
+def votes_family(**settings: Any) -> Family:
+    """Return `VOTES` with these settings replaced."""
+    return VOTES.model_copy(
+        update={'settings': VOTES.settings.model_copy(update=settings)}
+    )
+
+
 def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
     """Return the agent kwargs that a family with this bound sends a system."""
     settings = VOTES.settings.model_copy(
@@ -60,19 +70,51 @@ def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
     return options.generate(system, settings)
 
 
-def installed_version(path: Path) -> str:
-    config = Task(path, disable_verification=True).config
+def version(config: task_config.TaskConfig) -> str:
     assert config.task is not None
     assert config.task.version is not None
     return config.task.version
 
 
-class TestRenderTasks:
-    def test_pins_the_version_of_a_known_task(self) -> None:
-        assert (
-            jobs.task_version('smoke-text/en-greeting', 'Hi.') == '1.0.0+74bceeb403c7'
-        )
+def installed_version(path: Path) -> str:
+    return version(Task(path, disable_verification=True).config)
 
+
+class TestRenderTaskConfig:
+    def test_pins_the_version_of_a_known_task(self) -> None:
+        config = jobs.render_task_config('smoke-text/en-greeting', 'Hi.')
+
+        assert version(config) == '1.0.0+2fe836d90551'
+
+    @pytest.mark.parametrize(
+        ('target', 'attribute', 'value'),
+        [
+            pytest.param(jobs, 'STOCK_IMAGE', 'debian:forky-slim', id='stock-image'),
+            pytest.param(jobs, 'AGENT_TIMEOUT_SEC', 60.0, id='agent-timeout'),
+            pytest.param(
+                task_config,
+                'EnvironmentConfig',
+                functools.partial(task_config.EnvironmentConfig, cpus=2),
+                id='another-environment-setting',
+            ),
+        ],
+    )
+    def test_changes_the_version_with_each_setting_it_renders(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        target: object,
+        attribute: str,
+        value: Any,
+    ) -> None:
+        before = version(jobs.render_task_config('f/a', 'Hi.'))
+        monkeypatch.setattr(target, attribute, value)
+
+        after = version(jobs.render_task_config('f/a', 'Hi.'))
+
+        assert after != before
+
+
+class TestRenderTasks:
     def test_writes_a_versioned_task_on_the_stock_image(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
@@ -80,8 +122,8 @@ class TestRenderTasks:
         (path,) = jobs.render_tasks(family, [case])
 
         assert path == data_dir / 'tasks' / 'smoke-text' / 'en-greeting'
-        assert installed_version(path) == jobs.task_version(
-            'smoke-text/en-greeting', case.instruction
+        assert installed_version(path) == version(
+            jobs.render_task_config('smoke-text/en-greeting', case.instruction)
         )
         task = Task(path, disable_verification=True)
         assert task.config.environment.docker_image == jobs.STOCK_IMAGE
@@ -107,18 +149,6 @@ class TestRenderTasks:
             'smoke-text/zh-greeting': DiffAction.REUSE,
         }
 
-    def test_reruns_every_task_when_the_stock_image_changes(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        family = load_family('smoke-text')
-        cases = load_cases(family)
-        before = [installed_version(path) for path in jobs.render_tasks(family, cases)]
-        monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
-
-        after = [installed_version(path) for path in jobs.render_tasks(family, cases)]
-
-        assert all(new != old for new, old in zip(after, before, strict=True))
-
     def test_prunes_tasks_for_cases_the_family_no_longer_has(
         self, data_dir: Path
     ) -> None:
@@ -136,39 +166,45 @@ class TestRenderTasks:
 
 
 class TestDriftedSystems:
-    def test_returns_the_recorded_and_current_fingerprints(
-        self, data_dir: Path
+    CURRENT = make_system()
+
+    @pytest.mark.parametrize(
+        ('kwargs', 'expected'),
+        [
+            pytest.param(
+                {'system': CURRENT.name, 'fingerprint': 'fp-old'},
+                [(CURRENT.name, 'fp-old', CURRENT.fingerprint)],
+                id='changed-fingerprint',
+            ),
+            pytest.param(
+                {'system': CURRENT.name, 'fingerprint': CURRENT.fingerprint},
+                [],
+                id='kept-fingerprint',
+            ),
+            pytest.param(
+                {'system': 'retired', 'fingerprint': 'fp-old'},
+                [],
+                id='unselected-system',
+            ),
+            pytest.param({'system': CURRENT.name}, [], id='no-recorded-fingerprint'),
+        ],
+    )
+    def test_returns_each_selected_system_whose_trial_recorded_another_fingerprint(
+        self,
+        data_dir: Path,
+        kwargs: dict[str, str],
+        expected: list[tuple[str, str, str]],
     ) -> None:
-        current = make_system()
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            AgentConfig(
-                import_path='x:Y',
-                kwargs={'system': current.name, 'fingerprint': 'fp-old'},
-            ),
+            AgentConfig(import_path='x:Y', kwargs=kwargs),
             task='f/a',
         )
 
-        assert jobs.drifted_systems(VOTES, [current]) == [
-            (current.name, 'fp-old', current.fingerprint)
-        ]
+        drifted = jobs.drifted_systems(VOTES, [self.CURRENT])
 
-    def test_accepts_a_system_whose_trials_kept_its_fingerprint(
-        self, data_dir: Path
-    ) -> None:
-        current = make_system()
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'a__1',
-            AgentConfig(
-                import_path='x:Y',
-                kwargs={'system': current.name, 'fingerprint': current.fingerprint},
-            ),
-            task='f/a',
-        )
-
-        assert jobs.drifted_systems(VOTES, [current]) == []
+        assert drifted == expected
 
     def test_returns_each_system_once_per_recorded_fingerprint(
         self, data_dir: Path
@@ -190,34 +226,12 @@ class TestDriftedSystems:
                 task=f'f/{trial}',
             )
 
-        assert jobs.drifted_systems(VOTES, [small, large]) == [
+        drifted = jobs.drifted_systems(VOTES, [small, large])
+
+        assert drifted == [
             ('acme-large', 'fp-old', large.fingerprint),
             ('acme-small', 'fp-old', small.fingerprint),
         ]
-
-    def test_ignores_a_system_the_run_does_not_select(self, data_dir: Path) -> None:
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'a__1',
-            AgentConfig(
-                import_path='x:Y',
-                kwargs={'system': 'retired', 'fingerprint': 'fp-old'},
-            ),
-            task='f/a',
-        )
-
-        assert jobs.drifted_systems(VOTES, [make_system()]) == []
-
-    def test_ignores_a_trial_that_recorded_no_fingerprint(self, data_dir: Path) -> None:
-        current = make_system()
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': current.name}),
-            task='f/a',
-        )
-
-        assert jobs.drifted_systems(VOTES, [current]) == []
 
 
 class TestCaseJob:
@@ -281,17 +295,10 @@ class TestCaseJob:
         ]
 
 
-def smoke_family(families_dir: Path, *task_ids: str) -> tuple[Family, list[Path]]:
-    """Copy the smoke family, adding copies of its echo task under other IDs."""
-    shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
-    for task_id in task_ids:
-        if task_id == 'echo':
-            continue
-        target = families_dir / 'smoke' / 'tasks' / task_id
-        shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
-        config = target / 'task.toml'
-        config.write_text(config.read_text().replace('smoke/echo', f'smoke/{task_id}'))
-    family = load_family('smoke')
+def task_family(families_dir: Path, *task_ids: str) -> tuple[Family, list[Path]]:
+    """Write task family `f` with a copy of the smoke echo task per ID."""
+    write_task_family(families_dir, *task_ids)
+    family = load_family('f')
     return family, [case_task(family, task_id) for task_id in task_ids]
 
 
@@ -399,7 +406,7 @@ class TestCheckTasks:
         value: Any,
         message: str,
     ) -> None:
-        family, tasks = smoke_family(families_dir, 'echo')
+        family, tasks = task_family(families_dir, 'echo')
         break_setting(tasks[0], path, value)
 
         with pytest.raises(ValueError) as error:
@@ -408,13 +415,13 @@ class TestCheckTasks:
         assert f'tasks/echo/task.toml: {message}' in str(error.value)
 
     def test_accepts_a_string_artifact(self, families_dir: Path) -> None:
-        family, tasks = smoke_family(families_dir, 'echo')
+        family, tasks = task_family(families_dir, 'echo')
         break_setting(tasks[0], ('artifacts',), ['/app'])
 
         jobs.check_tasks(family, tasks)
 
     def test_names_a_problem_in_a_later_task(self, families_dir: Path) -> None:
-        family, tasks = smoke_family(families_dir, 'echo', 'again')
+        family, tasks = task_family(families_dir, 'echo', 'again')
         break_setting(tasks[1], ('environment', 'cpus'), None)
 
         with pytest.raises(ValueError) as error:
@@ -437,7 +444,7 @@ class TestCheckTasks:
         assert 'cases/smoke/echo/task.toml: set [environment] cpus' in str(error.value)
 
     def test_names_every_problem_of_a_task(self, families_dir: Path) -> None:
-        family, tasks = smoke_family(families_dir, 'echo')
+        family, tasks = task_family(families_dir, 'echo')
         break_setting(tasks[0], ('environment', 'cpus'), None)
         break_setting(tasks[0], ('environment', 'memory_mb'), None)
 
@@ -450,13 +457,16 @@ class TestCheckTasks:
     def test_rejects_a_task_toml_that_fails_to_validate(
         self, families_dir: Path
     ) -> None:
-        family, tasks = smoke_family(families_dir, 'echo')
+        family, tasks = task_family(families_dir, 'echo')
         break_setting(tasks[0], ('environment', 'cpus'), 'two')
 
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
-        assert 'tasks/echo/task.toml is not valid:' in str(error.value)
+        assert str(error.value).startswith(
+            "family 'f':\ntasks/echo/task.toml: environment.cpus: Input should be a "
+            'valid integer'
+        )
 
 
 class TestCheckJob:
@@ -486,6 +496,7 @@ class TestHasJobs:
     @pytest.mark.parametrize(
         ('directory', 'result', 'expected'),
         [(False, False, False), (True, False, False), (True, True, True)],
+        ids=['no-job', 'job-without-a-result', 'finished-job'],
     )
     def test_reports_whether_the_family_has_a_job(
         self, data_dir: Path, directory: bool, result: bool, expected: bool
@@ -497,39 +508,73 @@ class TestHasJobs:
         if result:
             (job / 'result.json').touch()
 
-        assert jobs.has_jobs(family) is expected
+        found = jobs.has_jobs(family)
+
+        assert found is expected
 
     def test_ignores_a_check_job(self, data_dir: Path) -> None:
         job = data_dir / 'checks' / 'smoke' / 'job-1'
         job.mkdir(parents=True)
         (job / 'result.json').touch()
 
-        assert jobs.has_jobs(load_family('smoke')) is False
+        found = jobs.has_jobs(load_family('smoke'))
+
+        assert found is False
 
 
 class TestRunJob:
-    def test_passes_the_config_to_harbor_with_telemetry_off(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    @staticmethod
+    def stub_harbor(
+        directory: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
+    ) -> Path:
+        """Put a `harbor` beside the interpreter that records its call and exits.
+
+        It writes its arguments, the variables `run_job` sets, and the config it
+        receives beside itself.
+        """
+        harbor = directory / 'harbor'
+        harbor.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/bin/sh
+                printf '%s\\n' "$@" > "$0.args"
+                printf '%s\\n' "$HARBOR_TELEMETRY" "$LITELLM_MODE" > "$0.env"
+                cp "$3" "$0.json"
+                exit {exit_code}
+                """
+            )
+        )
+        harbor.chmod(0o755)
+        monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
+        return harbor
+
+    def test_runs_harbor_on_the_config_without_telemetry_or_dotenv(
+        self, data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls: list[tuple[list[Any], dict[str, str], JobConfig]] = []
-
-        def fake_run(args: list[Any], check: bool, env: dict[str, str]) -> None:
-            config = JobConfig.model_validate_json(Path(args[3]).read_text())
-            calls.append((args, env, config))
-
-        monkeypatch.setattr(subprocess, 'run', fake_run)
+        harbor = self.stub_harbor(tmp_path, monkeypatch, 0)
         family = load_family('smoke')
         job = jobs.check_job(family, [case_task(family, 'echo')])
 
         job_dir = jobs.run_job(job)
 
-        ((args, env, config),) = calls
-        assert Path(args[0]).name == 'harbor'
-        assert args[1:3] == ['run', '--config']
-        assert args[4:] == ['--yes']
-        assert env['HARBOR_TELEMETRY'] == 'off'
-        assert config == job
+        args = Path(f'{harbor}.args').read_text().splitlines()
+        assert args[:2] == ['run', '--config']
+        assert args[3:] == ['--yes']
+        assert Path(f'{harbor}.env').read_text().splitlines() == ['off', 'PRODUCTION']
+        assert JobConfig.model_validate_json(Path(f'{harbor}.json').read_text()) == job
         assert job_dir == data_dir / 'checks' / 'smoke' / job.job_name
+
+    def test_raises_when_harbor_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.stub_harbor(tmp_path, monkeypatch, 3)
+        family = load_family('smoke')
+        job = jobs.check_job(family, [case_task(family, 'echo')])
+
+        with pytest.raises(subprocess.CalledProcessError) as error:
+            jobs.run_job(job)
+
+        assert error.value.returncode == 3
 
 
 class TestIngest:
@@ -577,19 +622,7 @@ class TestIngest:
     def test_skips_a_trial_whose_case_no_longer_has_a_task(
         self, data_dir: Path
     ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-                gates=Gates(script='hans'),
-            ),
-        )
+        family = votes_family(samples=1, gates=Gates(script='hans'))
         cases = [
             Case(id='a', category='reply', source='held-out', instruction='Hi.'),
             Case(id='b', category='reply', source='held-out', instruction='Hi.'),
@@ -686,7 +719,7 @@ class TestIngest:
 
         outputs = jobs.ingest(VOTES, {system.name: system})
 
-        assert [(o.case, o.error) for o in outputs] == [
+        assert [(output.case, output.error) for output in outputs] == [
             ('a', 'TimeoutError'),
             ('b', None),
         ]
@@ -716,18 +749,7 @@ class TestIngest:
     def test_prefers_a_trial_that_sent_the_current_request(
         self, data_dir: Path
     ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-            ),
-        )
+        family = votes_family(samples=1)
         system = make_system()
         jobs_dir = data_dir / 'jobs' / 'f'
         for job, tokens, output in (
@@ -754,18 +776,7 @@ class TestIngest:
     def test_keeps_the_oldest_trial_that_sent_the_current_request(
         self, data_dir: Path
     ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-            ),
-        )
+        family = votes_family(samples=1)
         system = make_system()
         jobs_dir = data_dir / 'jobs' / 'f'
         for job, output in (
@@ -788,18 +799,7 @@ class TestIngest:
         ]
 
     def test_keeps_an_older_success_over_a_newer_error(self, data_dir: Path) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-            ),
-        )
+        family = votes_family(samples=1)
         system = make_system()
         jobs_dir = data_dir / 'jobs' / 'f'
         write_trial(
@@ -832,18 +832,7 @@ class TestIngest:
             import_path='assistant_bench.harnesses.generate:Generate',
             kwargs={'system': system.name, 'fingerprint': system.fingerprint},
         )
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-            ),
-        )
+        family = votes_family(samples=1)
         jobs_dir = data_dir / 'jobs' / 'f'
         write_trial(
             jobs_dir / 'job-1', 'a__1', generate, task='f/a', error='TimeoutError'
@@ -852,9 +841,9 @@ class TestIngest:
 
         outputs = jobs.ingest(family, {system.name: system})
 
-        assert [(o.job, o.case, o.error, o.text) for o in outputs] == [
-            ('job-2', 'a', None, 'Hi.')
-        ]
+        assert [
+            (output.job, output.case, output.error, output.text) for output in outputs
+        ] == [('job-2', 'a', None, 'Hi.')]
 
     @pytest.mark.parametrize(
         ('names', 'fingerprints'),
@@ -867,18 +856,7 @@ class TestIngest:
     def test_keeps_samples_per_name_and_fingerprint(
         self, data_dir: Path, names: tuple[str, str], fingerprints: tuple[str, str]
     ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-            ),
-        )
+        family = votes_family(samples=1)
         jobs_dir = data_dir / 'jobs' / 'f'
         samples = list(zip(('job-1', 'job-2'), names, fingerprints, strict=True))
         for job, name, fingerprint in samples:
@@ -890,27 +868,14 @@ class TestIngest:
 
         outputs = jobs.ingest(family, {})
 
-        assert sorted((o.system, o.fingerprint, o.text) for o in outputs) == sorted(
-            (name, fingerprint, job) for job, name, fingerprint in samples
-        )
+        assert sorted(
+            (output.system, output.fingerprint, output.text) for output in outputs
+        ) == sorted((name, fingerprint, job) for job, name, fingerprint in samples)
 
     def test_gates_each_output_against_its_case_instruction(
         self, data_dir: Path
     ) -> None:
-        family = Family(
-            name='f',
-            source='cases',
-            settings=VotesSettings(
-                scorer='votes',
-                display_name='Family F',
-                systems=['acme-large'],
-                samples=1,
-                max_output_tokens=300,
-                reference='acme-large',
-                language='zh',
-                gates=Gates(script='hans'),
-            ),
-        )
+        family = votes_family(samples=1, language='zh', gates=Gates(script='hans'))
         generate = AgentConfig(import_path='x:Y', kwargs={'system': 's'})
         stop = AgentContext(metadata={'finish_reason': 'stop'})
         for case, output in (('a', '臺北今天很热。'), ('b', '臺北今天很熱。')):
@@ -926,7 +891,7 @@ class TestIngest:
 
         outputs = jobs.ingest(family, {})
 
-        assert [(o.case, o.gate_failures) for o in outputs] == [
+        assert [(output.case, output.gate_failures) for output in outputs] == [
             ('a', []),
             ('b', [Gate.SCRIPT]),
         ]
@@ -988,6 +953,24 @@ class TestIngest:
 
         assert output.system == 'retired'
         assert output.cost_usd is None
+
+    def test_names_a_trial_whose_result_is_truncated(self, data_dir: Path) -> None:
+        trial = data_dir / 'jobs' / 'f' / 'job-1' / 'a__1'
+        write_trial(
+            trial.parent,
+            trial.name,
+            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            task='f/a',
+        )
+        result = trial / 'result.json'
+        result.write_text(result.read_text()[:20])
+
+        with pytest.raises(ValueError) as error:
+            jobs.ingest(VOTES, {})
+
+        assert str(error.value).startswith(
+            f"Source trial '{trial.resolve()}' has an unreadable result.json"
+        )
 
 
 class TestReadTrials:

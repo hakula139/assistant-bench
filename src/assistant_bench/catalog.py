@@ -1,5 +1,6 @@
 """Systems under test, resolved against the model catalog exported from nixos-config."""
 
+import difflib
 import hashlib
 import json
 import os
@@ -14,24 +15,7 @@ from assistant_bench.paths import REPO_ROOT
 
 EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
-
-
-class Price(BaseModel):
-    """Token prices in USD per million tokens."""
-
-    model_config = ConfigDict(extra='forbid', frozen=True)
-
-    input: float
-    output: float
-    cache_read: float
-
-    def cost(self, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
-        """Return the USD cost of one call. `input_tokens` includes the cached ones."""
-        return (
-            (input_tokens - cached_tokens) * self.input
-            + cached_tokens * self.cache_read
-            + output_tokens * self.output
-        ) / 1_000_000
+SYSTEMS_FILE = 'systems.toml'
 
 
 # ── nixos-config Export ──
@@ -91,6 +75,24 @@ def load_export() -> NixosConfigExport:
 # ── Systems ──
 
 
+class Price(BaseModel):
+    """Token prices in USD per million tokens."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    input: float
+    output: float
+    cache_read: float
+
+    def cost(self, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
+        """Return the USD cost of one call. `input_tokens` includes the cached ones."""
+        return (
+            (input_tokens - cached_tokens) * self.input
+            + cached_tokens * self.cache_read
+            + output_tokens * self.output
+        ) / 1_000_000
+
+
 class SystemConfig(BaseModel):
     """One table of `systems.toml`, naming either a catalog model or a bare route.
 
@@ -103,8 +105,8 @@ class SystemConfig(BaseModel):
 
     model: str | None = None
     route: str | None = None
-    effort: str | None = None
     price: Price | None = None
+    effort: str | None = None
     prompt: str | None = None
     display_name: str | None = Field(default=None, min_length=1)
 
@@ -132,12 +134,12 @@ class System(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    display_name: str
     route: str
+    price: Price | None
     effort: str | None
     prompt: str | None
-    price: Price | None
     harness: str = 'generate'
+    display_name: str
 
     @property
     def fingerprint(self) -> str:
@@ -157,7 +159,7 @@ class System(BaseModel):
 
 
 def load_systems(
-    export: NixosConfigExport, path: Path = REPO_ROOT / 'systems.toml'
+    export: NixosConfigExport, path: Path = REPO_ROOT / SYSTEMS_FILE
 ) -> dict[str, System]:
     return parse_systems(export, path.read_text())
 
@@ -200,17 +202,22 @@ def resolve_system(
         assert config.display_name is not None
         return System(
             name=name,
-            display_name=config.display_name,
             route=config.route,
+            price=config.price,
             effort=config.effort,
             prompt=prompt,
-            price=config.price,
+            display_name=config.display_name,
         )
 
     assert config.model is not None
     entry = export.catalog.models.get(config.model)
     if entry is None:
-        raise ValueError(f'system {name!r}: unknown catalog model {config.model!r}')
+        close = difflib.get_close_matches(config.model, export.catalog.models)
+        hint = f', so check it against {", ".join(close)}' if close else ''
+        raise ValueError(
+            f'system {name!r}: model {config.model!r} is not in the nixos-config '
+            f'catalog, data/llm-models.nix{hint}'
+        )
 
     if not entry.channel_id:
         raise ValueError(
@@ -225,11 +232,11 @@ def resolve_system(
     ((channel, route),) = entry.channel_id.items()
     return System(
         name=name,
-        display_name=config.display_name or entry.name,
         route=route,
+        price=_price(entry.channel_cost.get(channel)),
         effort=_resolve_effort(name, config.effort, entry.thinking),
         prompt=prompt,
-        price=_price(entry.channel_cost.get(channel)),
+        display_name=config.display_name or entry.name,
     )
 
 
@@ -247,8 +254,8 @@ def pin(system: System) -> SystemConfig:
         )
     return SystemConfig(
         route=system.route,
-        effort=system.effort,
         price=system.price,
+        effort=system.effort,
         display_name=system.display_name,
     )
 

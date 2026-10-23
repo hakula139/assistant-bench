@@ -18,6 +18,9 @@ from pydantic import (
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
+# ── Settings ──
+
+
 class _Settings(BaseModel):
     """Settings every family shares.
 
@@ -118,6 +121,12 @@ type Settings = Annotated[
 _SETTINGS = TypeAdapter[Settings](Settings)
 
 
+# ── Families and Cases ──
+
+
+type CaseSource = Literal['synthetic', 'public', 'transcript', 'held-out']
+
+
 class Family(BaseModel):
     """A directory under `families/`, holding either `cases.jsonl` or `tasks/`."""
 
@@ -135,7 +144,7 @@ class Case(BaseModel):
 
     id: str = Field(pattern=r'^[a-z0-9][a-z0-9-]*$')
     category: str
-    source: Literal['synthetic', 'public', 'transcript', 'held-out']
+    source: CaseSource
     instruction: str
     checklist: list[str] = []
 
@@ -146,7 +155,7 @@ class _TaskMetadata(BaseModel):
     model_config = ConfigDict(extra='ignore', frozen=True)
 
     category: str
-    source: Literal['synthetic', 'public', 'transcript', 'held-out']
+    source: CaseSource
 
 
 class _TaskSection(BaseModel):
@@ -169,6 +178,9 @@ class _TaskManifest(BaseModel):
     metadata: _TaskMetadata
 
 
+# ── Loading ──
+
+
 def family_names() -> list[str]:
     """Return the name of every directory under `families/` holding a `family.toml`."""
     return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
@@ -181,22 +193,31 @@ def load_family(name: str) -> Family:
     ------
     ValueError
         No family has the name, the family holds both or neither of
-        `cases.jsonl` and `tasks/`, a public family sets no aspect or names
-        itself without that aspect's prefix, a case family sets no
-        `max_output_tokens`, or a family scored by tests holds cases, which have
-        no tests to run.
+        `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
+        public family sets no aspect or names itself without that aspect's
+        prefix, a case family sets no `max_output_tokens`, or the scorer does not
+        fit the source: `votes` ranks cases, and `tests` runs each task's tests.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
-        raise ValueError(f'no family named {name!r}')
+        raise ValueError(
+            f'no family named {name!r}, so choose among {", ".join(family_names())}'
+        )
     has_cases = (directory / 'cases.jsonl').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
             f'family {name!r}: expected exactly one of cases.jsonl and tasks/'
         )
 
-    with (directory / 'family.toml').open('rb') as file:
-        settings = _SETTINGS.validate_python(tomllib.load(file))
+    prefix = f'family {name!r}: family.toml'
+    try:
+        with (directory / 'family.toml').open('rb') as file:
+            settings = _SETTINGS.validate_python(tomllib.load(file))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(f'{prefix} is not valid TOML: {error}') from error
+    except ValidationError as error:
+        # The first part of each error's path is the scorer's tag.
+        raise ValueError(error_lines(error, prefix, skip=1)) from error
     if settings.public:
         if settings.aspect is None:
             raise ValueError(f'family {name!r}: a public family needs an aspect')
@@ -207,10 +228,9 @@ def load_family(name: str) -> Family:
             )
     if has_cases and settings.max_output_tokens is None:
         raise ValueError(f'family {name!r}: case families need max_output_tokens')
-    if has_cases and isinstance(settings, TaskTestsSettings):
+    if has_cases != isinstance(settings, VotesSettings):
         raise ValueError(
-            f'family {name!r}: scorer "tests" needs tasks/ with their own tests, '
-            'so score cases.jsonl by "votes"'
+            f'family {name!r}: score cases.jsonl by "votes" and tasks/ by "tests"'
         )
     return Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
@@ -233,20 +253,21 @@ def load_cases(family: Family) -> list[Case]:
     """
     entries = _task_entries(family) if family.source == 'tasks' else _case_lines(family)
     cases: dict[str, Case] = {}
-    sources: dict[str, str] = {}
+    locations: dict[str, str] = {}
     for location, case in entries:
         if case.id in cases:
             raise ValueError(
                 f'family {family.name!r}: case {case.id!r} appears at '
-                f'{sources[case.id]} and {location}'
+                f'{locations[case.id]} and {location}'
             )
         if case.category not in family.settings.categories:
             raise ValueError(
                 f'family {family.name!r}: case {case.id!r} at {location} has '
-                f'category {case.category!r}, which categories does not list'
+                f'category {case.category!r}, missing from `categories` in '
+                'family.toml'
             )
         cases[case.id] = case
-        sources[case.id] = location
+        locations[case.id] = location
     return list(cases.values())
 
 
@@ -266,13 +287,13 @@ def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
                 case = Case.model_validate_json(line)
             except ValidationError as error:
                 raise ValueError(
-                    f'family {family.name!r}: {location} is not a valid case: {error}'
+                    error_lines(error, f'family {family.name!r}: {location}')
                 ) from error
             yield location, case
 
 
 def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
-    for root, prefix in task_roots(family):
+    for root, prefix in _task_roots(family):
         if not root.is_dir():
             continue
         for directory in sorted(path for path in root.iterdir() if path.is_dir()):
@@ -295,7 +316,7 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
         ) from error
     except ValidationError as error:
         raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not valid: {error}'
+            error_lines(error, f'family {family.name!r}: {location}/task.toml')
         ) from error
     expected = f'{family.name}/{directory.name}'
     if manifest.task.name != expected:
@@ -318,11 +339,32 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
         )
     except ValidationError as error:
         raise ValueError(
-            f'family {family.name!r}: {location}/task.toml is not a valid case: {error}'
+            error_lines(error, f'family {family.name!r}: {location}')
         ) from error
 
 
-def task_roots(family: Family) -> list[tuple[Path, str]]:
+def error_lines(error: ValidationError, prefix: str, *, skip: int = 0) -> str:
+    """Return one line per validation error, starting with `prefix` and the field.
+
+    `skip` drops that many leading parts of each error's path, such as the tag
+    of a tagged union.
+    """
+    lines = []
+    for detail in error.errors():
+        message = (
+            str(detail['ctx']['error'])
+            if detail['type'] == 'value_error'
+            else detail['msg']
+        )
+        path = '.'.join(str(part) for part in detail['loc'][skip:])
+        lines.append(f'{prefix}: {path}: {message}' if path else f'{prefix}: {message}')
+    return '\n'.join(lines)
+
+
+# ── Task Paths ──
+
+
+def _task_roots(family: Family) -> list[tuple[Path, str]]:
     """Return each root of a task family's tasks and the label it reports with."""
     return [
         (FAMILIES_DIR / family.name / 'tasks', 'tasks'),
@@ -334,7 +376,7 @@ def task_location(family: Family, task: Path) -> str:
     """Return the label that a task's own directory reports with."""
     return next(
         f'{prefix}/{task.name}'
-        for root, prefix in task_roots(family)
+        for root, prefix in _task_roots(family)
         if task.parent == root
     )
 
@@ -352,7 +394,7 @@ def case_task(family: Family, case_id: str) -> Path:
     """
     if family.source == 'cases':
         return tasks_dir(family) / case_id
-    committed, local = task_roots(family)
-    if (committed[0] / case_id).is_dir():
-        return committed[0] / case_id
-    return local[0] / case_id
+    (committed, _), (local, _) = _task_roots(family)
+    if (committed / case_id).is_dir():
+        return committed / case_id
+    return local / case_id

@@ -1,10 +1,10 @@
 import asyncio
-import shutil
 import sqlite3
 import subprocess
 import textwrap
 from collections import defaultdict
 from contextlib import closing
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,19 +15,21 @@ from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import AgentConfig
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, jobs, report, revisions
 from assistant_bench.arena import api
+from assistant_bench.arena.service import Arena
 from assistant_bench.arena.store import Ballot, Side, VoteStore, votes_file
-from assistant_bench.catalog import load_export, load_systems
+from assistant_bench.catalog import EXPORT_VAR, load_export, load_systems
 from assistant_bench.cli import app
-from assistant_bench.families import Gate, load_cases, load_family
+from assistant_bench.families import Gate, family_names, load_cases, load_family
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.paths import FAMILIES_DIR
 from support import (
     finish_job,
     make_output,
+    write_case_family,
+    write_task_family,
     write_trial,
     write_votes_family,
 )
@@ -36,49 +38,8 @@ from support import (
 runner = CliRunner()
 
 
-def invoke(*args: str) -> tuple[int, str]:
-    result = runner.invoke(app, list(args), env={'COLUMNS': '200'})
-    return result.exit_code, result.output
-
-
-def write_cases_family(families_dir: Path, systems: str, name: str = 'f') -> None:
-    directory = families_dir / name
-    directory.mkdir(parents=True)
-    (directory / 'family.toml').write_text(
-        textwrap.dedent(
-            f"""\
-            scorer = "votes"
-            display_name = "Family F"
-            systems = {systems}
-            samples = 1
-            max_output_tokens = 64
-            categories = ["reply"]
-            reference = "opus-5.5"
-            """
-        )
-    )
-    (directory / 'cases.jsonl').write_text('')
-
-
-def write_task_family(families_dir: Path, *task_ids: str) -> None:
-    """Write family `f` with a copy of the smoke echo task per ID."""
-    directory = families_dir / 'f'
-    (directory / 'tasks').mkdir(parents=True)
-    (directory / 'family.toml').write_text(
-        textwrap.dedent(
-            """\
-            scorer = "tests"
-            display_name = "Family F"
-            samples = 1
-            categories = ["smoke"]
-            """
-        )
-    )
-    for task_id in task_ids:
-        target = directory / 'tasks' / task_id
-        shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
-        config = target / 'task.toml'
-        config.write_text(config.read_text().replace('smoke/echo', f'f/{task_id}'))
+def invoke(*args: str) -> Result:
+    return runner.invoke(app, list(args), env={'COLUMNS': '200'})
 
 
 def trials(
@@ -89,6 +50,13 @@ def trials(
         make_output(case=case, system=system, reward=reward, error=error)
         for _ in range(jobs.CHECK_ATTEMPTS)
     ]
+
+
+def write_job(job_dir: Path) -> None:
+    """Write the files that mark a finished Harbor job without trials."""
+    job_dir.mkdir(parents=True)
+    (job_dir / 'config.json').touch()
+    (job_dir / 'result.json').touch()
 
 
 def write_removed_case(families_dir: Path, data_dir: Path) -> None:
@@ -129,41 +97,69 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 
     def run_job(job: JobConfig) -> Path:
         configs.append(job)
-        return job.jobs_dir / job.job_name
+        return jobs.job_path(job)
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
+
+
+@dataclass
+class Site:
+    """The stub site build and what `bench serve` served from it."""
+
+    path: Path
+    builds: list[tuple[list[str], str | None]] = field(default_factory=list)
+    served: list[tuple[list[str], Path]] = field(default_factory=list)
+
+
+@pytest.fixture
+def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Site:
+    """Replace the site build with one that writes a vote page, and record serves."""
+    stub = Site(tmp_path / 'dist')
+
+    def build(args: list[str], **options: Any) -> None:
+        stub.builds.append((args, options['env'].get(cli.LOCAL_SITE_VAR)))
+        (stub.path / 'vote').mkdir(parents=True)
+        (stub.path / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+
+    def serve(arena: Arena, site: Path) -> None:
+        stub.served.append(([family.name for family in arena.families()], site))
+
+    monkeypatch.setattr(cli, 'SITE_DIR', stub.path)
+    monkeypatch.setattr(subprocess, 'run', build)
+    monkeypatch.setattr(api, 'serve', serve)
+    return stub
 
 
 class TestCheck:
     def test_counts_the_cases_of_a_case_family(
         self, submitted: list[JobConfig]
     ) -> None:
-        result = runner.invoke(app, ['check', 'smoke-text'])
-
+        result = invoke('check', 'smoke-text')
         assert result.exit_code == 0, result.output
+
         assert result.output == 'smoke-text: 2 valid cases\n'
         assert submitted == []
 
     def test_checks_every_family_without_a_name(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5"]', name='g')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        write_case_family(families_dir, ['opus-5.5'], name='g')
 
-        exit_code, message = invoke('check')
+        result = invoke('check')
+        assert result.exit_code == 0, result.output
 
-        assert exit_code == 0
-        assert message == 'f: 0 valid cases\ng: 0 valid cases\n'
+        assert result.output == 'f: 0 valid cases\ng: 0 valid cases\n'
         assert submitted == []
 
     def test_checks_a_named_family_once(self, families_dir: Path) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]')
+        write_case_family(families_dir, ['opus-5.5'])
 
-        exit_code, message = invoke('check', 'f', 'f')
+        result = invoke('check', 'f', 'f')
+        assert result.exit_code == 0, result.output
 
-        assert exit_code == 0
-        assert message == 'f: 0 valid cases\n'
+        assert result.output == 'f: 0 valid cases\n'
 
     @pytest.mark.parametrize(
         ('tasks', 'outputs', 'exit_code', 'message'),
@@ -172,49 +168,51 @@ class TestCheck:
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
                 0,
-                'f: the oracle passed every task and the nop failed every task\n',
+                'f: every reference solution passed its tests, and the do-nothing '
+                'agent failed every task\n',
                 id='passed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
                 1,
-                'f: the oracle failed on a\n',
+                'f: the reference solution failed the tests of a\n',
                 id='oracle-failed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'nop', 0.0)],
                 1,
-                'f: the oracle left no trial of a\n',
+                'f: the reference solution left no trial of a\n',
                 id='oracle-left-no-trial',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 1.0)],
                 1,
-                'f: the nop did not fail a\n',
+                'f: the do-nothing agent passed the tests of a\n',
                 id='nop-passed',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0)],
                 1,
-                'f: the nop left no trial of a\n',
+                'f: the do-nothing agent left no trial of a\n',
                 id='nop-left-no-trial',
             ),
             pytest.param(
                 ('a',),
                 [*trials('a', 'oracle', 1.0), *trials('a', 'nop', None)],
                 1,
-                'f: the nop did not fail a\n',
+                'f: the do-nothing agent passed the tests of a\n',
                 id='nop-without-a-verdict',
             ),
             pytest.param(
                 ('a',),
                 [],
                 1,
-                'f: the oracle left no trial of a\nf: the nop left no trial of a\n',
+                'f: the reference solution left no trial of a\n'
+                'f: the do-nothing agent left no trial of a\n',
                 id='no-trials',
             ),
             pytest.param(
@@ -224,7 +222,7 @@ class TestCheck:
                     *trials('a', 'nop', 0.0),
                 ],
                 1,
-                'f: the oracle errored on a (TimeoutError)\n',
+                'f: the reference solution errored on a (TimeoutError)\n',
                 id='oracle-errored',
             ),
             pytest.param(
@@ -234,7 +232,7 @@ class TestCheck:
                     *trials('a', 'nop', 0.0, error='VerifierTimeoutError'),
                 ],
                 1,
-                'f: the nop errored on a (VerifierTimeoutError)\n',
+                'f: the do-nothing agent errored on a (VerifierTimeoutError)\n',
                 id='nop-errored',
             ),
             pytest.param(
@@ -246,7 +244,7 @@ class TestCheck:
                     *trials('b', 'nop', 0.0),
                 ],
                 1,
-                'f: the oracle failed on a, b\n',
+                'f: the reference solution failed the tests of a, b\n',
                 id='both-tasks-failed',
             ),
             pytest.param(
@@ -257,7 +255,8 @@ class TestCheck:
                     *trials('b', 'nop', 0.0),
                 ],
                 1,
-                'f: the oracle failed on a\nf: the oracle left no trial of b\n',
+                'f: the reference solution failed the tests of a\n'
+                'f: the reference solution left no trial of b\n',
                 id='failed-and-missing',
             ),
         ],
@@ -277,13 +276,48 @@ class TestCheck:
             jobs, 'read_trials', lambda family, job_dir, systems: outputs
         )
 
-        result = runner.invoke(app, ['check', 'f'])
+        result = invoke('check', 'f')
 
-        assert (result.exit_code, result.output) == (exit_code, message)
         (job,) = submitted
+        assert (result.exit_code, result.output) == (
+            exit_code,
+            f'Job written to {jobs.job_path(job)}\n{message}',
+        )
         assert [agent.name for agent in job.agents] == ['oracle', 'nop']
         assert job.n_attempts == jobs.CHECK_ATTEMPTS
         assert [task.path.name for task in job.tasks if task.path] == list(tasks)
+
+    def test_reports_the_problems_of_every_task_family(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_task_family(families_dir, 'a', name='f')
+        write_task_family(families_dir, 'a', name='g')
+        outputs = [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)]
+        monkeypatch.setattr(
+            jobs, 'read_trials', lambda family, job_dir, systems: outputs
+        )
+
+        result = invoke('check')
+
+        assert result.exit_code == 1
+        assert [job.jobs_dir.name for job in submitted] == ['f', 'g']
+        assert 'f: the reference solution failed the tests of a\n' in result.output
+        assert 'g: the reference solution failed the tests of a\n' in result.output
+
+    def test_validates_every_family_before_running_a_check(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_task_family(families_dir, 'a', name='f')
+        write_case_family(families_dir, ['ghost'], name='g')
+
+        result = invoke('check')
+
+        assert result.exit_code == 1
+        assert "family 'g' lists ghost" in result.output
+        assert submitted == []
 
     @pytest.mark.parametrize(
         ('old', 'new', 'message'),
@@ -311,33 +345,55 @@ class TestCheck:
         new: str,
         message: str,
     ) -> None:
-        shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
+        write_task_family(families_dir, 'echo', name='smoke')
         config = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
         config.write_text(config.read_text().replace(old, new))
 
-        exit_code, output = invoke('check', 'smoke')
+        result = invoke('check', 'smoke')
 
-        assert exit_code == 2
-        assert message in output
+        assert result.exit_code == 1
+        assert message in result.output
+        assert 'Usage:' not in result.output
         assert submitted == []
 
-    def test_rejects_a_missing_family(self) -> None:
-        exit_code, message = invoke('check', 'nope')
+    def test_rejects_a_missing_family_and_names_the_choices(self) -> None:
+        result = invoke('check', 'nope')
 
-        assert exit_code == 2
-        assert "Invalid value for FAMILY: no family named 'nope'" in message
+        assert result.exit_code == 2
+        assert (
+            f'no family named nope, so choose among {", ".join(family_names())}'
+            in result.output
+        )
 
-    def test_exits_with_the_code_of_a_failed_oracle_run(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_names_the_job_of_a_failed_oracle_run(
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def run_job(job: JobConfig) -> Path:
             raise subprocess.CalledProcessError(5, 'harbor')
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
 
-        exit_code, _ = invoke('check', 'smoke')
+        result = invoke('check', 'smoke')
 
-        assert exit_code == 5
+        assert result.exit_code == 5
+        assert result.output.startswith(
+            'Harbor exited with code 5. Browse its trials with '
+            f'`harbor view {data_dir / "checks" / "smoke"}/'
+        )
+
+    def test_names_the_file_and_field_of_an_invalid_family(
+        self, families_dir: Path
+    ) -> None:
+        config = write_case_family(families_dir, ['opus-5.5']).with_name('family.toml')
+        config.write_text(config.read_text().replace('samples = 1', 'samples = 0'))
+
+        result = invoke('check', 'f')
+
+        assert (result.exit_code, result.output) == (
+            1,
+            "family 'f': family.toml: samples: Input should be greater than or "
+            'equal to 1\n',
+        )
 
     def test_rejects_a_local_case_that_reuses_a_committed_id(
         self, data_dir: Path
@@ -345,24 +401,27 @@ class TestCheck:
         local = data_dir / 'cases' / 'smoke-text.jsonl'
         local.parent.mkdir(parents=True)
         local.write_text(
-            '{"id": "en-greeting", "category": "reply", "source": "held-out", '
+            '{"id": "en-greeting", "category": "message", "source": "held-out", '
             '"instruction": "Hi."}\n'
         )
 
-        exit_code, message = invoke('check', 'smoke-text')
+        result = invoke('check', 'smoke-text')
 
-        assert exit_code == 2
-        assert "case 'en-greeting' appears at" in message
+        assert result.exit_code == 1
+        assert "case 'en-greeting' appears at" in result.output
 
     def test_rejects_a_family_listing_an_unknown_system(
         self, families_dir: Path
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5", "ghost"]')
+        write_case_family(families_dir, ['opus-5.5', 'ghost'])
 
-        exit_code, message = invoke('check', 'f')
+        result = invoke('check', 'f')
 
-        assert exit_code == 2
-        assert 'f lists unknown systems: ghost' in message
+        assert (result.exit_code, result.output) == (
+            1,
+            "family 'f' lists ghost, which systems.toml does not define. Add a "
+            'table to systems.toml or fix the name in families/f/family.toml\n',
+        )
 
     def test_rejects_a_systems_table_that_fails_to_validate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -373,20 +432,31 @@ class TestCheck:
             cli, 'load_systems', lambda export: catalog.load_systems(export, path)
         )
 
-        exit_code, message = invoke('check', 'smoke-text')
+        result = invoke('check', 'smoke-text')
 
-        assert exit_code == 2
-        assert 'Invalid value for systems.toml: 1 validation error' in message
-        assert 'broken' in message
+        assert result.exit_code == 1
+        assert result.output.startswith('1 validation error for systems.toml\nbroken\n')
+
+    def test_reports_a_missing_export_without_a_traceback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(EXPORT_VAR)
+
+        result = invoke('check', 'smoke-text')
+
+        assert (result.exit_code, result.output) == (
+            1,
+            'BENCH_NIXOS_CONFIG is unset. Run bench inside `nix develop`.\n',
+        )
 
 
 class TestRun:
     def test_generates_the_listed_systems_on_every_case(
         self, submitted: list[JobConfig]
     ) -> None:
-        result = runner.invoke(app, ['run', 'smoke-text'])
-
+        result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
+
         family = load_family('smoke-text')
         (job,) = submitted
         assert [agent.kwargs['system'] for agent in job.agents] == (
@@ -399,11 +469,11 @@ class TestRun:
     def test_generates_only_the_named_systems_in_family_order(
         self, submitted: list[JobConfig]
     ) -> None:
-        result = runner.invoke(
-            app, ['run', 'smoke-text', '--system', 'kimi-k3', '--system', 'opus-5.5']
+        result = invoke(
+            'run', 'smoke-text', '--system', 'kimi-k3', '--system', 'opus-5.5'
         )
-
         assert result.exit_code == 0, result.output
+
         (job,) = submitted
         assert [agent.kwargs['system'] for agent in job.agents] == [
             'opus-5.5',
@@ -413,14 +483,12 @@ class TestRun:
     def test_rejects_a_named_system_the_family_does_not_list(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]')
+        write_case_family(families_dir, ['opus-5.5'])
 
-        exit_code, message = invoke(
-            'run', 'f', '--system', 'gpt-6-astra', '--system', 'opus-5.5'
-        )
+        result = invoke('run', 'f', '--system', 'gpt-6-astra', '--system', 'opus-5.5')
 
-        assert exit_code == 2
-        assert 'f does not list gpt-6-astra, so choose among opus-5.5' in message
+        assert result.exit_code == 2
+        assert 'f does not list gpt-6-astra, so choose among opus-5.5' in result.output
         assert submitted == []
 
     def test_generates_after_a_named_run_only_the_systems_it_left_out(
@@ -428,13 +496,13 @@ class TestRun:
     ) -> None:
         named = ['gpt-6.1-sol', 'kimi-k3']
         args = [arg for name in named for arg in ('--system', name)]
-        result = runner.invoke(app, ['run', 'smoke-text', *args])
+        result = invoke('run', 'smoke-text', *args)
         assert result.exit_code == 0, result.output
         first = finish_job(submitted[0])
 
-        result = runner.invoke(app, ['run', 'smoke-text'])
-
+        result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
+
         job = submitted[1]
         plan = asyncio.run(JobPlan.from_config(job))
         (source,) = job.source_jobs
@@ -449,49 +517,48 @@ class TestRun:
         }
 
     def test_rejects_a_task_family(self, submitted: list[JobConfig]) -> None:
-        exit_code, message = invoke('run', 'smoke')
+        result = invoke('run', 'smoke')
 
-        assert exit_code == 2
-        assert 'single-call systems run only case families' in message
+        assert (result.exit_code, result.output) == (
+            1,
+            "family 'smoke' holds tasks/, and bench run runs only families with "
+            'cases.jsonl. Validate its tasks with `uv run bench check smoke`\n',
+        )
         assert submitted == []
 
     def test_generates_every_family_that_lists_systems(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5", "kimi-k3"]', name='g')
-        task = families_dir / 'z'
-        (task / 'tasks').mkdir(parents=True)
-        (task / 'family.toml').write_text(
-            'scorer = "tests"\ndisplay_name = "Z"\nsamples = 1\n'
-        )
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        write_case_family(families_dir, ['opus-5.5', 'kimi-k3'], name='g')
+        write_task_family(families_dir, name='z')
 
-        result = runner.invoke(app, ['run'])
-
+        result = invoke('run')
         assert result.exit_code == 0, result.output
+
         assert [job.jobs_dir.name for job in submitted] == ['f', 'g']
         assert [len(job.agents) for job in submitted] == [1, 2]
 
     def test_generates_a_named_family_once(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]')
+        write_case_family(families_dir, ['opus-5.5'])
 
-        result = runner.invoke(app, ['run', 'f', 'f'])
-
+        result = invoke('run', 'f', 'f')
         assert result.exit_code == 0, result.output
+
         (job,) = submitted
         assert job.jobs_dir.name == 'f'
 
     def test_generates_a_named_system_on_every_family_that_lists_it(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5", "kimi-k3"]', name='g')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        write_case_family(families_dir, ['opus-5.5', 'kimi-k3'], name='g')
 
-        result = runner.invoke(app, ['run', '--system', 'kimi-k3'])
-
+        result = invoke('run', '--system', 'kimi-k3')
         assert result.exit_code == 0, result.output
+
         (job,) = submitted
         assert job.jobs_dir.name == 'g'
         assert [agent.kwargs['system'] for agent in job.agents] == ['kimi-k3']
@@ -499,12 +566,15 @@ class TestRun:
     def test_rejects_a_named_system_no_family_lists(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
 
-        exit_code, message = invoke('run', '--system', 'gpt-6-astra')
+        result = invoke('run', '--system', 'gpt-6-astra')
 
-        assert exit_code == 2
-        assert 'no family lists gpt-6-astra' in message
+        assert result.exit_code == 2
+        assert (
+            'no family lists gpt-6-astra in its systems, so check the name against '
+            'systems.toml' in result.output
+        )
         assert submitted == []
 
     def test_collects_the_run_into_outputs(
@@ -512,20 +582,20 @@ class TestRun:
     ) -> None:
         def run_job(job: JobConfig) -> Path:
             write_trial(
-                job.jobs_dir / job.job_name,
+                jobs.job_path(job),
                 'en-greeting__1',
                 AgentConfig(name='generate'),
                 task='smoke-text/en-greeting',
                 output='Hi.',
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
             )
-            return job.jobs_dir / job.job_name
+            return jobs.job_path(job)
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
 
-        result = runner.invoke(app, ['run', 'smoke-text'])
-
+        result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
+
         assert 'smoke-text:\n1 outputs, 0 errored\n' in result.output
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
@@ -536,8 +606,8 @@ class TestRun:
         data_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5"]', name='g')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        write_case_family(families_dir, ['opus-5.5'], name='g')
         submitted: list[JobConfig] = []
 
         def run_job(job: JobConfig) -> Path:
@@ -546,17 +616,20 @@ class TestRun:
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
 
-        result = runner.invoke(app, ['run'])
+        result = invoke('run')
 
         assert result.exit_code == 3
         assert [job.jobs_dir.name for job in submitted] == ['f']
 
-    def test_collects_finished_trials_when_harbor_fails(
+    def test_collects_finished_trials_and_names_the_job_when_harbor_fails(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        submitted: list[JobConfig] = []
+
         def run_job(job: JobConfig) -> Path:
+            submitted.append(job)
             write_trial(
-                job.jobs_dir / job.job_name,
+                jobs.job_path(job),
                 'en-greeting__1',
                 AgentConfig(name='generate'),
                 task='smoke-text/en-greeting',
@@ -567,17 +640,22 @@ class TestRun:
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
 
-        result = runner.invoke(app, ['run', 'smoke-text'])
+        result = invoke('run', 'smoke-text')
 
+        (job,) = submitted
         assert result.exit_code == 3
-        assert 'smoke-text:\n1 outputs, 0 errored\n' in result.output
+        assert result.output == (
+            'Harbor exited with code 3. Browse its trials with '
+            f'`harbor view {jobs.job_path(job)}`.\n'
+            'smoke-text:\n1 outputs, 0 errored\n'
+        )
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
     def test_rejects_a_system_whose_recorded_fingerprint_changed(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
         write_trial(
             data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
             'c1__1',
@@ -589,20 +667,24 @@ class TestRun:
         )
         current = load_systems(load_export())['opus-5.5'].fingerprint
 
-        exit_code, message = invoke('run', 'f')
+        result = invoke('run', 'f')
 
-        assert exit_code == 2
-        assert "'opus-5.5' ran under fingerprint fp-old" in message
-        assert f'but now resolves to {current}' in message
+        assert (result.exit_code, result.output) == (
+            1,
+            "family 'f':\n'opus-5.5' ran under fingerprint fp-old but now resolves "
+            f'to {current}\nGive a changed system a new name, or keep its old '
+            'resolution on a `route` table, as docs/guide/authoring.md#systems '
+            'describes\n',
+        )
         assert submitted == []
 
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5"]', name='g')
-        (families_dir / 'g' / 'cases.jsonl').write_text(
-            '{"id": "c1", "category": "reply", "source": "synthetic", '
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        cases = write_case_family(families_dir, ['opus-5.5'], name='g')
+        cases.write_text(
+            '{"id": "c1", "category": "message", "source": "synthetic", '
             '"instruction": "Hi."}\n'
         )
         write_trial(
@@ -615,34 +697,31 @@ class TestRun:
             task='g/old',
         )
 
-        exit_code, message = invoke('run')
+        result = invoke('run')
 
-        assert exit_code == 2
-        assert "'opus-5.5' ran under fingerprint fp-old" in message
+        assert result.exit_code == 1
+        assert "'opus-5.5' ran under fingerprint fp-old" in result.output
         assert submitted == []
         assert not (data_dir / 'tasks' / 'g' / 'c1').exists()
 
     def test_refuses_a_later_task_family_before_running_any(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        task = families_dir / 'z'
-        (task / 'tasks' / 't1').mkdir(parents=True)
-        (task / 'family.toml').write_text(
-            'scorer = "tests"\ndisplay_name = "Z"\n'
-            'systems = ["opus-5.5"]\nsamples = 1\n'
-        )
+        write_case_family(families_dir, ['opus-5.5'], name='f')
+        write_task_family(families_dir, name='z')
+        config = families_dir / 'z' / 'family.toml'
+        config.write_text(config.read_text() + 'systems = ["opus-5.5"]\n')
 
-        exit_code, message = invoke('run')
+        result = invoke('run')
 
-        assert exit_code == 2
-        assert 'single-call systems run only case families' in message
+        assert result.exit_code == 1
+        assert "family 'z' holds tasks/" in result.output
         assert submitted == []
 
     def test_rejects_an_unreadable_trial_record(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
+        write_case_family(families_dir, ['opus-5.5'], name='f')
         job = data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00'
         write_trial(
             job,
@@ -652,23 +731,11 @@ class TestRun:
         )
         (job / 'c1__1' / 'lock.json').unlink()
 
-        exit_code, message = invoke('run', 'f')
+        result = invoke('run', 'f')
 
-        assert exit_code == 2
-        assert 'lock.json' in message
+        assert result.exit_code == 1
+        assert 'has a result.json but no lock.json' in result.output
         assert submitted == []
-
-    def test_exits_with_the_code_of_a_failed_harbor_run(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def run_job(job: JobConfig) -> Path:
-            raise subprocess.CalledProcessError(3, 'harbor')
-
-        monkeypatch.setattr(jobs, 'run_job', run_job)
-
-        exit_code, _ = invoke('run', 'smoke-text')
-
-        assert exit_code == 3
 
 
 class TestIngest:
@@ -717,102 +784,82 @@ class TestIngest:
     ) -> None:
         monkeypatch.setattr(jobs, 'ingest', lambda family, systems: outputs)
 
-        result = runner.invoke(app, ['ingest', name])
-
+        result = invoke('ingest', name)
         assert result.exit_code == 0, result.output
+
         assert result.output == textwrap.dedent(summary)
 
     def test_collects_every_family_with_jobs(
         self, families_dir: Path, data_dir: Path
     ) -> None:
-        write_cases_family(families_dir, '["opus-5.5"]', name='f')
-        write_cases_family(families_dir, '["opus-5.5"]', name='g')
-        write_cases_family(families_dir, '["opus-5.5"]', name='h')
+        for name in ('f', 'g', 'h'):
+            write_case_family(families_dir, ['opus-5.5'], name=name)
         for name in ('f', 'g'):
-            job = data_dir / 'jobs' / name / 'job-1'
-            job.mkdir(parents=True)
-            (job / 'result.json').touch()
+            write_job(data_dir / 'jobs' / name / 'job-1')
 
-        exit_code, message = invoke('ingest')
+        result = invoke('ingest')
+        assert result.exit_code == 0, result.output
 
-        assert exit_code == 0, message
-        assert 'f:\n0 outputs, 0 errored\n' in message
-        assert 'g:\n0 outputs, 0 errored\n' in message
-        assert 'h:' not in message
+        assert result.output == 'f:\n0 outputs, 0 errored\ng:\n0 outputs, 0 errored\n'
         assert (data_dir / 'outputs' / 'f.jsonl').exists()
         assert (data_dir / 'outputs' / 'g.jsonl').exists()
         assert not (data_dir / 'outputs' / 'h.jsonl').exists()
 
     def test_reports_when_no_family_has_jobs(self) -> None:
-        result = runner.invoke(app, ['ingest'])
+        result = invoke('ingest')
 
         assert (result.exit_code, result.output) == (
             0,
-            'No family has jobs yet\n',
+            'No family has jobs yet. Run `uv run bench run` first.\n',
+        )
+
+    def test_reports_an_unreadable_trial_without_a_traceback(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        write_case_family(families_dir, ['opus-5.5'])
+        trial = data_dir / 'jobs' / 'f' / 'job-1' / 'c1__1'
+        write_trial(
+            trial.parent,
+            trial.name,
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5'}),
+            task='f/c1',
+        )
+        (trial / 'result.json').write_text('{')
+
+        result = invoke('ingest', 'f')
+
+        assert result.exit_code == 1
+        assert result.output.startswith(
+            f"Source trial '{trial.resolve()}' has an unreadable result.json"
         )
 
 
 class TestServe:
     def test_builds_the_local_site_and_serves_the_families_with_outputs(
-        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, families_dir: Path, site: Site
     ) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
         write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
-        site = tmp_path / 'dist'
-        builds: list[tuple[list[str], str | None]] = []
-        served: list[tuple[list[str], Path]] = []
 
-        def build(args: list[str], **options: Any) -> None:
-            builds.append((args, options['env'].get('BENCH_LOCAL')))
-            (site / 'vote').mkdir(parents=True)
-            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+        result = invoke('serve')
+        assert result.exit_code == 0, result.output
 
-        monkeypatch.setattr(cli, 'SITE_DIR', site)
-        monkeypatch.setattr(subprocess, 'run', build)
-        monkeypatch.setattr(
-            api,
-            'serve',
-            lambda arena, site: served.append(
-                ([family.name for family in arena.families()], site)
-            ),
+        assert site.builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
+        assert site.served == [(['f'], site.path)]
+        assert result.output == (
+            'Voting on f at http://127.0.0.1:8790/vote/. Open that exact address, '
+            'since the server refuses localhost.\n'
         )
-
-        exit_code, message = invoke('serve')
-
-        assert exit_code == 0, message
-        assert builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
-        assert served == [(['f'], site)]
-        assert message == 'Voting on f at http://127.0.0.1:8790/vote/\n'
 
     def test_serves_after_a_case_is_removed(
-        self,
-        families_dir: Path,
-        data_dir: Path,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, families_dir: Path, data_dir: Path, site: Site
     ) -> None:
         write_removed_case(families_dir, data_dir)
-        site = tmp_path / 'dist'
-        served: list[list[str]] = []
 
-        def build(args: list[str], **options: Any) -> None:
-            (site / 'vote').mkdir(parents=True)
-            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+        result = invoke('serve')
+        assert result.exit_code == 0, result.output
 
-        monkeypatch.setattr(cli, 'SITE_DIR', site)
-        monkeypatch.setattr(subprocess, 'run', build)
-        monkeypatch.setattr(
-            api,
-            'serve',
-            lambda arena, site: served.append(
-                [family.name for family in arena.families()]
-            ),
-        )
-
-        exit_code, message = invoke('serve')
-
-        assert exit_code == 0, message
-        assert served == [['f']]
+        assert [names for names, _ in site.served] == [['f']]
 
     def test_stops_when_the_build_leaves_no_vote_page(
         self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -823,13 +870,16 @@ class TestServe:
         monkeypatch.setattr(subprocess, 'run', lambda args, **options: None)
         monkeypatch.setattr(api, 'serve', lambda arena, site: pytest.fail('served'))
 
-        exit_code, message = invoke('serve')
+        result = invoke('serve')
 
-        assert exit_code == 1
-        assert f'No vote page at {tmp_path / "dist" / "vote" / "index.html"}' in message
-        assert '`BENCH_LOCAL=1 pnpm --filter web build`' in message
+        assert result.exit_code == 1
+        assert (
+            f'No vote page at {tmp_path / "dist" / "vote" / "index.html"}'
+            in result.output
+        )
+        assert '`BENCH_LOCAL=1 pnpm --filter web build`' in result.output
 
-    def test_exits_with_the_code_of_a_failed_site_build(
+    def test_points_at_pnpm_install_when_the_site_build_fails(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
@@ -840,28 +890,21 @@ class TestServe:
 
         monkeypatch.setattr(subprocess, 'run', build)
 
-        exit_code, _ = invoke('serve')
+        result = invoke('serve')
 
-        assert exit_code == 4
+        assert (result.exit_code, result.output) == (
+            4,
+            'Building the vote page failed. If the checkout lacks node_modules, run '
+            '`pnpm install` once, then rerun `uv run bench serve`.\n',
+        )
 
     def test_ingests_every_votes_family_with_jobs_before_loading(
-        self,
-        families_dir: Path,
-        data_dir: Path,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, families_dir: Path, data_dir: Path, site: Site
     ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_votes_family(families_dir, 'g', ['large', 'small'], {'c1': 'reply'})
-        write_votes_family(families_dir, 'h', ['large', 'small'], {'c1': 'reply'})
-        task_family = families_dir / 'z'
-        (task_family / 'tasks').mkdir(parents=True)
-        (task_family / 'family.toml').write_text(
-            'scorer = "tests"\ndisplay_name = "Z"\nsamples = 1\n'
-        )
-        task_job = data_dir / 'jobs' / 'z' / 'job-1'
-        task_job.mkdir(parents=True)
-        (task_job / 'result.json').touch()
+        for name in ('f', 'g', 'h'):
+            write_votes_family(families_dir, name, ['large', 'small'], {'c1': 'reply'})
+        write_task_family(families_dir, name='z')
+        write_job(data_dir / 'jobs' / 'z' / 'job-1')
         for name in ('f', 'g'):
             write_trial(
                 data_dir / 'jobs' / name / 'job-1',
@@ -874,37 +917,24 @@ class TestServe:
                 output='text',
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
             )
-        site = tmp_path / 'dist'
-        served: list[list[str]] = []
 
-        def build(args: list[str], **options: Any) -> None:
-            (site / 'vote').mkdir(parents=True)
-            (site / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
+        result = invoke('serve')
+        assert result.exit_code == 0, result.output
 
-        monkeypatch.setattr(cli, 'SITE_DIR', site)
-        monkeypatch.setattr(subprocess, 'run', build)
-        monkeypatch.setattr(
-            api,
-            'serve',
-            lambda arena, site: served.append(
-                [family.name for family in arena.families()]
-            ),
-        )
-
-        exit_code, message = invoke('serve')
-
-        assert exit_code == 0, message
         assert (data_dir / 'outputs' / 'f.jsonl').exists()
         assert (data_dir / 'outputs' / 'g.jsonl').exists()
         assert not (data_dir / 'outputs' / 'h.jsonl').exists()
         assert not (data_dir / 'outputs' / 'z.jsonl').exists()
-        assert served == [['f', 'g']]
+        assert [names for names, _ in site.served] == [['f', 'g']]
 
     def test_stops_when_no_family_has_outputs(self, families_dir: Path) -> None:
-        exit_code, message = invoke('serve')
+        result = invoke('serve')
 
-        assert exit_code == 1
-        assert 'No family scored by votes has outputs yet' in message
+        assert (result.exit_code, result.output) == (
+            1,
+            'No family scored by votes has outputs yet. Run '
+            '`uv run bench run <family>` first.\n',
+        )
 
     def test_reports_a_store_of_another_schema_version(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
@@ -916,10 +946,10 @@ class TestServe:
             subprocess, 'run', lambda *args, **options: pytest.fail('built the site')
         )
 
-        exit_code, message = invoke('serve')
+        result = invoke('serve')
 
-        assert exit_code == 1
-        assert 'has schema version 1, while this bench reads version 2' in message
+        assert result.exit_code == 1
+        assert 'has schema version 1, while this bench reads version 2' in result.output
 
 
 class TestClose:
@@ -968,11 +998,11 @@ class TestClose:
         (data_dir / 'outputs' / 'f.jsonl').unlink()
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
 
-        exit_code, message = invoke('close', 'f')
+        result = invoke('close', 'f')
+        assert result.exit_code == 0, result.output
 
-        assert exit_code == 0, message
         (path,) = (tmp_path / 'reports' / 'f').iterdir()
-        assert message == f'f:\n4 outputs, 0 errored\nReport written to {path}\n'
+        assert result.output == f'f:\n4 outputs, 0 errored\nReport written to {path}\n'
         closed = report.Report.model_validate_json(path.read_text())
         assert isinstance(closed.results, report.VotesResults)
         assert closed.family == 'f'
@@ -984,20 +1014,21 @@ class TestClose:
     def test_rejects_a_family_without_votes(self, families_dir: Path) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
 
-        exit_code, message = invoke('close', 'f')
+        result = invoke('close', 'f')
 
-        assert exit_code == 2
-        assert "family 'f' has no votes" in message
+        assert result.exit_code == 1
+        assert "family 'f' has no votes" in result.output
+        assert 'Usage:' not in result.output
 
-    def test_closes_after_a_case_is_removed(
+    def test_ingests_past_a_removed_case_before_closing(
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_removed_case(families_dir, data_dir)
 
-        exit_code, message = invoke('close', 'f')
+        result = invoke('close', 'f')
 
-        assert exit_code == 2
-        assert "family 'f' has no votes" in message
+        assert result.exit_code == 1
+        assert "family 'f' has no votes" in result.output
 
     def test_reports_a_store_of_another_schema_version(
         self, families_dir: Path
@@ -1005,11 +1036,11 @@ class TestClose:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
         write_version_one_store()
 
-        exit_code, message = invoke('close', 'f')
+        result = invoke('close', 'f')
 
-        assert exit_code == 1
-        assert 'has schema version 1, while this bench reads version 2' in message
-        assert 'Invalid value for' not in message
+        assert result.exit_code == 1
+        assert 'has schema version 1, while this bench reads version 2' in result.output
+        assert 'Invalid value for' not in result.output
 
 
 class TestFingerprints:
@@ -1019,7 +1050,7 @@ class TestFingerprints:
         base = load_systems(load_export())
         monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
 
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+        result = invoke('fingerprints', 'origin/main')
 
         assert (result.exit_code, result.output) == (
             0,
@@ -1044,15 +1075,15 @@ class TestFingerprints:
             revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
         )
 
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+        result = invoke('fingerprints', 'origin/main')
 
         assert result.exit_code == 1
-        assert (
+        assert result.stderr == (
             "system 'opus-5.5' changed its fingerprint since origin/main, so give "
             'the changed system a new name, and keep the old name on its old '
-            'resolution with the table below, as the Systems section of '
-            'docs/guide/authoring.md describes'
-        ) in result.stderr
+            'resolution with the table below, as docs/guide/authoring.md#systems '
+            'describes\n'
+        )
         assert catalog.parse_systems(load_export(), result.stdout) == {'opus-5.5': old}
 
     def test_prints_no_table_for_a_prompt_system(
@@ -1065,12 +1096,15 @@ class TestFingerprints:
             revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
         )
 
-        result = runner.invoke(app, ['fingerprints', 'origin/main'])
+        result = invoke('fingerprints', 'origin/main')
 
         assert result.exit_code == 1
         assert result.stdout == ''
-        assert (
-            'A prompt system cannot be pinned with a `route` table yet' in result.stderr
+        assert result.stderr == (
+            "system 'opus-5.5' changed its fingerprint since origin/main, and a "
+            '`route` table cannot pin its prompt, so give the changed system a new '
+            'name and keep the old name only in closed reports, as '
+            'docs/guide/authoring.md#systems describes\n'
         )
 
     def test_exits_with_the_code_of_a_failed_revision_lookup(
@@ -1081,6 +1115,6 @@ class TestFingerprints:
 
         monkeypatch.setattr(revisions, 'systems_at', systems_at)
 
-        exit_code, _ = invoke('fingerprints', 'nope')
+        result = invoke('fingerprints', 'nope')
 
-        assert exit_code == 128
+        assert result.exit_code == 128

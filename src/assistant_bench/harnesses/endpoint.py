@@ -24,6 +24,13 @@ KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
 CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
 LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
+ENDPOINT_VARS = (
+    BASE_URL_VAR,
+    KEY_FILE_VAR,
+    CA_FILE_VAR,
+    HEADERS_VAR,
+    LOCAL_ADDRESS_VAR,
+)
 
 
 class Endpoint(BaseModel):
@@ -44,15 +51,8 @@ class Endpoint(BaseModel):
     @classmethod
     def read(cls, env: Callable[[str], str | None]) -> Endpoint:
         """Validate the value `env` returns for each endpoint variable."""
-        names = (
-            BASE_URL_VAR,
-            KEY_FILE_VAR,
-            CA_FILE_VAR,
-            HEADERS_VAR,
-            LOCAL_ADDRESS_VAR,
-        )
         return cls.model_validate(
-            {name: value for name in names if (value := env(name))}
+            {name: value for name in ENDPOINT_VARS if (value := env(name))}
         )
 
     def api_key(self) -> str:

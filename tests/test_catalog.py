@@ -54,9 +54,14 @@ class TestSystemConfig:
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
             },
         ],
-        ids=['no-source', 'both-sources', 'route-without-price', 'model-with-price'],
+        ids=[
+            'no-source',
+            'both-sources',
+            'route-without-display-name',
+            'model-with-price',
+        ],
     )
-    def test_rejects_an_ambiguous_source_or_price(
+    def test_rejects_an_ambiguous_or_incomplete_table(
         self, table: dict[str, object]
     ) -> None:
         with pytest.raises(ValidationError):
@@ -76,8 +81,9 @@ class TestSystem:
                 {'route': 'acme/large-2'},
                 {'effort': 'high'},
                 {'prompt': 'Be brief.'},
+                {'harness': 'terminus-2'},
             ],
-            ids=['route', 'effort', 'prompt'],
+            ids=['route', 'effort', 'prompt', 'harness'],
         )
         def test_changes_with_what_shapes_the_outputs(
             self, change: dict[str, str]
@@ -248,7 +254,14 @@ class TestResolveSystem:
         [
             (
                 SystemConfig(model='acme-huge'),
-                "system 'x': unknown catalog model 'acme-huge'",
+                "system 'x': model 'acme-huge' is not in the nixos-config catalog, "
+                'data/llm-models.nix, so check it against acme-large, acme-routed, '
+                'acme-unrouted',
+            ),
+            (
+                SystemConfig(model='zeta'),
+                "system 'x': model 'zeta' is not in the nixos-config catalog, "
+                'data/llm-models.nix',
             ),
             (
                 SystemConfig(model='acme-small', effort='medium'),
@@ -278,6 +291,7 @@ class TestResolveSystem:
             ),
         ],
         ids=[
+            'unknown-model-near-a-key',
             'unknown-model',
             'unoffered-effort',
             'effort-for-a-model-without-one',
