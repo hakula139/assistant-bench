@@ -23,7 +23,7 @@ web/src/
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
 ├── layouts/                                # The page shell
-├── lib/                                    # The report and family schemas, the aspects, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, formatters, hooks
+├── lib/                                    # The report and family schemas, the aspects, the system names, scorer steps and glossary, the forest axis, the site name, the vote API client, the vote page's Markdown, formatters, hooks
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
@@ -57,5 +57,5 @@ web/src/
 
 - The page exists only in builds with `BENCH_LOCAL=1`, so the public site never routes it. Keep it out of `src/pages/`.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, and keep Markdown images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
+- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
 - HTML outputs load by URL in `<iframe sandbox="allow-scripts">` from the separate render origin. Never use `srcdoc`, which inherits the vote page's policy.

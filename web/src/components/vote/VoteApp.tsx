@@ -1,9 +1,11 @@
 import { cn } from 'cn';
-import { ChevronDown } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, CircleCheck } from 'lucide-react';
+import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
 import { pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
+import { Hint } from '@/components/site/Term';
+import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Button } from '@/components/ui/button';
@@ -119,11 +121,17 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   );
 }
 
+const checklistHint = {
+  term: 'What to check',
+  definition: 'Points for you to judge by. The model never saw them.',
+};
+
 /**
- * The case's brief and checklist, with the session's status in its band. It spans the top of the
+ * The case's prompt and checklist, with the session's status in its band. It spans the top of the
  * pair while `stacked`, and otherwise takes a column beside the outputs from `xl` up.
  */
 function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
+  const checklistTitle = useId();
   return (
     <Collapsible defaultOpen asChild>
       <Card
@@ -141,7 +149,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
                 className="transition-transform in-data-[state=closed]:-rotate-90"
                 aria-hidden="true"
               />
-              Brief
+              Prompt
             </Button>
           </CollapsibleTrigger>
           {status}
@@ -154,13 +162,24 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               stacked ? 'max-h-[25dvh]' : 'max-xl:max-h-[25dvh]',
             )}
           >
-            <p className="leading-relaxed whitespace-pre-wrap">{pair.instruction}</p>
+            <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
-              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                {pair.checklist.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              <section
+                aria-labelledby={checklistTitle}
+                className="space-y-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
+              >
+                <h2 id={checklistTitle} className="text-sm font-medium text-muted-foreground">
+                  <Hint term={checklistHint} />
+                </h2>
+                <ul className={cn(prose, 'text-muted-foreground')}>
+                  {pair.checklist.map((item) => (
+                    <li key={item} className="flex gap-2 ps-0">
+                      <CircleCheck className="h-lh w-4 shrink-0" aria-hidden="true" />
+                      <InlineMarkdown text={item} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
           </CardContent>
         </CollapsibleContent>

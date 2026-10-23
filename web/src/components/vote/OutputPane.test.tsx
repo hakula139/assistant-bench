@@ -35,4 +35,19 @@ describe('OutputPane', () => {
     expect(container.querySelector('b, img')).toBeNull();
     expect(screen.getByRole('region', { name: 'Output B' }).textContent).toContain('<b>bold</b>');
   });
+
+  test('shows a raw output as written, keeping the end of each line together', () => {
+    const text = 'Spaced  out\n\n原因是磁盘写满，导致查询超时。';
+
+    render(
+      <OutputPane side="A" pane={{ render: 'text', text }} asMarkdown={false} viewport={1280} />,
+    );
+
+    const pane = screen.getByRole('region', { name: 'Output A' });
+    expect(pane.textContent).toBe(`Output A${text}`);
+    expect([...pane.querySelectorAll('.text-nowrap')].map((tail) => tail.textContent)).toEqual([
+      'Spaced  out',
+      '导致查询超时。',
+    ]);
+  });
 });
