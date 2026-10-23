@@ -197,6 +197,23 @@ def completion(
     }
 
 
+def terminus_completion(
+    keystrokes: str = '', *, task_complete: bool = True
+) -> dict[str, Any]:
+    """Return a completion carrying terminus-2's JSON reply.
+
+    The terminal sends `keystrokes` as one command, so it needs its own newline.
+    """
+    commands = [{'keystrokes': keystrokes, 'duration': 0.1}] if keystrokes else []
+    reply = {
+        'analysis': '',
+        'plan': '',
+        'commands': commands,
+        'task_complete': task_complete,
+    }
+    return completion(json.dumps(reply))
+
+
 @dataclass
 class Request:
     path: str

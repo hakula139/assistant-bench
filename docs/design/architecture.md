@@ -18,8 +18,12 @@ src/assistant_bench/
 │   └── store.py                            # The append-only SQLite vote store
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
-│   ├── __init__.py                         # Harness name to a Harbor agent name or import path
-│   └── generate.py                         # The single-call agent
+│   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
+│   ├── endpoint.py                         # The endpoint variables and the chat-completions client
+│   ├── generate.py                         # The single-call agent
+│   ├── labels.py                           # The kwargs that label a trial for ingest
+│   ├── options.py                          # The kwargs each harness builds from a system and settings
+│   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   └── ranking.py                          # Bradley-Terry fit, clustered bootstrap, rank spread

@@ -1,5 +1,4 @@
 import asyncio
-import ssl
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -8,7 +7,6 @@ import openai
 import pytest
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-from pydantic import ValidationError
 
 from assistant_bench.harnesses.generate import Generate
 from support import StubEndpoint, completion
@@ -48,78 +46,12 @@ class TestGenerate:
             'max_output_tokens': 1,
         }
 
-        def test_accepts_endpoint_variables_from_the_agent_env(
-            self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
-        ) -> None:
-            monkeypatch.delenv('BENCH_API_BASE_URL', raising=False)
-            monkeypatch.delenv('BENCH_API_KEY_FILE', raising=False)
-
-            Generate.preflight(self.OPTIONS, endpoint.env)
-
-        def test_names_each_missing_variable(
-            self, monkeypatch: pytest.MonkeyPatch
-        ) -> None:
-            for name in (
-                'BENCH_API_BASE_URL',
-                'BENCH_API_KEY_FILE',
-                'BENCH_NIXOS_CONFIG',
-            ):
-                monkeypatch.delenv(name, raising=False)
-
-            with pytest.raises(ValueError) as error:
-                Generate.preflight(self.OPTIONS, {})
-
-            assert str(error.value) == (
-                'BENCH_API_BASE_URL, BENCH_API_KEY_FILE, BENCH_NIXOS_CONFIG unset. '
-                'Copy .env.example to .env, and run inside `nix develop`.'
-            )
-
         def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:
             with pytest.raises(ValueError, match="Unknown option 'temperature'"):
                 Generate.preflight(
                     self.OPTIONS | {'temperature': 0},
                     endpoint.env,
                 )
-
-        @pytest.mark.parametrize(
-            ('variable', 'value'),
-            [
-                ('BENCH_API_BASE_URL', 'api.example.com/v1'),
-                ('BENCH_API_KEY_FILE', 'missing-key'),
-                ('BENCH_API_HEADERS', '{"x-trace": 1}'),
-                ('BENCH_API_CA_FILE', 'missing-ca.pem'),
-                ('BENCH_API_LOCAL_ADDRESS', 'eth0'),
-            ],
-        )
-        def test_rejects_an_unusable_endpoint_setting(
-            self, endpoint: StubEndpoint, variable: str, value: str
-        ) -> None:
-            with pytest.raises(ValidationError) as error:
-                Generate.preflight(self.OPTIONS, endpoint.env | {variable: value})
-
-            assert [e['loc'][0] for e in error.value.errors()] == [variable]
-            assert value not in str(error.value)
-
-        def test_rejects_a_ca_bundle_that_is_not_pem(
-            self, endpoint: StubEndpoint, tmp_path: Path
-        ) -> None:
-            ca_file = tmp_path / 'ca.pem'
-            ca_file.write_text('not a certificate\n')
-
-            with pytest.raises(ssl.SSLError):
-                Generate.preflight(
-                    self.OPTIONS, endpoint.env | {'BENCH_API_CA_FILE': str(ca_file)}
-                )
-
-        def test_treats_an_empty_optional_setting_as_unset(
-            self, endpoint: StubEndpoint
-        ) -> None:
-            empty = dict.fromkeys(
-                ('BENCH_API_CA_FILE', 'BENCH_API_HEADERS', 'BENCH_API_LOCAL_ADDRESS'),
-                '',
-            )
-
-            Generate.preflight(self.OPTIONS, endpoint.env | empty)
 
     class TestRun:
         def test_sends_one_request_and_records_the_reply(

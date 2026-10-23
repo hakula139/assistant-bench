@@ -27,7 +27,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
-from assistant_bench.harnesses.generate import GenerateOptions
+from assistant_bench.harnesses import options
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_trial
@@ -54,13 +54,10 @@ TESTS = Family(
 
 def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
     """Return the agent kwargs that a family with this bound sends a system."""
-    return GenerateOptions(
-        system=system.name,
-        fingerprint=system.fingerprint,
-        effort=system.effort,
-        system_prompt=system.prompt,
-        max_output_tokens=max_output_tokens,
-    ).model_dump()
+    settings = VOTES.settings.model_copy(
+        update={'max_output_tokens': max_output_tokens}
+    )
+    return options.generate(system, settings)
 
 
 def installed_version(path: Path) -> str:
@@ -229,9 +226,12 @@ class TestCaseJob:
     ) -> None:
         large = make_system(prompt='Be brief.')
         small = make_system(name='small', route='acme/small', effort=None)
+        terminus = make_system(
+            name='acme-terminus', route='acme/terminus', harness='terminus-2'
+        )
         task = data_dir / 'tasks' / 'f' / 'c'
 
-        job = jobs.case_job(VOTES, [large, small], [task])
+        job = jobs.case_job(VOTES, [large, small, terminus], [task])
 
         assert [
             (agent.import_path, agent.model_name, agent.concurrency_group)
@@ -239,6 +239,11 @@ class TestCaseJob:
         ] == [
             ('assistant_bench.harnesses.generate:Generate', 'acme/large', 'acme/large'),
             ('assistant_bench.harnesses.generate:Generate', 'acme/small', 'acme/small'),
+            (
+                'assistant_bench.harnesses.terminus:Terminus',
+                'openai/acme/terminus',
+                'acme/terminus',
+            ),
         ]
         assert job.agents[0].kwargs == {
             'system': 'acme-large',
@@ -246,6 +251,14 @@ class TestCaseJob:
             'effort': 'medium',
             'system_prompt': 'Be brief.',
             'max_output_tokens': 300,
+        }
+        assert job.agents[2].kwargs == {
+            'system': 'acme-terminus',
+            'fingerprint': terminus.fingerprint,
+            'llm_call_kwargs': {'max_completion_tokens': 300},
+            'reasoning_effort': 'medium',
+            'record_terminal_session': False,
+            'suppress_max_turns_warning': True,
         }
         assert job.n_attempts == 2
         assert job.retry.max_retries == 1

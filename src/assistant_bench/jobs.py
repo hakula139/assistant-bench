@@ -34,7 +34,7 @@ from assistant_bench.families import (
     tasks_dir,
 )
 from assistant_bench.harnesses import HARNESSES
-from assistant_bench.harnesses.generate import OUTPUT_FILE, GenerateOptions
+from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
@@ -144,15 +144,19 @@ def drifted_systems(
 
 
 def _request_kwargs(family: Family, system: System) -> dict[str, Any]:
-    """Return the agent kwargs that carry a system's request to the endpoint."""
-    assert family.settings.max_output_tokens is not None
-    return GenerateOptions(
-        system=system.name,
-        fingerprint=system.fingerprint,
-        effort=system.effort,
-        system_prompt=system.prompt,
-        max_output_tokens=family.settings.max_output_tokens,
-    ).model_dump()
+    """Return the kwargs a system's harness builds from the family's settings."""
+    return HARNESSES[system.harness].options(system, family.settings)
+
+
+def _agent_config(family: Family, system: System) -> trial_config.AgentConfig:
+    harness = HARNESSES[system.harness]
+    return trial_config.AgentConfig(
+        import_path=harness.import_path,
+        model_name=harness.model_name(system),
+        n_concurrent=ROUTE_CONCURRENCY,
+        concurrency_group=system.route,
+        kwargs=_request_kwargs(family, system),
+    )
 
 
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
@@ -162,17 +166,7 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     that none of them completed with the same task version and agent config. A case
     family is scored by votes, so its verifier stays disabled.
     """
-    agents = [
-        trial_config.AgentConfig(
-            name=HARNESSES[system.harness].name,
-            import_path=HARNESSES[system.harness].import_path,
-            model_name=system.route,
-            n_concurrent=ROUTE_CONCURRENCY,
-            concurrency_group=system.route,
-            kwargs=_request_kwargs(family, system),
-        )
-        for system in systems
-    ]
+    agents = [_agent_config(family, system) for system in systems]
     sources = [source for source, _ in _sources(family)]
     return _job(
         family,
@@ -262,13 +256,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     return _job(
         family,
         data_dir() / 'checks' / family.name,
-        [
-            trial_config.AgentConfig(
-                name=HARNESSES[agent].name,
-                import_path=HARNESSES[agent].import_path,
-            )
-            for agent in ('oracle', 'nop')
-        ],
+        [trial_config.AgentConfig(name=agent) for agent in ('oracle', 'nop')],
         tasks,
         [],
         n_attempts=CHECK_ATTEMPTS,

@@ -6,6 +6,7 @@
 
 - **Job configs:** `JobConfig` with one `AgentConfig` per system, `n_attempts` for samples, `RetryConfig(max_retries=1)` because Harbor defaults to no retries, and a `concurrency_group` with `n_concurrent` per route.
 - **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Its `AgentContext` takes token counts and free-form `metadata`.
+- **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. Its `llm_kwargs` reach every `litellm.acompletion` call, and LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and leaves `api_base` unset.
 - **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, beside its `nop` agent, which does nothing, for `bench check`. A task's separate verifier receives its `/app` artifact, and `network_mode = "no-network"` applies to the agent and verifier phases, which `resolve_trial_network_plan` resolves from the task's baseline and phase overrides.
 - **Reruns:** `SourceJobConfig(action='diff')`, which reuses finished trials from earlier jobs.
 
@@ -23,4 +24,9 @@
 - `AgentContext.n_input_tokens` includes the cached tokens counted in `n_cache_tokens`.
 - Harbor reads telemetry consent only from `HARBOR_TELEMETRY`, which the bench sets to `off` for every run.
 - `config.json` in each job directory records every agent's `kwargs` and `env` in plain text.
+- terminus-2 stops only after the model repeats `task_complete: true`, so one completed trial makes at least two model calls.
+- terminus-2 adds Anthropic `cache_control` blocks whenever the model name contains `anthropic` or `claude`, so an OpenAI-compatible route for an Anthropic model must accept them.
+- `record_terminal_session` defaults to on and records with asciinema, which a trial cannot install without a network, so the bench turns it off.
+- terminus-2 truncates each terminal observation to 10,000 bytes and records `n_episodes` in `AgentContext.metadata`. Both `llm_kwargs` and `llm_call_kwargs` reach every `litellm.acompletion` call: the constructor spreads `llm_kwargs` into each call's base kwargs, and a deep copy of `llm_call_kwargs` from the job's agent kwargs merges into each call.
+- `Terminus2._init_llm` is a private method, so a Harbor upgrade that changes it breaks the bench's client injection, which the docker test catches.
 - The package has no `py.typed` marker, so mypy needs an override to follow its annotations.

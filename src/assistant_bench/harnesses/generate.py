@@ -1,83 +1,26 @@
 """Harbor agent that answers a task with one chat-completions call from the host."""
 
-import os
-import ssl
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from importlib import metadata
 from typing import Any, override
 
-import httpx
 from harbor.agents.base import BaseAgent
-from harbor.agents.options import AgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    FilePath,
-    HttpUrl,
-    IPvAnyAddress,
-    Json,
-)
 
-from assistant_bench.catalog import EXPORT_VAR, load_export
+from assistant_bench.catalog import load_export
+from assistant_bench.harnesses.endpoint import Endpoint, preflight
+from assistant_bench.harnesses.labels import Labels
 
 
 OUTPUT_FILE = 'output.txt'
 
-BASE_URL_VAR = 'BENCH_API_BASE_URL'
-KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
-CA_FILE_VAR = 'BENCH_API_CA_FILE'
-HEADERS_VAR = 'BENCH_API_HEADERS'
-LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
 
+class GenerateOptions(Labels):
+    """The agent's `kwargs`, adding the request settings to the trial labels."""
 
-class Endpoint(BaseModel):
-    """The endpoint variables, where an empty value counts as unset."""
-
-    model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
-
-    base_url: HttpUrl = Field(validation_alias=BASE_URL_VAR)
-    key_file: FilePath = Field(validation_alias=KEY_FILE_VAR)
-    ca_file: FilePath | None = Field(default=None, validation_alias=CA_FILE_VAR)
-    headers: Json[dict[str, str]] | None = Field(
-        default=None, validation_alias=HEADERS_VAR
-    )
-    local_address: IPvAnyAddress | None = Field(
-        default=None, validation_alias=LOCAL_ADDRESS_VAR
-    )
-
-    @classmethod
-    def read(cls, env: Callable[[str], str | None]) -> Endpoint:
-        """Validate the value `env` returns for each endpoint variable."""
-        names = (
-            BASE_URL_VAR,
-            KEY_FILE_VAR,
-            CA_FILE_VAR,
-            HEADERS_VAR,
-            LOCAL_ADDRESS_VAR,
-        )
-        return cls.model_validate(
-            {name: value for name in names if (value := env(name))}
-        )
-
-    def api_key(self) -> str:
-        return self.key_file.read_text().strip()
-
-    def verify(self) -> ssl.SSLContext | bool:
-        """Trust the CA bundle when one is set, else the system's."""
-        return ssl.create_default_context(cafile=self.ca_file) if self.ca_file else True
-
-
-class GenerateOptions(AgentOptions):
-    """The agent's `kwargs`. `system` and `fingerprint` label the trial for ingest."""
-
-    system: str
-    fingerprint: str
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int
@@ -109,15 +52,7 @@ class Generate(BaseAgent):
         env: Mapping[str, str] | None = None,
     ) -> None:
         super().preflight(kwargs, env)
-        merged = {**os.environ, **(env or {})}
-        required = (BASE_URL_VAR, KEY_FILE_VAR, EXPORT_VAR)
-        missing = [var for var in required if not merged.get(var)]
-        if missing:
-            raise ValueError(
-                f'{", ".join(missing)} unset. '
-                'Copy .env.example to .env, and run inside `nix develop`.'
-            )
-        Endpoint.read(merged.get).verify()
+        preflight(env)
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -136,8 +71,9 @@ class Generate(BaseAgent):
         extra_body = (
             {'reasoning_effort': self.options.effort} if self.options.effort else None
         )
+        endpoint = Endpoint.read(self._get_env)
 
-        async with self._client() as client:
+        async with endpoint.client() as client:
             started = time.monotonic()
             raw = await client.chat.completions.with_raw_response.create(
                 model=self.model_name,
@@ -179,21 +115,3 @@ class Generate(BaseAgent):
         if self.options.system_prompt is None:
             return [user]
         return [{'role': 'system', 'content': self.options.system_prompt}, user]
-
-    def _client(self) -> AsyncOpenAI:
-        endpoint = Endpoint.read(self._get_env)
-        verify = endpoint.verify()
-        transport = (
-            httpx.AsyncHTTPTransport(
-                local_address=str(endpoint.local_address), verify=verify
-            )
-            if endpoint.local_address
-            else None
-        )
-        return AsyncOpenAI(
-            base_url=str(endpoint.base_url),
-            api_key=endpoint.api_key(),
-            default_headers=endpoint.headers,
-            max_retries=0,
-            http_client=httpx.AsyncClient(transport=transport, verify=verify),
-        )

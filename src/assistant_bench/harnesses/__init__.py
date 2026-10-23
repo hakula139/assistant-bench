@@ -1,15 +1,42 @@
-"""Harness names, each mapped to the Harbor agent that runs it.
+"""System harness names, each mapped to the Harbor agent that runs it.
 
-A bench harness maps to its import path, and a harness Harbor ships maps to its
-agent name. Harbor records the agent of every trial in the job's `config.json`,
-where `harbor job resume` reads it back, so an import path never changes.
+A harness maps to its agent's import path, the kwargs it builds from a system and
+the family's settings, and the model name the job sends. Harbor records the
+agent of every trial in the job's `config.json`, where `harbor job resume` reads
+it back, so an import path never changes.
 """
 
-from harbor.models.trial.config import AgentConfig
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from assistant_bench.catalog import System
+from assistant_bench.families import Settings
+from assistant_bench.harnesses import options
 
 
-HARNESSES: dict[str, AgentConfig] = {
-    'generate': AgentConfig(import_path='assistant_bench.harnesses.generate:Generate'),
-    'nop': AgentConfig(name='nop'),
-    'oracle': AgentConfig(name='oracle'),
+@dataclass(frozen=True)
+class Harness:
+    """A Harbor agent and how the bench configures it.
+
+    `options` builds the agent's kwargs from a system and the family's settings,
+    and `model_name` builds the name the job sends.
+    """
+
+    import_path: str
+    options: Callable[[System, Settings], dict[str, Any]]
+    model_name: Callable[[System], str]
+
+
+HARNESSES: dict[str, Harness] = {
+    'generate': Harness(
+        import_path='assistant_bench.harnesses.generate:Generate',
+        options=options.generate,
+        model_name=lambda system: system.route,
+    ),
+    'terminus-2': Harness(
+        import_path='assistant_bench.harnesses.terminus:Terminus',
+        options=options.terminus,
+        model_name=lambda system: f'openai/{system.route}',
+    ),
 }
