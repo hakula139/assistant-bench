@@ -177,10 +177,12 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
       </TableTwin>
     </Section>
 
-    <Section title="Issues">
-      <p class={note}>Votes that tagged this system's output with each issue.</p>
-      <DefectsTable client:visible standing={standing} />
-    </Section>
+    {Object.keys(standing.defects).length > 0 && (
+      <Section title="Issues">
+        <p class={note}>Votes that tagged this system's output with each issue.</p>
+        <DefectsTable client:visible standing={standing} />
+      </Section>
+    )}
 
     <Section title="Rounds">
       <RoundsTable client:visible appearances={roundRows} names={names} />

@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { VoteApp } from '@/components/vote/VoteApp';
 import type { FamilyView, SessionView } from '@/lib/arena';
 import { defectTerms } from '@/lib/glossary';
-import { defects } from '@/lib/report';
+import type { Defect } from '@/lib/report';
 
 const FAMILY: FamilyView = {
   name: 'fixture',
   aspect: 'writing',
   display_name: 'Chinese',
+  defects: ['facts', 'punctuation', 'tone', 'formulaic', 'length'],
 };
 
 interface Cast {
@@ -27,15 +28,24 @@ interface StubOptions {
   /** The votes `s1` already holds, as a session cast in an earlier visit does. */
   prior?: number;
   brief?: { instruction: string; checklist: string[] };
-  /** Serves each output as a page by URL, as a family that renders HTML does. */
-  pages?: boolean;
+  /** How the outputs reach the page: as text, as pages by URL, or as diffs. */
+  render?: 'text' | 'html' | 'diff';
+  /** The family's defects in place of the fixture family's. */
+  defects?: Defect[];
 }
 
 /**
  * A stand-in for the arena API that keeps one open pair in session `s1` until it is voted on or
  * undone, and records each session start, resume, vote, and undo.
  */
-function stubApi({ cases = 40, prior = 0, brief, pages = false }: StubOptions = {}) {
+function stubApi({
+  cases = 40,
+  prior = 0,
+  brief,
+  render = 'text',
+  defects = FAMILY.defects,
+}: StubOptions = {}) {
+  const family = { ...FAMILY, defects };
   const starts: { family: string }[] = [];
   const resumes: string[] = [];
   const casts: Cast[] = [];
@@ -50,14 +60,14 @@ function stubApi({ cases = 40, prior = 0, brief, pages = false }: StubOptions = 
     instruction: `Instruction ${token}`,
     checklist: [],
     ...brief,
-    ...(pages
+    ...(render === 'html'
       ? {
-          a: { render: 'html' as const, url: `http://127.0.0.1:8791/render/${token}/a` },
-          b: { render: 'html' as const, url: `http://127.0.0.1:8791/render/${token}/b` },
+          a: { render, url: `http://127.0.0.1:8791/render/${token}/a` },
+          b: { render, url: `http://127.0.0.1:8791/render/${token}/b` },
         }
       : {
-          a: { render: 'text' as const, text: `Output A${token.slice(1)}` },
-          b: { render: 'text' as const, text: `Output B${token.slice(1)}` },
+          a: { render, text: `Output A${token.slice(1)}` },
+          b: { render, text: `Output B${token.slice(1)}` },
         }),
   });
 
@@ -70,7 +80,7 @@ function stubApi({ cases = 40, prior = 0, brief, pages = false }: StubOptions = 
     }
     return {
       id: 's1',
-      family: FAMILY,
+      family,
       votes: count,
       remaining: cases - count,
       pair: open === null ? null : pairOf(open),
@@ -87,7 +97,7 @@ function stubApi({ cases = 40, prior = 0, brief, pages = false }: StubOptions = 
 
   vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
     if (path === '/api/families') {
-      return respond([FAMILY]);
+      return respond([family]);
     }
     if (path === '/api/sessions') {
       const { family } = JSON.parse(init?.body as string) as { family: string };
@@ -259,7 +269,7 @@ describe('VoteApp', () => {
         disconnect() {}
       },
     );
-    stubApi({ pages: true });
+    stubApi({ render: 'html' });
     const user = userEvent.setup();
     render(<VoteApp />);
     await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
@@ -460,7 +470,7 @@ describe('VoteApp', () => {
     expect(screen.getByText('its reader.').className).toBe('text-nowrap');
     await user.click(tone);
     expect(within(outputB).getByRole('button', { name: 'Issues 2' })).toBeDefined();
-    for (const defect of defects) {
+    for (const defect of FAMILY.defects) {
       const { term, definition } = defectTerms[defect];
       expect(
         screen.queryByRole('checkbox', { name: term, description: definition }),
@@ -490,6 +500,56 @@ describe('VoteApp', () => {
       { a: ['punctuation', 'length'], b: ['tone', 'length'] },
       { a: [], b: [] },
     ]);
+  });
+
+  test("keys the family's own issues and lists only those in each Issues popover", async () => {
+    const api = stubApi({ defects: ['scope', 'testing'] });
+    const user = await startSession();
+
+    await user.keyboard('2');
+    await user.keyboard('3');
+    await user.keyboard('6');
+    const outputB = screen.getByRole('region', { name: 'Output B' });
+    await user.click(within(outputB).getByRole('button', { name: 'Issues 1' }));
+    const popover = screen.getByRole('dialog', { name: 'Issues in output B' });
+    const boxes = within(popover).getAllByRole('checkbox');
+    expect(
+      boxes.map((box) => [
+        document.querySelector(`label[for="${box.id}"]`)?.textContent,
+        box.getAttribute('aria-keyshortcuts'),
+        box.ariaChecked,
+      ]),
+    ).toEqual([
+      ['Off-scope', '6', 'true'],
+      ['Weak tests', '7', 'false'],
+    ]);
+    await user.keyboard('{Escape}');
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.defects)).toEqual([{ a: ['testing'], b: ['scope'] }]);
+  });
+
+  test('hides the Issues buttons and their keys for a family that lists no issues', async () => {
+    const api = stubApi({ defects: [] });
+    const user = await startSession();
+
+    await user.keyboard('1a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(screen.queryByRole('button', { name: /^Issues/ })).toBeNull();
+    expect(api.casts.map((cast) => cast.defects)).toEqual([{ a: [], b: [] }]);
+  });
+
+  test.each([
+    ['shows', 'text', true],
+    ['hides', 'diff', false],
+  ] as const)('%s the Markdown toggle beside %s outputs', async (_, render, toggle) => {
+    stubApi({ render });
+
+    await startSession();
+
+    expect(screen.queryByRole('button', { name: 'Markdown' }) !== null).toBe(toggle);
   });
 
   test('leaves the note on Escape, so the next key is a shortcut again', async () => {
@@ -525,9 +585,9 @@ describe('VoteApp', () => {
 
   test('groups the families by aspect, with those without one last', async () => {
     const families: FamilyView[] = [
-      { name: 'smoke-text', aspect: null, display_name: 'Smoke' },
+      { name: 'smoke-text', aspect: null, display_name: 'Smoke', defects: [] },
       FAMILY,
-      { name: 'writing-en', aspect: 'writing', display_name: 'English' },
+      { name: 'writing-en', aspect: 'writing', display_name: 'English', defects: [] },
     ];
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(families))));
 

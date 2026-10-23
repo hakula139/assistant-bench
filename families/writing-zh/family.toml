@@ -16,6 +16,7 @@ language = "zh"
 samples = 2
 max_output_tokens = 16000
 categories = ["docs", "essay", "fiction", "message", "reply", "review"]
+defects = ["facts", "punctuation", "tone", "formulaic", "length"]
 
 [gates]
 min_chars = 40

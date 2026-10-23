@@ -18,7 +18,7 @@ import {
   MISSING,
 } from '@/lib/format';
 import { defectTerms, fallbackAnchor, fingerprintTerm, terms } from '@/lib/glossary';
-import { defects, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
+import type { Defect, Distribution, HeadToHead, Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 /**
@@ -134,6 +134,7 @@ export function DistributionTable({
   );
 }
 
+/** Counts each defect the standing's family lists, in the family's order, as the report keys them. */
 export function DefectsTable({ standing }: { standing: Standing }) {
   return (
     <Table className="max-w-xl">
@@ -145,7 +146,7 @@ export function DefectsTable({ standing }: { standing: Standing }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {defects.map((defect) => {
+        {(Object.keys(standing.defects) as Defect[]).map((defect) => {
           const count = standing.defects[defect] ?? 0;
           return (
             <TableRow key={defect}>

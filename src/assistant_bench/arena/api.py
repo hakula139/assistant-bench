@@ -19,6 +19,7 @@ from assistant_bench.arena.service import (
     NothingToUndo,
     SessionView,
     UnknownItem,
+    UnlistedDefects,
 )
 from assistant_bench.arena.store import Choice, Defects
 
@@ -88,6 +89,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     """Build the vote API under `/api`, serving the built site at `/`."""
     app = _app()
     app.add_exception_handler(NothingToUndo, _conflict)
+    app.add_exception_handler(UnlistedDefects, _unprocessable)
     router = APIRouter(prefix='/api')
     writes = APIRouter(dependencies=[Depends(same_origin)])
 
@@ -170,3 +172,7 @@ async def _not_found(request: Request, error: Exception) -> JSONResponse:
 
 async def _conflict(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse({'detail': 'no vote to undo'}, status_code=409)
+
+
+async def _unprocessable(request: Request, error: Exception) -> JSONResponse:
+    return JSONResponse({'detail': str(error)}, status_code=422)

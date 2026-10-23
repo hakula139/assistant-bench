@@ -2,7 +2,7 @@
   "$defs": {
     "CategoryBoard": {
       "additionalProperties": false,
-      "description": "A refit on one category's votes, anchored at the same system as the board.\n\n`unranked` lists the systems voted on in the category that have no score, for\nthe same reasons as on the board.",
+      "description": "A refit on one category's votes, anchored at the same system as the board.\n\n`unranked` lists the systems with outputs in the category that have no score\nthere, for the same reasons as on the board.",
       "properties": {
         "category": {
           "title": "Category",
@@ -105,7 +105,12 @@
         "punctuation",
         "tone",
         "formulaic",
-        "length"
+        "length",
+        "scope",
+        "conventions",
+        "complexity",
+        "testing",
+        "clarity"
       ],
       "type": "string"
     },
@@ -254,7 +259,7 @@
     },
     "Standing": {
       "additionalProperties": false,
-      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`\ndecisive votes. `defects` counts the votes that tagged this system's output\nwith each defect, whichever side won.",
+      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`\ndecisive votes. `outputs` counts the outputs that finished without an\nerror, while `gate_failure_rate` covers every output with a verdict,\nincluding a task's solution whose agent errored but whose tests still ran.\n`defects` counts the votes that tagged this system's output with each of\nthe family's defects, in the family's order, whichever side won.",
       "properties": {
         "system": {
           "title": "System",
@@ -496,7 +501,7 @@
     },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `sessions`\ncounts the sessions that hold a counted vote. `reference` is the system the\nfamily names to anchor the board, while `anchor` is the system the round\nactually fixed at `ranking.ANCHOR`, which is the most-voted system when the\nreference does not rank. `unranked` lists the voted systems with current\noutputs that no comparison connects to the anchor, or that so many resamples\nleave unconnected that their interval is unbounded. `position` is the left\npane's advantage, and `length` the score change per standard deviation of the\nrelative length difference, both in score points, where `length` is absent\nwhen no connected vote varies that difference. `split_half_tau` compares the\norders fit to odd and even sessions, and `decision` is absent while a system\ntied with the top one is preliminary.",
+      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `sessions`\ncounts the sessions that hold a counted vote. `reference` is the system the\nfamily names to anchor the board, while `anchor` is the system the round\nactually fixed at `ranking.ANCHOR`, which is the most-voted system when the\nreference does not rank. `unranked` lists the listed or voted systems with\ncurrent outputs that no comparison connects to the anchor, or that so many\nresamples leave unconnected that their interval is unbounded. `position` is\nthe left pane's advantage, and `length` the score change per standard\ndeviation of the relative length difference, both in score points, where\n`length` is absent when no connected vote varies that difference.\n`split_half_tau` compares the orders fit to odd and even sessions, and\n`decision` is absent while a system tied with the top one is preliminary.",
       "properties": {
         "scorer": {
           "const": "votes",

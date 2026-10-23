@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena, HtmlPane
 from assistant_bench.arena.store import Defects, VoteStore
-from support import Clock, make_arena
+from support import PROSE_DEFECTS, Clock, make_arena
 
 
 ORIGIN = {'Origin': api.APP_ORIGIN}
@@ -34,6 +34,7 @@ class TestCreateApp:
             'name': 'f',
             'aspect': 'writing',
             'display_name': 'Family f',
+            'defects': list(PROSE_DEFECTS),
         }
         assert client.get('/api/families').json() == [family]
 
@@ -133,6 +134,22 @@ class TestCreateApp:
         response = client.post('/api/pairs/nope/vote', json=body, headers=ORIGIN)
 
         assert response.status_code == 422
+
+    def test_rejects_a_defect_the_family_does_not_list(
+        self, client: TestClient, store: VoteStore
+    ) -> None:
+        session = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)
+        token = session.json()['pair']['token']
+
+        response = client.post(
+            f'/api/pairs/{token}/vote',
+            json={'choice': 'a', 'defects': {'a': ['scope'], 'b': ['tone']}},
+            headers=ORIGIN,
+        )
+
+        assert response.status_code == 422
+        assert response.json() == {'detail': 'issues the family does not list: scope'}
+        assert store.votes('f') == []
 
     def test_refuses_to_undo_an_empty_session(self, client: TestClient) -> None:
         session = client.post('/api/sessions', json={'family': 'f'}, headers=ORIGIN)

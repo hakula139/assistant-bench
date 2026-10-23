@@ -51,6 +51,21 @@ class _Settings(BaseModel):
 
 type Language = Literal['en', 'zh']
 
+type Defect = Literal[
+    'facts',
+    'punctuation',
+    'tone',
+    'formulaic',
+    'length',
+    'scope',
+    'conventions',
+    'complexity',
+    'testing',
+    'clarity',
+]
+
+MAX_DEFECTS = 5
+
 
 class Gate(StrEnum):
     """A check whose failure makes a voted output an automatic loss in its pairs."""
@@ -100,22 +115,31 @@ class VotesSettings(_Settings):
     `reference` names the listed system whose score anchors the board at
     `ranking.ANCHOR` when the round ranks it, and otherwise the most-voted
     system anchors in its place. `render` says whether the vote page shows
-    outputs as text or as sandboxed HTML, and `language` is the language every
-    output must be written in, which the gates check when it is set. A task
-    family's only gate is its tests and its outputs are diffs, so it sets none
-    of `render`, `language`, and `gates`.
+    outputs as text, as sandboxed HTML, or as diffs, which only a task family
+    yields, and `language` is the language every output must be written in,
+    which the gates check when it is set. A task family's only gate is its
+    tests, so it sets neither `language` nor `gates`. `defects` lists the
+    issues the owner can tag an output with, in the vote page's key order.
     """
 
     scorer: Literal['votes']
     reference: str
-    render: Literal['text', 'html'] = 'text'
+    render: Literal['text', 'html', 'diff'] = 'text'
     language: Language | None = None
     gates: Gates = Gates()
+    defects: list[Defect] = Field(default=[], max_length=MAX_DEFECTS)
 
     @model_validator(mode='after')
     def _check_reference(self) -> Self:
         if self.reference not in self.systems:
             raise ValueError(f'reference `{self.reference}` is not in `systems`')
+        return self
+
+    @model_validator(mode='after')
+    def _check_defects(self) -> Self:
+        repeated = sorted({d for d in self.defects if self.defects.count(d) > 1})
+        if repeated:
+            raise ValueError(f'`defects` repeats {code(repeated)}')
         return self
 
 
@@ -207,9 +231,10 @@ def load_family(name: str) -> Family:
         `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
         public family sets no aspect or names itself without that aspect's
         prefix, or the settings do not fit the source. A case family is scored by
-        `votes`, needs `max_output_tokens`, and sets no `harness` or `max_turns`.
-        A task family sets no `render`, `language`, or `gates`, and one that
-        lists systems needs `harness`, `max_turns`, and `max_output_tokens`.
+        `votes`, needs `max_output_tokens`, sets no `harness` or `max_turns`,
+        and renders no diffs. A task family sets no `language` or `gates` and
+        renders diffs when scored by votes, and one that lists systems needs
+        `harness`, `max_turns`, and `max_output_tokens`.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -268,18 +293,26 @@ def _check_source_settings(family: Family) -> None:
                 f'{prefix}: a `cases.jsonl` family runs every system as `generate`, '
                 f'so remove {code(agent_keys)}.'
             )
+        if settings.render == 'diff':
+            raise ValueError(
+                f'{prefix}: a `cases.jsonl` family yields replies, so set `render` '
+                'to `"text"` or `"html"`.'
+            )
         return
 
     if isinstance(settings, VotesSettings):
         gate_keys = [
-            key
-            for key in ('render', 'language', 'gates')
-            if key in settings.model_fields_set
+            key for key in ('language', 'gates') if key in settings.model_fields_set
         ]
         if gate_keys:
             raise ValueError(
-                f"{prefix}: a `tasks/` family's tests are its only gate and its "
-                f'outputs are diffs, so remove {code(gate_keys)}.'
+                f"{prefix}: a `tasks/` family's tests are its only gate, so remove "
+                f'{code(gate_keys)}.'
+            )
+        if settings.render != 'diff':
+            raise ValueError(
+                f'{prefix}: a `tasks/` family scored by `votes` yields diffs, so set '
+                '`render = "diff"`.'
             )
     if settings.systems:
         missing = [

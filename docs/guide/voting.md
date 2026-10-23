@@ -15,13 +15,17 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 | `a` / `b`  | A or B is better                                                                                                                     |
 | `t`        | Tie                                                                                                                                  |
 | `x`        | Both bad                                                                                                                             |
-| `1` to `5` | Toggle an issue on output A: wrong facts, punctuation, wrong tone, formulaic, too long                                               |
+| `1` to `5` | Toggle an issue on output A, in the order the family's Issues popover lists them                                                     |
 | `6` to `0` | Toggle the same issues on output B                                                                                                   |
 | `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field                               |
 | `Enter`    | Submit the vote and load the next pair. `Enter` submits even while a control in the pair has focus, and `Space` presses that control |
 | `u`        | Undo the last vote and show its pair again                                                                                           |
 
-An issue counts against the output you tag, whatever your verdict. Each output's Issues button shows what each issue means and toggles the same issues, which is how a phone tags them. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
+An issue counts against the output you tag, whatever your verdict. Each family lists its own issues, such as wrong facts or a wrong tone on writing and off-scope changes or weak tests on code, and each output's Issues button shows what each issue means and toggles the same issues, which is how a phone tags them. A family that lists none shows no Issues button. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
+
+## Diffs
+
+A task family scored by votes shows each solution as a diff of what it changed in the task's repository, with added and removed lines tinted and each file under its own header, and both solutions passed the task's hidden tests. Judge them as you would review a pull request against the prompt. The diff leaves out the repository's history, so a commit message never shows.
 
 ## HTML Outputs
 

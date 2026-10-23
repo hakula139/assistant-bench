@@ -2,7 +2,18 @@ import { z } from 'astro/zod';
 
 // ── Shared ──
 
-export const defects = ['facts', 'punctuation', 'tone', 'formulaic', 'length'] as const;
+export const defects = [
+  'facts',
+  'punctuation',
+  'tone',
+  'formulaic',
+  'length',
+  'scope',
+  'conventions',
+  'complexity',
+  'testing',
+  'clarity',
+] as const;
 
 const interval = z.strictObject({
   lower: z.number(),

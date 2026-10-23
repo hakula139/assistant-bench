@@ -5,19 +5,18 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from assistant_bench.families import Defect
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.ranking import Comparison
 
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
-type Defect = Literal['facts', 'punctuation', 'tone', 'formulaic', 'length']
 
-DEFECTS: tuple[Defect, ...] = get_args(Defect.__value__)
 LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 SWAPPED: dict[Choice, Choice] = {
     'a': 'b',

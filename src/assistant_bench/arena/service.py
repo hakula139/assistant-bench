@@ -21,6 +21,7 @@ from assistant_bench.arena.store import (
     VoteStore,
 )
 from assistant_bench.families import (
+    Defect,
     TaskTestsSettings,
     VotesSettings,
     case_task,
@@ -46,6 +47,10 @@ class NothingToUndo(Exception):
     """The session holds no vote of the owner's to undo."""
 
 
+class UnlistedDefects(ValueError):
+    """A vote tags an output with defects its family does not list."""
+
+
 # ── Views ──
 
 
@@ -61,7 +66,14 @@ class HtmlPane(BaseModel):
     url: str
 
 
-type Pane = Annotated[TextPane | HtmlPane, Field(discriminator='render')]
+class DiffPane(BaseModel):
+    """A solution as a unified diff of the task's repository."""
+
+    render: Literal['diff']
+    text: str
+
+
+type Pane = Annotated[TextPane | HtmlPane | DiffPane, Field(discriminator='render')]
 
 
 class PairView(BaseModel):
@@ -80,12 +92,14 @@ class PairView(BaseModel):
 class FamilyView(BaseModel):
     """A family the vote page can start a session on, where `name` is its ID.
 
-    The vote page composes the family's full name from `aspect` and `display_name`.
+    The vote page composes the family's full name from `aspect` and `display_name`,
+    and offers `defects` to tag each output with, in the family's order.
     """
 
     name: str
     aspect: str | None
     display_name: str
+    defects: list[Defect]
 
 
 class SessionView(BaseModel):
@@ -115,7 +129,8 @@ class ArenaFamily:
     name: str
     aspect: str | None
     display_name: str
-    render: Literal['text', 'html']
+    render: Literal['text', 'html', 'diff']
+    defects: list[Defect]
     instructions: dict[str, str]
     checklists: dict[str, list[str]]
     pool: Pool
@@ -148,6 +163,7 @@ def load_families() -> dict[str, ArenaFamily]:
                         aspect=family.settings.aspect,
                         display_name=family.settings.display_name,
                         render=family.settings.render,
+                        defects=family.settings.defects,
                         instructions={
                             case: (
                                 case_task(family, case) / 'instruction.md'
@@ -208,6 +224,25 @@ class Arena:
     def vote(
         self, token: str, choice: Choice, defects: Defects, note: str | None
     ) -> SessionView:
+        """Record the owner's vote on a pair and retire the pair.
+
+        Raises
+        ------
+        UnknownItem
+            The arena never issued the pair or has retired it.
+        UnlistedDefects
+            A side's defects include one the family does not list, which
+            leaves the pair open.
+        """
+        if token not in self._pairs:
+            raise UnknownItem(token)
+        session = self._session(self._pairs[token].session)
+        listed = self._families[session.family].defects
+        unlisted = sorted((defects.a | defects.b) - set(listed))
+        if unlisted:
+            raise UnlistedDefects(
+                f'issues the family does not list: {", ".join(unlisted)}'
+            )
         issued = self._retire(token)
         self._store.record(
             Ballot(
@@ -223,7 +258,7 @@ class Arena:
             ),
             self._clock(),
         )
-        return self._view(self._session(issued.session))
+        return self._view(session)
 
     def undo(self, session_id: str) -> SessionView:
         """Withdraw the session's latest vote and show its pair again.
@@ -281,7 +316,10 @@ class Arena:
     def _family_view(self, name: str) -> FamilyView:
         family = self._families[name]
         return FamilyView(
-            name=name, aspect=family.aspect, display_name=family.display_name
+            name=name,
+            aspect=family.aspect,
+            display_name=family.display_name,
+            defects=family.defects,
         )
 
     def _next(self, session: Session) -> None:
@@ -328,12 +366,12 @@ class Arena:
                 self._documents[document] = output.text
                 url = f'{self._render_origin}{OUTPUTS_PATH}/{document}'
                 return HtmlPane(render='html', url=url), document
+            case 'diff':
+                return DiffPane(render='diff', text=output.text), None
             case _:
                 assert_never(family.render)
 
     def _retire(self, token: str) -> _Issued:
-        if token not in self._pairs:
-            raise UnknownItem(token)
         issued = self._pairs.pop(token)
         del self._current[issued.session]
         for document in issued.documents:

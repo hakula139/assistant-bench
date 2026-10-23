@@ -2,19 +2,23 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.service import (
     Arena,
+    DiffPane,
     HtmlPane,
     NothingToUndo,
     PairView,
     TextPane,
     UnknownItem,
+    UnlistedDefects,
     load_families,
 )
 from assistant_bench.arena.store import Defects, Side, VoteStore
+from assistant_bench.families import Gate
 from assistant_bench.outputs import read_outputs, write_outputs
 from support import (
     ARENA_CASES,
@@ -25,8 +29,35 @@ from support import (
     make_arena,
     make_output,
     passing_outputs,
+    write_task_family,
     write_votes_family,
 )
+
+
+TASKS = ('t1', 't2', 't3')
+TASK_SYSTEMS = ('large', 'medium', 'small')
+FAILING_SOLUTIONS = {('t2', 'medium'), ('t3', 'medium'), ('t3', 'small')}
+
+
+def solution(task: str, system: str) -> str:
+    return f'--- a/{task}.py\n+++ b/{task}.py\n@@ -1 +1 @@\n-old\n+{system}\n'
+
+
+def task_arena(families_dir: Path, clock: Clock, store: VoteStore) -> Arena:
+    """Serve task family `f`, where only `large` solves `t3` and two solve `t2`."""
+    write_task_family(families_dir, *TASKS, systems=TASK_SYSTEMS)
+    failed = {'reward': 0.0, 'gate_failures': [Gate.TESTS]}
+    write_outputs(
+        'f',
+        [
+            output.model_copy(
+                update={'text': solution(*slot), 'reward': 1.0}
+                | (failed if slot in FAILING_SOLUTIONS else {})
+            )
+            for slot, output in passing_outputs(TASKS, TASK_SYSTEMS).items()
+        ],
+    )
+    return Arena(store, load_families(), RENDER_ORIGIN, clock, np.random.default_rng(0))
 
 
 def documents(pair: PairView) -> list[str]:
@@ -114,6 +145,32 @@ class TestArena:
 
             assert (view.votes, view.remaining, view.pair) == (0, 0, None)
             assert store.votes('f') == []
+
+        def test_shows_only_passing_solutions_as_diffs(
+            self, families_dir: Path, clock: Clock, store: VoteStore
+        ) -> None:
+            arena = task_arena(families_dir, clock, store)
+            passing = {
+                solution(task, system)
+                for task in TASKS
+                for system in TASK_SYSTEMS
+                if (task, system) not in FAILING_SOLUTIONS
+            }
+
+            view = arena.start('f')
+            remaining = view.remaining
+            shown = []
+            while view.pair is not None:
+                shown.append((view.pair.a, view.pair.b))
+                view = arena.vote(view.pair.token, 'a', Defects(), None)
+
+            assert remaining == 2
+            assert view.votes == 2
+            for a, b in shown:
+                assert isinstance(a, DiffPane)
+                assert isinstance(b, DiffPane)
+                assert {a.text, b.text} <= passing
+                assert a.text.split('\n')[0] == b.text.split('\n')[0]
 
         def test_pairs_the_systems_with_outputs_until_the_others_join(
             self, families_dir: Path, clock: Clock, store: VoteStore
@@ -251,6 +308,27 @@ class TestArena:
             assert second.pair is not None
             assert second.pair.token != first.pair.token
 
+        def test_refuses_a_defect_the_family_does_not_list(
+            self, families_dir: Path, clock: Clock, store: VoteStore
+        ) -> None:
+            arena = task_arena(families_dir, clock, store)
+            first = arena.start('f')
+            assert first.pair is not None
+
+            with pytest.raises(UnlistedDefects, match='tone'):
+                arena.vote(
+                    first.pair.token,
+                    'a',
+                    Defects(a=frozenset({'scope'}), b=frozenset({'tone'})),
+                    None,
+                )
+
+            assert store.votes('f') == []
+            assert arena.resume(first.id).pair == first.pair
+            arena.vote(first.pair.token, 'a', Defects(a=frozenset({'scope'})), None)
+            (vote,) = store.votes('f')
+            assert vote.defects == Defects(a=frozenset({'scope'}))
+
         def test_retires_the_pair_it_records(
             self, families_dir: Path, clock: Clock, store: VoteStore
         ) -> None:
@@ -361,6 +439,44 @@ class TestArena:
             assert store.votes('f') == []
             assert undone.pair is not None
             assert (undone.pair.a, undone.pair.b) == (first.pair.a, first.pair.b)
+
+        @pytest.mark.parametrize(
+            ('regrade', 'returns'),
+            [
+                pytest.param({'reward': 1.0, 'gate_failures': []}, True, id='passes'),
+                pytest.param(
+                    {'reward': 0.0, 'gate_failures': [Gate.TESTS]}, False, id='fails'
+                ),
+            ],
+        )
+        def test_keeps_a_vote_on_regraded_solutions_while_both_pass(
+            self,
+            families_dir: Path,
+            clock: Clock,
+            store: VoteStore,
+            regrade: dict[str, Any],
+            returns: bool,
+        ) -> None:
+            arena = task_arena(families_dir, clock, store)
+            first = arena.start('f')
+            assert first.pair is not None
+            arena.vote(first.pair.token, 'a', Defects(), None)
+            (vote,) = store.votes('f')
+            write_outputs(
+                'f',
+                [
+                    o.model_copy(update=regrade) if Side.of(o) == vote.a else o
+                    for o in read_outputs('f')
+                ],
+            )
+            restarted = Arena(store, load_families(), RENDER_ORIGIN, clock)
+
+            undone = restarted.undo(first.id)
+
+            assert undone.pair is not None
+            shown = (undone.pair.a, undone.pair.b)
+            assert (shown == (first.pair.a, first.pair.b)) is returns
+            assert first.pair.a not in shown or returns
 
         def test_draws_afresh_once_the_vote_s_output_left(
             self, families_dir: Path, clock: Clock, store: VoteStore
