@@ -4,7 +4,7 @@ What the bench stores, where each kind of data lives, and what may be committed 
 
 ## Data Classes
 
-Each case declares its `source`, which determines where the case and everything generated from it may live:
+Each case or task declares its `source`, which determines where it and everything generated from it may live:
 
 | Source       | Meaning                                                        | Lives in                                    |
 | ------------ | -------------------------------------------------------------- | ------------------------------------------- |
@@ -13,7 +13,9 @@ Each case declares its `source`, which determines where the case and everything 
 | `transcript` | Derived from the owner's assistant transcripts                 | The data directory's `cases/<family>.jsonl` |
 | `held-out`   | Kept private so a leaderboard cannot be fit to it              | The data directory's `cases/<family>.jsonl` |
 
-`test_repository.py` fails when a committed case file holds a `transcript` or `held-out` case.
+A task in a task family declares its source the same way, in its `task.toml`'s `[metadata]`. A committed task is `synthetic` or `public` and lives in `families/<family>/tasks/<task>/`, while a `transcript` or `held-out` task lives under the data directory's `cases/<family>/<task>/`.
+
+`test_repository.py` fails when a committed case file or task holds a `transcript` or `held-out` source.
 
 ## The Data Directory
 

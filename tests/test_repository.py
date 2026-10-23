@@ -30,6 +30,17 @@ def test_committed_cases_hold_only_synthetic_or_public_sources(path: Path) -> No
 
 
 @pytest.mark.parametrize(
+    'path',
+    sorted((REPO_ROOT / 'families').glob('*/tasks/*/task.toml')),
+    ids=lambda path: f'{path.parent.parent.parent.name}/{path.parent.name}',
+)
+def test_committed_tasks_hold_only_synthetic_or_public_sources(path: Path) -> None:
+    metadata = tomllib.loads(path.read_text()).get('metadata', {})
+
+    assert metadata.get('source') in COMMITTED_SOURCES
+
+
+@pytest.mark.parametrize(
     'name',
     sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/cases.jsonl')),
 )
@@ -95,15 +106,28 @@ def test_committed_families_and_reports_name_only_tabled_systems() -> None:
     } == set()
 
 
+def lockfiles() -> list[Path]:
+    """Return every lockfile and requirements file in the repo and its families."""
+    families = REPO_ROOT / 'families'
+    return sorted(
+        [REPO_ROOT / 'uv.lock', REPO_ROOT / 'pnpm-lock.yaml']
+        + list(families.rglob('uv.lock'))
+        + list(families.rglob('pnpm-lock.yaml'))
+        + list(families.rglob('requirements*.txt'))
+    )
+
+
+def registry(name: str) -> set[str]:
+    """Return the public registry that a lockfile or requirements file may name."""
+    if name == 'pnpm-lock.yaml':
+        return {'registry.npmjs.org'}
+    return {'pypi.org', 'files.pythonhosted.org'}
+
+
 @pytest.mark.parametrize(
-    ('lockfile', 'registry'),
-    [
-        ('uv.lock', {'pypi.org', 'files.pythonhosted.org'}),
-        ('pnpm-lock.yaml', {'registry.npmjs.org'}),
-    ],
-    ids=['uv', 'pnpm'],
+    'lockfile',
+    lockfiles(),
+    ids=lambda path: str(path.relative_to(REPO_ROOT)),
 )
-def test_lockfiles_name_only_their_public_registry(
-    lockfile: str, registry: set[str]
-) -> None:
-    assert hosts(REPO_ROOT / lockfile) <= registry
+def test_lockfiles_name_only_their_public_registry(lockfile: Path) -> None:
+    assert hosts(lockfile) <= registry(lockfile.name)

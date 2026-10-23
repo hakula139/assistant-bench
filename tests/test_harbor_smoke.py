@@ -1,26 +1,28 @@
 """Harbor trials under Docker, which the Harbor Smoke job runs."""
 
+from collections import Counter
+
 import pytest
 
 from assistant_bench import jobs
-from assistant_bench.families import load_cases, load_family
+from assistant_bench.families import case_task, load_cases, load_family
 from support import StubEndpoint, make_system
 
 
 pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
 
 
-def test_oracle_solves_every_smoke_task() -> None:
+def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None:
     family = load_family('smoke')
 
-    job_dir = jobs.run_job(jobs.oracle_job(family))
+    job_dir = jobs.run_job(jobs.check_job(family, [case_task(family, 'echo')]))
 
-    (output,) = jobs.read_trials(family, job_dir, {})
-    assert (output.case, output.system, output.error, output.reward) == (
-        'echo',
-        'oracle',
-        None,
-        1.0,
+    outputs = jobs.read_trials(family, job_dir, {})
+    assert Counter((o.system, o.error, o.reward) for o in outputs) == Counter(
+        {
+            ('oracle', None, 1.0): jobs.CHECK_ATTEMPTS,
+            ('nop', None, 0.0): jobs.CHECK_ATTEMPTS,
+        }
     )
 
 

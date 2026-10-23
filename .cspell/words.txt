@@ -6,6 +6,7 @@ cafile
 cedict
 chatcmpl
 covariate
+cpus
 csgraph
 Daan
 dateutil

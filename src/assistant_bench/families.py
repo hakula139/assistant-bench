@@ -190,13 +190,19 @@ def load_family(name: str) -> Family:
 def load_cases(family: Family) -> list[Case]:
     """Return the committed cases followed by the local ones, if the family has any.
 
+    A task family's cases are its task directories, each taking its ID from the
+    directory name and its category, source, and instruction from the task.
+
     Raises
     ------
     ValueError
-        A line is not a valid case, two cases share an ID, within one file or
-        across both, or a case's category is missing from the family's
-        `categories`.
+        A line is not a valid case, a task has no `task.toml` or `instruction.md`
+        or names itself apart from its directory, two cases share an ID, within
+        one source or across both, or a case's category is missing from the
+        family's `categories`.
     """
+    if family.source == 'tasks':
+        return _task_cases(family)
     paths = [
         FAMILIES_DIR / family.name / 'cases.jsonl',
         data_dir() / 'cases' / f'{family.name}.jsonl',
@@ -231,11 +237,88 @@ def load_cases(family: Family) -> list[Case]:
     return list(cases.values())
 
 
+def _task_cases(family: Family) -> list[Case]:
+    roots = [
+        (FAMILIES_DIR / family.name / 'tasks', 'tasks'),
+        (data_dir() / 'cases' / family.name, f'cases/{family.name}'),
+    ]
+    cases: dict[str, Case] = {}
+    sources: dict[str, str] = {}
+    for root, prefix in roots:
+        if not root.is_dir():
+            continue
+        for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+            location = f'{prefix}/{directory.name}'
+            if directory.name in cases:
+                raise ValueError(
+                    f'family {family.name!r}: case {directory.name!r} appears at '
+                    f'{sources[directory.name]} and {location}'
+                )
+            cases[directory.name] = _task_case(family, directory, location)
+            sources[directory.name] = location
+    return list(cases.values())
+
+
+def _task_case(family: Family, directory: Path, location: str) -> Case:
+    config_path = directory / 'task.toml'
+    if not config_path.is_file():
+        raise ValueError(
+            f'family {family.name!r}: task {directory.name!r} at {location} '
+            'has no task.toml'
+        )
+    config = tomllib.loads(config_path.read_text())
+    expected = f'{family.name}/{directory.name}'
+    if config.get('task', {}).get('name') != expected:
+        raise ValueError(
+            f'family {family.name!r}: set [task] name to "{expected}" in '
+            f'{location}/task.toml'
+        )
+    instruction_path = directory / 'instruction.md'
+    if not instruction_path.is_file():
+        raise ValueError(
+            f'family {family.name!r}: task {directory.name!r} at {location} '
+            'has no instruction.md'
+        )
+    metadata = config.get('metadata', {})
+    absent = [key for key in ('category', 'source') if key not in metadata]
+    if absent:
+        raise ValueError(
+            f'family {family.name!r}: {location}/task.toml sets no [metadata] '
+            f'{", ".join(absent)}'
+        )
+    try:
+        case = Case(
+            id=directory.name,
+            category=metadata['category'],
+            source=metadata['source'],
+            instruction=instruction_path.read_text(),
+        )
+    except ValidationError as error:
+        raise ValueError(
+            f'family {family.name!r}: {location}/task.toml is not a valid case: {error}'
+        ) from error
+    if case.category not in family.settings.categories:
+        raise ValueError(
+            f'family {family.name!r}: case {case.id!r} at {location}/task.toml '
+            f'has category {case.category!r}, which categories does not list'
+        )
+    return case
+
+
 def tasks_dir(family: Family) -> Path:
     """Return the directory that `jobs.render_tasks` installs the family's tasks in."""
     return data_dir() / 'tasks' / family.name
 
 
 def case_task(family: Family, case_id: str) -> Path:
-    """Return the directory that `jobs.render_tasks` installs a case's task in."""
-    return tasks_dir(family) / case_id
+    """Return a case's Harbor task directory.
+
+    A case family's task is installed under the data directory, while a task
+    family's task is its own directory, committed or local.
+    """
+    if family.source == 'cases':
+        return tasks_dir(family) / case_id
+    committed = FAMILIES_DIR / family.name / 'tasks' / case_id
+    if committed.is_dir():
+        return committed
+    return data_dir() / 'cases' / family.name / case_id

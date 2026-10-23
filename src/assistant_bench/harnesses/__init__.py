@@ -10,5 +10,6 @@ from harbor.models.trial.config import AgentConfig
 
 HARNESSES: dict[str, AgentConfig] = {
     'generate': AgentConfig(import_path='assistant_bench.harnesses.generate:Generate'),
+    'nop': AgentConfig(name='nop'),
     'oracle': AgentConfig(name='oracle'),
 }

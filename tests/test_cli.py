@@ -135,19 +135,52 @@ class TestCheck:
         assert message == 'f: 0 valid cases\n'
 
     @pytest.mark.parametrize(
-        ('rewards', 'exit_code', 'message'),
+        ('attempts', 'exit_code', 'message'),
         [
-            ([1.0], 0, 'smoke: the oracle passed every task\n'),
-            ([0.0], 1, 'smoke: the oracle failed on echo\n'),
-            ([], 1, 'smoke: the oracle left no trial of echo\n'),
+            pytest.param(
+                {'oracle': [1.0, 1.0, 1.0], 'nop': [0.0, 0.0, 0.0]},
+                0,
+                'smoke: the oracle passed every task and the nop failed every task\n',
+                id='passed',
+            ),
+            pytest.param(
+                {'oracle': [0.0, 0.0, 0.0], 'nop': [0.0, 0.0, 0.0]},
+                1,
+                'smoke: the oracle failed on echo\n',
+                id='oracle-failed',
+            ),
+            pytest.param(
+                {'oracle': [], 'nop': [0.0, 0.0, 0.0]},
+                1,
+                'smoke: the oracle left no trial of echo\n',
+                id='oracle-left-no-trial',
+            ),
+            pytest.param(
+                {'oracle': [1.0, 1.0, 1.0], 'nop': [1.0, 0.0, 0.0]},
+                1,
+                'smoke: the nop did not fail echo\n',
+                id='nop-passed',
+            ),
+            pytest.param(
+                {'oracle': [1.0, 1.0, 1.0], 'nop': []},
+                1,
+                'smoke: the nop left no trial of echo\n',
+                id='nop-left-no-trial',
+            ),
+            pytest.param(
+                {},
+                1,
+                'smoke: the oracle left no trial of echo\n'
+                'smoke: the nop left no trial of echo\n',
+                id='no-trials',
+            ),
         ],
-        ids=['passed', 'failed', 'no-trial'],
     )
-    def test_runs_the_oracle_on_task_directories(
+    def test_runs_the_oracle_and_the_nop_on_task_directories(
         self,
         submitted: list[JobConfig],
         monkeypatch: pytest.MonkeyPatch,
-        rewards: list[float],
+        attempts: dict[str, list[float]],
         exit_code: int,
         message: str,
     ) -> None:
@@ -155,7 +188,9 @@ class TestCheck:
             jobs,
             'read_trials',
             lambda family, job_dir, systems: [
-                make_output(case='echo', reward=reward) for reward in rewards
+                make_output(case='echo', system=system, reward=reward)
+                for system, rewards in attempts.items()
+                for reward in rewards
             ],
         )
 
@@ -163,7 +198,60 @@ class TestCheck:
 
         assert (result.exit_code, result.output) == (exit_code, message)
         (job,) = submitted
-        assert [agent.name for agent in job.agents] == ['oracle']
+        assert [agent.name for agent in job.agents] == ['oracle', 'nop']
+        assert job.n_attempts == jobs.CHECK_ATTEMPTS
+
+    @pytest.mark.parametrize(
+        'system', ['oracle', 'nop'], ids=['oracle-errored', 'nop-errored']
+    )
+    def test_fails_a_check_whose_trial_errored(
+        self,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+        system: str,
+    ) -> None:
+        monkeypatch.setattr(
+            jobs,
+            'read_trials',
+            lambda family, job_dir, systems: [
+                make_output(
+                    case='echo',
+                    system=system,
+                    reward=1.0 if system == 'oracle' else 0.0,
+                    error='TimeoutError',
+                )
+                for _ in range(jobs.CHECK_ATTEMPTS)
+            ],
+        )
+
+        result = runner.invoke(app, ['check', 'smoke'])
+
+        assert result.exit_code == 1
+        expected = 'failed on' if system == 'oracle' else 'did not fail'
+        assert f'smoke: the {system} {expected} echo' in result.output
+
+    def test_rejects_a_task_whose_settings_break_a_rule(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
+        config = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
+        config.write_text(
+            config.read_text().replace(
+                'network_mode = "no-network"', 'network_mode = "public"'
+            )
+        )
+        monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
+
+        exit_code, message = invoke('check', 'smoke')
+
+        assert exit_code == 2
+        assert (
+            'tasks/echo/task.toml: set [environment] network_mode = "no-network"'
+        ) in message
+        assert submitted == []
 
     def test_rejects_a_task_named_apart_from_its_directory(
         self,

@@ -1,9 +1,12 @@
 import asyncio
+import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
+import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
@@ -20,12 +23,13 @@ from assistant_bench.families import (
     Gates,
     TaskTestsSettings,
     VotesSettings,
+    case_task,
     load_cases,
     load_family,
 )
 from assistant_bench.harnesses.generate import GenerateOptions
 from assistant_bench.outputs import Output
-from assistant_bench.paths import REPO_ROOT
+from assistant_bench.paths import FAMILIES_DIR, REPO_ROOT
 from support import finish_job, make_system, write_trial
 
 
@@ -264,19 +268,154 @@ class TestCaseJob:
         ]
 
 
-class TestOracleJob:
-    def test_checks_the_committed_tasks_apart_from_ingested_jobs(
+class TestCheckJob:
+    def test_checks_the_committed_tasks_with_the_oracle_and_the_nop(
         self, data_dir: Path
     ) -> None:
-        job = jobs.oracle_job(load_family('smoke'))
+        job = jobs.check_job(
+            load_family('smoke'), [REPO_ROOT / 'families' / 'smoke' / 'tasks' / 'echo']
+        )
 
-        assert [agent.name for agent in job.agents] == ['oracle']
+        assert [(agent.name, agent.import_path) for agent in job.agents] == [
+            ('oracle', None),
+            ('nop', None),
+        ]
+        assert job.n_attempts == jobs.CHECK_ATTEMPTS == 3
         assert [t.path for t in job.tasks] == [
             REPO_ROOT / 'families' / 'smoke' / 'tasks' / 'echo'
         ]
         assert not job.verifier.disable
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
+
+
+def broken_smoke_task(
+    families_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: tuple[str, ...],
+    value: Any,
+) -> tuple[Family, list[Path]]:
+    """Copy the smoke family and set or remove one setting of its echo task."""
+    shutil.copytree(FAMILIES_DIR / 'smoke', families_dir / 'smoke')
+    monkeypatch.setattr(jobs, 'FAMILIES_DIR', families_dir)
+    config_path = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
+    config = tomllib.loads(config_path.read_text())
+    target = config
+    for key in path[:-1]:
+        target = target[key]
+    if value is None:
+        target.pop(path[-1], None)
+    else:
+        target[path[-1]] = value
+    config_path.write_text(tomli_w.dumps(config))
+    family = load_family('smoke')
+    return family, [case_task(family, 'echo')]
+
+
+class TestCheckTasks:
+    def test_accepts_the_committed_smoke_task(self) -> None:
+        family = load_family('smoke')
+
+        jobs.check_tasks(family, [case_task(family, 'echo')])
+
+    @pytest.mark.parametrize(
+        ('path', 'value', 'message'),
+        [
+            pytest.param(
+                ('task', 'version'), None, 'set [task] version', id='no-version'
+            ),
+            pytest.param(
+                ('environment', 'network_mode'),
+                'public',
+                'set [environment] network_mode = "no-network"',
+                id='open-network',
+            ),
+            pytest.param(
+                ('verifier', 'environment_mode'),
+                None,
+                'set [verifier] environment_mode = "separate"',
+                id='shared-verifier',
+            ),
+            pytest.param(
+                ('artifacts',),
+                None,
+                'list "/app" under [[artifacts]]',
+                id='no-artifact',
+            ),
+            pytest.param(
+                ('environment', 'cpus'), None, 'set [environment] cpus', id='no-cpus'
+            ),
+            pytest.param(
+                ('environment', 'memory_mb'),
+                None,
+                'set [environment] memory_mb',
+                id='no-memory',
+            ),
+            pytest.param(
+                ('agent', 'timeout_sec'),
+                None,
+                'set [agent] timeout_sec',
+                id='no-agent-timeout',
+            ),
+        ],
+    )
+    def test_rejects_a_task_that_breaks_a_rule(
+        self,
+        families_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        path: tuple[str, ...],
+        value: Any,
+        message: str,
+    ) -> None:
+        family, tasks = broken_smoke_task(families_dir, monkeypatch, path, value)
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_tasks(family, tasks)
+
+        assert f'tasks/echo/task.toml: {message}' in str(error.value)
+
+    def test_names_a_local_task(self, data_dir: Path) -> None:
+        task = data_dir / 'cases' / 'smoke' / 'echo'
+        task.mkdir(parents=True)
+        config = tomllib.loads(
+            (FAMILIES_DIR / 'smoke' / 'tasks' / 'echo' / 'task.toml').read_text()
+        )
+        del config['environment']['cpus']
+        (task / 'task.toml').write_text(tomli_w.dumps(config))
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_tasks(load_family('smoke'), [task])
+
+        assert 'cases/smoke/echo/task.toml: set [environment] cpus' in str(error.value)
+
+    def test_names_every_problem_of_a_task(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        family, tasks = broken_smoke_task(
+            families_dir, monkeypatch, ('environment', 'cpus'), None
+        )
+        config_path = families_dir / 'smoke' / 'tasks' / 'echo' / 'task.toml'
+        config = tomllib.loads(config_path.read_text())
+        del config['environment']['memory_mb']
+        config_path.write_text(tomli_w.dumps(config))
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_tasks(family, tasks)
+
+        assert 'set [environment] cpus' in str(error.value)
+        assert 'set [environment] memory_mb' in str(error.value)
+
+    def test_rejects_a_task_toml_that_fails_to_validate(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        family, tasks = broken_smoke_task(
+            families_dir, monkeypatch, ('environment', 'cpus'), 'two'
+        )
+
+        with pytest.raises(ValueError) as error:
+            jobs.check_tasks(family, tasks)
+
+        assert 'tasks/echo/task.toml is not valid:' in str(error.value)
 
 
 class TestHasJobs:
@@ -296,6 +435,13 @@ class TestHasJobs:
 
         assert jobs.has_jobs(family) is expected
 
+    def test_ignores_a_check_job(self, data_dir: Path) -> None:
+        job = data_dir / 'checks' / 'smoke' / 'job-1'
+        job.mkdir(parents=True)
+        (job / 'result.json').touch()
+
+        assert jobs.has_jobs(load_family('smoke')) is False
+
 
 class TestRunJob:
     def test_passes_the_config_to_harbor_with_telemetry_off(
@@ -308,7 +454,8 @@ class TestRunJob:
             calls.append((args, env, config))
 
         monkeypatch.setattr(subprocess, 'run', fake_run)
-        job = jobs.oracle_job(load_family('smoke'))
+        family = load_family('smoke')
+        job = jobs.check_job(family, [case_task(family, 'echo')])
 
         job_dir = jobs.run_job(job)
 

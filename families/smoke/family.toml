@@ -1,3 +1,4 @@
 scorer = "tests"
 display_name = "Smoke Test · Tasks"
 samples = 1
+categories = ["smoke"]

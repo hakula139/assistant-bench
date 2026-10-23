@@ -17,6 +17,7 @@ from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
+from pydantic import ValidationError
 
 from assistant_bench.catalog import System
 from assistant_bench.families import (
@@ -45,6 +46,7 @@ N_CONCURRENT_TRIALS = 8
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
+CHECK_ATTEMPTS = 3
 
 
 # ── Jobs ──
@@ -168,46 +170,91 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
         for system in systems
     ]
     sources = [source for source, _ in _sources(family)]
-    return _job(family, data_dir() / 'jobs' / family.name, agents, tasks, sources)
+    return _job(
+        family,
+        data_dir() / 'jobs' / family.name,
+        agents,
+        tasks,
+        sources,
+        n_attempts=family.settings.samples,
+        verify=_runs_tests(family.settings),
+    )
 
 
-def oracle_job(family: Family) -> JobConfig:
-    """Build a job that runs Harbor's oracle on every task directory of the family.
-
-    Its trials go under `checks/`, apart from the jobs that ingest reads.
+def check_tasks(family: Family, tasks: list[Path]) -> None:
+    """Check that every task sets what a run needs.
 
     Raises
     ------
     ValueError
-        A task's `[task] name` is not `<family>/<directory>`, which trials report.
+        A task's `task.toml` does not parse, or it leaves a required setting at
+        its default, naming the task and the value to set.
     """
-    tasks = sorted((FAMILIES_DIR / family.name / 'tasks').iterdir())
-    misnamed = [
-        f'"{family.name}/{task.name}" in tasks/{task.name}/task.toml'
-        for task in tasks
-        if _task_name(task) != f'{family.name}/{task.name}'
-    ]
-    if misnamed:
-        raise ValueError(
-            f'family {family.name!r}: set [task] name to {", ".join(misnamed)}'
-        )
+    problems = []
+    for task in tasks:
+        location = f'{_task_location(family, task)}/task.toml'
+        try:
+            config = _task_config(task)
+        except ValidationError as error:
+            problems.append(f'{location} is not valid: {error}')
+            continue
+        problems.extend(_task_problems(config, location))
+    if problems:
+        raise ValueError(f'family {family.name!r}:\n' + '\n'.join(problems))
+
+
+def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
+    problems = []
+    if config.task is None or config.task.version is None:
+        problems.append(f'{location}: set [task] version')
+    if config.environment.network_mode is not task_config.NetworkMode.NO_NETWORK:
+        problems.append(f'{location}: set [environment] network_mode = "no-network"')
+    if (
+        config.verifier.environment_mode
+        is not task_config.VerifierEnvironmentMode.SEPARATE
+    ):
+        problems.append(f'{location}: set [verifier] environment_mode = "separate"')
+    if not any(
+        (artifact if isinstance(artifact, str) else artifact.source) == '/app'
+        for artifact in config.artifacts
+    ):
+        problems.append(f'{location}: list "/app" under [[artifacts]]')
+    for field in ('cpus', 'memory_mb'):
+        if getattr(config.environment, field) is None:
+            problems.append(f'{location}: set [environment] {field}')
+    if config.agent.timeout_sec is None:
+        problems.append(f'{location}: set [agent] timeout_sec')
+    return problems
+
+
+def _task_location(family: Family, task: Path) -> str:
+    if task.parent == FAMILIES_DIR / family.name / 'tasks':
+        return f'tasks/{task.name}'
+    return f'cases/{family.name}/{task.name}'
+
+
+def check_job(family: Family, tasks: list[Path]) -> JobConfig:
+    """Build a job that runs the oracle and the nop on every task of the family.
+
+    The oracle must pass every task while the untouched repository must fail it,
+    so the job runs both agents three times on each. Its trials go under
+    `checks/`, apart from the jobs that ingest reads.
+    """
     return _job(
         family,
         data_dir() / 'checks' / family.name,
         [
             trial_config.AgentConfig(
-                name=HARNESSES['oracle'].name,
-                import_path=HARNESSES['oracle'].import_path,
+                name=HARNESSES[agent].name,
+                import_path=HARNESSES[agent].import_path,
             )
+            for agent in ('oracle', 'nop')
         ],
         tasks,
         [],
+        n_attempts=CHECK_ATTEMPTS,
+        verify=True,
     )
-
-
-def _task_name(task_dir: Path) -> str | None:
-    config = _installed_config(task_dir)
-    return config.task.name if config.task else None
 
 
 def has_jobs(family: Family) -> bool:
@@ -233,14 +280,17 @@ def _job(
     agents: list[trial_config.AgentConfig],
     tasks: list[Path],
     sources: list[SourceJobConfig],
+    *,
+    n_attempts: int,
+    verify: bool,
 ) -> JobConfig:
     return JobConfig(
         jobs_dir=jobs_dir,
-        n_attempts=family.settings.samples,
+        n_attempts=n_attempts,
         n_concurrent_trials=N_CONCURRENT_TRIALS,
         quiet=True,
         retry=RetryConfig(max_retries=1),
-        verifier=trial_config.VerifierConfig(disable=not _runs_tests(family.settings)),
+        verifier=trial_config.VerifierConfig(disable=not verify),
         agents=agents,
         tasks=[trial_config.TaskConfig(path=path) for path in tasks],
         source_jobs=sources,
@@ -364,13 +414,13 @@ def _installed_versions(family: Family) -> dict[str, str]:
     for task in directory.iterdir():
         if not (task / 'task.toml').is_file():
             continue
-        package = _installed_config(task).task
+        package = _task_config(task).task
         if package is not None and package.version is not None:
             versions[task.name] = package.version
     return versions
 
 
-def _installed_config(task_dir: Path) -> task_config.TaskConfig:
+def _task_config(task_dir: Path) -> task_config.TaskConfig:
     return task_config.TaskConfig.model_validate_toml(
         (task_dir / 'task.toml').read_text()
     )

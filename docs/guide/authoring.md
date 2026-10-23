@@ -54,6 +54,20 @@ Each line of `cases.jsonl` is one case:
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Because Harbor runs scripts in the main container through bash, the image must include it. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
+A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes.
+
+`bench check` checks each task's `task.toml` for what a run needs:
+
+- `[task] version`, which Harbor compares with an earlier trial's lock
+- `[environment] network_mode = "no-network"`, `cpus`, and `memory_mb`
+- `[verifier] environment_mode = "separate"`, which gives the verifier its own container
+- `[agent] timeout_sec`
+- `/app` under `[[artifacts]]`, which the verifier receives
+
+It then runs Harbor's oracle and nop agents three times on each task, and fails unless every oracle attempt earns reward 1 and every nop attempt earns 0, so the reference solution passes a task that the repository as committed fails.
+
+A local task is a directory under the data directory's `cases/<family>/`, which `bench check` reads beside the committed tasks. It carries `source = "held-out"` or `"transcript"`, as [Data](../conventions/data.md#data-classes) describes.
+
 ## Systems
 
 [`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key ends in the snapshot, as in `deepseek-v4.1-flash-1017`:

@@ -20,8 +20,10 @@ from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import System, load_export, load_systems, pin
 from assistant_bench.families import (
+    Case,
     Family,
     VotesSettings,
+    case_task,
     family_names,
     load_cases,
     load_family,
@@ -45,7 +47,7 @@ def main() -> None:
 def check(
     families: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
-    """Validate every family, or the named ones, running Harbor's oracle on tasks."""
+    """Validate every family, or the named ones, running the oracle and nop on tasks."""
     for name in _picked(families, family_names):
         selected = _load_family(name)
         _family_systems(selected)
@@ -53,25 +55,35 @@ def check(
             typer.echo(f'{name}: {len(_render_tasks(selected))} valid cases')
             continue
 
-        try:
-            job = jobs.oracle_job(selected)
-        except ValueError as error:
-            raise typer.BadParameter(str(error), param_hint='FAMILY') from error
-        outputs = jobs.read_trials(selected, _run(job), {})
-        failed = sorted(
-            {output.case for output in outputs if output.error or output.reward != 1}
-        )
-        tasks = {task.get_task_id().get_name() for task in job.tasks}
-        missing = sorted(tasks - {output.case for output in outputs})
-        if failed:
-            typer.echo(f'{name}: the oracle failed on {", ".join(failed)}', err=True)
-        if missing:
-            typer.echo(
-                f'{name}: the oracle left no trial of {", ".join(missing)}', err=True
+        cases = _load_cases(selected)
+        tasks = [case_task(selected, case.id) for case in cases]
+        _check_tasks(selected, tasks)
+        outputs = jobs.read_trials(selected, _run(jobs.check_job(selected, tasks)), {})
+        problems = []
+        for agent, reward, verdict in (
+            ('oracle', 1, 'failed on'),
+            ('nop', 0, 'did not fail'),
+        ):
+            attempts = [output for output in outputs if output.system == agent]
+            broken = sorted(
+                {
+                    output.case
+                    for output in attempts
+                    if output.error or output.reward != reward
+                }
             )
-        if failed or missing:
+            missing = sorted({task.name for task in tasks} - {o.case for o in attempts})
+            if broken:
+                problems.append(f'the {agent} {verdict} {", ".join(broken)}')
+            if missing:
+                problems.append(f'the {agent} left no trial of {", ".join(missing)}')
+        if problems:
+            for problem in problems:
+                typer.echo(f'{name}: {problem}', err=True)
             raise typer.Exit(1)
-        typer.echo(f'{name}: the oracle passed every task')
+        typer.echo(
+            f'{name}: the oracle passed every task and the nop failed every task'
+        )
 
 
 @app.command()
@@ -232,9 +244,20 @@ def _load_systems() -> dict[str, System]:
         raise typer.BadParameter(str(error), param_hint='systems.toml') from error
 
 
-def _render_tasks(family: Family) -> list[Path]:
+def _load_cases(family: Family) -> list[Case]:
     try:
-        return jobs.render_tasks(family, load_cases(family))
+        return load_cases(family)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+
+
+def _render_tasks(family: Family) -> list[Path]:
+    return jobs.render_tasks(family, _load_cases(family))
+
+
+def _check_tasks(family: Family, tasks: list[Path]) -> None:
+    try:
+        jobs.check_tasks(family, tasks)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint='FAMILY') from error
 
