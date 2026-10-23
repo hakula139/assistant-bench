@@ -39,7 +39,9 @@ export interface Family {
 export function boardSlug(name: string, aspect: Aspect): string {
   const prefix = `${aspect}-`;
   if (!name.startsWith(prefix)) {
-    throw new Error(`family ${name} does not start with its aspect ${aspect}-`);
+    throw new Error(
+      `family ${name}: a public family ID starts with its aspect, as in ${aspect}-<name>`,
+    );
   }
   return name.slice(prefix.length);
 }
@@ -63,8 +65,8 @@ export function systemPath(family: Family, system: string): string {
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, when a public family has no
- *   aspect, or when a public family's ID does not start with its aspect.
+ * @throws Error when two families, listed or not, share a full name, or when a public family has
+ *   no aspect.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -81,13 +83,12 @@ export function listFamilies(
     owners.set(title, name);
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
-  const families = configs
+  return configs
     .filter(({ config }) => config.public)
     .map(({ name, config }) => {
       if (config.aspect === undefined) {
         throw new Error(`public family ${name} has no aspect`);
       }
-      boardSlug(name, config.aspect);
       return {
         name,
         title: familyTitle(config),
@@ -100,7 +101,6 @@ export function listFamilies(
       };
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
-  return families;
 }
 
 export async function getFamilies(): Promise<Family[]> {

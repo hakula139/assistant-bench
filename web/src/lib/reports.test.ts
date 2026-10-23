@@ -26,9 +26,12 @@ describe('boardSlug', () => {
     expect(boardSlug('writing-zh', 'writing')).toBe('zh');
   });
 
-  test('rejects a family ID that does not start with its aspect', () => {
+  test('rejects a family ID that does not start with its aspect and a hyphen', () => {
     expect(() => boardSlug('zh', 'writing')).toThrow(
-      'family zh does not start with its aspect writing-',
+      'family zh: a public family ID starts with its aspect, as in writing-<name>',
+    );
+    expect(() => boardSlug('writingzh', 'writing')).toThrow(
+      'family writingzh: a public family ID starts with its aspect, as in writing-<name>',
     );
   });
 });
@@ -125,14 +128,6 @@ describe('listFamilies', () => {
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'public family prose has no aspect',
-    );
-  });
-
-  test('rejects a public family ID that does not start with its aspect', () => {
-    const configs = [{ name: 'zh', config: votes(true) }];
-
-    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'family zh does not start with its aspect writing-',
     );
   });
 });

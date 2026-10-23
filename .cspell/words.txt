@@ -80,5 +80,7 @@ virtualenv
 WakaTime
 wght
 workerd
+writingf
+writingzh
 zhon
 zstd

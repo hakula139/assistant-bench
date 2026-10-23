@@ -106,9 +106,9 @@ class TestLoadFamily:
         [
             ('f', '', "family 'f': a public family needs an aspect"),
             (
-                'f',
+                'writingf',
                 'aspect = "writing"',
-                "family 'f': a public family ID starts with its aspect, "
+                "family 'writingf': a public family ID starts with its aspect, "
                 'as in writing-<name>',
             ),
         ],
