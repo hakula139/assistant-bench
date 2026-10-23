@@ -7,6 +7,7 @@ cedict
 chatcmpl
 covariate
 csgraph
+Daan
 dateutil
 delenv
 direnv
@@ -30,6 +31,7 @@ kwargs
 lastrowid
 libstdc
 linkify
+listicle
 Logit
 lucide
 multinomial
@@ -43,6 +45,7 @@ numpy
 nums
 numtide
 nvmrc
+Orchidarium
 pkgs
 pycache
 pydantic
@@ -69,6 +72,7 @@ trustme
 typer
 unbilled
 undos
+unpushed
 unranked
 unrouted
 unscored
