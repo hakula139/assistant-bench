@@ -81,7 +81,9 @@ def test_terminus_completes_a_smoke_task_through_the_endpoint(
     family = load_family('smoke')
     system = make_system(harness='terminus-2')
 
-    job_dir = jobs.run_job(jobs.case_job(family, [system], [task]))
+    config = jobs.case_job(family, [system], [task])
+    config.verifier.disable = False
+    job_dir = jobs.run_job(config)
 
     (output,) = jobs.read_trials(family, job_dir, {})
     assert (output.case, output.system, output.error, output.reward) == (
