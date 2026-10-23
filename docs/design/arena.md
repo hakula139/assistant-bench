@@ -20,7 +20,7 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 
 ## Vote Store
 
-`votes.sqlite` in the data directory holds three append-only tables, whose triggers abort any update, delete, or insert over an existing row: `sessions`, `votes` with one row per vote, and `undos`, where an undo names the vote it withdraws. Each vote records its session, case, both sides' system, fingerprint, job, and trial, the choice (`a`, `b`, `tie`, or `both_bad`), the flags and note, the duration, `repeat_of`, and the time. Foreign keys are enforced, so an undo names a recorded vote. Reading the votes leaves out every undone one. The file's `user_version` holds the schema version, and the store refuses to open a file of another version.
+`votes.sqlite` in the data directory holds three append-only tables, whose triggers abort any update, delete, or insert over an existing row: `sessions`, `votes` with one row per vote, and `undos`, where an undo names the vote it withdraws. Each vote records its session, case, both sides' system, fingerprint, job, and trial, the choice (`a`, `b`, `tie`, or `both_bad`), the defects tagged on each side and the note, the duration, `repeat_of`, and the time. Foreign keys are enforced, so an undo names a recorded vote. Reading the votes leaves out every undone one. The file's `user_version` holds the schema version, and the store refuses to open a file of another version.
 
 ## Vote API
 
@@ -31,10 +31,10 @@ Only outputs that passed every gate reach the owner, and two samples with identi
 | `GET /api/families`            | Lists the families with outputs, each as `{"name", "aspect", "display_name"}` |
 | `POST /api/sessions`           | Starts a session on `{"family": ...}` and returns it with its first pair      |
 | `POST /api/sessions/{id}/pair` | Returns the session's open pair, drawing one if none is open                  |
-| `POST /api/pairs/{token}/vote` | Records `{"choice", "flags", "note"}` and returns the session's next pair     |
+| `POST /api/pairs/{token}/vote` | Records `{"choice", "defects", "note"}` and returns the session's next pair   |
 | `POST /api/sessions/{id}/undo` | Withdraws the session's latest owner vote and shows its pair again            |
 
-`TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. Flags are `meaning`, `punctuation`, `register`, `script`, and `length`, and a note holds at most 500 characters. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
+`TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. `defects` maps `a` and `b` to lists drawn from `facts`, `punctuation`, `tone`, `script`, and `length`. A note holds at most 500 characters and never leaves the store, since it may quote a private case. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
 
 The vote page is `web/dist/vote/index.html`, and `bench serve` stops when the build leaves none. Every file served from `vote/` carries the vote page's policy, decided on the path after normalization, so a URL that doubles or percent-encodes a slash carries it too. The policy loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin:
 

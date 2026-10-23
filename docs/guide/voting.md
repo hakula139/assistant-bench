@@ -15,12 +15,13 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 | `a` / `b`  | A or B is better                                                                                       |
 | `t`        | Tie                                                                                                    |
 | `x`        | Both bad                                                                                               |
-| `1` to `5` | Toggle a flag: meaning changed, punctuation, register, wrong script, too long                          |
+| `1` to `5` | Tag an issue on output A: wrong facts, punctuation, wrong tone, wrong script, too long                 |
+| `6` to `0` | Tag the same issues on output B                                                                        |
 | `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field |
 | `Enter`    | Submit the vote and load the next pair, even with a vote control focused, which `Space` still presses  |
 | `u`        | Undo the last vote and show its pair again                                                             |
 
-Flags count against the side you did not prefer, or against both sides of a tie or a both-bad vote. Outputs appear exactly as written, and the Markdown toggle renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
+An issue counts against the output you tag, whatever your verdict. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
 
 ## HTML Outputs
 
