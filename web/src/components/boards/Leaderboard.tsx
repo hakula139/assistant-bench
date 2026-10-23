@@ -220,9 +220,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
             ) : (
               <span className="font-medium whitespace-nowrap">{original.name}</span>
             )}
-            {original.system === anchorSystem && (
-              <StatusMark status="reference" term={anchorTerm} />
-            )}
+            {original.system === anchorSystem && <StatusMark status="anchor" term={anchorTerm} />}
             {original.preliminary && <StatusMark status="preliminary" />}
           </span>
         ),

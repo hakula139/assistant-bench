@@ -13,7 +13,7 @@ import {
 import { terms, type Term } from '@/lib/glossary';
 
 /** The marks a board puts beside a system's name, which the methodology glossary repeats. */
-export const statusIcons = { preliminary: Hourglass, reference: Anchor } satisfies Partial<
+export const statusIcons = { preliminary: Hourglass, anchor: Anchor } satisfies Partial<
   Record<keyof typeof terms, LucideIcon>
 >;
 
@@ -48,7 +48,7 @@ export function Hint({ term, children }: { term: Term; children?: ReactNode }) {
 
 /**
  * A badge beside a system's name that opens the status's definition, or `term` when the round
- * gives it one. The preliminary badge shows its term, and the reference one only its icon.
+ * gives it one. The preliminary badge shows its term, and the anchor one only its icon.
  */
 export function StatusMark({ status, term = terms[status] }: { status: Status; term?: Term }) {
   const Icon = statusIcons[status];

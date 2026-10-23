@@ -15,7 +15,7 @@ The fit is Bradley-Terry by weighted logistic loss, minimized with L-BFGS:
 
 ## Scores and Intervals
 
-Scores sit on an Elo-like scale, 400 / ln 10 points per logit. The fit is rooted at the most-voted system, whose own estimate is the most precise and least likely to detach in a resample, and the board then shifts the scale so that the family's `reference` sits at 1000 when the round ranks it. When the reference does not rank, the root stands at 1000, and the report records the system at 1000 as the round's `anchor`. Bradley-Terry strengths are identified up to an additive constant, so this choice changes no gap, rank, or interval. It only fixes the scale.
+Scores sit on an Elo-like scale, 400 / ln 10 points per logit. The fit is rooted at the most-voted system, which has the most comparisons behind its estimate, and the board then shifts the scale so that the family's `reference` sits at 1000 when the round ranks it. When the reference does not rank, the root stands at 1000, and the report records the system at 1000 as the round's `anchor`. Within a round the anchor is a pure shift, so it changes no gap, rank, or interval. The root decides which systems each resample keeps, so a different root can change an interval where resample connectivity sets its bound.
 
 Strengths compare only within one connected component of the comparison graph, because the penalty centers each component on its own. The board, each category board, and each half of the split-half fit therefore keep the systems that comparisons connect to their own root, found with SciPy's `connected_components`, and the report lists the other voted systems as `unranked`, without a score, together with the systems whose interval is unbounded.
 
@@ -31,13 +31,13 @@ A ranked system ties with the top-scoring one when the 95% interval of its score
 
 ## Diagnostics
 
-| Field             | Meaning                                                                                                                                                                                                           |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `position`        | The left pane's advantage in score points                                                                                                                                                                         |
-| `length`          | The score change per standard deviation of (A − B) / (A + B) over output lengths, from one refit of the owner's votes with that covariate. It only describes the board, which the raw score still ranks           |
-| `separability`    | The share of system pairs whose intervals do not overlap                                                                                                                                                          |
-| `split_half_tau`  | Kendall's τ between the orders fit to the votes of odd and even sessions, over the systems both halves connect to the root, and absent unless both halves include it                                              |
-| `rater_agreement` | How often a side-swapped repeat matched its original, where a tie matches a tie. `below_floor` marks agreement under 70%, when separations are weaker than the intervals suggest                                  |
-| `categories`      | A refit and bootstrap per case category, rooted at its own most-voted system and shifted to the board's anchor, with its own `unranked` list. A category whose component does not connect the anchor has no board |
+| Field             | Meaning                                                                                                                                                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `position`        | The left pane's advantage in score points                                                                                                                                                                                         |
+| `length`          | The score change per standard deviation of (A − B) / (A + B) over output lengths, from one refit of the owner's votes with that covariate. It only describes the board, which the raw score still ranks                           |
+| `separability`    | The share of system pairs whose intervals do not overlap                                                                                                                                                                          |
+| `split_half_tau`  | Kendall's τ between the orders fit to the votes of odd and even sessions, over the systems both halves connect to the root, and absent unless both halves include it                                                              |
+| `rater_agreement` | How often a side-swapped repeat matched its original, where a tie matches a tie. `below_floor` marks agreement under 70%, when separations are weaker than the intervals suggest                                                  |
+| `categories`      | A refit and bootstrap per case category, rooted at the most-voted system in the anchor's component and shifted to the board's anchor, with its own `unranked` list. A category whose votes do not connect the anchor has no board |
 
 Lengths count each Han character and each other whitespace-separated run as one unit, which measures Chinese in characters and English in words, including text that mixes both.

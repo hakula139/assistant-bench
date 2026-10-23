@@ -7,7 +7,6 @@ from typing import Any
 import jsonschema
 import numpy as np
 import pytest
-from pydantic import ValidationError
 
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
@@ -302,7 +301,7 @@ class TestClose:
         assert results.scorer == 'votes'
         assert (results.votes, results.dropped_votes) == (4, 1)
 
-    def test_ranks_only_the_systems_connected_to_the_reference(
+    def test_ranks_only_the_systems_connected_to_the_root(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         cases = {'c1': 'reply', 'c2': 'reply'}
@@ -468,12 +467,13 @@ class TestClose:
         assert results.scorer == 'votes'
         assert results.split_half_tau == pytest.approx(1.0)
 
-    def test_leaves_split_half_agreement_out_when_a_half_misses_the_reference(
+    def test_leaves_split_half_agreement_out_when_a_half_misses_the_root(
         self, families_dir: Path, store: VoteStore
     ) -> None:
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
         outputs = passing_outputs({'c1': 'reply'}, {'c1': {s: s for s in 'abc'}})
-        for day, pairs in enumerate(([('a', 'b'), ('a', 'c')], [('b', 'c')] * 2)):
+        halves = ([('a', 'b'), ('a', 'c')] * 4, [('b', 'c')] * 3)
+        for day, pairs in enumerate(halves):
             session = store.start_session('f', AT + timedelta(days=day))
             for winner, loser in pairs:
                 record(
@@ -483,6 +483,7 @@ class TestClose:
         results = close(load_family('f'), store, AT).results
 
         assert results.scorer == 'votes'
+        assert results.anchor == 'a'
         assert results.split_half_tau is None
 
     def test_measures_rater_agreement_on_swapped_repeats(
@@ -585,6 +586,33 @@ class TestClose:
         assert {standing.system for standing in results.standings} == {'a', 'b'}
         assert results.unranked == ['ref']
 
+    def test_roots_each_category_inside_the_anchors_component(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {f'r{i}': 'reply' for i in range(5)} | {
+            f'd{i}': 'docs' for i in range(3)
+        }
+        systems = ['a', 'b', 'c', 'd']
+        write_votes_family(families_dir, 'f', systems, cases)
+        outputs = passing_outputs(
+            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
+        )
+        session = store.start_session('f', AT)
+        for case in (f'r{i}' for i in range(5)):
+            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
+        for case in (f'd{i}' for i in range(2)):
+            record(store, session.id, outputs[(case, 'a')], outputs[(case, 'b')], 'a')
+        for case in (f'd{i}' for i in range(3)):
+            record(store, session.id, outputs[(case, 'c')], outputs[(case, 'd')], 'a')
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert results.anchor == 'a'
+        docs = next(board for board in results.categories if board.category == 'docs')
+        assert {standing.system for standing in docs.standings} == {'a', 'b'}
+        assert docs.unranked == ['c', 'd']
+
     def test_skips_a_category_whose_own_root_cannot_rank_the_anchor(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -633,6 +661,53 @@ class TestClose:
         ):
             close(family, store, AT)
 
+    def test_needs_votes_when_only_settled_results_remain(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        family = small_family(families_dir, store)
+        write_outputs(
+            'f',
+            [
+                output
+                if output.system == 'large'
+                else output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
+                for output in read_outputs('f')
+            ],
+        )
+
+        with pytest.raises(
+            ValueError, match="family 'f' has no votes on its current outputs"
+        ):
+            close(family, store, AT)
+
+    def test_breaks_a_root_vote_tie_by_the_systems_order(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {f'c{i}': 'reply' for i in range(8)}
+        systems = ['ref', 'zeta', 'alpha']
+        write_votes_family(families_dir, 'f', systems, cases)
+        outputs = passing_outputs(
+            cases, {case: {s: f'{s} on {case}' for s in systems} for case in cases}
+        )
+        session = store.start_session('f', AT)
+        for case in cases:
+            record(
+                store,
+                session.id,
+                outputs[(case, 'zeta')],
+                outputs[(case, 'alpha')],
+                'a',
+            )
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert (results.reference, results.anchor) == ('ref', 'zeta')
+        assert {standing.system for standing in results.standings} == {
+            'alpha',
+            'zeta',
+        }
+
     def test_anchors_a_fallback_when_the_reference_loses_its_votes(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -659,13 +734,6 @@ class TestClose:
 
         assert results.scorer == 'votes'
         assert (results.votes, results.dropped_votes) == (15, 0)
-
-    def test_requires_the_anchor_field(self) -> None:
-        document = json.loads(REPORT_FIXTURE.read_text())
-        del document['results']['anchor']
-
-        with pytest.raises(ValidationError):
-            Report.model_validate(document)
 
     def test_rejects_outputs_under_several_fingerprints(
         self, families_dir: Path, store: VoteStore

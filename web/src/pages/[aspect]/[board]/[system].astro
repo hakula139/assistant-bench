@@ -54,7 +54,9 @@ const names = family.systemNames;
 const name = (item: string) => systemName(names, item);
 const appearances = rounds.flatMap(({ round, results }) => {
   const standing = results.standings.find((item) => item.system === system);
-  return standing ? [{ round, anchor: results.anchor, results, standing }] : [];
+  return standing
+    ? [{ round, reference: results.reference, anchor: results.anchor, results, standing }]
+    : [];
 });
 const { round, results, standing } = appearances[appearances.length - 1];
 const standings = results.standings;
@@ -200,7 +202,7 @@ const Preliminary = statusIcons.preliminary;
     </Section>
 
     <Section title="Rounds">
-      <RoundsTable appearances={appearances} names={names} />
+      <RoundsTable client:visible appearances={appearances} names={names} />
     </Section>
   </div>
 </Base>

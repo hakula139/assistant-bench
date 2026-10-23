@@ -174,7 +174,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
   const href = (system: string) => `${base}${system}/`;
   const anchorTerm =
     results.anchor === results.reference
-      ? terms.reference
+      ? terms.anchor
       : fallbackAnchor(systemName(names, results.reference));
 
   return (

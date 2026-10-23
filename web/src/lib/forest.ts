@@ -1,6 +1,6 @@
 import { nice, tickStep, ticks } from 'd3-array';
 
-import { REFERENCE_SCORE } from '@/lib/reference';
+import { ANCHOR_SCORE } from '@/lib/anchor';
 import type { Interval, Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
@@ -71,15 +71,15 @@ export function forestTicks([start, stop]: [number, number]): number[] {
 }
 
 /**
- * Returns the ticks a narrow forest plot labels: both ends, and the reference when it sits far
- * enough from both that the labels cannot overlap.
+ * Returns the ticks a narrow forest plot labels: both ends, and the anchor when it sits far enough
+ * from both that the labels cannot overlap.
  */
 export function sparseTicks(domain: [number, number]): number[] {
   const all = forestTicks(domain);
   const [start, stop] = domain;
-  const share = (REFERENCE_SCORE - start) / (stop - start);
-  const reference = all.includes(REFERENCE_SCORE) && share >= 0.25 && share <= 0.75;
-  return [all[0], ...(reference ? [REFERENCE_SCORE] : []), all[all.length - 1]];
+  const share = (ANCHOR_SCORE - start) / (stop - start);
+  const anchor = all.includes(ANCHOR_SCORE) && share >= 0.25 && share <= 0.75;
+  return [all[0], ...(anchor ? [ANCHOR_SCORE] : []), all[all.length - 1]];
 }
 
 /** The plot width, in CSS pixels, below which an axis labels only its sparse ticks. */
@@ -114,10 +114,10 @@ export function clip({ score, interval }: Estimate, [start]: [number, number]): 
 }
 
 /**
- * Why a row has no estimate: the reference before any round closes, a system whose votes do not
- * yet connect it to the anchor, or a system with no votes.
+ * Why a row has no estimate: the pre-round anchor, a system whose votes do not yet connect it to
+ * the anchor, or a system with no votes.
  */
-export type Unplaced = 'reference' | 'unranked' | 'no-votes';
+export type Unplaced = 'anchor' | 'unranked' | 'no-votes';
 
 /** One system's row in a static forest plot, labelled by its display `name`. */
 export type ForestRow = { system: string; name: string; href?: string } & (
@@ -128,15 +128,11 @@ const byName = (names: SystemNames) => (a: string, b: string) =>
   systemName(names, a).localeCompare(systemName(names, b));
 
 /** Rows for a family before its first round closes, in display name order. */
-export function unmeasuredRows(
-  systems: string[],
-  reference: string,
-  names: SystemNames,
-): ForestRow[] {
+export function unmeasuredRows(systems: string[], anchor: string, names: SystemNames): ForestRow[] {
   return systems.toSorted(byName(names)).map((system) => ({
     system,
     name: systemName(names, system),
-    unplaced: system === reference ? 'reference' : 'no-votes',
+    unplaced: system === anchor ? 'anchor' : 'no-votes',
   }));
 }
 
@@ -175,20 +171,20 @@ export function roundRows(
 }
 
 /** A mark a forest plot draws, which its legend names. */
-export type LegendMark = 'score' | 'preliminary' | 'cut' | 'reference' | 'unbounded';
+export type LegendMark = 'score' | 'preliminary' | 'cut' | 'anchor' | 'unbounded';
 
-const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'reference', 'unbounded'];
+const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'anchor', 'unbounded'];
 
 /**
  * Returns the marks a forest plot of `rows` on `domain` draws, in legend order, where
- * `referenceLine` says whether the plot rules the reference score.
+ * `anchorLine` says whether the plot rules the anchor score.
  */
 export function legendMarks(
   rows: ForestRow[],
   domain: [number, number],
-  referenceLine: boolean,
+  anchorLine: boolean,
 ): LegendMark[] {
-  const drawn = new Set<LegendMark>(referenceLine ? ['reference'] : []);
+  const drawn = new Set<LegendMark>(anchorLine ? ['anchor'] : []);
   for (const row of rows) {
     if ('estimate' in row) {
       drawn.add(row.preliminary ? 'preliminary' : 'score');
@@ -196,7 +192,7 @@ export function legendMarks(
       if (clipped.cutLow || clipped.offScale) {
         drawn.add('cut');
       }
-    } else if (row.unplaced !== 'reference') {
+    } else if (row.unplaced !== 'anchor') {
       drawn.add('unbounded');
     }
   }

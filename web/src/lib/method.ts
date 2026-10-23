@@ -1,7 +1,7 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatScore } from '@/lib/format';
 import { terms } from '@/lib/glossary';
-import { REFERENCE_SCORE } from '@/lib/reference';
+import { ANCHOR_SCORE } from '@/lib/anchor';
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
@@ -93,7 +93,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
           detail: 'ranked from votes',
           hint:
             votes &&
-            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at ${formatScore(REFERENCE_SCORE)}.`,
+            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at ${formatScore(ANCHOR_SCORE)}.`,
         },
       ];
     }

@@ -176,7 +176,7 @@ def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floa
     own component's center.
     """
     k = len(matchups.systems)
-    anchor = matchups.systems.index(root)
+    root_index = matchups.systems.index(root)
     keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
     pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
     x = _design(
@@ -207,7 +207,7 @@ def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floa
                 pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
             )
             strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
-            connected = _connected(left[drawn], right[drawn], k, anchor)
+            connected = _connected(left[drawn], right[drawn], k, root_index)
             strengths[r, ~connected] = np.nan
     return strengths
 

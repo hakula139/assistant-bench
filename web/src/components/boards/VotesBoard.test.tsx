@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render as renderInDom } from '@testing-library/react';
+import { cleanup, render as renderInDom, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
@@ -87,7 +88,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(html).toMatch(/<span>Preliminary<\/span>/);
-    expect(html).toMatch(/<span class="sr-only">Reference<\/span>/);
+    expect(html).toMatch(/<span class="sr-only">Anchor<\/span>/);
   });
 
   test('keys the legend to the marks the board draws', async () => {
@@ -107,7 +108,7 @@ describe('VotesBoard', () => {
     const marked = (status: string) =>
       [...text(html).matchAll(new RegExp(`(Acme [A-Z][a-z]+) ${status} `, 'g'))].map((m) => m[1]);
 
-    expect(marked('Reference')).toEqual(['Acme Large']);
+    expect(marked('Anchor')).toEqual(['Acme Large']);
     expect(marked('Preliminary')).toEqual(['Acme Tiny']);
   });
 
@@ -118,8 +119,19 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(html).toMatch(/<span class="sr-only">Anchor<\/span>/);
-    expect(html).not.toMatch(/<span class="sr-only">Reference<\/span>/);
     expect(text(html)).toMatch(/Acme Large Anchor/);
+    expect(legend(html)).toContain('Anchor, 1,000');
+  });
+
+  test('names the reference the stand-in anchor replaces', async () => {
+    const { round, results } = await load();
+    results.reference = 'acme-new';
+    stubPlotFrame();
+    renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
+
+    expect(await screen.findByText(/reference Acme New, which is not ranked yet/)).toBeTruthy();
   });
 
   test('names the unranked systems after the table, sorted by display name', async () => {

@@ -239,15 +239,10 @@ def close(
             categories = {case.id: case.category for case in load_cases(family)}
             outputs = [output for output in outputs if output.case in categories]
             results = _votes_results(
-                family,
-                family.settings,
-                store,
-                outputs,
-                _fingerprints(outputs),
-                categories,
+                family, family.settings, store, outputs, categories
             )
         case TaskTestsSettings():
-            results = _tests_results(family, outputs, _fingerprints(outputs))
+            results = _tests_results(family, outputs)
         case _:
             assert_never(family.settings)
     return Report(
@@ -291,18 +286,22 @@ def _votes_results(
     settings: VotesSettings,
     store: VoteStore,
     outputs: list[Output],
-    fingerprints: dict[str, str | None],
     categories: dict[str, str],
 ) -> VotesResults:
     """Fit the current case set, where votes and outputs on retired cases drop out.
 
-    The systems with recorded votes enter the board, through the votes that
-    `reconcile` keeps and the results their current outputs settle.
+    The caller passes outputs already filtered to the current cases, together
+    with their case-to-category map. The systems with recorded votes enter the
+    board, through the votes that `reconcile` keeps and the results their
+    current outputs settle.
     """
     recorded = store.votes(family.name)
     if not recorded:
         raise ValueError(f'family {family.name!r} has no votes')
     votes = reconcile(recorded, outputs)
+    if not votes:
+        raise ValueError(f'family {family.name!r} has no votes on its current outputs')
+    fingerprints = _fingerprints(outputs)
     voted = {side.system for vote in recorded for side in (vote.a, vote.b)}
     comparisons = [m.vote.comparison() for m in votes] + [
         comparison
@@ -310,8 +309,6 @@ def _votes_results(
         if {comparison.left, comparison.right} <= voted
     ]
     everything = ranking.Matchups.build(comparisons)
-    if not everything.systems:
-        raise ValueError(f'family {family.name!r} has no votes on its current outputs')
     root = _root(everything, votes, settings.systems)
 
     ratings = ranking.rate(everything.component(root), root).bounded()
@@ -486,8 +483,11 @@ def _categories(
         matchups = ranking.Matchups.build(
             [c for c in comparisons if category[c.case] == name]
         )
+        if anchor not in matchups.systems:
+            continue
+        matchups = matchups.component(anchor)
         root = _root(matchups, category_votes, systems)
-        ratings = ranking.rate(matchups.component(root), root).bounded()
+        ratings = ranking.rate(matchups, root).bounded()
         if anchor not in ratings.systems:
             continue
         ratings = ratings.anchored(anchor)
@@ -615,11 +615,10 @@ def _lowest(
 # ── Tests Results ──
 
 
-def _tests_results(
-    family: Family, outputs: list[Output], fingerprints: dict[str, str | None]
-) -> TestsResults:
+def _tests_results(family: Family, outputs: list[Output]) -> TestsResults:
     if not outputs:
         raise ValueError(f'family {family.name!r} has no outputs')
+    fingerprints = _fingerprints(outputs)
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:
         by_system[output.system].append(output)

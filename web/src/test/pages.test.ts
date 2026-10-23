@@ -363,7 +363,7 @@ describe('system page', () => {
     );
   });
 
-  test("shows each round anchor when a system's rounds span more than one", async () => {
+  test('marks a round whose anchor differs from the reference', async () => {
     const arena = await family();
     const earlier = arena.rounds[0].results;
     if (earlier.scorer !== 'votes') {
@@ -377,9 +377,20 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain('Round Anchor Score 95% interval Votes');
-    expect(text(html)).toContain('2026-10-07 Acme Pro');
-    expect(text(html)).toContain('2026-10-21 Acme Large');
+    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).toMatch(/2026-10-07 Anchor/);
+    expect(text(html)).not.toMatch(/2026-10-21 Anchor/);
+  });
+
+  test('leaves the round unmarked when every round has one anchor', async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).not.toContain('Anchor');
   });
 
   test('leaves out the head-to-head chart for a system without votes', async () => {

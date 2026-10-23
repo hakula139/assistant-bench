@@ -71,6 +71,7 @@ unbilled
 undos
 unranked
 unrouted
+unscored
 unstub
 usize
 uvicorn
