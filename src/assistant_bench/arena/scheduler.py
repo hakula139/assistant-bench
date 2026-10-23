@@ -158,7 +158,7 @@ def draw(
     open_cases = {pair: cases for pair, cases in open_cases.items() if cases}
     if not open_cases:
         return None
-    counts = Counter((m.vote.a.system, m.vote.b.system) for m in votes)
+    counts = Counter(m.vote.systems for m in votes)
     pair = _seed_pair(open_cases, counts, rng) or _adaptive_pair(
         open_cases,
         counts,

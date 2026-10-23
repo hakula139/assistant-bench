@@ -18,8 +18,9 @@ _MARKDOWN = MarkdownIt('commonmark')
 _PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
 # A URL, which ends at whitespace, Han characters, or Chinese punctuation.
 _URL = re.compile(f'https?://[^\\s{hanzi.characters}{re.escape(hanzi.punctuation)}]+')
-# An end-of-line comment opened at line start or after whitespace by `# ` or `//`,
-# leaving out `#include`, CSS colors, shebangs, and `#[attribute]`.
+# A comment to the line's end, opened by `#` and whitespace or by `//` at line
+# start or after whitespace, so `#include`, CSS colors, shebangs, and `#[attribute]`
+# never match.
 _LINE_COMMENT = re.compile(r'(?:^|\s)(?:#(?=\s)|//)(.*)$', re.MULTILINE)
 _BLOCK_COMMENT = re.compile(r'/\*(.*?)\*/|"""(.*?)"""|\'\'\'(.*?)\'\'\'', re.DOTALL)
 _HAN = re.compile(f'[{hanzi.characters}]')
@@ -70,10 +71,10 @@ def detect_language(text: str) -> Language | None:
     The text is parsed as CommonMark. Natural language is its inline text without
     inline code or URLs, with each fence tagged `markdown`, `md`, `text`, or `txt`
     parsed the same way. Every other fenced or indented code block contributes only
-    its comments: those opened by `#` and a space or by `//` at a line's start or
-    after whitespace, `/* */` blocks, and triple-quoted strings, so code-only
-    outputs are judged by their comments. Han characters count
-    against Latin words, and a tie, including text with neither, returns `None`.
+    its comments: those opened by `#` and whitespace or by `//` at a line's start
+    or after whitespace, `/* */` blocks, and triple-quoted strings, so code-only
+    outputs are judged by their comments. Han characters count against Latin
+    words, and a tie, including text with neither, returns `None`.
     """
     natural = '\n'.join(_natural_language(text))
 

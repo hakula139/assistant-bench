@@ -55,10 +55,10 @@ def approx(value: Any) -> Any:
 
 
 def write_passing_outputs(
-    cases: dict[str, str], systems: list[str], text: str = '{system} on {case}'
+    cases: dict[str, str], systems: list[str]
 ) -> dict[tuple[str, str], Output]:
     """Write family `f`'s outputs, one passing output per case and system."""
-    outputs = passing_outputs(cases, systems, text=text)
+    outputs = passing_outputs(cases, systems)
     write_outputs('f', list(outputs.values()))
     return outputs
 
@@ -406,12 +406,17 @@ class TestClose:
     ) -> None:
         cases = {f'c{i}': 'reply' for i in range(8)}
         write_votes_family(families_dir, 'f', ['x', 'y'], cases)
-        words = {'x': lambda i: 5 + 3 * i, 'y': lambda i: 26 - 3 * i}
+        words: dict[str, Callable[[int], int]] = {
+            'x': lambda i: 5 + 3 * i,
+            'y': lambda i: 26 - 3 * i,
+        }
+        passing = passing_outputs(cases, ['x', 'y'])
         outputs = {
-            (case, system): output.model_copy(
-                update={'text': ' '.join(['word'] * words[system](int(case[1:])))}
+            (f'c{i}', system): passing[(f'c{i}', system)].model_copy(
+                update={'text': ' '.join(['word'] * count(i))}
             )
-            for (case, system), output in passing_outputs(cases, ['x', 'y']).items()
+            for i in range(8)
+            for system, count in words.items()
         }
         write_outputs('f', list(outputs.values()))
         session = store.start_session('f', AT)
@@ -467,7 +472,7 @@ class TestClose:
         self, families_dir: Path, store: VoteStore, empty: bool
     ) -> None:
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
-        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'], '{system}')
+        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'])
         strong = [('a', 'b'), ('b', 'c'), ('a', 'c')] * 3
         weak = [('c', 'b'), ('b', 'a'), ('c', 'a')]
         for day, pairs in enumerate((strong, strong, weak, weak)):
@@ -493,7 +498,7 @@ class TestClose:
         self, families_dir: Path, store: VoteStore
     ) -> None:
         write_votes_family(families_dir, 'f', ['a', 'b', 'c'], {'c1': 'reply'})
-        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'], '{system}')
+        outputs = write_passing_outputs({'c1': 'reply'}, ['a', 'b', 'c'])
         halves = ([('a', 'b'), ('a', 'c')] * 4, [('b', 'c')] * 3)
         for day, pairs in enumerate(halves):
             session = store.start_session('f', AT + timedelta(days=day))
@@ -619,6 +624,33 @@ class TestClose:
         assert {standing.system for standing in docs.standings} == {'a', 'b'}
         assert docs.unranked == ['c', 'd']
 
+    def test_breaks_a_category_root_vote_tie_by_the_systems_order(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        cases = {'r0': 'reply'} | {f'd{i}': 'docs' for i in range(7)}
+        systems = ['x', 'b', 'c', 'd']
+        write_votes_family(families_dir, 'f', systems, cases)
+        outputs = write_passing_outputs(cases, systems)
+        session = store.start_session('f', AT)
+        choices: list[Choice] = ['a', 'b', 'a', 'b', 'tie']
+        votes: list[tuple[str, str, str, Choice]] = [
+            ('r0', 'x', 'b', 'a'),
+            *((f'd{i}', 'x', 'b', choice) for i, choice in enumerate(choices)),
+            ('d5', 'x', 'c', 'a'),
+            *(('d6', 'c', 'd', 'a') for _ in range(5)),
+        ]
+        for case, left, right, choice in votes:
+            a, b = outputs[(case, left)], outputs[(case, right)]
+            store.record(make_ballot(a, b, session=session.id, choice=choice), AT)
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert results.anchor == 'x'
+        docs = next(board for board in results.categories if board.category == 'docs')
+        assert {standing.system for standing in docs.standings} == {'x', 'b'}
+        assert docs.unranked == ['c', 'd']
+
     def test_skips_a_category_whose_own_root_cannot_rank_the_anchor(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -651,33 +683,40 @@ class TestClose:
         assert 'a' in {standing.system for standing in reply.standings}
 
     def test_needs_votes(self, families_dir: Path, store: VoteStore) -> None:
+        cases = {'c1': 'reply'}
+        write_votes_family(families_dir, 'f', ['a', 'b'], cases)
+        write_passing_outputs(cases, ['a', 'b'])
+
+        with pytest.raises(ValueError, match="family 'f' has no votes yet"):
+            close(load_family('f'), store, AT)
+
+    def test_needs_outputs_on_the_current_cases(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
         family = small_family(families_dir, store)
-        family = family.model_copy(update={'name': 'quiet'})
+        retired = read_outputs('f')[0].model_copy(update={'case': 'gone'})
+        write_outputs('f', [retired])
 
-        with pytest.raises(ValueError, match="family 'quiet' has no votes yet"):
+        with pytest.raises(ValueError) as raised:
             close(family, store, AT)
+        assert str(raised.value) == (
+            "family 'f' has no outputs on its current cases. "
+            'Run `uv run bench run f` first.'
+        )
 
-    @pytest.mark.parametrize(
-        'current',
-        [
-            lambda outputs: [],
-            lambda outputs: [
+    def test_needs_votes_on_the_current_outputs(
+        self, families_dir: Path, store: VoteStore
+    ) -> None:
+        family = small_family(families_dir, store)
+        write_outputs(
+            'f',
+            [
                 output
                 if output.system == 'large'
                 else output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
-                for output in outputs
+                for output in read_outputs('f')
             ],
-        ],
-        ids=['outputs-gone', 'only-settled-results'],
-    )
-    def test_needs_votes_on_the_current_outputs(
-        self,
-        families_dir: Path,
-        store: VoteStore,
-        current: Callable[[list[Output]], list[Output]],
-    ) -> None:
-        family = small_family(families_dir, store)
-        write_outputs('f', current(read_outputs('f')))
+        )
 
         with pytest.raises(
             ValueError, match="family 'f' has votes, but none compares two of its"
@@ -752,9 +791,7 @@ class TestClose:
     ) -> None:
         cases = {'c1': 'reply', 'c2': 'reply'}
         write_votes_family(families_dir, 'f', ['a', 'b', 'c', 'd'], cases)
-        outputs = passing_outputs(
-            cases, ['a', 'b', 'c', 'd'], text='{system} on {case}'
-        )
+        outputs = passing_outputs(cases, ['a', 'b', 'c', 'd'])
         old = outputs[('c2', 'd')].model_copy(
             update={'trial': 'old', 'fingerprint': 'fp-old', 'text': 'd before'}
         )
@@ -768,18 +805,30 @@ class TestClose:
             close(load_family('f'), store, AT)
 
     @pytest.mark.parametrize(
-        ('fingerprints', 'message'),
-        [([], 'has no outputs'), (['a', 'b'], 'has outputs under several')],
-        ids=['no-outputs', 'several-fingerprints'],
+        ('trials', 'message'),
+        [
+            (
+                [{'case': 'retired', 'fingerprint': 'a'}],
+                "^family 'smoke' has no outputs on its current cases\\.$",
+            ),
+            (
+                [
+                    {'trial': 'a', 'fingerprint': 'a'},
+                    {'trial': 'b', 'fingerprint': 'b'},
+                ],
+                "'large' has outputs under several",
+            ),
+        ],
+        ids=['only-retired-outputs', 'several-fingerprints'],
     )
     def test_rejects_a_tests_family_it_cannot_aggregate(
-        self, store: VoteStore, fingerprints: list[str], message: str
+        self, store: VoteStore, trials: list[dict[str, str]], message: str
     ) -> None:
         write_outputs(
             'smoke',
             [
-                make_output(trial=f, case='echo', system='large', fingerprint=f)
-                for f in fingerprints
+                make_output(**{'case': 'echo', 'system': 'large'} | trial)
+                for trial in trials
             ],
         )
 

@@ -227,7 +227,7 @@ class Report(_Model):
 
 
 def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
-    """Aggregate the family's outputs on its current cases, and its votes.
+    """Aggregate the family's current outputs, and its votes when votes score it.
 
     Raises
     ------
@@ -238,6 +238,15 @@ def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
     outputs = [
         output for output in read_outputs(family.name) if output.case in categories
     ]
+    if not outputs:
+        step = (
+            f' Run `uv run bench run {family.name}` first.'
+            if family.source == 'cases'
+            else ''
+        )
+        raise ValueError(
+            f'family {family.name!r} has no outputs on its current cases.{step}'
+        )
     results: Results
     match family.settings:
         case VotesSettings():
@@ -245,7 +254,7 @@ def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
                 family, family.settings, store, outputs, categories
             )
         case TaskTestsSettings():
-            results = _tests_results(family, outputs)
+            results = _tests_results(outputs)
         case _:
             assert_never(family.settings)
     return Report(
@@ -598,9 +607,7 @@ def _lowest(
 # ── Tests Results ──
 
 
-def _tests_results(family: Family, outputs: list[Output]) -> TestsResults:
-    if not outputs:
-        raise ValueError(f'family {family.name!r} has no outputs')
+def _tests_results(outputs: list[Output]) -> TestsResults:
     fingerprints = _fingerprints(outputs)
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:

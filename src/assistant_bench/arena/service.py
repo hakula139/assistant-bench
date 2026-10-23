@@ -128,7 +128,7 @@ class _Issued:
     session: str
     draw: Draw
     view: PairView
-    documents: list[str]
+    documents: tuple[str, ...]
     served_at: datetime
 
 
@@ -297,7 +297,9 @@ class Arena:
     def _serve(self, session: Session, picked: Draw) -> None:
         family = self._families[session.family]
         token = secrets.token_urlsafe(16)
-        documents: list[str] = []
+        (a, a_document), (b, b_document) = (
+            self._pane(family, output) for output in (picked.a, picked.b)
+        )
         self._pairs[token] = _Issued(
             session=session.id,
             draw=picked,
@@ -305,26 +307,27 @@ class Arena:
                 token=token,
                 instruction=family.instructions[picked.case],
                 checklist=family.checklists[picked.case],
-                a=self._pane(family, picked.a, documents),
-                b=self._pane(family, picked.b, documents),
+                a=a,
+                b=b,
             ),
-            documents=documents,
+            documents=tuple(
+                document for document in (a_document, b_document) if document
+            ),
             served_at=self._clock(),
         )
         self._current[session.id] = token
 
-    def _pane(self, family: ArenaFamily, output: Output, documents: list[str]) -> Pane:
-        """Return the pane that shows `output`, adding an HTML pane's document."""
+    def _pane(self, family: ArenaFamily, output: Output) -> tuple[Pane, str | None]:
+        """Return the pane that shows `output`, with the token of its HTML document."""
         assert output.text is not None
         match family.render:
             case 'text':
-                return TextPane(render='text', text=output.text)
+                return TextPane(render='text', text=output.text), None
             case 'html':
                 document = secrets.token_urlsafe(16)
                 self._documents[document] = output.text
-                documents.append(document)
                 url = f'{self._render_origin}{OUTPUTS_PATH}/{document}'
-                return HtmlPane(render='html', url=url)
+                return HtmlPane(render='html', url=url), document
             case _:
                 assert_never(family.render)
 

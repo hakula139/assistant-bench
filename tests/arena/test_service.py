@@ -21,6 +21,7 @@ from support import (
     ARENA_SYSTEMS,
     RENDER_ORIGIN,
     Clock,
+    Refits,
     make_arena,
     make_output,
     passing_outputs,
@@ -135,10 +136,10 @@ class TestArena:
 
             *earlier, last = store.votes('f')
             assert len(earlier) == len(cases)
-            assert {frozenset({vote.a.system, vote.b.system}) for vote in earlier} == {
+            assert {frozenset(vote.systems) for vote in earlier} == {
                 frozenset(ARENA_SYSTEMS)
             }
-            assert 'ref' in {last.a.system, last.b.system}
+            assert 'ref' in last.systems
 
         def test_refits_the_board_when_a_session_starts(
             self,
@@ -146,7 +147,7 @@ class TestArena:
             clock: Clock,
             store: VoteStore,
             monkeypatch: pytest.MonkeyPatch,
-            fits: list[int],
+            fits: Refits,
         ) -> None:
             arena = make_arena(families_dir, clock, store)
             seeded = arena.start('f')
@@ -159,7 +160,28 @@ class TestArena:
             arena.vote(view.pair.token, 'a', Defects(), None)
             arena.start('f')
 
-            assert fits == [1, 2]
+            assert fits.comparisons == [1, 2]
+
+        def test_roots_a_tied_board_by_the_family_s_order(
+            self,
+            families_dir: Path,
+            clock: Clock,
+            store: VoteStore,
+            monkeypatch: pytest.MonkeyPatch,
+            fits: Refits,
+        ) -> None:
+            write_votes_family(families_dir, 'f', ['small', 'large'], ARENA_CASES)
+            outputs = passing_outputs(ARENA_CASES, ['small', 'large'])
+            write_outputs('f', list(outputs.values()))
+            arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
+            seeded = arena.start('f')
+            assert seeded.pair is not None
+            arena.vote(seeded.pair.token, 'a', Defects(), None)
+            monkeypatch.setattr(scheduler, 'SEED_VOTES_PER_SIDE', 0)
+
+            arena.start('f')
+
+            assert fits.roots == ['small']
 
         def test_refuses_a_family_it_does_not_serve(
             self, families_dir: Path, clock: Clock, store: VoteStore

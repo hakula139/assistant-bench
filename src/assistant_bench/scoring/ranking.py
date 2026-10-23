@@ -107,12 +107,13 @@ class Matchups:
         """
         sided = self.sided > 0
         rows = np.concatenate([self.left[sided], self.right[sided]])
-        votes = np.bincount(rows, minlength=len(self.systems))
+        counts = np.bincount(rows, minlength=len(self.systems))
+        votes = dict(zip(self.systems, counts, strict=True))
         position = {system: i for i, system in enumerate(order)}
         return min(
             self.systems,
             key=lambda system: (
-                -votes[self.systems.index(system)],
+                -votes[system],
                 position.get(system, len(position)),
                 system,
             ),

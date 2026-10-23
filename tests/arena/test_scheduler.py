@@ -14,17 +14,15 @@ from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.ranking import ANCHOR, ELO_PER_LOGIT, Comparison, Ratings
-from support import AT, make_output, make_vote, passing_outputs
+from support import AT, Refits, make_output, make_vote, passing_outputs
 
 
 SYSTEMS = ('large', 'medium', 'small')
 
 
-def make_pool(
-    systems: tuple[str, ...] = SYSTEMS, cases: int = 10, **fields: object
-) -> Pool:
+def make_pool(systems: tuple[str, ...] = SYSTEMS, cases: int = 10) -> Pool:
     names = [f'c{case}' for case in range(cases)]
-    outputs = passing_outputs(names, systems, text='{system} on {case}', **fields)
+    outputs = passing_outputs(names, systems)
     return Pool.build(systems, set(names), outputs.values())
 
 
@@ -94,7 +92,7 @@ class TestPool:
 
 class TestBoard:
     class TestReset:
-        def test_refits_on_the_next_draw(self, fits: list[int]) -> None:
+        def test_refits_on_the_next_draw(self, fits: Refits) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
             board = Board(pool.systems)
@@ -103,7 +101,7 @@ class TestBoard:
             board.reset()
             board.ratings(votes, [], {'large', 'small'})
 
-            assert fits == [4, 4]
+            assert fits.comparisons == [4, 4]
 
     class TestRatings:
         @pytest.mark.parametrize(
@@ -115,7 +113,7 @@ class TestBoard:
             ids=['cast-then-undone', 'undone-and-recast'],
         )
         def test_refits_once_refit_votes_changed_since_the_last_fit(
-            self, fits: list[int], subsets: list[Iterable[int]], expected: list[int]
+            self, fits: Refits, subsets: list[Iterable[int]], expected: list[int]
         ) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 9))
@@ -124,18 +122,18 @@ class TestBoard:
             for subset in subsets:
                 board.ratings([votes[i] for i in subset], [], {'large', 'small'})
 
-            assert fits == expected
+            assert fits.comparisons == expected
 
-        def test_fits_the_settled_results_with_the_votes(self, fits: list[int]) -> None:
+        def test_fits_the_settled_results_with_the_votes(self, fits: Refits) -> None:
             pool = make_pool(systems=('large', 'small'))
             votes = matched(pool, votes_between(pool, 'large', 'small', ['a'] * 4))
             settled = [Comparison('large', 'small', 1.0, 'c9', 0.25, sided=False)]
 
             Board(pool.systems).ratings(votes, settled, {'large', 'small'})
 
-            assert fits == [5]
+            assert fits.comparisons == [5]
 
-        def test_refits_for_a_system_it_lacks(self, fits: list[int]) -> None:
+        def test_refits_for_a_system_it_lacks(self, fits: Refits) -> None:
             pool = make_pool()
             votes = matched(
                 pool,
@@ -147,21 +145,40 @@ class TestBoard:
             board.ratings(votes[:4], [], {'large', 'small'})
             ratings = board.ratings(votes, [], set(SYSTEMS))
 
-            assert fits == [4, 5]
+            assert fits.comparisons == [4, 5]
             assert ratings.systems == SYSTEMS
 
-        def test_roots_the_fit_at_the_most_voted_system(self) -> None:
+        @pytest.mark.parametrize(
+            ('order', 'pairs', 'root'),
+            [
+                (
+                    SYSTEMS,
+                    [
+                        ('medium', 'large', 3),
+                        ('medium', 'small', 3),
+                        ('large', 'small', 1),
+                    ],
+                    'medium',
+                ),
+                (('small', 'large'), [('large', 'small', 4)], 'small'),
+            ],
+            ids=['most-voted', 'order-breaks-a-tie'],
+        )
+        def test_roots_the_fit_at_the_most_voted_system(
+            self, order: tuple[str, ...], pairs: list[tuple[str, str, int]], root: str
+        ) -> None:
             pool = make_pool()
-            votes = matched(
-                pool,
-                votes_between(pool, 'medium', 'large', ['a'] * 3)
-                + votes_between(pool, 'medium', 'small', ['a'] * 3, start=4)
-                + votes_between(pool, 'large', 'small', ['a'], start=7),
-            )
+            votes: list[Vote] = []
+            for left, right, count in pairs:
+                choices: list[Choice] = [
+                    'a' if i < count - 1 else 'b' for i in range(count)
+                ]
+                votes += votes_between(pool, left, right, choices, len(votes) + 1)
+            listed = {system for left, right, _ in pairs for system in (left, right)}
 
-            ratings = Board(pool.systems).ratings(votes, [], set(SYSTEMS))
+            ratings = Board(order).ratings(matched(pool, votes), [], listed)
 
-            assert ratings.score[ratings.systems.index('medium')] == ANCHOR
+            assert ratings.score[ratings.systems.index(root)] == ANCHOR
 
 
 class TestDraw:
@@ -176,7 +193,7 @@ class TestDraw:
             assert picked is not None
             votes.append(vote_on(picked, 'a', vote_id))
             if vote_id % 6 == 0:
-                counts.append(Counter((v.a.system, v.b.system) for v in votes))
+                counts.append(Counter(vote.systems for vote in votes))
 
         assert counts == [
             dict.fromkeys(permutations(SYSTEMS, 2), 1),

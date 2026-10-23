@@ -106,7 +106,7 @@ class Side(BaseModel):
 class Defects(BaseModel):
     """The defects the owner tagged on each side's output."""
 
-    model_config = ConfigDict(frozen=True, extra='forbid')
+    model_config = ConfigDict(extra='forbid', frozen=True)
 
     a: frozenset[Defect] = frozenset()
     b: frozenset[Defect] = frozenset()
@@ -166,11 +166,17 @@ class VoteStore:
             self._create()
         elif version != SCHEMA_VERSION:
             self._db.close()
+            step = (
+                'A newer bench wrote it, so update this checkout.'
+                if version > SCHEMA_VERSION
+                else "Close its families' rounds with the bench revision that wrote "
+                f"it, which `git log -S 'SCHEMA_VERSION = {version}' -- "
+                'src/assistant_bench/arena/store.py` finds, then move the file '
+                'aside so `bench serve` starts a new store.'
+            )
             raise ValueError(
-                f'{path} has schema version {version}, while this bench reads version '
-                f"{SCHEMA_VERSION}. Close its families' rounds with the bench "
-                'revision that wrote it, then move the file aside so `bench serve` '
-                'starts a new store.'
+                f'{path} has schema version {version}, while this bench reads '
+                f'version {SCHEMA_VERSION}. {step}'
             )
 
     def _create(self) -> None:

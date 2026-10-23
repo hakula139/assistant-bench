@@ -125,6 +125,13 @@ def make_system(**overrides: Any) -> System:
     return System(**(fields | overrides))
 
 
+def make_output(**fields: Any) -> Output:
+    empty = dict.fromkeys(Output.model_fields)
+    return Output.model_validate(
+        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
+    )
+
+
 def write_trial(
     job_dir: Path,
     name: str,
@@ -368,13 +375,6 @@ def serve_stub(
 AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
 
 
-def make_output(**fields: Any) -> Output:
-    empty = dict.fromkeys(Output.model_fields)
-    return Output.model_validate(
-        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
-    )
-
-
 def passing_outputs(
     cases: Iterable[str],
     systems: Iterable[str],
@@ -492,6 +492,14 @@ class Clock:
 
     def __call__(self) -> datetime:
         return self.now
+
+
+@dataclass
+class Refits:
+    """The comparisons behind each refit of the scheduler's board, and its root."""
+
+    comparisons: list[int] = field(default_factory=list)
+    roots: list[str] = field(default_factory=list)
 
 
 def make_arena(

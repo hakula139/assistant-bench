@@ -1087,13 +1087,13 @@ class TestClose:
             'small',
         }
 
-    def test_rejects_a_family_without_votes(self, families_dir: Path) -> None:
+    def test_rejects_a_family_without_outputs(self, families_dir: Path) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
 
         result = invoke('close', 'f')
 
         assert result.exit_code == 1
-        assert "family 'f' has no votes" in result.output
+        assert "family 'f' has no outputs on its current cases" in result.output
         assert 'Usage:' not in result.output
 
     def test_ingests_past_a_removed_case_before_closing(

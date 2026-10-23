@@ -7,7 +7,7 @@ import pytest
 
 from assistant_bench.arena.store import Choice, Defects, VoteStore, votes_file
 from assistant_bench.scoring.ranking import Comparison
-from support import AT, make_ballot, make_output
+from support import AT, make_ballot, make_output, make_vote
 
 
 LARGE = make_output(
@@ -22,13 +22,8 @@ class TestVote:
             ('choice', 'score'),
             [('a', 1.0), ('b', 0.0), ('tie', 0.5), ('both_bad', 0.5)],
         )
-        def test_scores_the_left_side(
-            self, store: VoteStore, choice: Choice, score: float
-        ) -> None:
-            session = store.start_session('f', AT)
-            vote = store.record(
-                make_ballot(LARGE, SMALL, session=session.id, choice=choice), AT
-            )
+        def test_scores_the_left_side(self, choice: Choice, score: float) -> None:
+            vote = make_vote(LARGE, SMALL, choice=choice)
 
             comparison = vote.comparison()
 
@@ -61,19 +56,35 @@ class TestVoteStore:
             assert votes == [recorded]
             assert restored == session
 
+        @pytest.mark.parametrize(
+            ('version', 'step'),
+            [
+                (
+                    1,
+                    "Close its families' rounds with the bench revision that wrote "
+                    "it, which `git log -S 'SCHEMA_VERSION = 1' -- "
+                    'src/assistant_bench/arena/store.py` finds, then move the file '
+                    'aside so `bench serve` starts a new store.',
+                ),
+                (3, 'A newer bench wrote it, so update this checkout.'),
+            ],
+            ids=['older', 'newer'],
+        )
         def test_refuses_a_store_of_another_schema_version(
-            self, data_dir: Path
+            self, data_dir: Path, version: int, step: str
         ) -> None:
             path = data_dir / 'votes.sqlite'
             path.parent.mkdir(parents=True)
             with closing(sqlite3.connect(path)) as db:
-                db.execute('PRAGMA user_version = 1')
+                db.execute(f'PRAGMA user_version = {version}')
 
-            with pytest.raises(
-                ValueError,
-                match='has schema version 1, while this bench reads version 2',
-            ):
+            with pytest.raises(ValueError) as raised:
                 VoteStore(path)
+
+            assert str(raised.value) == (
+                f'{path} has schema version {version}, while this bench reads '
+                f'version 2. {step}'
+            )
 
     class TestSession:
         def test_finds_no_session_it_never_started(self, store: VoteStore) -> None:
