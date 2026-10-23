@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
 import type { FamilyView, SessionView } from '@/lib/arena';
+import { defectTerms } from '@/lib/glossary';
 
 const FAMILY: FamilyView = {
   name: 'fixture',
@@ -384,8 +385,12 @@ describe('VoteApp', () => {
       'ariaChecked',
       'false',
     );
-    const tone = await screen.findByRole('checkbox', { name: 'Wrong tone' });
+    const tone = await screen.findByRole('checkbox', {
+      name: 'Wrong tone',
+      description: defectTerms.tone.definition,
+    });
     expect(tone.getAttribute('aria-keyshortcuts')).toBe('8');
+    expect(screen.getByText('its reader.').className).toBe('text-nowrap');
     await user.click(tone);
     expect(within(outputB).getByRole('button', { name: 'Issues 2' })).toBeDefined();
     await user.keyboard('{Escape}');

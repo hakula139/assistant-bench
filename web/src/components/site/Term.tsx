@@ -11,6 +11,18 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { terms, type Term } from '@/lib/glossary';
+import { splitTail, TAIL_CLASS } from '@/lib/markdown';
+
+/** One line of text whose last words stay together, so no browser strands one on its own line. */
+export function KeptTail({ text }: { text: string }) {
+  const [head, tail] = splitTail(text);
+  return (
+    <>
+      {head}
+      {tail !== '' && <span className={TAIL_CLASS}>{tail}</span>}
+    </>
+  );
+}
 
 /** The marks a board puts beside a system's name, which the methodology glossary repeats. */
 export const statusIcons = { preliminary: Hourglass, anchor: Anchor } satisfies Partial<
@@ -25,7 +37,9 @@ function Definition({ term }: { term: Term }) {
     <PopoverContent side="top" collisionPadding={16} aria-labelledby={title}>
       <PopoverHeader>
         <PopoverTitle id={title}>{term.term}</PopoverTitle>
-        <PopoverDescription>{term.definition}</PopoverDescription>
+        <PopoverDescription>
+          <KeptTail text={term.definition} />
+        </PopoverDescription>
       </PopoverHeader>
     </PopoverContent>
   );

@@ -1,5 +1,6 @@
 import { useId } from 'react';
 
+import { KeptTail } from '@/components/site/Term';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -22,7 +23,7 @@ interface DefectPickerProps {
   onToggle: (defect: Defect) => void;
 }
 
-/** One output's Issues button and the issues it can be tagged with. */
+/** One output's Issues button and the issues it can be tagged with, each with what it means. */
 export function DefectPicker({ side, tagged, keys, onToggle }: DefectPickerProps) {
   const id = useId();
   return (
@@ -39,23 +40,31 @@ export function DefectPicker({ side, tagged, keys, onToggle }: DefectPickerProps
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" collisionPadding={16} aria-label={`Issues in output ${side}`}>
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-3">
           {defects.map((defect, index) => {
             const key = `${id}-${defect}`;
+            const { term, definition } = defectTerms[defect];
             return (
-              <li key={defect} className="flex items-center gap-2">
+              <li key={defect} className="flex items-start gap-2">
                 <Checkbox
                   id={key}
                   checked={tagged.includes(defect)}
                   onCheckedChange={() => {
                     onToggle(defect);
                   }}
+                  aria-describedby={`${key}-definition`}
                   aria-keyshortcuts={keys[index]}
+                  className="mt-0.5"
                 />
-                <label htmlFor={key}>{defectTerms[defect].term}</label>
-                <Kbd aria-hidden="true" className="ml-auto">
-                  {keys[index]}
-                </Kbd>
+                <div className="flex flex-1 flex-col gap-0.5">
+                  <label htmlFor={key} className="font-medium">
+                    {term}
+                  </label>
+                  <p id={`${key}-definition`} className="text-muted-foreground">
+                    <KeptTail text={definition} />
+                  </p>
+                </div>
+                <Kbd aria-hidden="true">{keys[index]}</Kbd>
               </li>
             );
           })}

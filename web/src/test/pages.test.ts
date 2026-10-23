@@ -8,7 +8,8 @@ import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
 import { familyTitle } from '@/lib/aspects';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
-import { reportSchema } from '@/lib/report';
+import { defectTerms } from '@/lib/glossary';
+import { defects, reportSchema } from '@/lib/report';
 import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
@@ -364,7 +365,7 @@ describe('system page', () => {
     );
   });
 
-  test("counts each issue tagged on the system's outputs, with its share of the votes", async () => {
+  test("counts each issue tagged on the system's outputs, with its share and meaning", async () => {
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-mini',
@@ -374,6 +375,14 @@ describe('system page', () => {
     expect(text(html)).toContain(
       "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
     );
+    const table = [...new JSDOM(html).window.document.querySelectorAll('astro-island')].find(
+      (island) => island.textContent.includes('Wrong facts'),
+    );
+    expect(
+      [...(table?.querySelectorAll('button[aria-haspopup="dialog"]') ?? [])].map(
+        (hint) => hint.textContent,
+      ),
+    ).toEqual(defects.map((defect) => defectTerms[defect].term));
   });
 
   test('marks a round whose anchor differs from the reference', async () => {
