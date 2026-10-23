@@ -32,7 +32,7 @@ web/src/
 
 ## Comments
 
-- Use `/** */` TSDoc to document a declaration, which editors show on hover: an exported or module-level function, type, interface, const, component prop, or class member. Use `//` to annotate code inside a function body.
+- Write a `/** */` TSDoc comment, which editors show on hover, on a module-level declaration or a member of a module-level interface, type, or class. Use `//` for every other comment, including one above a function or const declared inside a function body.
 
 ## Reports
 
