@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import numpy as np
 from harbor.job_plan import JobPlan
@@ -25,10 +26,16 @@ from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import (
     AgentConfig,
     EnvironmentConfig,
+    SourceTrialConfig,
     TaskConfig,
     TrialConfig,
 )
-from harbor.models.trial.result import AgentInfo, ExceptionInfo, TrialResult
+from harbor.models.trial.result import (
+    AgentInfo,
+    ExceptionInfo,
+    TimingInfo,
+    TrialResult,
+)
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
@@ -63,7 +70,12 @@ REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
 
 TASK_SETTINGS = TaskTestsSettings(
-    scorer='tests', display_name='Family', samples=1, max_output_tokens=64
+    scorer='tests',
+    display_name='Family',
+    samples=1,
+    harness='terminus-2',
+    max_turns=8,
+    max_output_tokens=64,
 )
 
 
@@ -89,14 +101,32 @@ def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -
     return cases
 
 
-def write_task_family(families_dir: Path, *task_ids: str, name: str = 'f') -> None:
-    """Write a task family in the `smoke` category, copying the echo task per ID."""
+def write_task_family(
+    families_dir: Path, *task_ids: str, name: str = 'f', systems: tuple[str, ...] = ()
+) -> None:
+    """Write a task family in the `smoke` category, copying the echo task per ID.
+
+    A family that lists systems is scored by votes and runs them as terminus-2,
+    and one without is scored by tests.
+    """
     directory = families_dir / name
     (directory / 'tasks').mkdir(parents=True)
+    scoring = (
+        f"""\
+        scorer = "votes"
+        systems = {json.dumps(list(systems))}
+        reference = "{systems[0]}"
+        harness = "terminus-2"
+        max_turns = 4
+        max_output_tokens = 64
+        """
+        if systems
+        else 'scorer = "tests"\n'
+    )
     (directory / 'family.toml').write_text(
-        textwrap.dedent(
+        textwrap.dedent(scoring)
+        + textwrap.dedent(
             f"""\
-            scorer = "tests"
             display_name = "Family {name}"
             samples = 1
             categories = ["smoke"]
@@ -144,11 +174,16 @@ def write_trial(
     output: str | None = None,
     instruction: str | None = 'Hi.',
     version: str | None = None,
-) -> None:
+    workspace: dict[str, str] | None = None,
+    source: UUID | None = None,
+    agent_execution: TimingInfo | None = None,
+) -> UUID:
     """Write a trial's result and lock, its job's files, and its task's instruction.
 
     An `instruction` of `None` leaves a task that `render_tasks` wrote untouched.
-    The trial records its installed task's version unless one is given.
+    The trial records its installed task's version unless one is given. Each
+    `workspace` file lands in the trial's `/app` artifact, and `source` names the
+    trial a regrade derives from. Returns the trial's ID.
     """
     if instruction is not None:
         task_dir = data_dir() / 'tasks' / task
@@ -163,6 +198,10 @@ def write_trial(
     (trial_dir / 'agent').mkdir(parents=True)
     if output is not None:
         (trial_dir / 'agent' / OUTPUT_FILE).write_text(output)
+    for path, content in (workspace or {}).items():
+        file = trial_dir / 'artifacts' / 'app' / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content)
     exception = ExceptionInfo(
         exception_type=error or '',
         exception_message='',
@@ -175,13 +214,22 @@ def write_trial(
         trial_uri=f'file://{trial_dir}',
         task_id=LocalTaskId(path=Path('/tasks') / task),
         task_checksum='0',
-        config=TrialConfig(task=TaskConfig(path=Path('/tasks') / task), agent=agent),
+        config=TrialConfig(
+            task=TaskConfig(path=Path('/tasks') / task),
+            agent=agent,
+            source_trial=None
+            if source is None
+            else SourceTrialConfig(
+                action='regrade', type='local', trial_id=source, path=Path('/moved')
+            ),
+        ),
         agent_info=AgentInfo(name=agent.name or 'generate', version='1'),
         agent_result=context,
         verifier_result=None
         if reward is None
         else VerifierResult(rewards={'reward': reward}),
         exception_info=exception if error else None,
+        agent_execution=agent_execution,
     )
     lock = TrialLock(
         task=TaskLock(
@@ -198,6 +246,7 @@ def write_trial(
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+    return result.id
 
 
 def _installed_version(task: str) -> str:
@@ -213,6 +262,7 @@ def finish_job(job: JobConfig) -> Path:
     """Write a successful trial for each trial Harbor plans, and return the job's path.
 
     Each lock comes from Harbor's own plan, so a later job's diff can reuse the trial.
+    A job with the verifier enabled records reward 1 for each trial.
     """
     plan = asyncio.run(JobPlan.from_config(job))
     job_dir = job.jobs_dir / job.job_name
@@ -228,6 +278,9 @@ def finish_job(job: JobConfig) -> Path:
             task_checksum='0',
             config=trial,
             agent_info=AgentInfo(name='generate', version='1'),
+            verifier_result=None
+            if job.verifier.disable
+            else VerifierResult(rewards={'reward': 1.0}),
             finished_at=datetime(2026, 10, 21, tzinfo=UTC),
         )
         (trial_dir / 'result.json').write_text(result.model_dump_json())

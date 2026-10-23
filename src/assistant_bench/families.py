@@ -30,6 +30,10 @@ class _Settings(BaseModel):
     the family's short name within its aspect, or its whole name without one.
     `categories` lists the categories its cases may carry, which reports publish,
     and `public` says whether the public site lists the family.
+
+    `harness` names the agent that runs every listed system of a task family,
+    and `max_turns` bounds that agent's turns, while a case family runs every
+    system as `generate`.
     """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
@@ -38,6 +42,8 @@ class _Settings(BaseModel):
     display_name: str = Field(min_length=1)
     systems: list[str] = []
     samples: int = Field(ge=1)
+    harness: str | None = None
+    max_turns: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
     categories: list[str] = []
     public: bool = False
@@ -59,6 +65,8 @@ class Gate(StrEnum):
     """The output's prose and code comments are mostly in another language."""
     SCRIPT = 'script'
     """The output holds Traditional-only characters that the instruction lacks."""
+    TESTS = 'tests'
+    """The task's hidden tests failed."""
 
 
 class Gates(BaseModel):
@@ -93,7 +101,9 @@ class VotesSettings(_Settings):
     `ranking.ANCHOR` when the round ranks it, and otherwise the most-voted
     system anchors in its place. `render` says whether the vote page shows
     outputs as text or as sandboxed HTML, and `language` is the language every
-    output must be written in, which the gates check when it is set.
+    output must be written in, which the gates check when it is set. A task
+    family's only gate is its tests and its outputs are diffs, so it sets none
+    of `render`, `language`, and `gates`.
     """
 
     scorer: Literal['votes']
@@ -196,8 +206,10 @@ def load_family(name: str) -> Family:
         No family has the name, the family holds both or neither of
         `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
         public family sets no aspect or names itself without that aspect's
-        prefix, a case family sets no `max_output_tokens`, or the scorer does not
-        fit the source: `votes` ranks cases, and `tests` runs each task's tests.
+        prefix, or the settings do not fit the source. A case family is scored by
+        `votes`, needs `max_output_tokens`, and sets no `harness` or `max_turns`.
+        A task family sets no `render`, `language`, or `gates`, and one that
+        lists systems needs `harness`, `max_turns`, and `max_output_tokens`.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -227,17 +239,58 @@ def load_family(name: str) -> Family:
                 f'Family `{name}`: a public family ID starts with its aspect, '
                 f'as in `{settings.aspect}-<name>`.'
             )
-    if has_cases and settings.max_output_tokens is None:
-        raise ValueError(
-            f'Family `{name}`: a `cases.jsonl` family needs `max_output_tokens`.'
-        )
-    if has_cases != isinstance(settings, VotesSettings):
-        raise ValueError(
-            f'Family `{name}`: score `cases.jsonl` by `votes` and `tasks/` by `tests`.'
-        )
-    return Family(
+    family = Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
     )
+    _check_source_settings(family)
+    return family
+
+
+def _check_source_settings(family: Family) -> None:
+    """Raise unless the family's settings fit where its tasks come from."""
+    settings = family.settings
+    prefix = f'Family `{family.name}`'
+    if family.source == 'cases':
+        if not isinstance(settings, VotesSettings):
+            raise ValueError(
+                f'{prefix}: score a `cases.jsonl` family by `votes`, since only '
+                'a `tasks/` family has tests.'
+            )
+        if settings.max_output_tokens is None:
+            raise ValueError(
+                f'{prefix}: a `cases.jsonl` family needs `max_output_tokens`.'
+            )
+        agent_keys = [
+            key for key in ('harness', 'max_turns') if key in settings.model_fields_set
+        ]
+        if agent_keys:
+            raise ValueError(
+                f'{prefix}: a `cases.jsonl` family runs every system as `generate`, '
+                f'so remove {code(agent_keys)}.'
+            )
+        return
+
+    if isinstance(settings, VotesSettings):
+        gate_keys = [
+            key
+            for key in ('render', 'language', 'gates')
+            if key in settings.model_fields_set
+        ]
+        if gate_keys:
+            raise ValueError(
+                f"{prefix}: a `tasks/` family's tests are its only gate and its "
+                f'outputs are diffs, so remove {code(gate_keys)}.'
+            )
+    if settings.systems:
+        missing = [
+            key
+            for key in ('harness', 'max_turns', 'max_output_tokens')
+            if getattr(settings, key) is None
+        ]
+        if missing:
+            raise ValueError(
+                f'{prefix}: a `tasks/` family that lists systems needs {code(missing)}.'
+            )
 
 
 def load_cases(family: Family) -> list[Case]:

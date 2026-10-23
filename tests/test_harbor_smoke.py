@@ -1,6 +1,7 @@
 """Harbor trials under Docker, which the Harbor Smoke job runs."""
 
 from collections import Counter
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -8,8 +9,12 @@ import pytest
 from assistant_bench import jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
-from assistant_bench.paths import FAMILIES_DIR
-from support import StubEndpoint, make_system, terminus_completion
+from support import (
+    StubEndpoint,
+    make_system,
+    terminus_completion,
+    write_task_family,
+)
 
 
 pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
@@ -60,7 +65,7 @@ def test_generate_answers_each_case_once_across_reruns(
 
     for _ in range(2):
         tasks = jobs.render_tasks(family, cases)
-        jobs.run_job(jobs.case_job(family, [system], tasks))
+        jobs.run_job(jobs.job(family, [system], tasks))
 
     outputs = jobs.collect(family, {system.name: system})
     assert [
@@ -74,31 +79,41 @@ def test_generate_answers_each_case_once_across_reruns(
     assert sorted(prompts) == sorted(case.instruction for case in cases)
 
 
-def test_terminus_completes_a_smoke_task_through_the_endpoint(
+def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
     export: NixosConfigExport,
+    families_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
-    task = FAMILIES_DIR / 'smoke' / 'tasks' / 'echo'
+    write_task_family(families_dir, 'echo', systems=('acme-large',))
+    family = load_family('f')
+    task = case_task(family, 'echo')
     endpoint.response = terminus_completion(solution_commands(task))
-    family = load_family('smoke')
-    system = make_system(harness='terminus-2')
+    system = make_system()
+    systems = jobs.family_systems(family, [system])
 
-    config = jobs.case_job(family, [system], [task])
-    config.verifier.disable = False
-    job_dir = jobs.run_job(config)
+    job_dir = jobs.run_job(jobs.job(family, systems, [task]))
+    requests = len(endpoint.requests)
+    jobs.run_job(jobs.job(family, systems, [task]))
 
-    (output,) = jobs.read_trials(family, job_dir, {})
-    assert (output.case, output.system, output.error, output.reward) == (
-        'echo',
-        'acme-large',
-        None,
-        1.0,
-    )
-    assert output.nixos_config_rev == export.rev
-    assert endpoint.requests
+    assert len(endpoint.requests) == requests > 0
+    (output,) = jobs.collect(family, {system.name: system})
+    assert output.model_dump(
+        include={'case', 'system', 'error', 'reward', 'gate_failures', 'text'}
+    ) == {
+        'case': 'echo',
+        'system': 'acme-large',
+        'error': None,
+        'reward': 1.0,
+        'gate_failures': [],
+        'text': 'diff --git a/greeting.txt b/greeting.txt\nnew file mode 100644\n'
+        '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
+        '\\ No newline at end of file\n',
+    }
+    assert (output.job, output.nixos_config_rev) == (job_dir.name, export.rev)
+    assert output.harness_version == metadata.version('harbor')
     for request in endpoint.requests:
         assert request.headers['authorization'] == 'Bearer test-key'
         assert request.headers['x-trace'] == 'bench'
@@ -110,3 +125,15 @@ def test_terminus_completes_a_smoke_task_through_the_endpoint(
         for path in job_dir.rglob('*')
         if path.is_file() and key in path.read_bytes()
     ]
+
+    test = task / 'tests' / 'test.sh'
+    test.write_text(test.read_text() + '# A tests-only edit.\n')
+    config = task / 'task.toml'
+    config.write_text(
+        config.read_text().replace('version = "1.0.0"', 'version = "1.1.0"')
+    )
+    jobs.run_job(jobs.job(family, systems, [task]))
+
+    assert len(endpoint.requests) == requests
+    (regraded,) = jobs.collect(family, {system.name: system})
+    assert regraded == output

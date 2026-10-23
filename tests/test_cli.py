@@ -15,6 +15,7 @@ from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
+from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
 from typer.testing import CliRunner, Result
 
@@ -436,6 +437,24 @@ class TestCheck:
             'Trial `echo__1` has an unreadable `result.json`.\n',
         )
 
+    def test_reports_an_unreadable_run_trial_without_a_traceback(
+        self, data_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
+        write_trial(
+            job,
+            'en-greeting__1',
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5'}),
+            task='smoke-text/en-greeting',
+        )
+        (job / 'en-greeting__1' / 'lock.json').unlink()
+
+        result = invoke('check', 'smoke-text')
+
+        assert result.exit_code == 1
+        assert 'has a result.json but no lock.json' in result.stderr
+        assert submitted == []
+
     def test_names_the_file_and_field_of_an_invalid_family(
         self, families_dir: Path
     ) -> None:
@@ -464,6 +483,46 @@ class TestCheck:
 
         assert result.exit_code == 1
         assert 'case `en-greeting` appears at' in result.output
+
+    def test_rejects_a_family_whose_harness_cannot_run_a_listed_system(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('opus-5.5',))
+        config = families_dir / 'f' / 'family.toml'
+        config.write_text(config.read_text().replace('terminus-2', 'claude-code'))
+
+        result = invoke('check', 'f')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `f`: harness `claude-code` is not one of `generate`, '
+            '`terminus-2`.\n',
+        )
+        assert submitted == []
+
+    def test_rejects_a_family_whose_harness_cannot_send_a_listed_prompt(
+        self,
+        families_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        submitted: list[JobConfig],
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('opus-5.5',))
+        systems = load_systems(load_export())
+        prompted = systems['opus-5.5'].model_copy(update={'prompt': 'Be brief.'})
+        monkeypatch.setattr(
+            cli, 'load_systems', lambda export: systems | {'opus-5.5': prompted}
+        )
+
+        result = invoke('check', 'f')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `f` lists `opus-5.5`, whose prompt the `terminus-2` harness '
+            'cannot send. Remove them from `systems`.\n',
+        )
+        assert submitted == []
 
     def test_rejects_a_family_listing_an_unknown_system(
         self, families_dir: Path
@@ -588,14 +647,60 @@ class TestRun:
             for system in load_family('smoke-text').settings.systems
         }
 
-    def test_rejects_a_task_family(self, submitted: list[JobConfig]) -> None:
+    def test_runs_a_task_family_under_its_harness(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('opus-5.5',))
+
+        result = invoke('run', 'f')
+        assert result.exit_code == 0, result.output
+
+        (job,) = submitted
+        (agent,) = job.agents
+        opus = load_systems(load_export())['opus-5.5']
+        assert agent.import_path == 'assistant_bench.harnesses.terminus:Terminus'
+        assert agent.model_name == f'openai/{opus.route}'
+        assert agent.kwargs['fingerprint'] == (
+            opus.model_copy(update={'harness': 'terminus-2'}).fingerprint
+        )
+        assert agent.kwargs['max_turns'] == 4
+        assert agent.kwargs['llm_call_kwargs'] == {'max_completion_tokens': 64}
+        assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
+        assert not job.verifier.disable
+        assert [task.path for task in job.tasks] == [
+            families_dir / 'f' / 'tasks' / 'echo'
+        ]
+
+    def test_runs_after_a_task_family_run_only_the_systems_it_left_out(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('opus-5.5', 'kimi-k3'))
+        result = invoke('run', 'f', '--system', 'opus-5.5')
+        assert result.exit_code == 0, result.output
+        first = finish_job(submitted[0])
+
+        result = invoke('run', 'f')
+        assert result.exit_code == 0, result.output
+
+        job = submitted[1]
+        plan = asyncio.run(JobPlan.from_config(job))
+        diff = compare_job_trials(
+            plan, load_source_trials([(job.source_jobs[0], first)])
+        )
+        assert {
+            trial.agent.kwargs['system']: trial_diff.action
+            for trial, trial_diff in zip(plan.trial_configs, diff.trials, strict=True)
+        } == {'opus-5.5': DiffAction.REUSE, 'kimi-k3': DiffAction.RERUN}
+
+    def test_rejects_a_named_family_without_systems(
+        self, submitted: list[JobConfig]
+    ) -> None:
         result = invoke('run', 'smoke')
 
         assert (result.exit_code, result.output) == (
             1,
-            'Family `smoke` holds `tasks/`, and `bench run` runs only families '
-            'with `cases.jsonl`. Validate its tasks with '
-            '`uv run bench check smoke`.\n',
+            'Family `smoke` lists no systems. Add them to `systems` in '
+            '`families/smoke/family.toml`.\n',
         )
         assert submitted == []
 
@@ -778,18 +883,58 @@ class TestRun:
         assert submitted == []
         assert not (data_dir / 'tasks' / 'g' / 'c1').exists()
 
-    def test_refuses_a_later_task_family_before_running_any(
+    def test_refuses_a_task_edited_without_a_bump_before_running_any(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
         write_case_family(families_dir, ['opus-5.5'], name='f')
-        write_task_family(families_dir, name='z')
-        config = families_dir / 'z' / 'family.toml'
-        config.write_text(config.read_text() + 'systems = ["opus-5.5"]\n')
+        write_task_family(families_dir, 'echo', name='z', systems=('opus-5.5',))
+        result = invoke('run', 'z')
+        assert result.exit_code == 0, result.output
+        finish_job(submitted.pop())
+        test = families_dir / 'z' / 'tasks' / 'echo' / 'tests' / 'test.sh'
+        test.write_text(test.read_text() + '# Edited.\n')
 
         result = invoke('run')
 
-        assert result.exit_code == 1
-        assert 'Family `z` holds `tasks/`' in result.output
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `z` has tasks to bump:\n'
+            'Task `echo` changed since a trial ran it at version `1.0.0`.\n'
+            "Bump each task's `[task] version`: the patch for a change no trial "
+            'depends on, such as its solution, the minor for a change to `tests/` '
+            'alone, which regrades its trials, or the major for anything the '
+            'agent sees, which reruns them.\n',
+        )
+        assert submitted == []
+
+    def test_refuses_a_case_whose_rendered_task_changed_under_its_version(
+        self, monkeypatch: pytest.MonkeyPatch, submitted: list[JobConfig]
+    ) -> None:
+        result = invoke('run', 'smoke-text')
+        assert result.exit_code == 0, result.output
+        finish_job(submitted.pop())
+        render = jobs.render_task_config
+
+        def with_new_default(name: str, instruction: str) -> TaskConfig:
+            config = render(name, instruction)
+            verifier = config.verifier.model_copy(update={'timeout_sec': 1.0})
+            return config.model_copy(update={'verifier': verifier})
+
+        monkeypatch.setattr(jobs, 'render_task_config', with_new_default)
+
+        result = invoke('run', 'smoke-text')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `smoke-text` has cases whose rendered task changed under a '
+            'version a trial recorded: `en-greeting`, `zh-greeting`. A Harbor '
+            'upgrade that changes a `task.toml` default does this, and Harbor '
+            "aborts the job until the family's earlier job directories are "
+            'removed, as `docs/research/harbor.md#quirks-of-the-pinned-release` '
+            'describes.\n',
+        )
         assert submitted == []
 
     def test_rejects_an_unreadable_trial_record(
@@ -834,8 +979,8 @@ class TestCollect:
             pytest.param(
                 'smoke',
                 [
-                    make_output(reward=1.0),
-                    make_output(reward=0.0),
+                    make_output(reward=1.0, harness_version='0.24.0'),
+                    make_output(reward=0.0, harness_version='0.24.0'),
                     make_output(error='TimeoutError'),
                 ],
                 """\
@@ -843,7 +988,24 @@ class TestCollect:
                   TimeoutError: 1
                 Mean reward 0.500.
                 """,
-                id='errors-and-rewards',
+                id='errors-rewards-and-one-harbor-version',
+            ),
+            pytest.param(
+                'smoke',
+                [
+                    make_output(case='a', reward=1.0, harness_version='0.24.0'),
+                    make_output(case='b', reward=0.0, harness_version='0.25.0'),
+                    make_output(case='c', reward=0.5, harness_version='0.24.0'),
+                    make_output(case='d', error='RuntimeError'),
+                ],
+                """\
+                Family `smoke`: 4 outputs, 1 errored.
+                  RuntimeError: 1
+                Mean reward 0.500.
+                No system solved `b`, `c`.
+                The outputs span Harbor versions `0.24.0`, `0.25.0`.
+                """,
+                id='unsolved-tasks-and-harbor-versions',
             ),
         ],
     )

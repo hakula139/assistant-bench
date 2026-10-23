@@ -19,17 +19,24 @@ class Harness:
 
     `options` builds the agent's kwargs from a system and the family's settings,
     and the job sends the system's route after `model_prefix` as the model name.
+    `sends_prompt` says whether the agent sends a system's prompt, and
+    `single_call` says whether it makes one request and never acts in the
+    task's environment, so it cannot solve a task family's tasks.
     """
 
     import_path: str
     options: Callable[[System, Settings], dict[str, Any]]
     model_prefix: str = ''
+    sends_prompt: bool = False
+    single_call: bool = False
 
 
 HARNESSES: dict[str, Harness] = {
     'generate': Harness(
         import_path='assistant_bench.harnesses.generate:Generate',
         options=options.generate,
+        sends_prompt=True,
+        single_call=True,
     ),
     'terminus-2': Harness(
         import_path='assistant_bench.harnesses.terminus:Terminus',

@@ -46,6 +46,7 @@ class TestTerminus:
         assert kwargs == {
             'system': 'acme-large',
             'fingerprint': system.fingerprint,
+            'max_turns': 8,
             'llm_call_kwargs': {'max_completion_tokens': 64},
             'reasoning_effort': 'medium',
             'record_terminal_session': False,
