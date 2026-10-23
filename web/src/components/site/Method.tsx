@@ -73,7 +73,7 @@ export function MethodStrip({
   return (
     <ol
       aria-label={`${scorers[scorer].title} scoring steps`}
-      className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-md:flex-col max-md:items-start"
+      className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-md:flex-col max-md:items-start max-md:gap-y-2"
     >
       {methodSteps(scorer, config).map(({ step, title, detail, hint }, i) => {
         const Icon = stepIcons[step];

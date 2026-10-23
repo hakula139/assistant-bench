@@ -420,6 +420,44 @@ describe('system page', () => {
   });
 });
 
+const VOID_ELEMENTS = new Set(['area', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta']);
+
+/** The class attribute of each `<astro-island>`'s parent element, in document order. */
+function islandParentClasses(html: string): string[] {
+  const parents: string[] = [];
+  const open: { name: string; classes: string }[] = [];
+  const markup = html.replace(/<(script|style|template)\b[\s\S]*?<\/\1>/g, '');
+  for (const [, closing, name, attributes, selfClosing] of markup.matchAll(
+    /<(\/?)([a-z][\w-]*)([^>]*?)(\/?)>/g,
+  )) {
+    if (closing) {
+      open.splice(open.findLastIndex((element) => element.name === name));
+      continue;
+    }
+    if (name === 'astro-island') {
+      parents.push(open.at(-1)?.classes ?? '');
+    }
+    if (!selfClosing && !VOID_ELEMENTS.has(name)) {
+      open.push({ name, classes: /\bclass="([^"]*)"/.exec(attributes)?.[1] ?? '' });
+    }
+  }
+  return parents;
+}
+
+describe('island containers', () => {
+  // Astro renders each island as a `display: contents` element, which takes no margin.
+  test.each([
+    ['family page', FamilyPage],
+    ['system page', SystemPage],
+  ])('space the islands on the %s with gap', async (_, page) => {
+    const html = await render(page, { family: await family(), system: 'acme-pro', boards: [] });
+    const parents = islandParentClasses(html);
+    expect(parents).not.toEqual([]);
+
+    expect(parents.filter((classes) => /\bspace-[xy]-/.test(classes))).toEqual([]);
+  });
+});
+
 /** The `[href, label, aria-current]` of each link in the nav that `label` names. */
 function navLinks(html: string, label: string): [string, string, string | null][] {
   const nav = new RegExp(`<nav\\b[^>]*aria-label="${label}"[^>]*>([\\s\\S]*?)</nav>`).exec(

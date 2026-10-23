@@ -32,7 +32,10 @@ const { Board } = scorerViews[config.scorer];
   <PageHeader title={title}>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip client:load scorer={config.scorer} config={config} />
-    <a href={`/methodology/#${config.scorer}`} class="inline-flex items-center gap-2 text-sm">
+    <a
+      href={`/methodology/#${config.scorer}`}
+      class="inline-flex items-center gap-2 self-start text-sm"
+    >
       <BookOpen className="size-4" aria-hidden="true" />
       How to read this board
     </a>

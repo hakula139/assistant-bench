@@ -208,7 +208,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
         className={cn(
           panel,
           'data-[state=closed]:self-start md:col-span-2',
-          !stacked && 'xl:col-span-1',
+          !stacked && 'xl:col-span-1 xl:data-[state=closed]:row-span-1',
         )}
       >
         <div className={cn(band, 'group-data-[state=open]/card:border-b')}>
@@ -560,7 +560,8 @@ export function VoteApp() {
       <div
         className={cn(
           'grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]',
-          !hasFrames && 'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1',
+          !hasFrames &&
+            'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-y-0 xl:*:row-span-2 xl:*:grid xl:*:grid-rows-subgrid',
         )}
       >
         <Brief pair={pair} status={status} stacked={hasFrames} />

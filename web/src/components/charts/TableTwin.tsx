@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 /** A chart's data as a table, behind a disclosure below the chart that works without scripts. */
 export function TableTwin({ children }: { children: ReactNode }) {
   return (
-    <details className="group mt-2">
+    <details className="group">
       <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronDown
           className="size-4 -rotate-90 transition-transform group-open:rotate-0"

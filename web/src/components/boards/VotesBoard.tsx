@@ -263,8 +263,10 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
 
       {(costPoints.length > 0 || latencyPoints.length > 0) && (
         <Section title="Score against cost and latency">
-          <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="h-0.5 w-5 bg-faint" aria-hidden="true" />
+          <p className="flex gap-2 text-sm text-muted-foreground">
+            <span className="flex h-lh w-5 shrink-0 items-center" aria-hidden="true">
+              <span className="h-0.5 w-full bg-faint" />
+            </span>
             Pareto frontier: no other system scores higher for less
           </p>
           <div className="grid gap-6 lg:grid-cols-2">
