@@ -1,7 +1,7 @@
 [project]
 name = "assistant-bench"
 version = "0.1.0"
-description = "Blind pairwise benchmark of AI assistant outputs"
+description = "Benchmark of AI assistant outputs, scored by blind pairwise votes or task tests"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"

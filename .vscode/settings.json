@@ -1,10 +1,17 @@
 {
-  "[json][jsonc][markdown][yaml]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  "[nix]": {
+    "editor.defaultFormatter": "jnoortheen.nix-ide"
   },
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff"
   },
+  "[shellscript]": {
+    "editor.defaultFormatter": "mkhl.shfmt"
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml"
+  },
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
   "json.schemas": [
     {

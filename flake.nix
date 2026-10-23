@@ -110,6 +110,11 @@
           };
         };
 
+        nodeTools = with pkgs; [
+          nodejs_24
+          pnpm
+        ];
+
         # These hooks run the tools pinned in node_modules and uv.lock, which the Nix sandbox lacks.
         # The flake check leaves them to CI's Node Check and Python Check jobs.
         nodeHook =
@@ -117,10 +122,7 @@
           pkgs.lib.getExe (
             pkgs.writeShellApplication {
               inherit name;
-              runtimeInputs = with pkgs; [
-                nodejs_24
-                pnpm
-              ];
+              runtimeInputs = nodeTools;
 
               text = ''
                 if [ ! -d node_modules ]; then
@@ -133,11 +135,10 @@
           );
 
         nodeHooks = {
-          prettier-write = {
+          prettier = {
             enable = true;
-            name = "prettier";
-            entry = nodeHook "prettier-write" "prettier --write --ignore-unknown";
-            types = [ "text" ];
+            package = null;
+            entry = nodeHook "prettier" "prettier --write --ignore-unknown";
           };
 
           cspell = {
@@ -207,10 +208,7 @@
             pythonEnvironment.packages
             ++ preCommit.enabledPackages
             ++ [ preCommit.config.package ]
-            ++ (with pkgs; [
-              nodejs_24
-              pnpm
-            ]);
+            ++ nodeTools;
 
           # Other repositories enter this shell for its tools, and the flake's source is a store
           # copy that can't name its checkout, so hooks install only where the repository's

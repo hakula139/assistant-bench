@@ -27,6 +27,7 @@ httpx
 intp
 isort
 jitless
+jnoortheen
 katex
 kimi
 kwarg
@@ -39,6 +40,7 @@ litellm
 llms
 Logit
 lucide
+mkhl
 multinomial
 mypy
 NFKC
@@ -47,7 +49,6 @@ nixos
 Nixpkgs
 npmjs
 numpy
-nums
 numtide
 nvmrc
 Orchidarium
@@ -67,6 +68,7 @@ srcdoc
 SSIM
 statix
 strconv
+tamasfe
 taplo
 threadpoolctl
 tokei
@@ -82,6 +84,7 @@ unranked
 unrouted
 unscored
 unstub
+untabled
 usize
 uvicorn
 venv
