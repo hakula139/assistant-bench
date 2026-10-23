@@ -16,7 +16,14 @@ Votes and scores pool only within one fingerprint. Altering a system's route, ef
 
 ## Harnesses
 
-`System.harness` names an entry in `harnesses.HARNESSES`, which maps it to a Harbor agent: either a bench agent by import path or an agent shipped with Harbor by name. Every system defaults to `generate`, the single-call agent, while `bench check` uses Harbor's `oracle` and `nop`.
+`System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder returns the agent's kwargs from a system and the family's settings, and its `model_name` builder names the model the job sends.
+
+| Harness      | Agent                                         | Model name       |
+| ------------ | --------------------------------------------- | ---------------- |
+| `generate`   | `assistant_bench.harnesses.generate:Generate` | `system.route`   |
+| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | `openai/<route>` |
+
+Every system defaults to `generate`, the single-call agent. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry. `terminus-2` is Harbor's Terminal-Bench agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`.
 
 Harbor records each trial's agent import path in the job's `config.json`, and `harbor job resume` imports it from there, ensuring an import path never changes once a job uses it.
 

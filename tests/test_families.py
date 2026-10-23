@@ -148,6 +148,7 @@ class TestLoadFamily:
                 display_name='Smoke Test · Tasks',
                 samples=1,
                 categories=['smoke'],
+                max_output_tokens=64,
             ),
         )
 
