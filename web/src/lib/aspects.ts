@@ -1,6 +1,6 @@
 /** The skills families measure, in the order the site lists them. */
 export const aspects = {
-  'technical-writing': { title: 'Technical Writing' },
+  writing: { title: 'Writing' },
 } satisfies Record<string, { title: string }>;
 
 export type Aspect = keyof typeof aspects;

@@ -30,7 +30,7 @@ class TestCreateApp:
     def test_runs_a_session_from_start_to_undo(self, client: TestClient) -> None:
         family = {
             'name': 'f',
-            'aspect': 'technical-writing',
+            'aspect': 'writing',
             'display_name': 'Family f',
         }
         assert client.get('/api/families').json() == [family]

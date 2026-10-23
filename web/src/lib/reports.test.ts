@@ -14,7 +14,7 @@ import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
   scorer: 'votes',
-  ...(listed && { aspect: 'technical-writing' }),
+  ...(listed && { aspect: 'writing' }),
   display_name: displayName,
   systems: ['acme-large', 'acme-pro'],
   reference: 'acme-large',
@@ -63,8 +63,8 @@ describe('listFamilies', () => {
     expect(families).toEqual([
       {
         name: 'prose',
-        title: 'Technical Writing · Prose',
-        aspect: 'technical-writing',
+        title: 'Writing · Prose',
+        aspect: 'writing',
         config: votes(true),
         rounds: [],
         systemNames: FIXTURE_NAMES,
@@ -90,11 +90,11 @@ describe('listFamilies', () => {
   test('rejects two families sharing a full name, even one that is not public', () => {
     const configs = [
       { name: 'prose', config: votes(true, 'English') },
-      { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'technical-writing' } },
+      { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'writing' } },
     ] satisfies { name: string; config: FamilyConfig }[];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose and smoke-text share the full name Technical Writing · English',
+      'families prose and smoke-text share the full name Writing · English',
     );
   });
 
@@ -106,7 +106,7 @@ describe('listFamilies', () => {
 
     const families = listFamilies(configs, [], FIXTURE_NAMES);
 
-    expect(families.map((family) => family.title)).toEqual(['Technical Writing · English']);
+    expect(families.map((family) => family.title)).toEqual(['Writing · English']);
   });
 
   test('rejects a public family without an aspect', () => {
@@ -131,8 +131,8 @@ describe('board paths', () => {
       FIXTURE_NAMES,
     );
 
-    expect(boardPath(family)).toBe('/technical-writing/zh/');
-    expect(systemPath(family, 'acme-pro')).toBe('/technical-writing/zh/acme-pro/');
+    expect(boardPath(family)).toBe('/writing/zh/');
+    expect(systemPath(family, 'acme-pro')).toBe('/writing/zh/acme-pro/');
   });
 
   test('redirects the old family path to the board, at any depth', () => {
@@ -144,9 +144,9 @@ describe('board paths', () => {
 
     expect(redirectLines([family])).toBe(
       [
-        '/prose-zh /technical-writing/zh/ 301',
-        '/prose-zh/ /technical-writing/zh/ 301',
-        '/prose-zh/* /technical-writing/zh/:splat 301',
+        '/prose-zh /writing/zh/ 301',
+        '/prose-zh/ /writing/zh/ 301',
+        '/prose-zh/* /writing/zh/:splat 301',
         '',
       ].join('\n'),
     );
@@ -159,7 +159,7 @@ describe('board paths', () => {
     ] satisfies { name: string; config: FamilyConfig }[];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose-zh and prose-zh-two share the board path /technical-writing/zh/',
+      'families prose-zh and prose-zh-two share the board path /writing/zh/',
     );
   });
 });

@@ -8,7 +8,7 @@ import type { FamilyView, SessionView } from '@/lib/arena';
 
 const FAMILY: FamilyView = {
   name: 'prose-zh',
-  aspect: 'technical-writing',
+  aspect: 'writing',
   display_name: 'Chinese',
 };
 
@@ -141,10 +141,10 @@ describe('VoteApp', () => {
   test('starts the family it shows by short name, and names it in full in the session', async () => {
     const api = stubApi(1);
     const user = await startSession();
-    expect(screen.getByText('Technical Writing · Chinese, pair 1 of 1')).toBeDefined();
+    expect(screen.getByText('Writing · Chinese, pair 1 of 1')).toBeDefined();
 
     await user.keyboard('a{Enter}');
-    await screen.findByText('1 vote recorded on Technical Writing · Chinese.');
+    await screen.findByText('1 vote recorded on Writing · Chinese.');
     await user.click(screen.getByRole('button', { name: 'Start another session' }));
 
     await vi.waitFor(() => {
@@ -213,7 +213,7 @@ describe('VoteApp', () => {
     const families: FamilyView[] = [
       { name: 'smoke-text', aspect: null, display_name: 'Smoke' },
       FAMILY,
-      { name: 'prose-en', aspect: 'technical-writing', display_name: 'English' },
+      { name: 'prose-en', aspect: 'writing', display_name: 'English' },
     ];
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(families))));
 
@@ -228,7 +228,7 @@ describe('VoteApp', () => {
           .map((button) => button.textContent),
       ]),
     ).toEqual([
-      ['Technical Writing', ['Chinese', 'English']],
+      ['Writing', ['Chinese', 'English']],
       ['Unlisted', ['Smoke']],
     ]);
   });

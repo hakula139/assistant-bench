@@ -27,7 +27,7 @@ const SLUGS = { ...FIXTURE_NAMES, arena: 'Arena Writing' };
 
 const arenaConfig: VotesConfig = {
   scorer: 'votes',
-  aspect: 'technical-writing',
+  aspect: 'writing',
   display_name: 'Arena Writing',
   systems: ['acme-large', 'acme-new', 'acme-pro', 'acme-small'],
   reference: 'acme-large',
@@ -52,12 +52,12 @@ async function family(): Promise<Family> {
   return listedFamily('arena', arenaConfig, [earlier, latest]);
 }
 
-/** A family as `listFamilies` lists it under the technical writing aspect. */
+/** A family as `listFamilies` lists it under the writing aspect. */
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
   return {
     name,
     title: familyTitle(config),
-    aspect: 'technical-writing',
+    aspect: 'writing',
     config,
     rounds,
     systemNames: FIXTURE_NAMES,
@@ -118,7 +118,7 @@ function testsFamily(): Family {
     'smoke',
     {
       scorer: 'tests',
-      aspect: 'technical-writing',
+      aspect: 'writing',
       display_name: 'Smoke Tasks',
       systems: ['acme-pro', 'acme-small'],
       public: true,
@@ -235,7 +235,7 @@ describe('home page anchors', () => {
 
     const html = await render(HomePage, {});
 
-    expect(html).toMatch(/<h2 id="technical-writing"[^>]*>[\s\S]*?Technical Writing\s*<\/h2>/);
+    expect(html).toMatch(/<h2 id="writing"[^>]*>[\s\S]*?Writing\s*<\/h2>/);
   });
 });
 
@@ -243,7 +243,7 @@ describe('family panel', () => {
   test('links its short name to the board under its aspect', async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
-    expect(html).toContain('href="/technical-writing/zh/"');
+    expect(html).toContain('href="/writing/zh/"');
   });
 
   test("draws the latest round's intervals and names its leader", async () => {
@@ -291,7 +291,7 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain(
-      'Technical Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
+      'Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
     );
   });
 
@@ -302,9 +302,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(html).toContain(
-      '<title>Acme Pro on Technical Writing · Arena Writing | HAKULA†BENCH</title>',
-    );
+    expect(html).toContain('<title>Acme Pro on Writing · Arena Writing | HAKULA†BENCH</title>');
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
@@ -384,11 +382,11 @@ describe('header', () => {
     const arena = await family();
 
     const pages = [
-      await render(FamilyPage, { family: arena, boards: [] }, '/technical-writing/zh/'),
+      await render(FamilyPage, { family: arena, boards: [] }, '/writing/zh/'),
       await render(
         SystemPage,
         { family: arena, system: 'acme-pro', boards: [] },
-        '/technical-writing/zh/acme-pro/',
+        '/writing/zh/acme-pro/',
       ),
     ];
 
@@ -434,13 +432,13 @@ describe('board switcher', () => {
 
     const html = await render(
       FamilyPage,
-      propsAt(familyPaths(families), { aspect: 'technical-writing', board: 'en' }),
+      propsAt(familyPaths(families), { aspect: 'writing', board: 'en' }),
     );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([
-      ['/technical-writing/zh/', 'Arena Writing', null],
-      ['/technical-writing/en/', 'Arena English', 'page'],
-      ['/technical-writing/arena-japanese/', 'Arena Japanese', null],
+    expect(navLinks(html, 'Writing boards')).toEqual([
+      ['/writing/zh/', 'Arena Writing', null],
+      ['/writing/en/', 'Arena English', 'page'],
+      ['/writing/arena-japanese/', 'Arena Japanese', null],
     ]);
   });
 
@@ -450,15 +448,15 @@ describe('board switcher', () => {
     const html = await render(
       SystemPage,
       propsAt(systemPaths(families), {
-        aspect: 'technical-writing',
+        aspect: 'writing',
         board: 'zh',
         system: 'acme-pro',
       }),
     );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([
-      ['/technical-writing/zh/acme-pro/', 'Arena Writing', 'page'],
-      ['/technical-writing/en/acme-pro/', 'Arena English', null],
+    expect(navLinks(html, 'Writing boards')).toEqual([
+      ['/writing/zh/acme-pro/', 'Arena Writing', 'page'],
+      ['/writing/en/acme-pro/', 'Arena English', null],
     ]);
   });
 
@@ -467,10 +465,10 @@ describe('board switcher', () => {
 
     const html = await render(
       FamilyPage,
-      propsAt(familyPaths([arena]), { aspect: 'technical-writing', board: 'zh' }),
+      propsAt(familyPaths([arena]), { aspect: 'writing', board: 'zh' }),
     );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([]);
+    expect(navLinks(html, 'Writing boards')).toEqual([]);
   });
 });
 
@@ -483,8 +481,8 @@ describe('system page breadcrumb', () => {
     });
 
     expect(navLinks(html, 'breadcrumb')).toEqual([
-      ['/#technical-writing', 'Technical Writing', null],
-      ['/technical-writing/zh/', 'Arena Writing', null],
+      ['/#writing', 'Writing', null],
+      ['/writing/zh/', 'Arena Writing', null],
     ]);
   });
 });
