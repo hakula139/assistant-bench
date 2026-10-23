@@ -34,11 +34,12 @@ def settled_score(a: Output, b: Output) -> float | None:
 
 
 def settled(outputs: Iterable[Output]) -> list[Comparison]:
-    """Return the comparisons the gated outputs decide, derived afresh on each call.
+    """Return the comparisons the gated outputs decide.
 
-    Each pairing of two systems' samples on a case counts 1 / (samples × samples)
-    of a vote, so a case weighs at most one vote per pair of systems. No pane
-    showed either side, so the results carry no side.
+    Each pairing of two systems' samples on a case counts 1 / (the product of the
+    two systems' sample counts on the case) of a vote, so a case weighs at most
+    one vote per pair of systems. No pane showed either side, so the results
+    carry no side.
     """
     by_case: dict[str, dict[str, list[Output]]] = {}
     for output in outputs:

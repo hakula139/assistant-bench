@@ -14,7 +14,7 @@ from assistant_bench.cli import LOCAL_SITE_VAR
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.paths import DATA_DIR_VAR
 from assistant_bench.scoring import ranking
-from support import EXPORT_FILE, Clock, StubEndpoint, serve_stub
+from support import EXPORT_FILE, Clock, Refits, StubEndpoint, serve_stub
 
 
 # Set as `bench` sets it, before a test module imports LiteLLM.
@@ -78,16 +78,17 @@ def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def fits(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Record the number of comparisons behind each refit of the scheduler's board."""
-    comparisons: list[int] = []
+def fits(monkeypatch: pytest.MonkeyPatch) -> Refits:
+    """Record each refit of the scheduler's board."""
+    refits = Refits()
 
     def rate(matchups: ranking.Matchups, root: str) -> ranking.Ratings:
-        comparisons.append(len(matchups.score))
+        refits.comparisons.append(len(matchups.score))
+        refits.roots.append(root)
         return ranking.rate(matchups, root)
 
     monkeypatch.setattr(scheduler, 'rate', rate)
-    return comparisons
+    return refits
 
 
 @pytest.fixture

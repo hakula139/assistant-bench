@@ -6,7 +6,7 @@ A report is the published record of one closed round of a family: aggregates und
 
 `uv run bench close <family>` collects the family's trials and aggregates everything it has so far, then writes `reports/<family>/<round>.json`, where the round is the UTC date of closing, so closing again on the same day replaces that day's file. Only `bench close` writes under `reports/`, and each report is committed through an ordinary PR. A board pools every round, so each report is a snapshot of the cumulative board at its date.
 
-Closing fails, naming the problem, when the family has nothing to report, when a family scored by votes has no votes on its current outputs, or when a system's current outputs carry several fingerprints.
+Closing fails, naming the problem, when the family has no outputs on its current cases, when a family scored by votes has no votes on its current outputs, or when a system's current outputs carry several fingerprints.
 
 ## Schema
 
@@ -17,7 +17,7 @@ Closing fails, naming the problem, when the family has nothing to report, when a
 | `VotesResults` | Standings with scores, intervals, rank spread, vote counts, both-bad and gate-failure rates, cost, latency, token and latency percentiles, and defect tallies, the family's reference and the round's anchor, plus the counted and dropped votes, the unranked systems, head-to-head records, category boards, the diagnostics, and the decision that [Ranking](ranking.md) defines |
 | `TestsResults` | Per system, the trials, the errored trials, the pass rate with an errored trial counting as a failure, the mean cost, and the p50 latency                                                                                                                                                                                                                                           |
 
-Each defect counts against the output the owner tagged with it, once per vote, whichever side won. Costs and latencies average every output of the system on the current cases that finished without an error, and the gate-failure rate covers the outputs the gates checked. A system whose votes all dropped out still ranks through its settled results, with no both-bad rate, and `decision` is null while a system tied with the top one is preliminary. `anchor` is the reference when the round ranks it, and otherwise the most-voted system that stands at 1,000. Rounds with different anchors are offset by an unknown constant, so compare scores only within one round.
+Each defect counts against the output the owner tagged with it, once per vote, whichever side won. Both scorers count only the outputs on the family's current cases, and costs and latencies cover the outputs among them that finished without an error, while the gate-failure rate covers the outputs the gates checked. A system whose votes all dropped out still ranks through its settled results, with no both-bad rate, and `decision` is null while a system tied with the top one is preliminary. `anchor` is the reference when the round ranks it, and otherwise the most-voted system that stands at 1,000. Rounds with different anchors are offset by an unknown constant, so compare scores only within one round.
 
 A new scorer adds one variant here, an arm in `close`, and a board on the site, as [Architecture](architecture.md#families-and-scorers) describes.
 

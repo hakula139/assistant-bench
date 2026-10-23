@@ -10,13 +10,22 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Literal, assert_never, get_args
+from typing import Annotated, Literal, assert_never
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
+from zhon import hanzi
 
 from assistant_bench.arena.resolution import MatchedVote, reconcile, settled
-from assistant_bench.arena.store import Choice, Defect, Vote, VoteStore
+from assistant_bench.arena.store import (
+    DEFECTS,
+    LEFT_SCORE,
+    SWAPPED,
+    Choice,
+    Defect,
+    Vote,
+    VoteStore,
+)
 from assistant_bench.families import (
     Family,
     TaskTestsSettings,
@@ -31,17 +40,11 @@ from assistant_bench.scoring import ranking
 PRELIMINARY_DECISIVE_VOTES = 40
 RATER_AGREEMENT_FLOOR = 0.7
 
-# A Han ideograph, or a run of anything else up to whitespace or a Han ideograph.
-_LENGTH_UNIT = re.compile(
-    r'[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]'
-    r'|[^\s\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]+'
-)
-_SWAPPED: dict[Choice, Choice] = {
-    'a': 'b',
-    'b': 'a',
-    'tie': 'tie',
-    'both_bad': 'both_bad',
-}
+# A Han character, or a run of anything else up to whitespace or a Han character.
+_LENGTH_UNIT = re.compile(f'[{hanzi.characters}]|[^\\s{hanzi.characters}]+')
+
+
+# ── Shared Schema ──
 
 
 class _Model(BaseModel):
@@ -49,7 +52,7 @@ class _Model(BaseModel):
 
 
 class Interval(_Model):
-    """A 95% bootstrap interval on the score scale."""
+    """A bootstrap interval at `ranking.CONFIDENCE` on the score scale."""
 
     lower: float
     upper: float
@@ -68,9 +71,9 @@ class Standing(_Model):
     """One system's row on a board scored by votes.
 
     `rank` orders the scores, while `best_rank` and `worst_rank` span the ranks
-    its interval allows. `preliminary` marks fewer than 40 decisive votes.
-    `defects` counts the votes that tagged this system's output with each defect,
-    whichever side won.
+    its interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`
+    decisive votes. `defects` counts the votes that tagged this system's output
+    with each defect, whichever side won.
     """
 
     system: str
@@ -154,13 +157,14 @@ class VotesResults(_Model):
 
     `votes` counts the votes that compare current outputs needing a vote, while
     `dropped_votes` counts the rest: votes on retired cases, on outputs that left
-    or now fail a gate, and on pairs that the outputs now settle. `reference` is
-    the system the family names to anchor the board, while `anchor` is the system
-    the round actually fixed at 1000, which is the most-voted system when the
-    reference does not rank. `unranked` lists the voted systems that no
-    comparison connects to the anchor, or that so many resamples leave
-    unconnected that their interval is unbounded. `position` is the left pane's
-    advantage, and `length` the score change per standard deviation of the
+    or now fail a gate, and on pairs that the outputs now settle. `sessions`
+    counts the sessions that hold a counted vote. `reference` is the system the
+    family names to anchor the board, while `anchor` is the system the round
+    actually fixed at `ranking.ANCHOR`, which is the most-voted system when the
+    reference does not rank. `unranked` lists the voted systems with current
+    outputs that no comparison connects to the anchor, or that so many resamples
+    leave unconnected that their interval is unbounded. `position` is the left
+    pane's advantage, and `length` the score change per standard deviation of the
     relative length difference, both in score points, where `length` is absent
     when no connected vote varies that difference. `split_half_tau` compares the
     orders fit to odd and even sessions, and `decision` is absent while a system
@@ -189,6 +193,8 @@ class VotesResults(_Model):
 
 
 class TestsStanding(_Model):
+    """One system's pass rate, with cost and latency over its error-free trials."""
+
     system: str
     fingerprint: str | None
     trials: int
@@ -220,29 +226,35 @@ class Report(_Model):
     results: Results
 
 
-def close(
-    family: Family,
-    store: VoteStore,
-    closed_at: datetime,
-) -> Report:
-    """Aggregate the family's outputs, and its votes when votes score it.
+def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
+    """Aggregate the family's current outputs, and its votes when votes score it.
 
     Raises
     ------
     ValueError
         The family has nothing to report, or a system has several fingerprints.
     """
-    outputs = read_outputs(family.name)
+    categories = {case.id: case.category for case in load_cases(family)}
+    outputs = [
+        output for output in read_outputs(family.name) if output.case in categories
+    ]
+    if not outputs:
+        step = (
+            f' Run `uv run bench run {family.name}` first.'
+            if family.source == 'cases'
+            else ''
+        )
+        raise ValueError(
+            f'Family `{family.name}` has no outputs on its current cases.{step}'
+        )
     results: Results
     match family.settings:
         case VotesSettings():
-            categories = {case.id: case.category for case in load_cases(family)}
-            outputs = [output for output in outputs if output.case in categories]
             results = _votes_results(
                 family, family.settings, store, outputs, categories
             )
         case TaskTestsSettings():
-            results = _tests_results(family, outputs)
+            results = _tests_results(outputs)
         case _:
             assert_never(family.settings)
     return Report(
@@ -273,7 +285,9 @@ def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:
     for system, fingerprints in sorted(by_system.items()):
         if len(fingerprints) > 1:
             raise ValueError(
-                f'system {system!r} has outputs under several fingerprints'
+                f'System `{system}` has outputs under several fingerprints. Give '
+                'the changed system a new name, as `docs/guide/authoring.md#systems` '
+                'describes.'
             )
     return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
 
@@ -288,35 +302,40 @@ def _votes_results(
     outputs: list[Output],
     categories: dict[str, str],
 ) -> VotesResults:
-    """Fit the current case set, where votes and outputs on retired cases drop out.
+    """Fit the votes and settled results on the current cases' `outputs`.
 
-    The caller passes outputs already filtered to the current cases, together
-    with their case-to-category map. The systems with recorded votes enter the
-    board, through the votes that `reconcile` keeps and the results their
-    current outputs settle.
+    `categories` maps each current case to its category. The systems with
+    recorded votes enter the board, through the votes that `reconcile` keeps and
+    the results their current outputs settle.
     """
     recorded = store.votes(family.name)
     if not recorded:
-        raise ValueError(f'family {family.name!r} has no votes')
+        raise ValueError(
+            f'Family `{family.name}` has no votes yet. Vote with '
+            '`uv run bench serve`, then close the round.'
+        )
     votes = reconcile(recorded, outputs)
     if not votes:
-        raise ValueError(f'family {family.name!r} has no votes on its current outputs')
+        raise ValueError(
+            f'Family `{family.name}` has votes, but none compares two of its '
+            'current outputs. Vote on the current outputs, then close the round.'
+        )
     fingerprints = _fingerprints(outputs)
-    voted = {side.system for vote in recorded for side in (vote.a, vote.b)}
+    voted = {system for vote in recorded for system in vote.systems}
     comparisons = [m.vote.comparison() for m in votes] + [
         comparison
         for comparison in settled(outputs)
         if {comparison.left, comparison.right} <= voted
     ]
     everything = ranking.Matchups.build(comparisons)
-    root = _root(everything, votes, settings.systems)
+    root = everything.root(settings.systems)
 
     ratings = ranking.rate(everything.component(root), root).bounded()
     anchor = settings.reference if settings.reference in ratings.systems else root
     ratings = ratings.anchored(anchor)
     ranked = set(ratings.systems)
     best, worst = ranking.rank_spread(ratings.lower, ratings.upper)
-    connected = [m for m in votes if _systems([m]) <= ranked]
+    connected = [m for m in votes if set(m.vote.systems) <= ranked]
     feature = _length_feature(connected)
     length = (
         None
@@ -335,22 +354,23 @@ def _votes_results(
             Interval(lower=float(ratings.lower[i]), upper=float(ratings.upper[i])),
             int((ratings.score > ratings.score[i]).sum()) + 1,
             (int(best[i]), int(worst[i])),
-            [m.vote for m in votes if system in _systems([m])],
+            [m.vote for m in votes if system in m.vote.systems],
             [output for output in outputs if output.system == system],
         )
         for i, system in enumerate(ratings.systems)
     ]
     standings.sort(key=lambda standing: (standing.rank, standing.system))
-    sessions = [session.id for session in store.sessions(family.name)]
+    counted = {m.vote.session for m in votes}
+    sessions = [s.id for s in store.sessions(family.name) if s.id in counted]
     return VotesResults(
         scorer='votes',
         reference=settings.reference,
         anchor=anchor,
         votes=len(votes),
         dropped_votes=len(recorded) - len(votes),
-        sessions=len({m.vote.session for m in votes}),
+        sessions=len(sessions),
         standings=standings,
-        unranked=sorted(voted - ranked),
+        unranked=sorted((voted & fingerprints.keys()) - ranked),
         head_to_head=_head_to_head([m.vote for m in votes], sorted(voted)),
         categories=_categories(
             categories, anchor, votes, comparisons, settings.systems
@@ -362,27 +382,6 @@ def _votes_results(
         rater_agreement=_rater_agreement(recorded),
         decision=decide(standings, ratings),
     )
-
-
-def _root(
-    matchups: ranking.Matchups, votes: list[MatchedVote], systems: list[str]
-) -> str:
-    """Return the system whose component the fit roots at.
-
-    The most-voted system roots it, since its own estimate is the most precise and
-    it is the least likely to detach in a resample. A tie follows the family's
-    `systems` order, then the name.
-    """
-    counts = Counter(side.system for m in votes for side in (m.vote.a, m.vote.b))
-    order = {system: i for i, system in enumerate(systems)}
-    return min(
-        matchups.systems,
-        key=lambda system: (-counts[system], order.get(system, len(order)), system),
-    )
-
-
-def _systems(votes: Iterable[MatchedVote]) -> set[str]:
-    return {side.system for m in votes for side in (m.vote.a, m.vote.b)}
 
 
 def _standing(
@@ -404,7 +403,6 @@ def _standing(
         for defect in tagged
     )
     finished = [output for output in outputs if output.error is None]
-    gated = [output.gate_failures for output in finished]
     decisive = choices['a'] + choices['b']
     return Standing(
         system=system,
@@ -419,21 +417,21 @@ def _standing(
         decisive_votes=decisive,
         both_bad_rate=_share(vote.choice == 'both_bad' for vote in votes),
         outputs=len(finished),
-        gate_failure_rate=_share(bool(gates) for gates in gated if gates is not None),
+        gate_failure_rate=_share(bool(output.gate_failures) for output in finished),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
         latency_sec=_distribution(output.latency_sec for output in finished),
-        defects={defect: defects[defect] for defect in get_args(Defect.__value__)},
+        defects={defect: defects[defect] for defect in DEFECTS},
     )
 
 
 def _head_to_head(votes: list[Vote], systems: Iterable[str]) -> list[HeadToHead]:
-    tallies: defaultdict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    tallies: defaultdict[tuple[str, str], Counter[Choice]] = defaultdict(Counter)
     for vote in votes:
-        left, right = vote.a.system, vote.b.system
+        left, right = vote.systems
         tallies[(left, right)][vote.choice] += 1
-        tallies[(right, left)][_SWAPPED[vote.choice]] += 1
+        tallies[(right, left)][SWAPPED[vote.choice]] += 1
     rows = []
     for system in systems:
         for opponent in systems:
@@ -450,15 +448,14 @@ def _head_to_head(votes: list[Vote], systems: Iterable[str]) -> list[HeadToHead]
                     losses=tally['b'],
                     ties=tally['tie'],
                     both_bad=tally['both_bad'],
-                    win_rate=(tally['a'] + (tally['tie'] + tally['both_bad']) / 2)
-                    / total,
+                    win_rate=sum(LEFT_SCORE[c] * n for c, n in tally.items()) / total,
                 )
             )
     return rows
 
 
 def _categories(
-    category: dict[str, str],
+    categories: dict[str, str],
     anchor: str,
     votes: list[MatchedVote],
     comparisons: list[ranking.Comparison],
@@ -467,25 +464,24 @@ def _categories(
     """Refit each category whose own root connects it to the board's anchor."""
     by_category: defaultdict[str, list[MatchedVote]] = defaultdict(list)
     for m in votes:
-        by_category[category[m.vote.case]].append(m)
+        by_category[categories[m.vote.case]].append(m)
 
     boards = []
     for name, category_votes in sorted(by_category.items()):
-        voted = _systems(category_votes)
+        voted = {system for m in category_votes for system in m.vote.systems}
         matchups = ranking.Matchups.build(
-            [c for c in comparisons if category[c.case] == name]
+            [c for c in comparisons if categories[c.case] == name]
         )
         if anchor not in matchups.systems:
             continue
         matchups = matchups.component(anchor)
-        root = _root(matchups, category_votes, systems)
-        ratings = ranking.rate(matchups, root).bounded()
+        ratings = ranking.rate(matchups, matchups.root(systems)).bounded()
         if anchor not in ratings.systems:
             continue
         ratings = ratings.anchored(anchor)
         standings = []
         for i, system in enumerate(ratings.systems):
-            mine = [m.vote for m in category_votes if system in _systems([m])]
+            mine = [m.vote for m in category_votes if system in m.vote.systems]
             decisive = sum(vote.choice in ('a', 'b') for vote in mine)
             standings.append(
                 CategoryStanding(
@@ -528,7 +524,7 @@ def text_length(text: str) -> int:
     """Count each Han character and each other whitespace-separated run as one.
 
     This measures Chinese in characters and English in words, including a text
-    that mixes both.
+    that mixes both. Han characters are the ones the language gate counts.
     """
     return len(_LENGTH_UNIT.findall(text))
 
@@ -536,7 +532,11 @@ def text_length(text: str) -> int:
 def _split_half_tau(
     votes: list[MatchedVote], sessions: list[str], root: str
 ) -> float | None:
-    """Compare the systems both halves connect to the root, if each has it."""
+    """Compare the systems both halves connect to the root, if each has it.
+
+    `sessions` lists the sessions holding `votes` in the order they started, and
+    alternate sessions form each half.
+    """
     parity = {session: i % 2 for i, session in enumerate(sessions)}
     halves = [
         [m.vote.comparison() for m in votes if parity[m.vote.session] == half]
@@ -557,7 +557,7 @@ def _split_half_tau(
 def _rater_agreement(votes: list[Vote]) -> RaterAgreement:
     originals = {vote.id: vote for vote in votes}
     matches = [
-        vote.choice == _SWAPPED[originals[vote.repeat_of].choice]
+        vote.choice == SWAPPED[originals[vote.repeat_of].choice]
         for vote in votes
         if vote.repeat_of in originals
     ]
@@ -607,24 +607,23 @@ def _lowest(
 # ── Tests Results ──
 
 
-def _tests_results(family: Family, outputs: list[Output]) -> TestsResults:
-    if not outputs:
-        raise ValueError(f'family {family.name!r} has no outputs')
+def _tests_results(outputs: list[Output]) -> TestsResults:
     fingerprints = _fingerprints(outputs)
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:
         by_system[output.system].append(output)
     standings = []
     for system, trials in sorted(by_system.items()):
+        finished = [output for output in trials if output.error is None]
         standings.append(
             TestsStanding(
                 system=system,
                 fingerprint=fingerprints[system],
                 trials=len(trials),
-                errored=sum(output.error is not None for output in trials),
+                errored=len(trials) - len(finished),
                 pass_rate=sum(output.reward or 0.0 for output in trials) / len(trials),
-                mean_cost_usd=_mean(output.cost_usd for output in trials),
-                p50_latency_sec=_median(output.latency_sec for output in trials),
+                mean_cost_usd=_mean(output.cost_usd for output in finished),
+                p50_latency_sec=_median(output.latency_sec for output in finished),
             )
         )
     return TestsResults(scorer='tests', standings=standings)

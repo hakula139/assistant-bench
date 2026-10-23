@@ -185,7 +185,7 @@
     },
     "Interval": {
       "additionalProperties": false,
-      "description": "A 95% bootstrap interval on the score scale.",
+      "description": "A bootstrap interval at `ranking.CONFIDENCE` on the score scale.",
       "properties": {
         "lower": {
           "title": "Lower",
@@ -254,7 +254,7 @@
     },
     "Standing": {
       "additionalProperties": false,
-      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than 40 decisive votes.\n`defects` counts the votes that tagged this system's output with each defect,\nwhichever side won.",
+      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`\ndecisive votes. `defects` counts the votes that tagged this system's output\nwith each defect, whichever side won.",
       "properties": {
         "system": {
           "title": "System",
@@ -430,6 +430,7 @@
     },
     "TestsStanding": {
       "additionalProperties": false,
+      "description": "One system's pass rate, with cost and latency over its error-free trials.",
       "properties": {
         "system": {
           "title": "System",
@@ -495,7 +496,7 @@
     },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `reference` is\nthe system the family names to anchor the board, while `anchor` is the system\nthe round actually fixed at 1000, which is the most-voted system when the\nreference does not rank. `unranked` lists the voted systems that no\ncomparison connects to the anchor, or that so many resamples leave\nunconnected that their interval is unbounded. `position` is the left pane's\nadvantage, and `length` the score change per standard deviation of the\nrelative length difference, both in score points, where `length` is absent\nwhen no connected vote varies that difference. `split_half_tau` compares the\norders fit to odd and even sessions, and `decision` is absent while a system\ntied with the top one is preliminary.",
+      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `sessions`\ncounts the sessions that hold a counted vote. `reference` is the system the\nfamily names to anchor the board, while `anchor` is the system the round\nactually fixed at `ranking.ANCHOR`, which is the most-voted system when the\nreference does not rank. `unranked` lists the voted systems with current\noutputs that no comparison connects to the anchor, or that so many resamples\nleave unconnected that their interval is unbounded. `position` is the left\npane's advantage, and `length` the score change per standard deviation of the\nrelative length difference, both in score points, where `length` is absent\nwhen no connected vote varies that difference. `split_half_tau` compares the\norders fit to odd and even sessions, and `decision` is absent while a system\ntied with the top one is preliminary.",
       "properties": {
         "scorer": {
           "const": "votes",

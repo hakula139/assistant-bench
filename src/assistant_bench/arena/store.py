@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,8 +17,14 @@ from assistant_bench.scoring.ranking import Comparison
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
 type Defect = Literal['facts', 'punctuation', 'tone', 'formulaic', 'length']
 
-# Ties and both-bad votes count as half a win for each side.
-_LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
+DEFECTS: tuple[Defect, ...] = get_args(Defect.__value__)
+LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
+SWAPPED: dict[Choice, Choice] = {
+    'a': 'b',
+    'b': 'a',
+    'tie': 'tie',
+    'both_bad': 'both_bad',
+}
 
 SCHEMA_VERSION = 2
 
@@ -58,29 +64,15 @@ _APPEND_ONLY = """
 CREATE TRIGGER IF NOT EXISTS {table}_no_{action} BEFORE {action} ON {table}
 BEGIN SELECT RAISE(ABORT, 'the vote store is append-only'); END;
 """
+
 # `INSERT OR REPLACE` deletes the row it replaces without firing DELETE triggers.
 _NO_REPLACE = """
 CREATE TRIGGER IF NOT EXISTS {table}_no_replace BEFORE INSERT ON {table}
 WHEN EXISTS (SELECT 1 FROM {table} WHERE {key} = NEW.{key})
 BEGIN SELECT RAISE(ABORT, 'the vote store is append-only'); END;
 """
+
 _KEYS = {'sessions': 'id', 'votes': 'id', 'undos': 'vote'}
-_VOTE_COLUMNS = (
-    'session',
-    'case_id',
-    *(
-        f'{side}_{key}'
-        for side in 'ab'
-        for key in ('system', 'fingerprint', 'job', 'trial')
-    ),
-    'choice',
-    'a_defects',
-    'b_defects',
-    'note',
-    'duration_sec',
-    'repeat_of',
-    'recorded_at',
-)
 
 
 class Session(BaseModel):
@@ -114,7 +106,7 @@ class Side(BaseModel):
 class Defects(BaseModel):
     """The defects the owner tagged on each side's output."""
 
-    model_config = ConfigDict(frozen=True, extra='forbid')
+    model_config = ConfigDict(extra='forbid', frozen=True)
 
     a: frozenset[Defect] = frozenset()
     b: frozenset[Defect] = frozenset()
@@ -139,15 +131,18 @@ class Ballot(BaseModel):
     duration_sec: float
     repeat_of: int | None = None
 
+    @property
+    def systems(self) -> tuple[str, str]:
+        """Return the systems on the left and the right."""
+        return self.a.system, self.b.system
+
 
 class Vote(Ballot):
     id: int
     recorded_at: datetime
 
     def comparison(self) -> Comparison:
-        return Comparison(
-            self.a.system, self.b.system, _LEFT_SCORE[self.choice], self.case
-        )
+        return Comparison(*self.systems, LEFT_SCORE[self.choice], self.case)
 
 
 class VoteStore:
@@ -171,9 +166,18 @@ class VoteStore:
             self._create()
         elif version != SCHEMA_VERSION:
             self._db.close()
+            step = (
+                'A newer bench wrote it, so update this checkout.'
+                if version > SCHEMA_VERSION
+                else "Close its families' rounds with the bench revision that wrote "
+                f"it, which `git log -S 'SCHEMA_VERSION = {version}' -- "
+                'src/assistant_bench/arena/store.py` finds, then move the file '
+                'aside so `bench serve` starts a new store.'
+            )
             raise ValueError(
-                f'{path} has schema version {version}, '
-                f'while this bench reads version {SCHEMA_VERSION}'
+                f'The vote store `{path}` has schema version {version}, while this '
+                'bench reads '
+                f'version {SCHEMA_VERSION}. {step}'
             )
 
     def _create(self) -> None:
@@ -210,22 +214,26 @@ class VoteStore:
         return [Session.model_validate(dict(row)) for row in rows]
 
     def record(self, ballot: Ballot, at: datetime) -> Vote:
+        row: dict[str, Any] = {
+            'session': ballot.session,
+            'case_id': ballot.case,
+            **{
+                f'{side}_{key}': value
+                for side, shown in (('a', ballot.a), ('b', ballot.b))
+                for key, value in shown.model_dump().items()
+            },
+            'choice': ballot.choice,
+            'a_defects': json.dumps(sorted(ballot.defects.a)),
+            'b_defects': json.dumps(sorted(ballot.defects.b)),
+            'note': ballot.note,
+            'duration_sec': ballot.duration_sec,
+            'repeat_of': ballot.repeat_of,
+            'recorded_at': at.isoformat(),
+        }
         cursor = self._db.execute(
-            f'INSERT INTO votes ({", ".join(_VOTE_COLUMNS)}) '
-            f'VALUES ({", ".join("?" * len(_VOTE_COLUMNS))})',
-            (
-                ballot.session,
-                ballot.case,
-                *(getattr(ballot.a, key) for key in Side.model_fields),
-                *(getattr(ballot.b, key) for key in Side.model_fields),
-                ballot.choice,
-                json.dumps(sorted(ballot.defects.a)),
-                json.dumps(sorted(ballot.defects.b)),
-                ballot.note,
-                ballot.duration_sec,
-                ballot.repeat_of,
-                at.isoformat(),
-            ),
+            f'INSERT INTO votes ({", ".join(row)}) '
+            f'VALUES ({", ".join(f":{column}" for column in row)})',
+            row,
         )
         assert cursor.lastrowid is not None
         return Vote(id=cursor.lastrowid, recorded_at=at, **dict(ballot))
@@ -255,12 +263,7 @@ def votes_file() -> Path:
 
 def _vote(row: sqlite3.Row) -> Vote:
     sides = {
-        side: Side(
-            system=row[f'{side}_system'],
-            fingerprint=row[f'{side}_fingerprint'],
-            job=row[f'{side}_job'],
-            trial=row[f'{side}_trial'],
-        )
+        side: Side(**{key: row[f'{side}_{key}'] for key in Side.model_fields})
         for side in ('a', 'b')
     }
     return Vote(

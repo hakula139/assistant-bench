@@ -83,6 +83,42 @@ class TestMatchups:
             assert connected.sided.tolist() == [1.0, 0.0]
             assert connected.cluster.tolist() == [0, 1]
 
+    class TestRoot:
+        @pytest.mark.parametrize(
+            ('comparisons', 'order', 'root'),
+            [
+                (
+                    [('c', 'a', True), ('c', 'b', True)] * 2 + [('a', 'b', True)],
+                    ['a', 'b', 'c'],
+                    'c',
+                ),
+                ([('x', 'y', True)], ['y', 'x'], 'y'),
+                ([('y', 'x', True)], [], 'x'),
+                (
+                    [('a', 'b', True), ('a', 'c', True)] + [('b', 'c', False)] * 5,
+                    ['b', 'c', 'a'],
+                    'a',
+                ),
+            ],
+            ids=['most-voted', 'order-breaks-a-tie', 'name-breaks-a-tie', 'votes-only'],
+        )
+        def test_roots_at_the_most_voted_system(
+            self,
+            comparisons: list[tuple[str, str, bool]],
+            order: list[str],
+            root: str,
+        ) -> None:
+            matchups = Matchups.build(
+                [
+                    Comparison(left, right, 1.0, 'c', 1.0 if sided else 0.25, sided)
+                    for left, right, sided in comparisons
+                ]
+            )
+
+            chosen = matchups.root(order)
+
+            assert chosen == root
+
 
 class TestFit:
     def test_matches_a_fractional_logit_from_statsmodels(self) -> None:

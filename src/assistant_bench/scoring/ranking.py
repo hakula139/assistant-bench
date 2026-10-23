@@ -98,6 +98,27 @@ class Matchups:
             cluster=cluster.astype(np.intp),
         )
 
+    def root(self, order: Sequence[str]) -> str:
+        """Return the system to root a fit at, the one in the most votes.
+
+        The most-voted system has the most precise estimate and is the least
+        likely to detach in a resample. Only sided rows count as votes. A tie
+        follows `order`, then the name.
+        """
+        sided = self.sided > 0
+        rows = np.concatenate([self.left[sided], self.right[sided]])
+        counts = np.bincount(rows, minlength=len(self.systems))
+        votes = dict(zip(self.systems, counts, strict=True))
+        position = {system: i for i, system in enumerate(order)}
+        return min(
+            self.systems,
+            key=lambda system: (
+                -votes[system],
+                position.get(system, len(position)),
+                system,
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class Fit:
@@ -179,21 +200,21 @@ def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floa
     root_index = matchups.systems.index(root)
     keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
     pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
-    x = _design(
-        pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp), pairs[:, 2], k, []
-    )
-    membership = np.zeros((len(matchups.score), len(pairs)))
-    membership[np.arange(len(matchups.score)), pair_of_vote] = 1
+    left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
+    x = _design(left, right, pairs[:, 2], k, [])
 
     rng = np.random.default_rng(SEED)
     n_cases = int(matchups.cluster.max()) + 1
     draws = rng.multinomial(n_cases, np.full(n_cases, 1 / n_cases), size=resamples)
-    vote_weights = draws[:, matchups.cluster] * matchups.weight
-    left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
+    cells = (matchups.cluster, pair_of_vote)
+    case_weights = np.zeros((n_cases, len(pairs)))
+    np.add.at(case_weights, cells, matchups.weight)
+    case_wins = np.zeros((n_cases, len(pairs)))
+    np.add.at(case_wins, cells, matchups.weight * matchups.score)
     strengths = np.empty((resamples, k))
     with threadpool_limits(limits=1, user_api='blas'):
-        pair_weights = vote_weights @ membership
-        pair_wins = (vote_weights * matchups.score) @ membership
+        pair_weights = draws @ case_weights
+        pair_wins = draws @ case_wins
         start = _minimize(
             x,
             pair_wins.sum(axis=0) / pair_weights.sum(axis=0),

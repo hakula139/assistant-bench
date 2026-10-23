@@ -123,9 +123,9 @@ class TestCreateApp:
         'body',
         [
             {'choice': 'a', 'defects': {'c': []}},
-            {'choice': 'a', 'flags': ['length']},
+            {'choice': 'a', 'rating': 5},
         ],
-        ids=['unknown-side', 'old-key'],
+        ids=['unknown-side', 'unknown-key'],
     )
     def test_rejects_a_body_the_models_forbid(
         self, client: TestClient, body: dict[str, Any]
@@ -203,7 +203,14 @@ class TestCreateRenderApp:
             "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
             'frame-ancestors http://127.0.0.1:8790'
         )
-        assert client.get('/outputs/nope').status_code == 404
+
+    def test_answers_an_unknown_output_without_detail(self, arena: Arena) -> None:
+        client = TestClient(api.create_render_app(arena), base_url=api.RENDER_ORIGIN)
+
+        response = client.get('/outputs/nope')
+
+        assert response.status_code == 404
+        assert response.json() == {'detail': 'not found'}
 
 
 class TestServe:

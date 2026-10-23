@@ -8,12 +8,12 @@ import socket
 import ssl
 import textwrap
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 import numpy as np
 from harbor.job_plan import JobPlan
@@ -34,9 +34,10 @@ from harbor.trial.regrade import local_task_name
 
 from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import (
+    DEFECTS,
+    SWAPPED,
     Ballot,
     Choice,
-    Defect,
     Defects,
     Side,
     Vote,
@@ -122,6 +123,13 @@ def make_system(**overrides: Any) -> System:
         'price': Price(input=2.0, output=10.0, cache_read=0.2),
     }
     return System(**(fields | overrides))
+
+
+def make_output(**fields: Any) -> Output:
+    empty = dict.fromkeys(Output.model_fields)
+    return Output.model_validate(
+        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
+    )
 
 
 def write_trial(
@@ -364,11 +372,60 @@ def serve_stub(
 # ── Arena ──
 
 
-def make_output(**fields: Any) -> Output:
-    empty = dict.fromkeys(Output.model_fields)
-    return Output.model_validate(
-        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
+AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
+
+
+def passing_outputs(
+    cases: Iterable[str],
+    systems: Iterable[str],
+    text: str = '{system} answers {case}',
+    **fields: Any,
+) -> dict[tuple[str, str], Output]:
+    """Return one output per case and system that passes every gate.
+
+    Each text formats `text` with the case and the system.
+    """
+    listed = list(systems)
+    return {
+        (case, system): make_output(
+            **{
+                'trial': f'{case}__{system}',
+                'job': 'job-1',
+                'case': case,
+                'system': system,
+                'fingerprint': f'fp-{system}',
+                'text': text.format(case=case, system=system),
+                'finish_reason': 'stop',
+                'gate_failures': [],
+            }
+            | fields
+        )
+        for case in cases
+        for system in listed
+    }
+
+
+def make_ballot(a: Output, b: Output, **fields: Any) -> Ballot:
+    """Return a vote for `a`, shown on the left, against `b` on `a`'s case."""
+    return Ballot.model_validate(_ballot_fields(a, b) | fields)
+
+
+def make_vote(a: Output, b: Output, **fields: Any) -> Vote:
+    """Return vote 1, recorded at `AT`, for `a` on the left against `b`."""
+    return Vote.model_validate(
+        {'id': 1, 'recorded_at': AT} | _ballot_fields(a, b) | fields
     )
+
+
+def _ballot_fields(a: Output, b: Output) -> dict[str, Any]:
+    return {
+        'session': 's',
+        'case': a.case,
+        'a': Side.of(a),
+        'b': Side.of(b),
+        'choice': 'a',
+        'duration_sec': 5.0,
+    }
 
 
 def write_votes_family(
@@ -431,10 +488,18 @@ RENDER_ORIGIN = 'http://127.0.0.1:9'
 
 class Clock:
     def __init__(self) -> None:
-        self.now = datetime(2026, 10, 21, 9, tzinfo=UTC)
+        self.now = AT
 
     def __call__(self) -> datetime:
         return self.now
+
+
+@dataclass
+class Refits:
+    """The comparisons behind each refit of the scheduler's board, and its root."""
+
+    comparisons: list[int] = field(default_factory=list)
+    roots: list[str] = field(default_factory=list)
 
 
 def make_arena(
@@ -447,21 +512,16 @@ def make_arena(
 ) -> Arena:
     """Serve family `f`, where `texts` overrides each system's output text."""
     write_votes_family(families_dir, 'f', ARENA_SYSTEMS, ARENA_CASES, render=render)
+    outputs = passing_outputs(ARENA_CASES, ARENA_SYSTEMS).values()
+    truncated = {'finish_reason': 'length', 'gate_failures': [Gate.TRUNCATED]}
     write_outputs(
         'f',
         [
-            make_output(
-                trial=f'{case}__{system}',
-                job='job-1',
-                case=case,
-                system=system,
-                fingerprint=f'fp-{system}',
-                text=(texts or {}).get(system, f'{system} answers {case}'),
-                finish_reason='length' if system in cut_off else 'stop',
-                gate_failures=[Gate.TRUNCATED] if system in cut_off else [],
+            output.model_copy(
+                update={'text': (texts or {}).get(output.system, output.text)}
+                | (truncated if output.system in cut_off else {})
             )
-            for case in ARENA_CASES
-            for system in ARENA_SYSTEMS
+            for output in outputs
         ],
     )
     return Arena(store, load_families(), RENDER_ORIGIN, clock, np.random.default_rng(0))
@@ -572,7 +632,7 @@ def write_synthetic_round(
                     case=original.case,
                     a=original.b,
                     b=original.a,
-                    choice=_SWAPPED[original.choice] if agree else original.choice,
+                    choice=SWAPPED[original.choice] if agree else original.choice,
                     duration_sec=float(rng.uniform(15, 120)),
                     repeat_of=original.id,
                 )
@@ -592,15 +652,6 @@ def write_synthetic_round(
             store.record(_simulated_vote(rng, session.id, a, b), at)
 
 
-_SWAPPED: dict[Choice, Choice] = {
-    'a': 'b',
-    'b': 'a',
-    'tie': 'tie',
-    'both_bad': 'both_bad',
-}
-_DEFECTS: list[Defect] = list(get_args(Defect.__value__))
-
-
 def _simulated_vote(
     rng: np.random.Generator, session: str, a: Output, b: Output
 ) -> Ballot:
@@ -615,7 +666,9 @@ def _simulated_vote(
     else:
         choice = 'a' if rng.random() < 1 / (1 + np.exp(-gap)) else 'b'
     tagged = (
-        frozenset({_DEFECTS[rng.integers(5)]}) if rng.random() < 0.2 else frozenset()
+        frozenset({DEFECTS[rng.integers(len(DEFECTS))]})
+        if rng.random() < 0.2
+        else frozenset()
     )
     defects = Defects(b=tagged) if choice == 'a' else Defects(a=tagged)
     return Ballot(
