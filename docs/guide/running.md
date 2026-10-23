@@ -41,7 +41,7 @@ When Harbor exits, `bench run` collects the family's trials into `outputs/<famil
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. To regenerate a case, give it a new ID. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
 
-A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would otherwise pool two configurations under one name. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
+A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
 Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their lines in `cases.jsonl`, then `uv run bench run`.
 
@@ -52,7 +52,7 @@ uv run bench ingest
 uv run bench ingest smoke-text
 ```
 
-`bench run` collects its own trials, and `bench ingest` re-collects them for every family with a finished job, or for the named families, which is how an edited `[gates]` table reaches the arena and the report. It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint and preferring the newest successful trial, so a rerun under the current config replaces what an earlier job produced. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
+`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench ingest` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Within a slot it prefers a successful trial whose recorded request matches the family's current settings, then the oldest, so a changed request replaces what an earlier job produced while a rerun of the same request keeps the outputs its votes refer to. It prints the count, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. Each record holds the text (or the verifier's reward for a `tests` family), the [gates](../design/families/writing.md#gate-verdicts) a voted output failed, the error type of a failed trial, token counts including reasoning tokens where the endpoint reports them, the cost at catalog prices, the end-to-end latency, the response model, the request ID, and the system's fingerprint and nixos-config rev. A model whose catalog channel has no price reports a null cost.
 
 ## Voting
 
@@ -68,7 +68,7 @@ uv run bench serve
 uv run bench close writing-zh
 ```
 
-`bench close` collects the family's trials first, then fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. It needs the dev shell's `BENCH_NIXOS_CONFIG` to price the collected outputs. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+`bench close` collects the family's trials first, then fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 

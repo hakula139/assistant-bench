@@ -21,11 +21,10 @@ Requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon, and an 
 nix develop                                 # Dev shell with every tool
 uv sync                                     # Virtualenv with Harbor and the bench
 cp .env.example .env                        # Then fill in the endpoint variables
-uv run bench check smoke                    # Run Harbor's oracle on the smoke task
-uv run bench run smoke-text                 # Send each smoke case to every listed system
-uv run bench run --system <name>            # Send one system's missing trials to every family that lists it
-uv run bench serve                          # Vote on blind pairs at http://127.0.0.1:8790/vote/
-uv run bench close smoke-text               # Write the family's report under reports/
+uv run bench check smoke                        # Run Harbor's oracle on the smoke task
+uv run bench run smoke-text --system <name>     # Send each smoke case to one listed system
+uv run bench serve                              # Vote on blind pairs at http://127.0.0.1:8790/vote/
+uv run bench close smoke-text                   # Write the family's report under reports/
 ```
 
 ## Documentation

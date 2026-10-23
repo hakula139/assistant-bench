@@ -31,7 +31,7 @@ Chinese cases are written in Chinese and keep code, paths, and commands in their
 
 ## Gates
 
-`bench ingest` runs the gates on every output of a trial that finished without an error and records the failed gates in the output's `gate_failures`:
+Every collection runs the gates on each output of a trial that finished without an error and records the failed gates in the output's `gate_failures`:
 
 | Gate        | Fails when                                                                                       | Setting                          |
 | ----------- | ------------------------------------------------------------------------------------------------ | -------------------------------- |
@@ -57,4 +57,4 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | The trial errored, so it never enters the arena, or the family's scorer has no gates                                  |
 
-The names are the values of `families.Gate`, which sits beside the gate settings so that readers of outputs can import it without the gate code, and they follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and `bench ingest` prints the count of outputs that failed a gate and the failures by gate.
+The names are the values of `families.Gate`, which sits beside the gate settings so that readers of outputs can import it without the gate code, and they follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and every collection prints the count of outputs that failed a gate and the failures by gate.

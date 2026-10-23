@@ -86,14 +86,24 @@ def run(
         ),
     ] = None,
 ) -> None:
-    """Generate missing trials for every family, or only for the named ones."""
+    """Generate missing trials and collect them for every family, or the named ones.
+
+    A run without a family sends every family that lists systems.
+    """
+    prepared = []
     for family, systems in _run_targets(families, names):
         if family.source != 'cases':
             raise typer.BadParameter(
                 'single-call systems run only case families', param_hint='FAMILY'
             )
-        _refuse_drift(family, systems)
-        tasks = _render_tasks(family)
+        try:
+            _refuse_drift(family, systems)
+            tasks = _render_tasks(family)
+        except ValueError as error:
+            raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+        prepared.append((family, systems, tasks))
+
+    for family, systems, tasks in prepared:
         try:
             path = jobs.run_job(jobs.case_job(family, systems, tasks))
         except subprocess.CalledProcessError as error:
@@ -108,7 +118,11 @@ def ingest(
     families: Annotated[list[str] | None, typer.Argument()] = None,
 ) -> None:
     """Collect every family's trials into `outputs/<family>.jsonl`."""
-    for name in _picked(families, _families_with_jobs):
+    names = _picked(families, _families_with_jobs)
+    if not names:
+        typer.echo('No family has jobs yet')
+        return
+    for name in names:
         _ingest(_load_family(name))
 
 
@@ -159,7 +173,7 @@ def serve() -> None:
 
 @app.command()
 def close(family: str) -> None:
-    """Write the family's report to `reports/<family>/<round>.json`."""
+    """Collect the family's trials and write its report under `reports/`."""
     selected = _load_family(family)
     with closing(_vote_store()) as store:
         _ingest(selected)
@@ -306,7 +320,7 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
     if not drifted:
         return
     detail = '\n'.join(
-        f'{name!r} ran under fingerprint {recorded}, which now resolves to {current}'
+        f'{name!r} ran under fingerprint {recorded} but now resolves to {current}'
         for name, recorded, current in drifted
     )
     raise typer.BadParameter(

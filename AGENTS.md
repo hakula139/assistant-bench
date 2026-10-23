@@ -7,7 +7,7 @@ This file specifies the rules for every change and points to the conventions for
 ```bash
 uv run bench check                          # Validate every family, running Harbor's oracle on task families
 uv run bench run --system <name>            # Generate one system's missing trials on every family that lists it
-uv run bench serve                          # Collect every votes family's trials, then serve its vote page
+uv run bench serve                          # Collect every votes family's trials, then serve the vote page
 uv run bench close writing-zh               # Write a family's report to reports/<family>/<round>.json
 ```
 

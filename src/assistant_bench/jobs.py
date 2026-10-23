@@ -7,7 +7,7 @@ import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import assert_never
+from typing import Any, assert_never
 
 from harbor.job_diff import load_source_trials
 from harbor.models.agent.context import AgentContext
@@ -125,7 +125,7 @@ def _changed_tasks(family: Family, tasks: list[Path]) -> list[str]:
 
 def drifted_systems(
     family: Family, systems: list[System]
-) -> list[tuple[str, str | None, str | None]]:
+) -> list[tuple[str, str, str]]:
     """Return each selected system whose earlier trials recorded another fingerprint.
 
     An entry names the system, the fingerprint an earlier trial recorded, and the
@@ -138,22 +138,31 @@ def drifted_systems(
         A source job is not a job directory, or a trial record is unreadable.
     """
     current = {system.name: system.fingerprint for system in systems}
-    recorded: defaultdict[str, set[str | None]] = defaultdict(set)
+    recorded: defaultdict[str, set[str]] = defaultdict(set)
     for trial in load_source_trials(_sources(family)):
         kwargs = trial.result.config.agent.kwargs
-        name = str(kwargs.get('system', trial.result.agent_info.name))
+        name = kwargs.get('system')
         fingerprint = kwargs.get('fingerprint')
         if name in current and isinstance(fingerprint, str):
             recorded[name].add(fingerprint)
     return sorted(
-        (
-            (name, fingerprint, current[name])
-            for name, fingerprints in recorded.items()
-            for fingerprint in fingerprints
-            if fingerprint != current[name]
-        ),
-        key=lambda entry: (entry[0], entry[1] or ''),
+        (name, fingerprint, current[name])
+        for name, fingerprints in recorded.items()
+        for fingerprint in fingerprints
+        if fingerprint != current[name]
     )
+
+
+def _request_kwargs(family: Family, system: System) -> dict[str, Any]:
+    """Return the agent kwargs that carry a system's request to the endpoint."""
+    assert family.settings.max_output_tokens is not None
+    return GenerateOptions(
+        system=system.name,
+        fingerprint=system.fingerprint,
+        effort=system.effort,
+        system_prompt=system.prompt,
+        max_output_tokens=family.settings.max_output_tokens,
+    ).model_dump()
 
 
 def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
@@ -162,7 +171,6 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     The job diffs against the family's earlier jobs, so Harbor runs only the trials
     that none of them completed with the same task version and agent config.
     """
-    assert family.settings.max_output_tokens is not None
     agents = [
         trial_config.AgentConfig(
             name=HARNESSES[system.harness].name,
@@ -170,13 +178,7 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
             model_name=system.route,
             n_concurrent=ROUTE_CONCURRENCY,
             concurrency_group=system.route,
-            kwargs=GenerateOptions(
-                system=system.name,
-                fingerprint=system.fingerprint,
-                effort=system.effort,
-                system_prompt=system.prompt,
-                max_output_tokens=family.settings.max_output_tokens,
-            ).model_dump(),
+            kwargs=_request_kwargs(family, system),
         )
         for system in systems
     ]
@@ -226,7 +228,7 @@ def _task_name(task_dir: Path) -> str | None:
 
 
 def has_jobs(family: Family) -> bool:
-    """Return whether the family has at least one finished Harbor job."""
+    """Return whether the family has at least one Harbor job."""
     return bool(_family_jobs(family))
 
 
@@ -301,22 +303,26 @@ def ingest(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
     Each case, system, and fingerprint keeps at most `samples` outputs, preferring
-    the newest successful trial, so a rerun under the current config replaces what
-    an earlier job produced. Costs come from the catalog, so a system outside it
-    reports as unpriced.
+    a successful trial whose recorded request matches the family's current settings,
+    and otherwise the oldest. Costs come from the current catalog price, so a system
+    missing from `systems` or without a price reports as unpriced.
     """
-    candidates = sorted(
-        (
-            output
-            for job_dir in _family_jobs(family)
-            for output in read_trials(family, job_dir, systems)
-        ),
-        key=lambda output: output.trial,
+    expected = (
+        {name: _request_kwargs(family, system) for name, system in systems.items()}
+        if family.source == 'cases'
+        else {}
     )
-    candidates.sort(key=lambda output: output.job, reverse=True)
-    candidates.sort(key=lambda output: output.error is not None)
+    candidates = [
+        (output, kwargs == expected.get(output.system))
+        for job_dir in _family_jobs(family)
+        for output, kwargs in _read_trials(family, job_dir, systems)
+    ]
+    candidates.sort(key=lambda candidate: candidate[0].trial)
+    candidates.sort(key=lambda candidate: candidate[0].job)
+    candidates.sort(key=lambda candidate: not candidate[1])
+    candidates.sort(key=lambda candidate: candidate[0].error is not None)
     groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
-    for output in candidates:
+    for output, _ in candidates:
         groups[(output.case, output.system, output.fingerprint)].append(output)
     outputs = sorted(
         (
@@ -335,14 +341,26 @@ def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
     """Return one output per finished trial of a job."""
-    return [
-        _output(family, result.parent, systems)
-        for result in sorted(job_dir.glob('*/result.json'))
-    ]
+    return [output for output, _ in _read_trials(family, job_dir, systems)]
 
 
-def _output(family: Family, trial_dir: Path, systems: dict[str, System]) -> Output:
-    result = TrialResult.model_validate_json((trial_dir / 'result.json').read_bytes())
+def _read_trials(
+    family: Family, job_dir: Path, systems: dict[str, System]
+) -> list[tuple[Output, dict[str, Any]]]:
+    """Return each finished trial's output and the agent kwargs it recorded."""
+    records = []
+    for result_path in sorted(job_dir.glob('*/result.json')):
+        trial_dir = result_path.parent
+        result = TrialResult.model_validate_json(result_path.read_bytes())
+        records.append(
+            (_output(family, trial_dir, result, systems), result.config.agent.kwargs)
+        )
+    return records
+
+
+def _output(
+    family: Family, trial_dir: Path, result: TrialResult, systems: dict[str, System]
+) -> Output:
     kwargs = result.config.agent.kwargs
     system = kwargs.get('system', result.agent_info.name)
     context = result.agent_result or AgentContext()
