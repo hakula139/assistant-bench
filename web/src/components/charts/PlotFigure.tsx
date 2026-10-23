@@ -1,6 +1,9 @@
 import * as Plot from '@observablehq/plot';
 import { useEffect, useRef, useState } from 'react';
 
+/** Room between a row label and the plot, in CSS pixels. */
+export const LABEL_GAP = 12;
+
 export interface PlotFrame {
   /** The container's width, in CSS pixels. */
   width: number;
@@ -9,9 +12,9 @@ export interface PlotFrame {
 }
 
 interface PlotFigureProps {
-  /** Builds the plot for the measured container. */
+  /** Builds the plot for the measured container, which sets its width and height. */
   plot: (frame: PlotFrame) => Plot.PlotOptions;
-  /** Reserved before the first render so the page does not shift, in CSS pixels. */
+  /** The chart's height, which the container reserves before the first render, in CSS pixels. */
   height: number;
   /**
    * Names the chart for assistive technology, which reads its values from the table twin. Omit it
@@ -60,26 +63,28 @@ export function PlotFigure({ plot, height, label }: PlotFigureProps) {
     }
     const options = plot({ width, measure: labelMeasure(element) });
     // Plot's injected :where(.bench-plot) { --plot-background: white } sits outside any cascade
-    // layer, so it beats every layered rule in global.css.
+    // layer, so it beats every layered rule, Tailwind's utilities included.
     const figure = Plot.plot({
       className: 'bench-plot',
       style: '--plot-background: var(--popover)',
       ...options,
       width,
+      height,
     });
     figure.setAttribute('aria-hidden', 'true');
     element.replaceChildren(figure);
     return () => {
       figure.remove();
     };
-  }, [plot, width, fontsReady]);
+  }, [plot, width, height, fontsReady]);
 
+  // The font utilities sit on the SVG too, since Plot sets its font in presentation attributes.
   return (
     <div
       ref={container}
       role={label === undefined ? undefined : 'img'}
       aria-label={label}
-      className="bench-plot"
+      className="font-sans text-xs text-muted-foreground [&_[aria-label=tip]]:text-popover-foreground [&_svg]:font-sans [&_svg]:text-xs"
       style={{ minHeight: height }}
     />
   );

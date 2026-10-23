@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render as renderInDom, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render as renderInDom, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -12,7 +12,12 @@ import { stubPlotFrame } from '@/test/plot';
 
 const search = vi.hoisted(() => new URLSearchParams());
 vi.mock('@/lib/use-search-param', () => ({
-  useSearchParam: (name: string, fallback: string) => [search.get(name) ?? fallback, () => null],
+  useSearchParam: (name: string, fallback: string) => [
+    search.get(name) ?? fallback,
+    (value: string) => {
+      search.set(name, value);
+    },
+  ],
 }));
 
 async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRound> {
@@ -44,12 +49,26 @@ function verticalRules(row: Element): number[] {
     .map((line) => Number(line.getAttribute('x1')));
 }
 
+const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
+
+/** The round summary's figures as `[label, value]`, read as the page shows them. */
+const stats = (html: string) =>
+  [...parse(html).querySelectorAll('dl > div')].map((stat) => [
+    stat.querySelector('dt')?.textContent,
+    stat.querySelector('dd')?.textContent,
+  ]);
+
+/** The text of each hint trigger in the round summary. */
+const statHints = (html: string) =>
+  [...parse(html).querySelectorAll('dl [aria-haspopup="dialog"]')].map((hint) => hint.textContent);
+
 const legend = (html: string) =>
   text(/<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '').trim();
 
 describe('VotesBoard', () => {
   afterEach(() => {
     search.delete('category');
+    search.delete('round');
     cleanup();
   });
 
@@ -70,12 +89,26 @@ describe('VotesBoard', () => {
     ]);
   });
 
-  test('names the leader, how its tie was broken, and the votes left out', async () => {
+  test('names the leader and the votes left out, with hints on the tie and the left-out votes', async () => {
     const html = render(await load());
 
-    expect(text(html)).toContain(
-      'Leader Acme Large tied with the top score, chosen by the lower cost Votes 340 over 10 sessions, plus 20 left out of the fit',
-    );
+    expect(stats(html)).toEqual([
+      ['Leader', 'Acme Large, tied'],
+      ['Votes', '340 over 10 sessions, 20 left out'],
+      ['Rater agreement', '83% on 23 repeats'],
+      ['Separated pairs', '67%'],
+      ['Split-half τ', '0.60'],
+      ['Length bias', 'Favors shorter, 6.5'],
+    ]);
+    expect(statHints(html)).toEqual([
+      'Leader',
+      'tied',
+      '20 left out',
+      'Rater agreement',
+      'Separated pairs',
+      'Split-half τ',
+      'Length bias',
+    ]);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -99,7 +132,7 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(legend(html)).toBe('Score, 95% interval Past the axis Anchor, 1,000');
+    expect(legend(html)).toBe('Score, 95% interval Interval past the axis Anchor, 1,000');
   });
 
   test('marks only the anchor and the preliminary systems', async () => {
@@ -170,15 +203,18 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('Agreement below 70%, so the intervals overstate separation.');
+    expect(parse(html).body.textContent).toContain(
+      'Agreement below 70%, so the intervals overstate separation.',
+    );
   });
 
   test('names no leader while a preliminary system ties with the top score', async () => {
     const html = render(await load('report-early'));
 
-    expect(text(html)).toContain(
-      'Leader – none until every system tied for the top has 40 decisive votes Votes 34 over 1 session, plus 2 left out of the fit',
-    );
+    expect(stats(html).slice(0, 2)).toEqual([
+      ['Leader', 'No leader yet'],
+      ['Votes', '34 over 1 session, 2 left out'],
+    ]);
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -199,7 +235,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toBe(
-      ' System 95% interval Score Votes Both bad all categories Gate failures all categories What Gate failures means Cost / output all categories p50 latency all categories ',
+      ' System 95% interval Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means Cost / output all categories What Cost / output and p50 latency means p50 latency all categories What Cost / output and p50 latency means ',
     );
   });
 
@@ -208,8 +244,36 @@ describe('VotesBoard', () => {
 
     const html = render(await load());
 
-    expect(text(head(html))).toMatch(/^ Rank System /);
+    expect(text(head(html))).toMatch(/^ Rank What Rank means System /);
     expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
+  });
+
+  test('writes the category picked to the address', async () => {
+    const { round, results } = await load();
+    stubPlotFrame();
+    renderInDom(<VotesBoard base={BOARD} rounds={[{ round, results }]} names={FIXTURE_NAMES} />);
+
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'message' } });
+
+    expect(search.get('category')).toBe('message');
+  });
+
+  test('leaves the interval column and its legend out on phones, keeping the score', async () => {
+    const document = parse(render(await load()));
+    const leaderboard = document.querySelector('table');
+    const columns = [...(leaderboard?.querySelectorAll('thead th') ?? [])].map(
+      (cell) => cell.textContent,
+    );
+    const column = (name: string) =>
+      [...(leaderboard?.querySelectorAll('tr') ?? [])].map((row) =>
+        row.children.item(columns.indexOf(name))?.className.includes('max-sm:hidden'),
+      );
+
+    expect(new Set(column('95% interval'))).toEqual(new Set([true]));
+    expect(new Set(column('Score'))).toEqual(new Set([false]));
+    expect(
+      document.querySelector('ul[aria-label="Legend"]')?.closest('.max-sm\\:hidden')?.localName,
+    ).toBe('div');
   });
 
   test("draws the anchor's score as one rule through every row", async () => {

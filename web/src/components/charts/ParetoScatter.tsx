@@ -181,7 +181,6 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
         Math.max(2, Math.floor((width - MARGIN.left - MARGIN.right) / (tickWidth + 24))),
       );
       return {
-        height: HEIGHT,
         marginTop: MARGIN.top,
         marginRight: MARGIN.right,
         marginBottom: MARGIN.bottom,

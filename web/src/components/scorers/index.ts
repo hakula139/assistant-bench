@@ -4,14 +4,15 @@ import TestsBoard from '@/components/scorers/tests/Board.astro';
 import TestsMethod from '@/components/scorers/tests/Method.astro';
 import TestsPanel from '@/components/scorers/tests/Panel.astro';
 import VotesBoard from '@/components/scorers/votes/Board.astro';
+import { panelForest } from '@/components/scorers/votes/forest';
 import VotesMethod from '@/components/scorers/votes/Method.astro';
 import VotesPanel from '@/components/scorers/votes/Panel.astro';
-import { panelForest } from '@/components/scorers/votes/forest';
 import { votesParts } from '@/components/scorers/votes/parts';
 import { drawnMarks } from '@/components/site/Forest';
 import type { Scorer } from '@/lib/family';
 import type { LegendMark } from '@/lib/forest';
-import type { Family } from '@/lib/reports';
+import { formatCountOf } from '@/lib/format';
+import { votesRounds, type Family } from '@/lib/reports';
 
 /** How the site renders the families of one scorer. */
 interface ScorerView {
@@ -25,6 +26,8 @@ interface ScorerView {
   parts: Record<string, string>;
   /** The legend marks the family's panel draws, which the home page's shared legend names. */
   marks: (family: Family) => LegendMark[];
+  /** What the panel's header adds after the latest round's date, such as its vote count. */
+  roundDetail: (family: Family) => string | null;
 }
 
 /** Each scorer's views, which every page dispatches through, so a new scorer adds an entry here. */
@@ -38,6 +41,17 @@ export const scorerViews = {
       const { rows, domain } = panelForest(family);
       return drawnMarks(rows, domain);
     },
+    roundDetail: (family) => {
+      const round = votesRounds(family).at(-1);
+      return round ? formatCountOf(round.results.votes, 'vote') : null;
+    },
   },
-  tests: { Board: TestsBoard, Panel: TestsPanel, Method: TestsMethod, parts: {}, marks: () => [] },
+  tests: {
+    Board: TestsBoard,
+    Panel: TestsPanel,
+    Method: TestsMethod,
+    parts: {},
+    marks: () => [],
+    roundDetail: () => null,
+  },
 } satisfies Record<Scorer, ScorerView>;

@@ -1,5 +1,3 @@
-import type { Decision } from '@/lib/report';
-
 const score = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
 const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0 });
 const cost = new Intl.NumberFormat('en', {
@@ -15,6 +13,7 @@ const seconds = new Intl.NumberFormat('en', {
 });
 const tau = new Intl.NumberFormat('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const count = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
+const bias = new Intl.NumberFormat('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** Shown wherever a report holds no value, as for an unpriced route. */
 export const MISSING = '–';
@@ -34,22 +33,9 @@ export const formatSeconds = (value: number | null) =>
 export const formatInterval = ({ lower, upper }: { lower: number; upper: number }) =>
   `${formatScore(lower)}–${formatScore(upper)}`;
 
-const tieBreaks: Record<Decision['tie_break'], string> = {
-  score: 'the higher score',
-  cost: 'the lower cost',
-  latency: 'the lower latency',
-};
-
-/**
- * Qualifies a round's leader: why the round has none, how a tie with the top score was broken, or
- * null when no other ranked system ties with the leader.
- */
-export const formatLeaderNote = (decision: Decision | null) =>
-  decision === null
-    ? 'none until every system tied for the top has 40 decisive votes'
-    : decision.separated
-      ? null
-      : `tied with the top score, chosen by ${tieBreaks[decision.tie_break]}`;
+/** Names the output length the rater favors and by how many points, as in "Favors shorter, 6.5". */
+export const formatLengthBias = (value: number) =>
+  `Favors ${value >= 0 ? 'longer' : 'shorter'}, ${bias.format(Math.abs(value))}`;
 
 export const formatRank = (best: number, worst: number) =>
   best === worst ? `${best}` : `${best}–${worst}`;

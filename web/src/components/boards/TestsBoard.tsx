@@ -1,3 +1,4 @@
+import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -7,18 +8,18 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCost, formatPercent, formatSeconds } from '@/lib/format';
+import { terms } from '@/lib/glossary';
 import type { TestsRound } from '@/lib/reports';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 interface TestsBoardProps {
-  /** Closed rounds, oldest first. */
-  rounds: TestsRound[];
+  /** The latest closed round. */
+  round: TestsRound;
   names: SystemNames;
 }
 
-/** A family's pass rates on its task tests in the latest round. */
-export function TestsBoard({ rounds, names }: TestsBoardProps) {
-  const { round, results } = rounds[rounds.length - 1];
+/** A family's pass rates on its task tests in the latest round, with each column's meaning on tap. */
+export function TestsBoard({ round: { round, results }, names }: TestsBoardProps) {
   const standings = results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate);
   return (
     <div className="flex flex-col gap-4">
@@ -27,11 +28,19 @@ export function TestsBoard({ rounds, names }: TestsBoardProps) {
         <TableHeader>
           <TableRow>
             <TableHead>System</TableHead>
-            <TableHead numeric>Pass rate</TableHead>
+            <TableHead numeric>
+              <Hint term={terms.passRate} />
+            </TableHead>
             <TableHead numeric>Trials</TableHead>
-            <TableHead numeric>Errored</TableHead>
-            <TableHead numeric>Cost / trial</TableHead>
-            <TableHead numeric>p50 latency</TableHead>
+            <TableHead numeric>
+              <Hint term={terms.errored} />
+            </TableHead>
+            <TableHead numeric>
+              <Hint term={terms.testsCostLatency}>Cost / trial</Hint>
+            </TableHead>
+            <TableHead numeric>
+              <Hint term={terms.testsCostLatency}>p50 latency</Hint>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

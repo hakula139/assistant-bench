@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import type { StateCore, Token } from 'markdown-it';
 
-import { TAIL_CLASS, Tail } from '@/lib/tail';
+import { Tail, TAIL_CLASS } from '@/lib/tail';
 
 /**
  * Wraps the tail of one inline run in a span. The tail starts only between whole emphasis, links,

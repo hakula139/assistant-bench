@@ -1,6 +1,6 @@
 import { getContainerRenderer } from '@astrojs/react/container-renderer';
-import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { loadRenderers } from 'astro:container';
+import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { JSDOM } from 'jsdom';
 import { describe, expect, test, vi } from 'vitest';
 
@@ -11,8 +11,8 @@ import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { defectTerms, terms } from '@/lib/glossary';
 import { defects, reportSchema } from '@/lib/report';
 import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
-import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
+import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -54,7 +54,7 @@ async function family(): Promise<Family> {
   return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
 }
 
-/** A family as `listFamilies` lists it under the writing aspect. */
+/** A family as `publicFamilies` lists it under the writing aspect. */
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
   return {
     name,
@@ -189,8 +189,8 @@ describe('family page', () => {
       'system names hidden',
       'ranked from votes',
     ]);
-    expect(text(html)).toContain(
-      'Leader Acme Large tied with the top score, chosen by the lower cost',
+    expect(new JSDOM(html).window.document.querySelector('dl dd')?.textContent).toBe(
+      'Acme Large, tied',
     );
     expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
   });
@@ -292,9 +292,7 @@ describe('home page', () => {
     const legend = /<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '';
     expect(text(legend).trim()).toBe('Anchor, 1,000 Unbounded');
   });
-});
 
-describe('home page anchors', () => {
   test("titles each aspect's section with the anchor its breadcrumbs link", async () => {
     listed.families = [await family()];
 
@@ -318,10 +316,18 @@ describe('family panel', () => {
   test("draws the latest round's intervals and names its leader", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
-    expect(text(html)).toContain('Votes · Round 2026-10-21, 340 votes');
+    const leader = new JSDOM(html).window.document.querySelector('[aria-label="Leader"]');
+
+    expect(text(html)).toContain('Votes: Round 2026-10-21 · 340 votes');
     expect(text(html)).toContain('Acme Pro 955–1,065 1,004');
-    expect(html).toContain('aria-label="Leader"');
-    expect(text(html)).toContain('Acme Large, tied with the top score, chosen by the lower cost');
+    expect(leader?.parentElement?.textContent).toBe('Acme Large, tied');
+    expect(islandHints(html, 'Leader')).toEqual(['tied']);
+  });
+
+  test("gives each row's score a hint with its interval", async () => {
+    const html = await render(FamilyPanel, { family: await family() });
+
+    expect(islandHints(html, 'Forest')).toContain('1,004');
   });
 
   test('keeps the unranked systems and those without votes after the round', async () => {
@@ -375,16 +381,14 @@ describe('system page', () => {
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
-  test('names which output length the rater favors', async () => {
+  test('lists the fingerprint each round ran', async () => {
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-pro',
       boards: [],
     });
 
-    expect(text(html)).toContain(
-      "Length preference Shorter, 6.5 points per SD of the pair's relative length difference",
-    );
+    expect(text(html)).toContain('Round Score 95% interval Votes Fingerprint');
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -463,6 +467,19 @@ describe('system page', () => {
     expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
     expect(islandHints(html, 'StatusMark')).toEqual(['Preliminary']);
   });
+
+  test("links the family's aspect on the home page, then the family's board", async () => {
+    const html = await render(SystemPage, {
+      family: await family(),
+      system: 'acme-pro',
+      boards: [],
+    });
+
+    expect(navLinks(html, 'breadcrumb')).toEqual([
+      ['/#writing', 'Writing', null],
+      ['/writing/arena/', 'Arena Writing', null],
+    ]);
+  });
 });
 
 const classesOf = (element: Element | null) => element?.getAttribute('class') ?? '';
@@ -474,20 +491,35 @@ function blocks(stack: Element): Element[] {
   );
 }
 
+const sources = import.meta.glob<string>(['/src/**/*.{astro,tsx}', '!/src/components/ui/**'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+
 describe('stacks', () => {
+  test('use gap in every page and component, since margins skip the islands', () => {
+    const files = Object.entries(sources);
+    expect(files.length).toBeGreaterThan(20);
+
+    const spaced = files.filter(([, source]) => /\bspace-[xy]-/.test(source)).map(([path]) => path);
+
+    expect(spaced).toEqual([]);
+  });
+
   test.each([
     ['family page', FamilyPage],
     ['system page', SystemPage],
   ])('space the islands on the %s with gap', async (_, page) => {
     const html = await render(page, { family: await family(), system: 'acme-pro', boards: [] });
-    const parents = [...new JSDOM(html).window.document.querySelectorAll('astro-island')].map(
-      (island) => classesOf(island.parentElement),
-    );
+    // An island inside a run of text, such as a hint in a stat's detail, flows with the text.
+    const parents = [...new JSDOM(html).window.document.querySelectorAll('astro-island')]
+      .map((island) => island.parentElement)
+      .filter((parent) => parent?.localName !== 'span')
+      .map(classesOf);
     expect(parents).not.toEqual([]);
 
-    expect(
-      parents.filter((classes) => !/\bgap-/.test(classes) || /\bspace-[xy]-/.test(classes)),
-    ).toEqual([]);
+    expect(parents.filter((classes) => !/\bgap-/.test(classes))).toEqual([]);
   });
 
   test.each([
@@ -649,20 +681,5 @@ describe('board switcher', () => {
     );
 
     expect(navLinks(html, 'Writing boards')).toEqual([]);
-  });
-});
-
-describe('system page breadcrumb', () => {
-  test("links the family's aspect on the home page, then the family's board", async () => {
-    const html = await render(SystemPage, {
-      family: await family(),
-      system: 'acme-pro',
-      boards: [],
-    });
-
-    expect(navLinks(html, 'breadcrumb')).toEqual([
-      ['/#writing', 'Writing', null],
-      ['/writing/arena/', 'Arena Writing', null],
-    ]);
   });
 });

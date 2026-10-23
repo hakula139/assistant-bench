@@ -1,7 +1,7 @@
 ---
 import { scorerViews } from '@/components/scorers';
 import { partId } from '@/components/scorers/parts';
-import { PageHeader, Section, intro, list, stack } from '@/components/site/PageParts';
+import { intro, list, PageHeader, Section, stack } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import type { Scorer } from '@/lib/family';
 import { scorers } from '@/lib/method';
@@ -37,17 +37,17 @@ const contents = [
 
     <nav
       aria-label="On this page"
-      class="text-sm lg:sticky lg:top-8 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start"
+      class="flex flex-col gap-2 text-sm lg:sticky lg:top-8 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start"
     >
-      <p class="mb-2 font-medium">On this page</p>
-      <ul class="space-y-1.5">
+      <p class="font-medium">On this page</p>
+      <ul class="flex flex-col gap-1.5">
         {contents.map(({ id, title, parts }) => (
-          <li>
-            <a href={`#${id}`} class="text-muted-foreground hover:text-foreground">
+          <li class="flex flex-col gap-1.5">
+            <a href={`#${id}`} class="self-start text-muted-foreground hover:text-foreground">
               {title}
             </a>
             {parts.length > 0 && (
-              <ul class="mt-1.5 space-y-1.5 border-l pl-3">
+              <ul class="flex flex-col gap-1.5 border-l pl-3">
                 {parts.map((part) => (
                   <li>
                     <a href={`#${part.id}`} class="text-muted-foreground hover:text-foreground">
@@ -65,9 +65,10 @@ const contents = [
     <article class:list={[stack, 'leading-relaxed lg:col-start-1']}>
       <Section id="systems" title="Systems and rounds">
         <p>
-          A system is a model with its effort, harness, and prompt, and changing any part makes a
-          new system. Each round is a dated snapshot that refits every result so far. Families are
-          grouped by aspect, the skill they measure.
+          A family is one leaderboard: a fixed set of cases or tasks and the systems that answer
+          them. A system is a model with its effort, harness, and prompt, and changing any part
+          makes a new system. Each round is a dated snapshot that refits every result so far.
+          Families are grouped by aspect, the skill they measure.
         </p>
       </Section>
 
@@ -83,11 +84,11 @@ const contents = [
             One person casts every vote, so each voted board reflects that person's preferences.
           </li>
           <li>
-            Voted scores are relative, so the both-bad and gate-failure rates are their only
-            absolute signals.
+            Voted scores are relative, so only the both-bad and gate-failure rates measure outputs
+            on an absolute scale.
           </li>
           <li>
-            Voted scores carry no length adjustment. Each system page reports whether the rater
+            Voted scores carry no length adjustment. Each round summary reports whether the rater
             favors longer or shorter outputs.
           </li>
         </ul>

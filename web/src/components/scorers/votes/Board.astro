@@ -1,6 +1,6 @@
 ---
 import { VotesBoard } from '@/components/boards/VotesBoard';
-import { Forest, ForestLegend, drawnMarks } from '@/components/site/Forest';
+import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
 import { note } from '@/components/site/PageParts';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
 import { boardPath, configOf, votesRounds, type Family } from '@/lib/reports';
@@ -19,6 +19,7 @@ const rows = unmeasuredRows(config.systems, config.reference, family.systemNames
   <div class="flex flex-col gap-4">
     <p class={note}>No round has closed yet.</p>
     <Forest
+      client:visible
       caption={`${family.title} systems, none measured yet`}
       rows={rows}
       domain={EMPTY_DOMAIN}

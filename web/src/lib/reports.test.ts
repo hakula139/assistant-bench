@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { boardSlug, listFamilies, systemPages } from '@/lib/reports';
+import { boardSlug, publicFamilies, systemPages } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
@@ -26,22 +26,22 @@ describe('boardSlug', () => {
     expect(boardSlug('writing-zh', 'writing')).toBe('zh');
   });
 
-  test('rejects a family ID that does not start with its aspect and a hyphen', () => {
-    expect(() => boardSlug('zh', 'writing')).toThrow(
-      'family zh: a public family ID starts with its aspect, as in writing-<name>',
-    );
-    expect(() => boardSlug('writingzh', 'writing')).toThrow(
-      'family writingzh: a public family ID starts with its aspect, as in writing-<name>',
-    );
-  });
+  test.each(['zh', 'writingzh'])(
+    'rejects the family ID %s, which does not start with its aspect and a hyphen',
+    (name) => {
+      expect(() => boardSlug(name, 'writing')).toThrow(
+        `family ${name}: a public family ID starts with its aspect, as in writing-<name>`,
+      );
+    },
+  );
 });
 
-describe('listFamilies', () => {
+describe('publicFamilies', () => {
   test('pairs each public family with its rounds, oldest first', async () => {
     const later = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
     const earlier = await report('writing-prose', '2026-10-07', '2026-10-07T18:00:00Z');
 
-    const families = listFamilies(
+    const families = publicFamilies(
       [{ name: 'writing-prose', config: votes(true) }],
       [later, earlier],
       FIXTURE_NAMES,
@@ -53,7 +53,7 @@ describe('listFamilies', () => {
   });
 
   test('lists the families by name', () => {
-    const families = listFamilies(
+    const families = publicFamilies(
       [
         { name: 'writing-zh', config: votes(true, 'Chinese Prose') },
         { name: 'writing-en', config: votes(true, 'English Prose') },
@@ -66,7 +66,7 @@ describe('listFamilies', () => {
   });
 
   test('lists a public family before its first round closes', () => {
-    const families = listFamilies(
+    const families = publicFamilies(
       [{ name: 'writing-prose', config: votes(true) }],
       [],
       FIXTURE_NAMES,
@@ -87,7 +87,7 @@ describe('listFamilies', () => {
   test('leaves out a family that is not public, with its reports', async () => {
     const smoke = await report('smoke-text', '2026-10-21', '2026-10-21T18:00:00Z');
 
-    const families = listFamilies(
+    const families = publicFamilies(
       [
         { name: 'smoke-text', config: votes(false, 'Smoke') },
         { name: 'writing-prose', config: votes(true) },
@@ -107,7 +107,7 @@ describe('listFamilies', () => {
       { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'writing' } },
     ] satisfies { name: string; config: FamilyConfig }[];
 
-    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
+    expect(() => publicFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'families writing-prose and smoke-text share the full name Writing · English',
     );
   });
@@ -118,7 +118,7 @@ describe('listFamilies', () => {
       { name: 'smoke-text', config: votes(false, 'English') },
     ];
 
-    const families = listFamilies(configs, [], FIXTURE_NAMES);
+    const families = publicFamilies(configs, [], FIXTURE_NAMES);
 
     expect(families.map((family) => family.title)).toEqual(['Writing · English']);
   });
@@ -126,7 +126,7 @@ describe('listFamilies', () => {
   test('rejects a public family without an aspect', () => {
     const configs = [{ name: 'prose', config: { ...votes(true), aspect: undefined } }];
 
-    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
+    expect(() => publicFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'public family prose has no aspect',
     );
   });
@@ -135,7 +135,7 @@ describe('listFamilies', () => {
 describe('systemPages', () => {
   test('gives a page to every system a voted round placed', async () => {
     const round = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
-    const [family] = listFamilies(
+    const [family] = publicFamilies(
       [{ name: 'writing-prose', config: votes(true) }],
       [round],
       FIXTURE_NAMES,

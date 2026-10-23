@@ -14,7 +14,7 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
 ---
 
 <Base section="leaderboards">
-  <section class="space-y-4">
+  <section class="flex flex-col gap-4">
     <h1 class="text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
       AI assistants ranked on everyday work
     </h1>
@@ -25,16 +25,16 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
   </section>
 
   {families.length === 0 ? (
-    <p class="text-muted-foreground">No family is listed yet.</p>
+    <p class="text-muted-foreground">No leaderboard is published yet.</p>
   ) : (
-    <div class="space-y-6">
+    <div class="flex flex-col gap-6">
       {marks.length > 0 && <ForestLegend marks={marks} />}
       {groupByAspect(families).map(({ aspect, members }) => (
-        <section class="space-y-6" aria-labelledby={aspect}>
+        <section class="flex flex-col gap-6" aria-labelledby={aspect}>
           <h2 id={aspect} class:list={[groupTitle, 'flex items-center gap-2']}>
             <AspectTitle aspect={aspect} />
           </h2>
-          <div class="grid gap-x-12 gap-y-12 lg:grid-cols-2">
+          <div class="grid gap-12 lg:grid-cols-2">
             {members.map((family) => (
               <FamilyPanel family={family} />
             ))}

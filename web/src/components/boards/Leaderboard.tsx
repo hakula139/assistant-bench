@@ -13,8 +13,8 @@ import { cn } from 'cn';
 import { ArrowDown, ArrowUp, CircleHelp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
+import { anchorRule, forestMarks } from '@/components/charts/forest-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { forestMarks } from '@/components/charts/forest-marks';
 import { Hint, StatusMark } from '@/components/site/Term';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,15 +26,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  MISSING,
-  formatCost,
-  formatInterval,
-  formatPercent,
-  formatRank,
-  formatScore,
-  formatSeconds,
-} from '@/lib/format';
-import {
   clip,
   forestDomain,
   forestTicks,
@@ -42,6 +33,15 @@ import {
   legendMarks,
   type LegendMark,
 } from '@/lib/forest';
+import {
+  formatCost,
+  formatInterval,
+  formatPercent,
+  formatRank,
+  formatScore,
+  formatSeconds,
+  MISSING,
+} from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
 import type { Interval, Standing } from '@/lib/report';
 
@@ -95,7 +95,6 @@ function forestScale(domain: [number, number]): Plot.ScaleOptions {
 function ForestAxis({ domain }: { domain: [number, number] }) {
   const plot = useCallback(
     ({ width }: PlotFrame): Plot.PlotOptions => ({
-      height: 28,
       margin: 0,
       marginTop: 20,
       x: {
@@ -113,7 +112,7 @@ function ForestAxis({ domain }: { domain: [number, number] }) {
   return <PlotFigure plot={plot} height={28} />;
 }
 
-function ForestRow({
+function IntervalCell({
   row,
   domain,
   anchor,
@@ -124,16 +123,13 @@ function ForestRow({
 }) {
   const plot = useCallback(
     (): Plot.PlotOptions => ({
-      height: ROW_HEIGHT,
       margin: 0,
       x: { ...forestScale(domain), axis: null },
       y: { axis: null, domain: [0, 1] },
       color: { type: 'identity' },
       marks: [
         Plot.gridX(forestTicks(domain), { stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
-        anchor === undefined
-          ? null
-          : Plot.ruleX([anchor], { stroke: 'var(--faint)', strokeOpacity: 0.4 }),
+        anchor === undefined ? null : anchorRule(anchor),
         forestMarks(
           [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
           domain,
@@ -178,7 +174,10 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
   );
 }
 
-/** The leaderboard table, whose interval column is a forest plot on one shared axis. */
+/**
+ * The leaderboard table, whose interval column is a forest plot on one shared axis. Phones leave
+ * that column out, so the score shows on the first screen with its interval as text.
+ */
 export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
   const anchor = anchorScore(rows, anchorSystem);
@@ -204,7 +203,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
                 original.standing
                   ? formatRank(original.standing.best_rank, original.standing.worst_rank)
                   : MISSING,
-              meta: { numeric: true },
+              meta: { numeric: true, term: terms.rank },
             }),
           ]
         : []),
@@ -229,7 +228,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
       helper.display({
         id: 'interval',
         header: () => <ForestAxis domain={domain} />,
-        cell: ({ row }) => <ForestRow row={row.original} domain={domain} anchor={anchor} />,
+        cell: ({ row }) => <IntervalCell row={row.original} domain={domain} anchor={anchor} />,
         meta: { forest: true },
       }),
       helper.accessor('score', {
@@ -248,7 +247,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
       helper.accessor('votes', {
         header: terms.votes.term,
         sortDescFirst: true,
-        meta: { numeric: true },
+        meta: { numeric: true, term: terms.votes },
       }),
       helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
         id: 'both-bad',
@@ -256,7 +255,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true },
+        meta: { numeric: true, term: terms.bothBad },
       }),
       helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
         id: 'gate-failures',
@@ -272,7 +271,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatCost(getValue() ?? null),
-        meta: { numeric: true },
+        meta: { numeric: true, term: terms.costLatency },
       }),
       helper.accessor((row) => row.standing?.p50_latency_sec ?? undefined, {
         id: 'latency',
@@ -280,7 +279,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatSeconds(getValue() ?? null),
-        meta: { numeric: true },
+        meta: { numeric: true, term: terms.costLatency },
       }),
     ]);
   }, [ranked, domain, anchor, anchorSystem, anchorTerm, href]);
@@ -303,7 +302,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
                 return (
                   <TableHead
                     key={header.id}
-                    className="w-[38%] min-w-48 p-0 align-bottom sm:min-w-72"
+                    className="w-[38%] min-w-48 p-0 align-bottom max-sm:hidden"
                   >
                     <span className="sr-only">95% interval</span>
                     <table.FlexRender header={header} />
@@ -324,7 +323,10 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
                       variant="ghost"
                       size="sm"
                       onClick={header.column.getToggleSortingHandler()}
-                      className={cn('-mx-2.5 text-muted-foreground', numeric && 'flex-row-reverse')}
+                      className={cn(
+                        '-mx-2 px-2 text-muted-foreground',
+                        numeric && 'flex-row-reverse',
+                      )}
                     >
                       <table.FlexRender header={header} />
                       <SortIcon direction={sorted} />
@@ -351,7 +353,7 @@ export function Leaderboard({ rows, ranked, anchorSystem, anchorTerm, href }: Le
                 <TableCell
                   key={cell.id}
                   numeric={numeric}
-                  className={cn(forest && 'p-0', wraps && 'whitespace-normal')}
+                  className={cn(forest && 'p-0 max-sm:hidden', wraps && 'whitespace-normal')}
                 >
                   <table.FlexRender cell={cell} />
                 </TableCell>

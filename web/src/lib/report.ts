@@ -122,13 +122,13 @@ export const reportSchema = z.strictObject({
   results: z.discriminatedUnion('scorer', [votesResults, testsResults]),
 });
 
-export type Report = z.infer<typeof reportSchema>;
 export type Defect = (typeof defects)[number];
 export type Interval = z.infer<typeof interval>;
 export type Distribution = z.infer<typeof distribution>;
-export type VotesResults = z.infer<typeof votesResults>;
 export type Standing = z.infer<typeof standing>;
-export type CategoryBoard = z.infer<typeof categoryBoard>;
 export type HeadToHead = z.infer<typeof headToHead>;
+export type CategoryBoard = z.infer<typeof categoryBoard>;
 export type Decision = z.infer<typeof decision>;
+export type VotesResults = z.infer<typeof votesResults>;
 export type TestsResults = z.infer<typeof testsResults>;
+export type Report = z.infer<typeof reportSchema>;

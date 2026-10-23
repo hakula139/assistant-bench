@@ -18,19 +18,16 @@ const standing = (system: string, passRate: number) => ({
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
 describe('TestsBoard', () => {
-  test("lists the latest round's systems by pass rate, best first", () => {
-    const rounds: TestsRound[] = [
-      { round: '2026-10-07', results: { scorer: 'tests', standings: [standing('acme-tiny', 1)] } },
-      {
-        round: '2026-10-21',
-        results: {
-          scorer: 'tests',
-          standings: [standing('acme-small', 0.25), standing('acme-pro', 0.75)],
-        },
+  test("lists the round's systems by pass rate, best first", () => {
+    const round: TestsRound = {
+      round: '2026-10-21',
+      results: {
+        scorer: 'tests',
+        standings: [standing('acme-small', 0.25), standing('acme-pro', 0.75)],
       },
-    ];
+    };
 
-    const html = renderToString(<TestsBoard rounds={rounds} names={FIXTURE_NAMES} />);
+    const html = renderToString(<TestsBoard round={round} names={FIXTURE_NAMES} />);
 
     expect(text(html)).toMatch(/Round 2026-10-21 .* Acme Pro 75% 4 0 – – Acme Small 25% 4 0 – – $/);
   });

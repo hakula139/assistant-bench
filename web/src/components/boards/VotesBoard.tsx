@@ -9,14 +9,16 @@ import {
   type LeaderboardRow,
 } from '@/components/boards/Leaderboard';
 import { CategoryForests } from '@/components/charts/CategoryForests';
+import type { Refit } from '@/components/charts/ForestPlot';
 import {
-  ParetoScatter,
   paretoFrontier,
+  ParetoScatter,
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
 import { TableTwin } from '@/components/charts/TableTwin';
+import { Leader } from '@/components/scorers/votes/Leader';
 import { ForestLegend } from '@/components/site/Forest';
-import { Section, Stat, note, stack, statList } from '@/components/site/PageParts';
+import { note, Section, stack, Stat, statList } from '@/components/site/PageParts';
 import { Hint } from '@/components/site/Term';
 import {
   Table,
@@ -27,18 +29,21 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  MISSING,
   formatCost,
+  formatCount,
   formatCountOf,
   formatInterval,
+  formatLengthBias,
   formatPercent,
   formatScore,
   formatSeconds,
-  formatLeaderNote,
   formatTau,
+  MISSING,
 } from '@/lib/format';
 import { fallbackAnchor, terms } from '@/lib/glossary';
-import type { CategoryBoard, Standing, VotesResults } from '@/lib/report';
+import { systemPagePath } from '@/lib/paths';
+import { AGREEMENT_FLOOR } from '@/lib/ranking';
+import type { Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
@@ -52,8 +57,6 @@ interface VotesBoardProps {
 }
 
 const ALL = 'all';
-
-type Refit = CategoryBoard['standings'][number];
 
 function leaderboardRows(
   results: VotesResults,
@@ -94,22 +97,27 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
 }
 
 function RoundSummary({ results, names }: { results: VotesResults; names: SystemNames }) {
-  const { decision, rater_agreement: agreement } = results;
-  const leaderNote = formatLeaderNote(decision);
+  const { decision, rater_agreement: agreement, length } = results;
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <dl className={statList}>
-        <Stat label="Leader">
-          {decision ? systemName(names, decision.leader) : MISSING}
-          {leaderNote !== null && (
-            <span className="block text-xs font-normal text-muted-foreground">{leaderNote}</span>
-          )}
+        <Stat label={<Hint term={terms.leader} />}>
+          <Leader decision={decision} name={decision && systemName(names, decision.leader)} />
         </Stat>
         <Stat
           label={terms.votes.term}
-          detail={`over ${formatCountOf(results.sessions, 'session')}${results.dropped_votes > 0 ? `, plus ${results.dropped_votes} left out of the fit` : ''}`}
+          detail={
+            <>
+              over {formatCountOf(results.sessions, 'session')}
+              {results.dropped_votes > 0 && (
+                <>
+                  , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
+                </>
+              )}
+            </>
+          }
         >
-          {results.votes}
+          {formatCount(results.votes)}
         </Stat>
         <Stat
           label={<Hint term={terms.raterAgreement} />}
@@ -121,11 +129,14 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
           {formatPercent(results.separability)}
         </Stat>
         <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
+        {length !== null && (
+          <Stat label={<Hint term={terms.lengthBias} />}>{formatLengthBias(length)}</Stat>
+        )}
       </dl>
       {agreement.below_floor && (
         <p className={cn(note, 'flex gap-2')}>
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          Agreement below 70%, so the intervals overstate separation.
+          <TriangleAlert className="h-lh w-4 shrink-0" aria-hidden="true" />
+          Agreement below {formatPercent(AGREEMENT_FLOOR)}, so the intervals overstate separation.
         </p>
       )}
     </div>
@@ -171,11 +182,11 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
     .map((row) => row.name);
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
-  const href = (system: string) => `${base}${system}/`;
+  const href = (system: string) => systemPagePath(base, system);
   const anchorTerm =
     results.anchor === results.reference
       ? terms.anchor
-      : fallbackAnchor(systemName(names, results.reference));
+      : fallbackAnchor(systemName(names, results.anchor), systemName(names, results.reference));
 
   return (
     <div className={stack}>
@@ -204,7 +215,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
 
       <RoundSummary results={results} names={names} />
 
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         <Leaderboard
           rows={rows}
           ranked={activeCategory === ALL}
@@ -221,7 +232,9 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
               .join(', ')}`}
           </p>
         )}
-        <ForestLegend marks={leaderboardMarks(rows, results.anchor)} />
+        <div className="max-sm:hidden">
+          <ForestLegend marks={leaderboardMarks(rows, results.anchor)} />
+        </div>
       </div>
 
       {categories.length > 0 && (
@@ -271,7 +284,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
           </p>
           <div className="grid gap-6 lg:grid-cols-2">
             {costPoints.length > 0 && (
-              <figure className="space-y-1">
+              <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
                   Mean cost per output
                   {unpriced.length > 0 && `, leaving out the unpriced ${unpriced.join(', ')}`}
@@ -281,7 +294,7 @@ export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
               </figure>
             )}
             {latencyPoints.length > 0 && (
-              <figure className="space-y-1">
+              <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
                   Median latency{activeCategory !== ALL && ', over all categories'}
                 </figcaption>

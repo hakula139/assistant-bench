@@ -1,4 +1,5 @@
 import astro from 'eslint-plugin-astro';
+import perfectionist from 'eslint-plugin-perfectionist';
 import reactHooks from 'eslint-plugin-react-hooks';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
@@ -8,9 +9,25 @@ const sharedRules = {
   'eqeqeq': ['error', 'always'],
   'no-throw-literal': 'error',
   'prefer-const': 'error',
+  'perfectionist/sort-imports': [
+    'error',
+    {
+      groups: [
+        ['type-builtin', 'value-builtin'],
+        ['type-external', 'value-external'],
+        ['type-internal', 'value-internal'],
+        'unknown',
+      ],
+      internalPattern: ['^@/'],
+    },
+  ],
+  'perfectionist/sort-named-imports': ['error', { groups: ['value-import', 'type-import'] }],
 };
 
 export default defineConfig([
+  {
+    plugins: { perfectionist },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [tseslint.configs.strictTypeChecked, reactHooks.configs.flat.recommended],

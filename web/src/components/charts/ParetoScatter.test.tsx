@@ -3,8 +3,8 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
-  ParetoScatter,
   paretoFrontier,
+  ParetoScatter,
   placeLabels,
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';

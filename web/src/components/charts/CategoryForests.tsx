@@ -26,7 +26,7 @@ export function CategoryForests({ categories, systems, names }: CategoryForestsP
   return (
     <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
       {categories.map((board) => (
-        <figure key={board.category} className="space-y-1">
+        <figure key={board.category} className="flex flex-col gap-1">
           <figcaption className="text-sm">
             <span className="font-medium">{board.category}</span>
             <span className="text-muted-foreground">, {formatCountOf(board.votes, 'vote')}</span>

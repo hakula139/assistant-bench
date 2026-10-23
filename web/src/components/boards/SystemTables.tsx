@@ -9,18 +9,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  MISSING,
   formatCount,
   formatInterval,
   formatPercent,
   formatScore,
   formatSeconds,
+  MISSING,
 } from '@/lib/format';
-import { defectTerms, terms } from '@/lib/glossary';
+import { defectTerms, fallbackAnchor } from '@/lib/glossary';
 import { defects, type Distribution, type HeadToHead, type Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
-
-// ── System Page Tables ──
 
 export function HeadToHeadTable({
   headToHead,
@@ -122,7 +120,7 @@ export function DistributionTable({
 
 export function DefectsTable({ standing }: { standing: Standing }) {
   return (
-    <Table className="max-w-md">
+    <Table className="max-w-xl">
       <TableHeader>
         <TableRow>
           <TableHead>Issue</TableHead>
@@ -166,6 +164,7 @@ export function RoundsTable({
           <TableHead numeric>Score</TableHead>
           <TableHead numeric>95% interval</TableHead>
           <TableHead numeric>Votes</TableHead>
+          <TableHead>Fingerprint</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -177,10 +176,7 @@ export function RoundsTable({
                 {anchor !== reference && (
                   <StatusMark
                     status="anchor"
-                    term={{
-                      term: terms.anchor.term,
-                      definition: `This round fixed ${systemName(names, anchor)} at 1,000 because the reference, ${systemName(names, reference)}, is not ranked.`,
-                    }}
+                    term={fallbackAnchor(systemName(names, anchor), systemName(names, reference))}
                   />
                 )}
               </span>
@@ -188,6 +184,7 @@ export function RoundsTable({
             <TableCell numeric>{formatScore(past.score)}</TableCell>
             <TableCell numeric>{formatInterval(past.interval)}</TableCell>
             <TableCell numeric>{past.votes}</TableCell>
+            <TableCell className="font-mono text-xs">{past.fingerprint ?? MISSING}</TableCell>
           </TableRow>
         ))}
       </TableBody>

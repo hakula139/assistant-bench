@@ -3,12 +3,8 @@ import { Check, ChevronDown, CircleCheck } from 'lucide-react';
 import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
-import { pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
+import { bleed, pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
 import { Hint } from '@/components/site/Term';
-import { DefectPicker, type DefectKeys } from '@/components/vote/DefectPicker';
-import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
-import { OutputPane } from '@/components/vote/OutputPane';
-import { band, panel, scroll } from '@/components/vote/panel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -16,6 +12,10 @@ import { Kbd } from '@/components/ui/kbd';
 import { Textarea } from '@/components/ui/textarea';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { DefectPicker, type DefectKeys } from '@/components/vote/DefectPicker';
+import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
+import { OutputPane } from '@/components/vote/OutputPane';
+import { band, panel, scroll } from '@/components/vote/panel';
 import {
   ApiError,
   castVote,
@@ -36,6 +36,7 @@ import { defects, type Defect } from '@/lib/report';
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
 const STALE_PAIR = 'This pair changed in another tab.';
+const GONE_FAMILY = 'This family has no outputs to vote on now. Restart bench serve after a run.';
 const VIEWPORTS = [375, 768, 1280] as const;
 
 /** The verdicts from left to right. On phones, two to a row, A and B share the first. */
@@ -93,7 +94,12 @@ async function enterFamily(family: string): Promise<SessionView> {
   }
 }
 
+/** What went wrong, in words that say what to do when the server is out of reach. */
 function message(error: unknown): string {
+  // fetch rejects with a TypeError, whose text differs by browser, when no server answers.
+  if (error instanceof TypeError) {
+    return 'Could not reach the vote server. Check that bench serve is still running, then reload.';
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -120,7 +126,7 @@ function Notice({ notice }: { notice: string | null }) {
 /** A centered page for the states around a session, with its heading. */
 function Screen({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-16">
+    <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-16">
       <h1 className={pageTitle}>{title}</h1>
       {children}
     </div>
@@ -148,14 +154,15 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
       <ErrorAlert error={error === null ? startError : `Could not list families: ${error}`} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
-          No family has outputs to vote on. Run a family, then restart `bench serve`.
+          No family has outputs to vote on. Run <code>uv run bench run &lt;family&gt;</code>, then
+          restart <code>uv run bench serve</code>.
         </p>
       )}
       {families &&
         groupByAspect(families).map(({ aspect, members }) => {
           const id = `aspect-${aspect ?? 'unlisted'}`;
           return (
-            <section key={id} className="space-y-3" aria-labelledby={id}>
+            <section key={id} className="flex flex-col gap-3" aria-labelledby={id}>
               <h2 id={id} className={cn(sectionTitle, 'flex items-center gap-2')}>
                 {aspect ? <AspectTitle aspect={aspect} /> : 'Unlisted'}
               </h2>
@@ -227,7 +234,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
           <CardContent
             className={cn(
               scroll,
-              'space-y-3 text-base',
+              'flex flex-col gap-3 text-base',
               stacked ? 'max-h-[25dvh]' : 'max-xl:max-h-[25dvh]',
             )}
           >
@@ -235,7 +242,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
             {pair.checklist.length > 0 && (
               <section
                 aria-labelledby={checklistTitle}
-                className="space-y-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
+                className="flex flex-col gap-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
               >
                 <h2 id={checklistTitle} className="text-sm font-medium text-muted-foreground">
                   <Hint term={checklistHint} />
@@ -321,6 +328,8 @@ export function VoteApp() {
     } catch (reason) {
       if (session !== null && notFound(reason)) {
         await follow(session.family.name);
+      } else if (notFound(reason)) {
+        setError(GONE_FAMILY);
       } else {
         setError(message(reason));
       }
@@ -399,9 +408,14 @@ export function VoteApp() {
     }));
   };
 
-  // Enter on a focused control outside the pair, such as a header link, keeps its own action.
+  // Enter on a focused control outside the pair, such as a header link, keeps its own action. The
+  // pair's popovers render in a portal and keep focus through their closing animation, so they
+  // count as part of the pair.
   const outside = (target: EventTarget | null) =>
-    target instanceof Node && target !== document.body && !pairView.current?.contains(target);
+    target instanceof Element &&
+    target !== document.body &&
+    !pairView.current?.contains(target) &&
+    target.closest('[data-slot=popover-content]') === null;
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
     if (event.isComposing || event.repeat) {
@@ -478,7 +492,7 @@ export function VoteApp() {
         </p>
         <Notice notice={notice} />
         <ErrorAlert error={error} />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             disabled={busy}
             onClick={() => {
@@ -486,6 +500,9 @@ export function VoteApp() {
             }}
           >
             Start another session
+          </Button>
+          <Button variant="outline" className="text-foreground" asChild>
+            <a href={window.location.pathname}>Choose another family</a>
           </Button>
           <Button variant="outline" onClick={undo} disabled={session.votes === 0 || busy}>
             Undo last vote
@@ -580,7 +597,7 @@ export function VoteApp() {
         ))}
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         {frameFocused && (
           <p role="status" className="text-sm text-muted-foreground">
             Keys go to the output frame while it has focus. Click outside the frame to vote by
@@ -612,7 +629,12 @@ export function VoteApp() {
         </div>
       </div>
 
-      <div className="grid gap-2 max-md:sticky max-md:bottom-0 max-md:-mx-4 max-md:border-t max-md:bg-background max-md:px-4 max-md:py-3 sm:grid-cols-[1fr_auto] sm:max-md:-mx-6 sm:max-md:px-6">
+      <div
+        className={cn(
+          bleed,
+          'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
+        )}
+      >
         <ToggleGroup
           type="single"
           variant="choice"
