@@ -586,7 +586,7 @@ class TestRunJob:
         assert error.value.returncode == 3
 
 
-class TestIngest:
+class TestCollect:
     def test_keeps_only_trials_of_the_current_task(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
@@ -620,7 +620,7 @@ class TestIngest:
 
         (data_dir / 'tasks' / 'smoke-text' / 'stray.md').write_text('Stray.')
 
-        outputs = jobs.ingest(family, {})
+        outputs = jobs.collect(family, {})
 
         assert {(output.case, output.system) for output in outputs} == {
             ('en-greeting', 'b'),
@@ -648,7 +648,7 @@ class TestIngest:
             )
         jobs.render_tasks(family, cases[:1])
 
-        (output,) = jobs.ingest(family, {})
+        (output,) = jobs.collect(family, {})
 
         assert output.case == 'a'
 
@@ -673,7 +673,7 @@ class TestIngest:
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
-        (output,) = jobs.ingest(family, {})
+        (output,) = jobs.collect(family, {})
 
         assert output.case == path.name
 
@@ -693,7 +693,7 @@ class TestIngest:
         )
         monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
 
-        (output,) = jobs.ingest(family, {})
+        (output,) = jobs.collect(family, {})
 
         assert output.case == 'en-greeting'
 
@@ -726,7 +726,7 @@ class TestIngest:
         )
         write_trial(job_dir, 'a__1', generate, task='f/a', error='TimeoutError')
 
-        outputs = jobs.ingest(VOTES, {system.name: system})
+        outputs = jobs.collect(VOTES, {system.name: system})
 
         assert [(output.case, output.error) for output in outputs] == [
             ('a', 'TimeoutError'),
@@ -776,7 +776,7 @@ class TestIngest:
                 ),
             )
 
-        outputs = jobs.ingest(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
         assert [
             (output.job, output.text, output.output_tokens) for output in outputs
@@ -801,7 +801,7 @@ class TestIngest:
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
             )
 
-        outputs = jobs.ingest(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
         assert [(output.job, output.text) for output in outputs] == [
             ('2026-10-20__10-00-00', 'first')
@@ -827,7 +827,7 @@ class TestIngest:
             error='TimeoutError',
         )
 
-        outputs = jobs.ingest(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
         assert [(output.job, output.error, output.text) for output in outputs] == [
             ('2026-10-20__10-00-00', None, 'kept')
@@ -855,7 +855,7 @@ class TestIngest:
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
-        outputs = jobs.ingest(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
         assert [(output.job, output.error, output.text) for output in outputs] == [
             ('2026-10-21__10-00-00', None, 'old request')
@@ -876,7 +876,7 @@ class TestIngest:
         )
         write_trial(jobs_dir / 'job-2', 'a__2', generate, task='f/a', output='Hi.')
 
-        outputs = jobs.ingest(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
         assert [
             (output.job, output.case, output.error, output.text) for output in outputs
@@ -903,7 +903,7 @@ class TestIngest:
             )
             write_trial(jobs_dir / job, 'a__1', agent, task='f/a', output=job)
 
-        outputs = jobs.ingest(family, {})
+        outputs = jobs.collect(family, {})
 
         assert sorted(
             (output.system, output.fingerprint, output.text) for output in outputs
@@ -926,7 +926,7 @@ class TestIngest:
                 context=stop,
             )
 
-        outputs = jobs.ingest(family, {})
+        outputs = jobs.collect(family, {})
 
         assert [(output.case, output.gate_failures) for output in outputs] == [
             ('a', []),
@@ -949,7 +949,7 @@ class TestIngest:
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
 
-        (output,) = jobs.ingest(VOTES, {})
+        (output,) = jobs.collect(VOTES, {})
 
         assert output.gate_failures == []
 
@@ -968,8 +968,8 @@ class TestIngest:
             version=jobs.TASK_VERSION,
         )
 
-        (scored,) = jobs.ingest(TESTS, {})
-        (voted,) = jobs.ingest(VOTES, {})
+        (scored,) = jobs.collect(TESTS, {})
+        (voted,) = jobs.collect(VOTES, {})
 
         assert (scored.case, scored.system, scored.reward) == ('a', 'oracle', 1.0)
         assert scored.gate_failures is None
@@ -986,7 +986,7 @@ class TestIngest:
             context=AgentContext(n_input_tokens=10, n_output_tokens=5),
         )
 
-        (output,) = jobs.ingest(VOTES, {})
+        (output,) = jobs.collect(VOTES, {})
 
         assert output.system == 'retired'
         assert output.cost_usd is None
@@ -1003,7 +1003,7 @@ class TestIngest:
         result.write_text(result.read_text()[:20])
 
         with pytest.raises(ValueError) as error:
-            jobs.ingest(VOTES, {})
+            jobs.collect(VOTES, {})
 
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"

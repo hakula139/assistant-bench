@@ -4,7 +4,7 @@ from harbor.agents.options import AgentOptions
 
 
 class Labels(AgentOptions):
-    """The kwargs that label a trial for ingest."""
+    """The kwargs that label a trial for collection."""
 
     system: str
     fingerprint: str

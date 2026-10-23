@@ -103,7 +103,7 @@ Because changing a system's route, effort, or prompt changes its [fingerprint](.
 When the catalog moves a model key to a new snapshot, keep the old name on its old resolution:
 
 1. Run `uv run bench fingerprints <base>`, which names each system whose fingerprint changed and prints the `route` table that `<base>` resolved it to from that revision's catalog. A system with a `prompt` cannot be pinned this way, so the command prints only a notice for it.
-2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `effort`, `price`, and `display_name` and sets no `model`. The pinned `price` matters because ingest prices each output from the current system table, so a pin without it leaves the frozen outputs unpriced and out of the cost tie-break.
+2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `effort`, `price`, and `display_name` and sets no `model`. The pinned `price` matters because collection prices each output from the current system table, so a pin without it leaves the frozen outputs unpriced and out of the cost tie-break.
 3. Add the new snapshot in a table whose key ends in the snapshot, as `deepseek-v4.1-flash-1017` does, and set a `display_name` that tells it apart from the pinned table.
 4. Replace the old name with the new one in each family's `systems` list, including `reference` where it named the old one. Until the new snapshot collects votes, `bench close` anchors the board at the most-voted system and records it as the round's `anchor`.
 5. For a system with a `prompt`, drop its table and keep the old name only in closed reports, since its fingerprint cannot be pinned.

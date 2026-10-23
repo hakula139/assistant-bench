@@ -509,7 +509,7 @@ class TestCheck:
 
 
 class TestKnownFamilies:
-    @pytest.mark.parametrize('command', ['check', 'run', 'ingest', 'close'])
+    @pytest.mark.parametrize('command', ['check', 'run', 'collect', 'close'])
     def test_rejects_a_missing_family_and_names_the_choices(self, command: str) -> None:
         choices = ', '.join(f'`{name}`' for name in family_names())
 
@@ -812,7 +812,7 @@ class TestRun:
         assert submitted == []
 
 
-class TestIngest:
+class TestCollect:
     @pytest.mark.parametrize(
         ('name', 'outputs', 'summary'),
         [
@@ -847,16 +847,16 @@ class TestIngest:
             ),
         ],
     )
-    def test_summarizes_the_ingested_outputs(
+    def test_summarizes_the_collected_outputs(
         self,
         monkeypatch: pytest.MonkeyPatch,
         name: str,
         outputs: list[Output],
         summary: str,
     ) -> None:
-        monkeypatch.setattr(jobs, 'ingest', lambda family, systems: outputs)
+        monkeypatch.setattr(jobs, 'collect', lambda family, systems: outputs)
 
-        result = invoke('ingest', name)
+        result = invoke('collect', name)
         assert result.exit_code == 0, result.output
 
         assert result.output == textwrap.dedent(summary)
@@ -869,7 +869,7 @@ class TestIngest:
         for name in ('f', 'g'):
             write_job(data_dir / 'jobs' / name / 'job-1')
 
-        result = invoke('ingest')
+        result = invoke('collect')
         assert result.exit_code == 0, result.output
 
         assert result.output == (
@@ -880,7 +880,7 @@ class TestIngest:
         assert not (data_dir / 'outputs' / 'h.jsonl').exists()
 
     def test_reports_when_no_family_has_jobs(self) -> None:
-        result = invoke('ingest')
+        result = invoke('collect')
 
         assert (result.exit_code, result.output) == (
             0,
@@ -900,7 +900,7 @@ class TestIngest:
         )
         (trial / 'result.json').write_text('{')
 
-        result = invoke('ingest', 'f')
+        result = invoke('collect', 'f')
 
         assert result.exit_code == 1
         assert result.output.startswith(
@@ -972,7 +972,7 @@ class TestServe:
             '`pnpm install` once, then rerun `uv run bench serve`.\n',
         )
 
-    def test_ingests_every_votes_family_with_jobs_before_loading(
+    def test_collects_every_votes_family_with_jobs_before_loading(
         self, families_dir: Path, data_dir: Path, site: Site
     ) -> None:
         for name in ('f', 'g', 'h'):
@@ -1053,7 +1053,7 @@ class TestClose:
                     context=AgentContext(metadata={'finish_reason': 'stop'}),
                     instruction=None,
                 )
-        outputs = jobs.ingest(load_family('f'), {})
+        outputs = jobs.collect(load_family('f'), {})
         by_key = {(output.case, output.system): output for output in outputs}
         at = datetime(2026, 10, 22, tzinfo=UTC)
         session = store.start_session('f', at)
@@ -1096,7 +1096,7 @@ class TestClose:
         assert 'Family `f` has no outputs on its current cases.' in result.output
         assert 'Usage:' not in result.output
 
-    def test_ingests_past_a_removed_case_before_closing(
+    def test_collects_past_a_removed_case_before_closing(
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_removed_case(families_dir, data_dir)
