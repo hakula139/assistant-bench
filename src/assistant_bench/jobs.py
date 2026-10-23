@@ -159,7 +159,8 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
     """Build a job that runs every system on every case task.
 
     The job diffs against the family's earlier jobs, so Harbor runs only the trials
-    that none of them completed with the same task version and agent config.
+    that none of them completed with the same task version and agent config. A case
+    family is scored by votes, so its verifier stays disabled.
     """
     agents = [
         trial_config.AgentConfig(
@@ -180,7 +181,7 @@ def case_job(family: Family, systems: list[System], tasks: list[Path]) -> JobCon
         tasks,
         sources,
         n_attempts=family.settings.samples,
-        verify=_runs_tests(family.settings),
+        verify=False,
     )
 
 
@@ -313,16 +314,6 @@ def _job(
         tasks=[trial_config.TaskConfig(path=path) for path in tasks],
         source_jobs=sources,
     )
-
-
-def _runs_tests(settings: Settings) -> bool:
-    match settings:
-        case VotesSettings():
-            return False
-        case TaskTestsSettings():
-            return True
-        case _:
-            assert_never(settings)
 
 
 def run_job(config: JobConfig) -> Path:

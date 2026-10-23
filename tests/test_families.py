@@ -595,6 +595,16 @@ class TestLoadCases:
 
         assert [case.id for case in cases] == ['a']
 
+    def test_rejects_a_task_id_that_is_not_a_slug(self, families_dir: Path) -> None:
+        write_task_family(families_dir)
+        write_task(families_dir / 'f' / 'tasks' / 'Bad', name='f/Bad')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert 'tasks/Bad/task.toml is not a valid case:' in str(error.value)
+        assert 'id' in str(error.value)
+
 
 class TestCaseTask:
     def test_finds_a_committed_task_and_a_local_one(
