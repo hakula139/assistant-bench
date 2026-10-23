@@ -96,11 +96,8 @@ def run(
             raise typer.BadParameter(
                 'single-call systems run only case families', param_hint='FAMILY'
             )
-        try:
-            _refuse_drift(family, systems)
-            tasks = _render_tasks(family)
-        except ValueError as error:
-            raise typer.BadParameter(str(error), param_hint='FAMILY') from error
+        _refuse_drift(family, systems)
+        tasks = _render_tasks(family)
         prepared.append((family, systems, tasks))
 
     for family, systems, tasks in prepared:
@@ -316,7 +313,10 @@ def _run_targets(
 
 
 def _refuse_drift(family: Family, systems: list[System]) -> None:
-    drifted = jobs.drifted_systems(family, systems)
+    try:
+        drifted = jobs.drifted_systems(family, systems)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint='FAMILY') from error
     if not drifted:
         return
     detail = '\n'.join(
