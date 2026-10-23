@@ -3,8 +3,9 @@ import { useCallback } from 'react';
 
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
-import { REFERENCE_SCORE, clip, forestTicks, labelledTicks } from '@/lib/forest';
+import { clip, forestTicks, labelledTicks } from '@/lib/forest';
 import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
+import { REFERENCE_SCORE } from '@/lib/reference';
 import type { CategoryBoard } from '@/lib/report';
 
 /** A category refit, which carries its votes and preliminary status. */

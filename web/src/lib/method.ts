@@ -1,7 +1,7 @@
-import type { Scorer, VotesConfig } from '@/lib/family';
-import { REFERENCE_SCORE } from '@/lib/forest';
+import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatScore } from '@/lib/format';
-import type { Term } from '@/lib/glossary';
+import { terms } from '@/lib/glossary';
+import { REFERENCE_SCORE } from '@/lib/reference';
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
@@ -9,8 +9,8 @@ export interface MethodStep {
   step: 'text' | 'html' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
   title: string;
   detail: string;
-  /** One family's specifics, such as its exact gates, which the detail opens on tap. */
-  hint?: Term;
+  /** What the step means on a family's board, which its detail opens. */
+  hint?: string;
 }
 
 /** How each scorer describes its boards, so a new scorer adds an entry here. */
@@ -26,21 +26,30 @@ const languages: Record<NonNullable<VotesConfig['language']>, string> = {
 
 const anyOf = new Intl.ListFormat('en', { type: 'disjunction' });
 
-/** What drops a voted output before it reaches the rater, the checks `failed_gates` makes. */
+/** Keeps a range's two bounds and its unit on one line, where a break may follow an en dash. */
+const joiner = String.fromCodePoint(0x2060);
+/** A no-break space keeps each bound on the line of its unit. */
+const characters = ' characters';
+
+/** What makes a voted output lose its pairs without a vote, the checks `failed_gates` makes. */
 export function gateRule({ language, gates }: VotesConfig): string {
   const { min_chars: min, max_chars: max } = gates;
   const length =
     min !== undefined && max !== undefined
-      ? `outside ${formatCount(min)}–${formatCount(max)} characters`
+      ? `outside ${formatCount(min)}–${joiner}${formatCount(max)}${characters}`
       : min !== undefined
-        ? `shorter than ${formatCount(min)} characters`
+        ? `shorter than ${formatCount(min)}${characters}`
         : max !== undefined
-          ? `longer than ${formatCount(max)} characters`
+          ? `longer than ${formatCount(max)}${characters}`
           : undefined;
-  const name = language && languages[language];
-  const written = gates.script === 'hans' ? `Simplified ${name ?? 'script'}` : name;
-  const problems = ['blank', 'unfinished', length, written && `not in ${written}`];
-  return `An output is dropped when it is ${anyOf.format(problems.filter((problem) => problem !== undefined))}.`;
+  const problems = [
+    'blank',
+    'cut off',
+    length,
+    language && `not in ${languages[language]}`,
+    gates.script === 'hans' ? 'written with Traditional characters' : undefined,
+  ].filter((problem) => problem !== undefined);
+  return `An output loses its pairs without a vote if it is ${anyOf.format(problems)}.`;
 }
 
 const runs: Record<VotesConfig['render'], { step: MethodStep['step']; answer: string }> = {
@@ -49,55 +58,67 @@ const runs: Record<VotesConfig['render'], { step: MethodStep['step']; answer: st
 };
 
 /**
- * A scorer's stages in a few words each, alike for every family. Given one family's config, each
- * votes step also carries a hint with that family's specifics.
+ * A scorer's stages in a few words each, alike on every board. Given a family's config, each step
+ * also carries a hint saying what it means on that family's board.
  */
-export function methodSteps(scorer: Scorer, config?: VotesConfig): MethodStep[] {
+export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[] {
   switch (scorer) {
     case 'votes': {
-      const run = runs[config?.render ?? 'text'];
+      const votes = config?.scorer === 'votes' ? config : undefined;
+      const run = runs[votes?.render ?? 'text'];
       return [
         {
           step: run.step,
           title: 'Run',
           detail: 'same cases for all',
-          hint: config && {
-            term: 'Run',
-            definition: `Every system answers each case ${run.answer}.`,
-          },
+          hint: votes && `Every system answers each case ${run.answer}.`,
         },
         {
           step: 'gates',
           title: 'Gates',
-          detail: 'bad outputs dropped',
-          hint: config && { term: 'Gates', definition: gateRule(config) },
+          detail: 'failing outputs lose',
+          hint: votes && gateRule(votes),
         },
         {
           step: 'pairs',
           title: 'Blind pairs',
           detail: 'system names hidden',
-          hint: config && {
-            term: 'Blind pairs',
-            definition:
-              'One rater picks the better of two outputs on a case without seeing which systems wrote them.',
-          },
+          hint:
+            votes &&
+            'One rater votes on two outputs for a case without seeing which systems wrote them.',
         },
         {
           step: 'scores',
           title: 'Scores',
           detail: 'ranked from votes',
-          hint: config && {
-            term: 'Scores',
-            definition: `Bradley-Terry scores with 95% intervals. The reference system stays at ${formatScore(REFERENCE_SCORE)}.`,
-          },
+          hint:
+            votes &&
+            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The reference system is fixed at ${formatScore(REFERENCE_SCORE)}.`,
         },
       ];
     }
-    case 'tests':
+    case 'tests': {
+      const tests = config?.scorer === 'tests' ? config : undefined;
       return [
-        { step: 'trial', title: 'Run', detail: 'same tasks for all' },
-        { step: 'tests', title: 'Tests', detail: "each task's own tests" },
-        { step: 'rate', title: 'Pass rate', detail: 'share of tasks passed' },
+        {
+          step: 'trial',
+          title: 'Run',
+          detail: 'same tasks for all',
+          hint: tests && 'Every system attempts each task.',
+        },
+        {
+          step: 'tests',
+          title: 'Tests',
+          detail: "each task's own tests",
+          hint: tests && "The task's own tests score each trial.",
+        },
+        {
+          step: 'rate',
+          title: 'Pass rate',
+          detail: 'share of trials passed',
+          hint: tests && terms.passRate.definition,
+        },
       ];
+    }
   }
 }

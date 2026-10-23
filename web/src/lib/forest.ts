@@ -1,5 +1,6 @@
 import { nice, tickStep, ticks } from 'd3-array';
 
+import { REFERENCE_SCORE } from '@/lib/reference';
 import type { Interval, Standing } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
@@ -8,9 +9,6 @@ export interface Estimate {
   score: number;
   interval: Interval;
 }
-
-/** The score every family's and category's reference system is anchored at. */
-export const REFERENCE_SCORE = 1000;
 
 /**
  * How far below the top score an axis may start. At 600 points the top system would win about

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import type { VotesConfig } from '@/lib/family';
+import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { gateRule, methodSteps } from '@/lib/method';
 
 const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
@@ -14,59 +14,82 @@ const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
   ...overrides,
 });
 
+const joiner = String.fromCodePoint(0x2060);
+
+const rule = (problems: string) => `An output loses its pairs without a vote if it is ${problems}.`;
+
 describe('gateRule', () => {
   test.each([
-    ['both bounds', { min_chars: 40, max_chars: 6000 }, 'outside 40–6,000 characters'],
-    ['a lower bound alone', { min_chars: 1200 }, 'shorter than 1,200 characters'],
-    ['an upper bound alone', { max_chars: 800 }, 'longer than 800 characters'],
-  ])('names %s', (_, gates, length) => {
-    expect(gateRule(config({ gates }))).toBe(
-      `An output is dropped when it is blank, unfinished, or ${length}.`,
-    );
+    ['both bounds', { min_chars: 40, max_chars: 6000 }, `outside 40–${joiner}6,000`],
+    ['a lower bound alone', { min_chars: 1200 }, 'shorter than 1,200'],
+    ['an upper bound alone', { max_chars: 800 }, 'longer than 800'],
+  ])('names %s with its unit on the same line', (_, gates, length) => {
+    expect(gateRule(config({ gates }))).toBe(rule(`blank, cut off, or ${length} characters`));
   });
 
-  test('names only blank and unfinished output when the family sets no gates', () => {
-    expect(gateRule(config())).toBe('An output is dropped when it is blank or unfinished.');
+  test('names only blank and cut-off outputs when the family sets no gates', () => {
+    expect(gateRule(config())).toBe(rule('blank or cut off'));
   });
 
   test.each([
-    ['a language', { language: 'en' }, 'not in English'],
+    ['a language', { language: 'en' }, 'or not in English'],
     [
-      'a language and its script',
+      'a language and the script',
       { language: 'zh', gates: { script: 'hans' } },
-      'not in Simplified Chinese',
+      'not in Chinese, or written with Traditional characters',
     ],
-    ['a script alone', { gates: { script: 'hans' } }, 'not in Simplified script'],
-  ] as const)('names %s last', (_, overrides, written) => {
-    expect(gateRule(config(overrides))).toBe(
-      `An output is dropped when it is blank, unfinished, or ${written}.`,
-    );
+    ['the script alone', { gates: { script: 'hans' } }, 'or written with Traditional characters'],
+  ] as const)('names %s last, each as its own check', (_, overrides, written) => {
+    expect(gateRule(config(overrides))).toBe(rule(`blank, cut off, ${written}`));
   });
 });
 
 describe('methodSteps', () => {
-  test("keeps a family's specifics in the hints, under the same details as every family", () => {
-    const family = config({ render: 'html', gates: { min_chars: 40 } });
+  test.each([
+    ['text', 'text: Every system answers each case in text.'],
+    ['html', 'html: Every system answers each case with an HTML page.'],
+  ] as const)('names the run of a family that renders %s', (render, run) => {
+    const [step] = methodSteps('votes', config({ render }));
+
+    expect(`${step.step}: ${step.hint ?? ''}`).toBe(run);
+  });
+
+  test("keeps a voted family's specifics in the hints, under the details every board shows", () => {
+    const family = config({ gates: { min_chars: 40 } });
 
     const steps = methodSteps('votes', family);
 
     expect(steps.map(({ detail }) => detail)).toEqual(
       methodSteps('votes').map(({ detail }) => detail),
     );
-    expect(steps.map(({ step, hint }) => `${step}: ${hint?.definition ?? ''}`)).toEqual([
-      'html: Every system answers each case with an HTML page.',
-      `gates: ${gateRule(family)}`,
-      'pairs: One rater picks the better of two outputs on a case without seeing which systems wrote them.',
-      'scores: Bradley-Terry scores with 95% intervals. The reference system stays at 1,000.',
+    expect(steps.slice(1).map(({ hint }) => hint)).toEqual([
+      gateRule(family),
+      'One rater votes on two outputs for a case without seeing which systems wrote them.',
+      'Elo-like scores from a Bradley-Terry fit, with 95% intervals. The reference system is fixed at 1,000.',
     ]);
   });
 
-  test('gives no hints without a config', () => {
-    expect(methodSteps('votes').map(({ hint }) => hint)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+  test("gives a tests family's steps their hints", () => {
+    const family: FamilyConfig = {
+      scorer: 'tests',
+      display_name: 'Tasks',
+      systems: [],
+      public: true,
+    };
+
+    const steps = methodSteps('tests', family);
+
+    expect(steps.map(({ title, hint }) => `${title}: ${hint ?? ''}`)).toEqual([
+      'Run: Every system attempts each task.',
+      "Tests: The task's own tests score each trial.",
+      'Pass rate: The share of trials whose tests pass, counting errored trials as failures.',
     ]);
   });
+
+  test.each(['votes', 'tests'] as const)(
+    'gives the %s steps no hints without a config',
+    (scorer) => {
+      expect(methodSteps(scorer).filter(({ hint }) => hint !== undefined)).toEqual([]);
+    },
+  );
 });

@@ -143,6 +143,16 @@ function boardLinks(html: string): string[] {
     .filter((href) => !href.startsWith('/methodology/') && !/\.\w+$/.test(href));
 }
 
+/** The text of each scoring step's detail that opens a hint, in strip order. */
+function stepHints(html: string): string[] {
+  return [...html.matchAll(/<ol aria-label="\w+ scoring steps"[\s\S]*?<\/ol>/g)].flatMap(
+    ([strip]) =>
+      [...strip.matchAll(/<button[^>]*aria-haspopup="dialog"[^>]*>([^<]*)<\/button>/g)].map(
+        ([, label]) => label,
+      ),
+  );
+}
+
 describe('family page', () => {
   test('links each system to its page under the board', async () => {
     const arena = await family();
@@ -157,9 +167,14 @@ describe('family page', () => {
     const html = await render(FamilyPage, { family: await family(), boards: [] });
 
     expect(text(html)).toContain(
-      'Run same cases for all Gates bad outputs dropped Blind pairs system names hidden Scores ranked from votes',
+      'Run same cases for all Gates failing outputs lose Blind pairs system names hidden Scores ranked from votes',
     );
-    expect(text(html)).not.toContain('6,000 characters');
+    expect(stepHints(html)).toEqual([
+      'same cases for all',
+      'failing outputs lose',
+      'system names hidden',
+      'ranked from votes',
+    ]);
     expect(text(html)).toContain(
       'Leader Acme Large tied with the top score, chosen by the lower cost',
     );
@@ -202,8 +217,9 @@ describe('family page', () => {
     const html = await render(FamilyPage, { family: testsFamily(), boards: [] });
 
     expect(text(html)).toContain(
-      "Run same tasks for all Tests each task's own tests Pass rate share of tasks passed",
+      "Run same tasks for all Tests each task's own tests Pass rate share of trials passed",
     );
+    expect(stepHints(html)).toHaveLength(3);
     expect(text(html)).toContain('Acme Pro 75% 4 1');
   });
 
@@ -231,6 +247,15 @@ describe('family page', () => {
 
     expect(guide(html)).toBe(scorer);
     expect(methodology).toContain(`id="${scorer}"`);
+  });
+});
+
+describe('methodology page', () => {
+  test("draws each scorer's steps without a family's hints", async () => {
+    const html = await render(MethodologyPage, {});
+
+    expect(text(html)).toContain('Run same tasks for all');
+    expect(stepHints(html)).toEqual([]);
   });
 });
 

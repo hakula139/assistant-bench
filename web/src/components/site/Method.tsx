@@ -17,7 +17,7 @@ import {
 
 import { Hint } from '@/components/site/Term';
 import { aspects, type Aspect } from '@/lib/aspects';
-import type { Scorer, VotesConfig } from '@/lib/family';
+import type { FamilyConfig, Scorer } from '@/lib/family';
 import { methodSteps, scorers, type MethodStep } from '@/lib/method';
 
 const stepIcons: Record<MethodStep['step'], LucideIcon> = {
@@ -58,8 +58,8 @@ export function ScorerIcon({ scorer, className }: { scorer: Scorer; className?: 
 }
 
 /**
- * A scorer's stages from output to board, one family's when `config` is given and the scorer's in
- * general otherwise, where `links` points a step at the part that explains it.
+ * A scorer's stages from output to board, where `config` makes each step open what it means on
+ * that family's board and `links` points a step at the part that explains it.
  */
 export function MethodStrip({
   scorer,
@@ -67,22 +67,22 @@ export function MethodStrip({
   links = {},
 }: {
   scorer: Scorer;
-  config?: VotesConfig;
+  config?: FamilyConfig;
   links?: Partial<Record<MethodStep['step'], string>>;
 }) {
   return (
     <ol
       aria-label={`${scorers[scorer].title} scoring steps`}
-      className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-sm:flex-col max-sm:items-start"
+      className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-md:flex-col max-md:items-start"
     >
       {methodSteps(scorer, config).map(({ step, title, detail, hint }, i) => {
         const Icon = stepIcons[step];
         const href = links[step];
         return (
-          <li key={step} className="flex items-center gap-2 max-sm:flex-col max-sm:items-start">
+          <li key={step} className="flex items-center gap-2 max-md:flex-col max-md:items-start">
             {i > 0 && (
               <ChevronRight
-                className="size-4 shrink-0 text-faint max-sm:ml-2 max-sm:rotate-90"
+                className="size-4 shrink-0 text-faint max-md:ml-2 max-md:rotate-90"
                 aria-hidden="true"
               />
             )}
@@ -95,7 +95,7 @@ export function MethodStrip({
                   {href ? <a href={href}>{title}</a> : title}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {hint ? <Hint term={hint}>{detail}</Hint> : detail}
+                  {hint ? <Hint term={{ term: title, definition: hint }}>{detail}</Hint> : detail}
                 </span>
               </span>
             </span>
