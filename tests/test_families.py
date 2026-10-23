@@ -61,7 +61,7 @@ class TestLoadFamily:
             'f',
             """\
             scorer = "votes"
-            aspect = "technical-writing"
+            aspect = "writing"
             display_name = "Family F"
             systems = ["large", "small"]
             samples = 2
@@ -81,7 +81,7 @@ class TestLoadFamily:
             source='cases',
             settings=VotesSettings(
                 scorer='votes',
-                aspect='technical-writing',
+                aspect='writing',
                 display_name='Family F',
                 systems=['large', 'small'],
                 samples=2,

@@ -6,11 +6,11 @@ import { describe, expect, test, vi } from 'vitest';
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
 import { familyTitle } from '@/lib/aspects';
-import type { FamilyConfig } from '@/lib/family';
+import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
-import { familyPaths, systemPaths, type Family } from '@/lib/reports';
-import FamilyPage from '@/pages/[family]/index.astro';
-import SystemPage from '@/pages/[family]/[system].astro';
+import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
+import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
+import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -25,9 +25,9 @@ vi.mock(import('@/lib/reports'), async (importOriginal) => ({
 /** The fixture's systems and the family itself, whose table and directory names pages hide. */
 const SLUGS = { ...FIXTURE_NAMES, arena: 'Arena Writing' };
 
-const arenaConfig: FamilyConfig = {
+const arenaConfig: VotesConfig = {
   scorer: 'votes',
-  aspect: 'technical-writing',
+  aspect: 'writing',
   display_name: 'Arena Writing',
   systems: ['acme-large', 'acme-new', 'acme-pro', 'acme-small'],
   reference: 'acme-large',
@@ -52,12 +52,12 @@ async function family(): Promise<Family> {
   return listedFamily('arena', arenaConfig, [earlier, latest]);
 }
 
-/** A family as `listFamilies` lists it under the technical writing aspect. */
+/** A family as `listFamilies` lists it under the writing aspect. */
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
   return {
     name,
     title: familyTitle(config),
-    aspect: 'technical-writing',
+    aspect: 'writing',
     config,
     rounds,
     systemNames: FIXTURE_NAMES,
@@ -118,7 +118,7 @@ function testsFamily(): Family {
     'smoke',
     {
       scorer: 'tests',
-      aspect: 'technical-writing',
+      aspect: 'writing',
       display_name: 'Smoke Tasks',
       systems: ['acme-pro', 'acme-small'],
       public: true,
@@ -136,7 +136,23 @@ function guide(html: string): string {
   return match[1];
 }
 
+/** Every root-relative page link, leaving out the home page, its anchors, and the methodology. */
+function boardLinks(html: string): string[] {
+  return [...html.matchAll(/href="(\/[^"#]+)"/g)]
+    .map(([, href]) => href)
+    .filter((href) => !href.startsWith('/methodology/') && !/\.\w+$/.test(href));
+}
+
 describe('family page', () => {
+  test('links each system to its page under the board', async () => {
+    const arena = await family();
+
+    const html = await render(FamilyPage, { family: arena, boards: [] });
+
+    expect(boardLinks(html)).toContain(systemPath(arena, 'acme-pro'));
+    expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
+  });
+
   test("draws the family's gates and reference, then the round summary", async () => {
     const html = await render(FamilyPage, { family: await family(), boards: [] });
 
@@ -235,11 +251,21 @@ describe('home page anchors', () => {
 
     const html = await render(HomePage, {});
 
-    expect(html).toMatch(/<h2 id="technical-writing"[^>]*>[\s\S]*?Technical Writing\s*<\/h2>/);
+    expect(html).toMatch(/<h2 id="writing"[^>]*>[\s\S]*?Writing\s*<\/h2>/);
   });
 });
 
 describe('family panel', () => {
+  test('links its short name and its systems to pages under its board', async () => {
+    const arena = await family();
+
+    const html = await render(FamilyPanel, { family: arena });
+
+    expect(boardLinks(html)).toContain(boardPath(arena));
+    expect(boardLinks(html)).toContain(systemPath(arena, 'acme-pro'));
+    expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
+  });
+
   test("draws the latest round's intervals and names its leader", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
@@ -285,7 +311,7 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain(
-      'Technical Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
+      'Writing Arena Writing Acme Pro Score 1,004 (955–1,065) Rank 1–3 Votes 114 (89 decisive) Round 2026-10-21',
     );
   });
 
@@ -296,9 +322,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(html).toContain(
-      '<title>Acme Pro on Technical Writing · Arena Writing | HAKULA†BENCH</title>',
-    );
+    expect(html).toContain('<title>Acme Pro on Writing · Arena Writing | HAKULA†BENCH</title>');
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
@@ -378,11 +402,11 @@ describe('header', () => {
     const arena = await family();
 
     const pages = [
-      await render(FamilyPage, { family: arena, boards: [] }, '/arena/'),
+      await render(FamilyPage, { family: arena, boards: [] }, '/writing/arena-writing/'),
       await render(
         SystemPage,
         { family: arena, system: 'acme-pro', boards: [] },
-        '/arena/acme-pro/',
+        '/writing/arena-writing/acme-pro/',
       ),
     ];
 
@@ -418,12 +442,15 @@ describe('board switcher', () => {
   test("links the aspect's boards by short name and marks the current one", async () => {
     const families = await boards();
 
-    const html = await render(FamilyPage, propsAt(familyPaths(families), { family: 'arena-en' }));
+    const html = await render(
+      FamilyPage,
+      propsAt(familyPaths(families), { aspect: 'writing', board: 'arena-english' }),
+    );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([
-      ['/arena/', 'Arena Writing', null],
-      ['/arena-en/', 'Arena English', 'page'],
-      ['/arena-ja/', 'Arena Japanese', null],
+    expect(navLinks(html, 'Writing boards')).toEqual([
+      ['/writing/arena-writing/', 'Arena Writing', null],
+      ['/writing/arena-english/', 'Arena English', 'page'],
+      ['/writing/arena-japanese/', 'Arena Japanese', null],
     ]);
   });
 
@@ -432,21 +459,28 @@ describe('board switcher', () => {
 
     const html = await render(
       SystemPage,
-      propsAt(systemPaths(families), { family: 'arena', system: 'acme-pro' }),
+      propsAt(systemPaths(families), {
+        aspect: 'writing',
+        board: 'arena-writing',
+        system: 'acme-pro',
+      }),
     );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([
-      ['/arena/acme-pro/', 'Arena Writing', 'page'],
-      ['/arena-en/acme-pro/', 'Arena English', null],
+    expect(navLinks(html, 'Writing boards')).toEqual([
+      ['/writing/arena-writing/acme-pro/', 'Arena Writing', 'page'],
+      ['/writing/arena-english/acme-pro/', 'Arena English', null],
     ]);
   });
 
   test('stays off a page whose aspect lists one board', async () => {
     const arena = await family();
 
-    const html = await render(FamilyPage, propsAt(familyPaths([arena]), { family: 'arena' }));
+    const html = await render(
+      FamilyPage,
+      propsAt(familyPaths([arena]), { aspect: 'writing', board: 'arena-writing' }),
+    );
 
-    expect(navLinks(html, 'Technical Writing boards')).toEqual([]);
+    expect(navLinks(html, 'Writing boards')).toEqual([]);
   });
 });
 
@@ -459,8 +493,8 @@ describe('system page breadcrumb', () => {
     });
 
     expect(navLinks(html, 'breadcrumb')).toEqual([
-      ['/#technical-writing', 'Technical Writing', null],
-      ['/arena/', 'Arena Writing', null],
+      ['/#writing', 'Writing', null],
+      ['/writing/arena-writing/', 'Arena Writing', null],
     ]);
   });
 });

@@ -5,7 +5,7 @@ import {
   unmeasuredRows,
   type ForestRow,
 } from '@/lib/forest';
-import { configOf, latest, type Family } from '@/lib/reports';
+import { configOf, latest, systemPath, type Family } from '@/lib/reports';
 
 /** The rows and axis of a voted family's home panel: its latest round, or its systems before one. */
 export function panelForest(family: Family): { rows: ForestRow[]; domain: [number, number] } {
@@ -18,7 +18,12 @@ export function panelForest(family: Family): { rows: ForestRow[]; domain: [numbe
     };
   }
   return {
-    rows: roundRows(family.name, config.systems, results, family.systemNames),
+    rows: roundRows(
+      (system) => systemPath(family, system),
+      config.systems,
+      results,
+      family.systemNames,
+    ),
     domain: forestDomain(results.standings),
   };
 }

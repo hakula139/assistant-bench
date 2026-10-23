@@ -110,7 +110,7 @@ describe('clip', () => {
 });
 
 describe('roundRows', () => {
-  test('orders the standings by score, then the unranked and those without votes by name', async () => {
+  test('orders the standings by score and links them, then the unranked and those without votes by name', async () => {
     const report = reportSchema.parse(await readFixture());
     if (report.results.scorer !== 'votes') {
       throw new Error('the fixture is a votes report');
@@ -118,19 +118,19 @@ describe('roundRows', () => {
     const { standings, unranked } = report.results;
 
     const rows = roundRows(
-      'arena',
+      (system) => `/board/${system}/`,
       ['acme-new', 'acme-large', 'acme-gone'],
       { standings: standings.toReversed(), unranked: unranked.toReversed() },
       { ...FIXTURE_NAMES, 'acme-gone': 'Acme Gone' },
     );
 
-    expect(rows.map((row) => [row.system, 'unplaced' in row ? row.unplaced : 'placed'])).toEqual([
-      ['acme-pro', 'placed'],
-      ['acme-large', 'placed'],
-      ['acme-small', 'placed'],
-      ['acme-flash', 'placed'],
-      ['acme-mini', 'placed'],
-      ['acme-tiny', 'placed'],
+    expect(rows.map((row) => [row.system, 'unplaced' in row ? row.unplaced : row.href])).toEqual([
+      ['acme-pro', '/board/acme-pro/'],
+      ['acme-large', '/board/acme-large/'],
+      ['acme-small', '/board/acme-small/'],
+      ['acme-flash', '/board/acme-flash/'],
+      ['acme-mini', '/board/acme-mini/'],
+      ['acme-tiny', '/board/acme-tiny/'],
       ['acme-edge', 'unranked'],
       ['acme-nano', 'unranked'],
       ['acme-gone', 'no-votes'],

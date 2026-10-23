@@ -44,7 +44,8 @@ import { systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
 
 interface VotesBoardProps {
-  family: string;
+  /** The board's path, which each system's page extends. */
+  base: string;
   /** Closed rounds, oldest first. */
   rounds: VotesRound[];
   names: SystemNames;
@@ -132,7 +133,7 @@ function RoundSummary({ results, names }: { results: VotesResults; names: System
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
+export function VotesBoard({ base, rounds, names }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', ALL);
@@ -170,7 +171,7 @@ export function VotesBoard({ family, rounds, names }: VotesBoardProps) {
     .map((row) => row.name);
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
-  const href = (system: string) => `/${family}/${system}/`;
+  const href = (system: string) => `${base}${system}/`;
 
   return (
     <div className={stack}>

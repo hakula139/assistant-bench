@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'vitest';
 
-import type { FamilyConfig } from '@/lib/family';
+import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { listFamilies, systemPages } from '@/lib/reports';
+import { boardSlug, listFamilies, systemPages } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
-const votes = (listed: boolean, displayName = 'Prose'): FamilyConfig => ({
+const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
   scorer: 'votes',
-  ...(listed && { aspect: 'technical-writing' }),
+  ...(listed && { aspect: 'writing' }),
   display_name: displayName,
   systems: ['acme-large', 'acme-pro'],
   reference: 'acme-large',
@@ -20,6 +20,22 @@ async function report(family: string, round: string, closedAt: string): Promise<
   const parsed = reportSchema.parse(await readFixture());
   return { ...parsed, family, round, closed_at: closedAt };
 }
+
+describe('boardSlug', () => {
+  test.each([
+    ['Chinese', 'chinese'],
+    ['C++ / Rust (beta)', 'c-rust-beta'],
+    ['Café Essays', 'cafe-essays'],
+  ])('names the board of %s by its short name in kebab case', (name, slug) => {
+    expect(boardSlug(votes(true, name))).toBe(slug);
+  });
+
+  test('rejects a short name with no ASCII letter or digit', () => {
+    expect(() => boardSlug(votes(true, '日本語'))).toThrow(
+      'the short name 日本語 has no ASCII letter or digit for its board path',
+    );
+  });
+});
 
 describe('listFamilies', () => {
   test('pairs each public family with its rounds, oldest first', async () => {
@@ -56,8 +72,8 @@ describe('listFamilies', () => {
     expect(families).toEqual([
       {
         name: 'prose',
-        title: 'Technical Writing · Prose',
-        aspect: 'technical-writing',
+        title: 'Writing · Prose',
+        aspect: 'writing',
         config: votes(true),
         rounds: [],
         systemNames: FIXTURE_NAMES,
@@ -83,11 +99,11 @@ describe('listFamilies', () => {
   test('rejects two families sharing a full name, even one that is not public', () => {
     const configs = [
       { name: 'prose', config: votes(true, 'English') },
-      { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'technical-writing' } },
+      { name: 'smoke-text', config: { ...votes(false, 'English'), aspect: 'writing' } },
     ] satisfies { name: string; config: FamilyConfig }[];
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
-      'families prose and smoke-text share the full name Technical Writing · English',
+      'families prose and smoke-text share the full name Writing · English',
     );
   });
 
@@ -99,7 +115,7 @@ describe('listFamilies', () => {
 
     const families = listFamilies(configs, [], FIXTURE_NAMES);
 
-    expect(families.map((family) => family.title)).toEqual(['Technical Writing · English']);
+    expect(families.map((family) => family.title)).toEqual(['Writing · English']);
   });
 
   test('rejects a public family without an aspect', () => {
@@ -107,6 +123,34 @@ describe('listFamilies', () => {
 
     expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
       'public family prose has no aspect',
+    );
+  });
+
+  test('rejects two public families sharing a board path', () => {
+    const configs = [
+      { name: 'cpp', config: votes(true, 'C++') },
+      { name: 'csharp', config: votes(true, 'C#') },
+    ];
+
+    expect(() => listFamilies(configs, [], FIXTURE_NAMES)).toThrow(
+      'families cpp and csharp share the board path /writing/c/',
+    );
+  });
+
+  test('accepts a hidden family on a public board path', () => {
+    const configs = [
+      { name: 'cpp', config: votes(true, 'C++') },
+      { name: 'csharp', config: { ...votes(false, 'C#'), aspect: 'writing' } },
+    ] satisfies { name: string; config: FamilyConfig }[];
+
+    const families = listFamilies(configs, [], FIXTURE_NAMES);
+
+    expect(families.map((family) => family.name)).toEqual(['cpp']);
+  });
+
+  test.each(['writing', 'methodology', 'vote'])('rejects a family named %s', (name) => {
+    expect(() => listFamilies([{ name, config: votes(false) }], [], FIXTURE_NAMES)).toThrow(
+      `family ${name} takes the name of a top-level path`,
     );
   });
 });

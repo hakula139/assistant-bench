@@ -1,5 +1,5 @@
 scorer = "votes"
-aspect = "technical-writing"
+aspect = "writing"
 display_name = "Chinese"
 public = true
 systems = [

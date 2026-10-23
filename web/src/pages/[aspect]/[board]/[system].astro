@@ -28,7 +28,14 @@ import { sharedDomain } from '@/lib/forest';
 import { formatInterval, formatRank, formatScore } from '@/lib/format';
 import { terms } from '@/lib/glossary';
 import type { Distribution, Standing } from '@/lib/report';
-import { getFamilies, systemPaths, votesRounds, type BoardLink, type Family } from '@/lib/reports';
+import {
+  boardPath,
+  getFamilies,
+  systemPaths,
+  votesRounds,
+  type BoardLink,
+  type Family,
+} from '@/lib/reports';
 import { systemName } from '@/lib/systems';
 
 export const getStaticPaths = (async () =>
@@ -94,7 +101,7 @@ const Preliminary = statusIcons.preliminary;
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbLink href={`/${family.name}/`}>{family.config.display_name}</BreadcrumbLink>
+            <BreadcrumbLink href={boardPath(family)}>{family.config.display_name}</BreadcrumbLink>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>

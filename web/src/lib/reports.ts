@@ -1,6 +1,6 @@
 import { getCollection } from 'astro:content';
 
-import { familyTitle, type Aspect } from '@/lib/aspects';
+import { aspectIds, familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
@@ -32,11 +32,47 @@ export interface Family {
 }
 
 /**
+ * A family's path segment under its aspect: its short name in kebab case, with accents dropped.
+ *
+ * @throws Error when the short name has no ASCII letter or digit to build the segment from.
+ */
+export function boardSlug({ display_name: name }: FamilyConfig): string {
+  const slug = name
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!slug) {
+    throw new Error(`the short name ${name} has no ASCII letter or digit for its board path`);
+  }
+  return slug;
+}
+
+function boardParams(family: Family): { aspect: Aspect; board: string } {
+  return { aspect: family.aspect, board: boardSlug(family.config) };
+}
+
+/** A family's board path, which every link to the board and its system pages starts with. */
+export function boardPath(family: Family): string {
+  const { aspect, board } = boardParams(family);
+  return `/${aspect}/${board}/`;
+}
+
+/** A system's page path on a family's board. */
+export function systemPath(family: Family, system: string): string {
+  return `${boardPath(family)}${system}/`;
+}
+
+/** The site's top-level path segments, which a family ID may not take. */
+const reservedNames = new Set<string>([...aspectIds, 'methodology', 'vote']);
+
+/**
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, or a public family has no
- *   aspect.
+ * @throws Error when two families, listed or not, share a full name, when a family ID names an
+ *   aspect or a top-level page, when a public family has no aspect, or when two public families
+ *   share a board path.
  */
 export function listFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -51,9 +87,12 @@ export function listFamilies(
       throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
+    if (reservedNames.has(name)) {
+      throw new Error(`family ${name} takes the name of a top-level path`);
+    }
   }
   const rounds = Map.groupBy(reports, (report) => report.family);
-  return configs
+  const families = configs
     .filter(({ config }) => config.public)
     .map(({ name, config }) => {
       if (config.aspect === undefined) {
@@ -71,6 +110,16 @@ export function listFamilies(
       };
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
+  const holders = new Map<string, string>();
+  for (const family of families) {
+    const path = boardPath(family);
+    const holder = holders.get(path);
+    if (holder !== undefined) {
+      throw new Error(`families ${holder} and ${family.name} share the board path ${path}`);
+    }
+    holders.set(path, family.name);
+  }
+  return families;
 }
 
 export async function getFamilies(): Promise<Family[]> {
@@ -145,11 +194,11 @@ function siblings(families: Family[], family: Family): Family[] {
 /** Returns each family page's params and props: the family and its aspect's boards. */
 export function familyPaths(families: Family[]) {
   return families.map((family) => ({
-    params: { family: family.name },
+    params: boardParams(family),
     props: {
       family,
       boards: siblings(families, family).map((item): BoardLink => ({
-        href: `/${item.name}/`,
+        href: boardPath(item),
         label: item.config.display_name,
         current: item.name === family.name,
       })),
@@ -165,14 +214,14 @@ export function systemPaths(families: Family[]) {
   const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
   return families.flatMap((family) =>
     [...systemPages(family)].map((system) => ({
-      params: { family: family.name, system },
+      params: { ...boardParams(family), system },
       props: {
         family,
         system,
         boards: siblings(families, family)
           .filter((item) => pages.get(item.name)?.has(system))
           .map((item): BoardLink => ({
-            href: `/${item.name}/${system}/`,
+            href: systemPath(item, system),
             label: item.config.display_name,
             current: item.name === family.name,
           })),
