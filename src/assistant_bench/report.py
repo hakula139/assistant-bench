@@ -245,7 +245,7 @@ def close(family: Family, store: VoteStore, closed_at: datetime) -> Report:
             else ''
         )
         raise ValueError(
-            f'family {family.name!r} has no outputs on its current cases.{step}'
+            f'Family `{family.name}` has no outputs on its current cases.{step}'
         )
     results: Results
     match family.settings:
@@ -285,8 +285,8 @@ def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:
     for system, fingerprints in sorted(by_system.items()):
         if len(fingerprints) > 1:
             raise ValueError(
-                f'system {system!r} has outputs under several fingerprints. Give '
-                'the changed system a new name, as docs/guide/authoring.md#systems '
+                f'System `{system}` has outputs under several fingerprints. Give '
+                'the changed system a new name, as `docs/guide/authoring.md#systems` '
                 'describes.'
             )
     return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
@@ -311,13 +311,13 @@ def _votes_results(
     recorded = store.votes(family.name)
     if not recorded:
         raise ValueError(
-            f'family {family.name!r} has no votes yet. Vote with '
+            f'Family `{family.name}` has no votes yet. Vote with '
             '`uv run bench serve`, then close the round.'
         )
     votes = reconcile(recorded, outputs)
     if not votes:
         raise ValueError(
-            f'family {family.name!r} has votes, but none compares two of its '
+            f'Family `{family.name}` has votes, but none compares two of its '
             'current outputs. Vote on the current outputs, then close the round.'
         )
     fingerprints = _fingerprints(outputs)

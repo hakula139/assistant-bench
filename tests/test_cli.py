@@ -1093,7 +1093,7 @@ class TestClose:
         result = invoke('close', 'f')
 
         assert result.exit_code == 1
-        assert "family 'f' has no outputs on its current cases" in result.output
+        assert 'Family `f` has no outputs on its current cases.' in result.output
         assert 'Usage:' not in result.output
 
     def test_ingests_past_a_removed_case_before_closing(
@@ -1104,7 +1104,7 @@ class TestClose:
         result = invoke('close', 'f')
 
         assert result.exit_code == 1
-        assert "family 'f' has no votes" in result.output
+        assert 'Family `f` has no votes yet.' in result.output
 
     def test_reports_a_store_of_another_schema_version(
         self, families_dir: Path

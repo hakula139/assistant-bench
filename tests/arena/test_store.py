@@ -82,8 +82,8 @@ class TestVoteStore:
                 VoteStore(path)
 
             assert str(raised.value) == (
-                f'{path} has schema version {version}, while this bench reads '
-                f'version 2. {step}'
+                f'The vote store `{path}` has schema version {version}, while this '
+                f'bench reads version 2. {step}'
             )
 
     class TestSession:

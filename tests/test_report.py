@@ -687,7 +687,7 @@ class TestClose:
         write_votes_family(families_dir, 'f', ['a', 'b'], cases)
         write_passing_outputs(cases, ['a', 'b'])
 
-        with pytest.raises(ValueError, match="family 'f' has no votes yet"):
+        with pytest.raises(ValueError, match='Family `f` has no votes yet'):
             close(load_family('f'), store, AT)
 
     def test_needs_outputs_on_the_current_cases(
@@ -700,7 +700,7 @@ class TestClose:
         with pytest.raises(ValueError) as raised:
             close(family, store, AT)
         assert str(raised.value) == (
-            "family 'f' has no outputs on its current cases. "
+            'Family `f` has no outputs on its current cases. '
             'Run `uv run bench run f` first.'
         )
 
@@ -719,7 +719,7 @@ class TestClose:
         )
 
         with pytest.raises(
-            ValueError, match="family 'f' has votes, but none compares two of its"
+            ValueError, match='Family `f` has votes, but none compares two of its'
         ):
             close(family, store, AT)
 
@@ -783,7 +783,9 @@ class TestClose:
         old = outputs[0].model_copy(update={'trial': 'old', 'fingerprint': 'fp-old'})
         write_outputs('f', [*outputs, old])
 
-        with pytest.raises(ValueError, match="'large' has outputs under several"):
+        with pytest.raises(
+            ValueError, match='System `large` has outputs under several'
+        ):
             close(family, store, AT)
 
     def test_rejects_an_unranked_system_under_several_fingerprints(
@@ -801,7 +803,7 @@ class TestClose:
             a, b = outputs[(case, left)], outputs[(case, right)]
             store.record(make_ballot(a, b, session=session.id), AT)
 
-        with pytest.raises(ValueError, match="'d' has outputs under several"):
+        with pytest.raises(ValueError, match='System `d` has outputs under several'):
             close(load_family('f'), store, AT)
 
     @pytest.mark.parametrize(
@@ -809,14 +811,14 @@ class TestClose:
         [
             (
                 [{'case': 'retired', 'fingerprint': 'a'}],
-                "^family 'smoke' has no outputs on its current cases\\.$",
+                '^Family `smoke` has no outputs on its current cases\\.$',
             ),
             (
                 [
                     {'trial': 'a', 'fingerprint': 'a'},
                     {'trial': 'b', 'fingerprint': 'b'},
                 ],
-                "'large' has outputs under several",
+                'System `large` has outputs under several',
             ),
         ],
         ids=['only-retired-outputs', 'several-fingerprints'],

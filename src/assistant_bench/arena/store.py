@@ -175,7 +175,8 @@ class VoteStore:
                 'aside so `bench serve` starts a new store.'
             )
             raise ValueError(
-                f'{path} has schema version {version}, while this bench reads '
+                f'The vote store `{path}` has schema version {version}, while this '
+                'bench reads '
                 f'version {SCHEMA_VERSION}. {step}'
             )
 
