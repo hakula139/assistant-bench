@@ -1,5 +1,5 @@
 import { Anchor, Hourglass, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import {
@@ -20,10 +20,11 @@ export const statusIcons = { preliminary: Hourglass, reference: Anchor } satisfi
 export type Status = keyof typeof statusIcons;
 
 function Definition({ term }: { term: Term }) {
+  const title = useId();
   return (
-    <PopoverContent side="top" collisionPadding={16}>
+    <PopoverContent side="top" collisionPadding={16} aria-labelledby={title}>
       <PopoverHeader>
-        <PopoverTitle>{term.term}</PopoverTitle>
+        <PopoverTitle id={title}>{term.term}</PopoverTitle>
         <PopoverDescription>{term.definition}</PopoverDescription>
       </PopoverHeader>
     </PopoverContent>

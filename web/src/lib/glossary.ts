@@ -1,5 +1,5 @@
-import { REFERENCE_SCORE } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
+import { REFERENCE_SCORE } from '@/lib/reference';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {

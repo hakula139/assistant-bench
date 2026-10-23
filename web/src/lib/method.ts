@@ -1,6 +1,7 @@
-import type { Scorer, VotesConfig } from '@/lib/family';
-import { REFERENCE_SCORE } from '@/lib/forest';
+import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatScore } from '@/lib/format';
+import { terms } from '@/lib/glossary';
+import { REFERENCE_SCORE } from '@/lib/reference';
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
@@ -8,6 +9,8 @@ export interface MethodStep {
   step: 'text' | 'html' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
   title: string;
   detail: string;
+  /** What the step means on a family's board, which its detail opens. */
+  hint?: string;
 }
 
 /** How each scorer describes its boards, so a new scorer adds an entry here. */
@@ -21,53 +24,101 @@ const languages: Record<NonNullable<VotesConfig['language']>, string> = {
   zh: 'Chinese',
 };
 
-/** What a voted output must pass to reach the rater, in the order `failed_gates` checks it. */
-export function gateLabels({ language, gates }: VotesConfig): string[] {
+const anyOf = new Intl.ListFormat('en', { type: 'disjunction' });
+
+/** Keeps a range's two bounds and its unit on one line, where a break may follow an en dash. */
+const joiner = String.fromCodePoint(0x2060);
+/** A no-break space keeps each bound on the line of its unit. */
+const characters = ' characters';
+
+/** What makes a voted output lose its pairs without a vote, the checks `failed_gates` makes. */
+export function gateRule({ language, gates }: VotesConfig): string {
   const { min_chars: min, max_chars: max } = gates;
   const length =
     min !== undefined && max !== undefined
-      ? `${formatCount(min)}–${formatCount(max)} characters`
+      ? `outside ${formatCount(min)}–${joiner}${formatCount(max)}${characters}`
       : min !== undefined
-        ? `at least ${formatCount(min)} characters`
+        ? `shorter than ${formatCount(min)}${characters}`
         : max !== undefined
-          ? `at most ${formatCount(max)} characters`
+          ? `longer than ${formatCount(max)}${characters}`
           : undefined;
-  return [
-    'finished, not blank',
-    ...(length ? [length] : []),
-    ...(language ? [`in ${languages[language]}`] : []),
-    ...(gates.script === 'hans' ? ['Simplified script'] : []),
-  ];
+  const problems = [
+    'blank',
+    'cut off',
+    length,
+    language && `not in ${languages[language]}`,
+    gates.script === 'hans' ? 'written with Traditional characters' : undefined,
+  ].filter((problem) => problem !== undefined);
+  return `An output loses its pairs without a vote if it is ${anyOf.format(problems)}.`;
 }
 
-const runs: Record<VotesConfig['render'], MethodStep> = {
-  text: { step: 'text', title: 'Run', detail: 'a text output per case' },
-  html: { step: 'html', title: 'Run', detail: 'an HTML page per case' },
+const runs: Record<VotesConfig['render'], { step: MethodStep['step']; answer: string }> = {
+  text: { step: 'text', answer: 'in text' },
+  html: { step: 'html', answer: 'with an HTML page' },
 };
 
-/** A scorer's stages, filled in with one family's render and gates when it is given. */
-export function methodSteps(scorer: Scorer, config?: VotesConfig): MethodStep[] {
+/**
+ * A scorer's stages in a few words each, alike on every board. Given a family's config, each step
+ * also carries a hint saying what it means on that family's board.
+ */
+export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[] {
   switch (scorer) {
-    case 'votes':
+    case 'votes': {
+      const votes = config?.scorer === 'votes' ? config : undefined;
+      const run = runs[votes?.render ?? 'text'];
       return [
-        config ? runs[config.render] : { ...runs.text, detail: 'an output per case' },
+        {
+          step: run.step,
+          title: 'Run',
+          detail: 'same cases for all',
+          hint: votes && `Every system answers each case ${run.answer}.`,
+        },
         {
           step: 'gates',
           title: 'Gates',
-          detail: config ? gateLabels(config).join(', ') : 'checked before any vote',
+          detail: 'failing outputs lose',
+          hint: votes && gateRule(votes),
         },
-        { step: 'pairs', title: 'Blind pairs', detail: 'one rater' },
+        {
+          step: 'pairs',
+          title: 'Blind pairs',
+          detail: 'system names hidden',
+          hint:
+            votes &&
+            'One rater votes on two outputs for a case without seeing which systems wrote them.',
+        },
         {
           step: 'scores',
           title: 'Scores',
-          detail: `Bradley-Terry, reference at ${formatScore(REFERENCE_SCORE)}, 95% intervals`,
+          detail: 'ranked from votes',
+          hint:
+            votes &&
+            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The reference system is fixed at ${formatScore(REFERENCE_SCORE)}.`,
         },
       ];
-    case 'tests':
+    }
+    case 'tests': {
+      const tests = config?.scorer === 'tests' ? config : undefined;
       return [
-        { step: 'trial', title: 'Run', detail: 'one trial per task' },
-        { step: 'tests', title: 'Tests', detail: "the task's own tests" },
-        { step: 'rate', title: 'Pass rate', detail: 'errored trials fail' },
+        {
+          step: 'trial',
+          title: 'Run',
+          detail: 'same tasks for all',
+          hint: tests && 'Every system attempts each task.',
+        },
+        {
+          step: 'tests',
+          title: 'Tests',
+          detail: "each task's own tests",
+          hint: tests && "The task's own tests score each trial.",
+        },
+        {
+          step: 'rate',
+          title: 'Pass rate',
+          detail: 'share of trials passed',
+          hint: tests && terms.passRate.definition,
+        },
       ];
+    }
   }
 }

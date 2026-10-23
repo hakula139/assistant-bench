@@ -10,7 +10,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  REFERENCE_SCORE,
   clip,
   forestTicks,
   legendMarks,
@@ -19,6 +18,7 @@ import {
   type LegendMark,
 } from '@/lib/forest';
 import { formatInterval, formatScore } from '@/lib/format';
+import { REFERENCE_SCORE } from '@/lib/reference';
 
 interface ForestProps {
   rows: ForestRow[];
