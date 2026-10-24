@@ -51,7 +51,7 @@ from assistant_bench.scoring.gates import failed_gates
 # Collection matches each trial's version exactly, while Harbor reuses a trial whose
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
-AGENT_TIMEOUT_SEC = 900.0
+AGENT_TIMEOUT_SEC = 3600.0
 WORKSPACE = '/app'
 
 N_CONCURRENT_TRIALS = 8

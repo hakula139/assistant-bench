@@ -61,4 +61,6 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 
 ## Concurrency
 
-Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time. A case family's job runs at most eight trials at once and a task family's job four, since each task trial can hold an agent and a verifier container. A rendered case has a 900-second operational timeout, and authored tasks set `[agent] timeout_sec`. Terminus uses its native completion loop without a family turn cutoff. Harbor retries a failed trial once.
+Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time. A case family's job runs at most eight trials at once and a task family's job four, since each task trial can hold an agent and a verifier container.
+
+A rendered case has a one-hour operational watchdog, while authored tasks keep their `[agent] timeout_sec`. Harbor cancels the agent at that deadline. HTTP read timeouts are disabled, while connection, write, and pool timeouts remain finite. Terminus uses its native completion loop without a family turn cutoff. Harbor retries eligible failures once and excludes agent timeouts.

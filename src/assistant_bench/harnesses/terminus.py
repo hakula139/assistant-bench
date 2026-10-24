@@ -118,6 +118,7 @@ class Terminus(Terminus2):
         constructor_kwargs: dict[str, Any] = {
             **(llm_kwargs or {}),
             'client': self._endpoint_client,
+            'timeout': self._endpoint_client.timeout,
         }
         if temperature is not None:
             constructor_kwargs['temperature'] = temperature
