@@ -6,7 +6,7 @@ CREATE TABLE deployment (
     mode TEXT NOT NULL CHECK (mode IN ('local', 'public')),
     local_key_id TEXT,
     quota_body TEXT NOT NULL CHECK (json_valid(quota_body) AND json_type(quota_body) = 'array'),
-    attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 0 AND 7776000000),
+    attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 0 AND 5184000000),
     schema_version INTEGER NOT NULL CHECK (schema_version = 1),
     CHECK ((mode = 'local' AND local_key_id IS NOT NULL AND length(local_key_id) > 0)
         OR (mode = 'public' AND local_key_id IS NULL))

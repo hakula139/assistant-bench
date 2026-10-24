@@ -60,14 +60,39 @@ class LedgerMaintenance:
             ),
             Statement(
                 sql="""
+                    DELETE FROM claims WHERE id IN (
+                        SELECT e.claim_id FROM claim_expiry e
+                        WHERE e.expires_at <= ? AND NOT EXISTS (
+                            SELECT 1 FROM pair_leases l WHERE l.claim_id = e.claim_id)
+                        ORDER BY e.expires_at, e.claim_id LIMIT 250)
+                    """,
+                params=(now,),
+            ),
+            Statement(
+                sql="""
                     DELETE FROM sessions WHERE id IN (
-                        SELECT s.id FROM sessions s WHERE s.created_at <= ? - 2592000000
-                            AND s.import_source IS NULL
-                            AND NOT EXISTS (SELECT 1 FROM vote_receipts r
-                                WHERE r.session_id = s.id)
+                        SELECT e.session_id FROM session_expiry e
+                        WHERE e.expires_at <= ?
                             AND NOT EXISTS (SELECT 1 FROM pair_leases l
-                                WHERE l.session_id = s.id)
-                        ORDER BY s.created_at, s.id LIMIT 250)
+                                WHERE l.session_id = e.session_id)
+                        ORDER BY e.expires_at, e.session_id LIMIT 250)
+                    """,
+                params=(now,),
+            ),
+            Statement(
+                sql="""
+                    DELETE FROM actors WHERE id IN (
+                        SELECT e.actor_id FROM actor_expiry e
+                        WHERE e.expires_at <= ?
+                            AND NOT EXISTS (SELECT 1 FROM sessions s
+                                WHERE s.actor_id = e.actor_id)
+                            AND NOT EXISTS (SELECT 1 FROM credentials c
+                                WHERE c.actor_id = e.actor_id)
+                            AND NOT EXISTS (SELECT 1 FROM claims c
+                                WHERE c.canonical_actor = e.actor_id)
+                            AND NOT EXISTS (SELECT 1 FROM admission_results a
+                                WHERE a.actor_id = e.actor_id)
+                        ORDER BY e.expires_at, e.actor_id LIMIT 250)
                     """,
                 params=(now,),
             ),
