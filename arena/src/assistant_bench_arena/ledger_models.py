@@ -1,6 +1,6 @@
 """Private ledger facts and control-plane inputs, independent of browser views."""
 
-from typing import Annotated, Literal, Self, get_args
+from typing import Annotated, Final, Literal, Self, get_args
 
 from pydantic import (
     Field,
@@ -22,6 +22,10 @@ from assistant_bench_arena.snapshots import (
     Presentation,
     PublicApproval,
 )
+
+
+MODERATION_CHUNK_SIZE: Final = 250
+"""Maximum reviewed receipt targets applied by one moderation command."""
 
 
 type SqlValue = StrictStr | StrictInt | StrictFloat | None
