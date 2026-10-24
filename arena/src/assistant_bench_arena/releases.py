@@ -200,6 +200,7 @@ def validate_evaluation(bundle: EvaluationBundle) -> None:
     systems = {system.id: system for system in bundle.systems}
     outputs = {output.key: output for output in bundle.outputs}
     numerics = {(row.section, row.key): row for row in bundle.numerics}
+
     if (
         evaluation.cases != len(cases)
         or len(cases) != len(bundle.cases)
@@ -213,6 +214,7 @@ def validate_evaluation(bundle: EvaluationBundle) -> None:
         raise ValueError('The evaluation counts and unique sections must agree.')
 
     manifest = evaluation.manifest
+
     if (
         manifest.family.name != evaluation.family
         or manifest.policy != bundle.policy
@@ -302,6 +304,7 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
     output_approvals = (
         {row.output_key: row for row in approval.outputs} if approval else {}
     )
+
     if approval is not None and (
         approval.family != bundle.evaluation.family
         or set(case_approvals) != set(cases)
@@ -311,6 +314,7 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
 
     for key, case in cases.items():
         document = presentation.cases[key]
+
         if case.instruction_digest != digest(document.instruction) or key != digest(
             {
                 'source_digest': case.metadata.source_digest,
@@ -324,6 +328,7 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
 
         if approval is not None:
             consent = case_approvals[key]
+
             if (
                 consent.source != case.source
                 or consent.instruction_digest != case.instruction_digest
