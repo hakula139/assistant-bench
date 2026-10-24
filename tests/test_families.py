@@ -74,7 +74,7 @@ class TestLoadFamily:
             scorer = "votes"
             aspect = "writing"
             display_name = "Family F"
-            systems = ["large", "small"]
+            systems = ["small", "large"]
             samples = 2
             max_output_tokens = 300
             reference = "large"
@@ -94,7 +94,7 @@ class TestLoadFamily:
                 scorer='votes',
                 aspect='writing',
                 display_name='Family F',
-                systems=['large', 'small'],
+                systems=['small', 'large'],
                 samples=2,
                 max_output_tokens=300,
                 reference='large',
@@ -312,6 +312,37 @@ class TestLoadFamily:
                 'Family `f`: a `cases.jsonl` family yields replies, so set `render` '
                 'to `"text"` or `"html"`.',
                 id='cases-with-diffs',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large", "small", "large"]
+                samples = 1
+                max_output_tokens = 300
+                reference = "large"
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                id='repeated-voted-systems',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "tests"
+                display_name = "Family F"
+                systems = ["large", "small", "large"]
+                samples = 1
+                harness = "terminus-2"
+                max_turns = 10
+                max_output_tokens = 300
+                """,
+                False,
+                True,
+                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                id='repeated-tested-systems',
             ),
             pytest.param(
                 'f',

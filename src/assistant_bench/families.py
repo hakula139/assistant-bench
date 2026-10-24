@@ -48,6 +48,13 @@ class _Settings(BaseModel):
     categories: list[str] = []
     public: bool = False
 
+    @model_validator(mode='after')
+    def _check_systems(self) -> Self:
+        repeated = sorted({s for s in self.systems if self.systems.count(s) > 1})
+        if repeated:
+            raise ValueError(f'`systems` repeats {code(repeated)}')
+        return self
+
 
 type Language = Literal['en', 'zh']
 
