@@ -31,7 +31,6 @@ class NativeStatement(Protocol):
 
 class NativeDatabase(Protocol):
     def prepare(self, sql: str) -> NativeStatement: ...
-    async def batch(self, statements: list[NativeStatement]) -> object: ...
 
 
 class DatabaseResult(BaseModel):
@@ -49,25 +48,6 @@ class D1Transport:
 
     async def query(self, statement: Statement) -> list[Row]:
         return (await self._run(statement)).results
-
-    async def batch(self, statements: list[Statement]) -> None:
-        """Initialize the current schema and profile in one native transaction."""
-        prepared = [
-            self.database.prepare(statement.sql).bind(*statement.params)
-            for statement in statements
-        ]
-
-        try:
-            value = await self.database.batch(prepared)
-        except JsException as error:
-            reason = _rejection(error)
-
-            if reason is not None:
-                raise CommandRejected(reason) from None
-
-            raise
-
-        TypeAdapter(list[DatabaseResult]).validate_python(value)
 
     async def _run(self, statement: Statement) -> DatabaseResult:
         try:
