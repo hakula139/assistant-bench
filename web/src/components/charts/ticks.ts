@@ -6,10 +6,10 @@ const MANTISSAS = [[1, 2, 5], [1, 3], [1]];
 /**
  * Picks at most `count` ticks for a log axis over `[min, max]`: 1, 2, and 5 per decade where they
  * fit, then fewer per decade, then every few powers of ten as d3-scale's log ticks do. Linear ticks
- * serve only a span too short to hold two of those.
+ * serve a span too short to hold two of those, or a domain starting at zero on a linear axis.
  */
 export function logTicks([min, max]: [number, number], count: number): number[] {
-  const values = max / min >= 3 ? decadeTicks(min, max, count) : [];
+  const values = min > 0 && max / min >= 3 ? decadeTicks(min, max, count) : [];
   return values.length >= 2 ? values : linearTicks(min, max, count);
 }
 

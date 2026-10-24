@@ -15,9 +15,10 @@ function subscribe(onChange: () => void) {
  * Reads and writes one query parameter, so filters survive reloads and shared links.
  *
  * The static render sees no query string, so it shows `fallback` until hydration reads the URL.
- * Setting `fallback` removes the parameter.
+ * Setting `fallback` removes the parameter. A null fallback distinguishes an absent parameter
+ * from every string value, including the empty string.
  */
-export function useSearchParam(name: string, fallback: string) {
+export function useSearchParam<T extends string | null>(name: string, fallback: T) {
   const value = useSyncExternalStore(
     subscribe,
     () => new URLSearchParams(window.location.search).get(name) ?? fallback,
@@ -25,9 +26,9 @@ export function useSearchParam(name: string, fallback: string) {
   );
 
   const setValue = useCallback(
-    (next: string) => {
+    (next: string | T) => {
       const url = new URL(window.location.href);
-      if (next === fallback) {
+      if (next === null || next === fallback) {
         url.searchParams.delete(name);
       } else {
         url.searchParams.set(name, next);

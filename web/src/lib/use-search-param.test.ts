@@ -39,4 +39,26 @@ describe('useSearchParam', () => {
 
     expect([loaded, result.current[0]]).toEqual(['2026-10-21', 'latest']);
   });
+
+  test.each(['all', '', 'category:all', 'a&b + %'])(
+    'distinguishes absent category from the literal %j',
+    (category) => {
+      const { result } = renderHook(() => useSearchParam('category', null));
+      expect(result.current[0]).toBeNull();
+
+      act(() => {
+        result.current[1](category);
+      });
+
+      expect(result.current[0]).toBe(category);
+      expect(new URLSearchParams(window.location.search).get('category')).toBe(category);
+
+      act(() => {
+        result.current[1](null);
+      });
+
+      expect(result.current[0]).toBeNull();
+      expect(window.location.search).toBe('?round=2026-10-21');
+    },
+  );
 });

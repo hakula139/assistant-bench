@@ -143,21 +143,27 @@ export function placeLabels(
 const extent = (values: number[]): [number, number] => [Math.min(...values), Math.max(...values)];
 
 /**
- * Score with its interval against a cost or latency on a log axis. The Pareto frontier is drawn
- * and its systems labelled, while the others name themselves on hover and in the table twin.
+ * Score with its interval against cost or latency, using a linear axis when the metric includes
+ * zero. The Pareto frontier is drawn and its systems labelled, while the others name themselves
+ * on hover and in the table twin.
  */
 export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
   const plot = useCallback(
     ({ width, measure }: PlotFrame): Plot.PlotOptions => {
       const frontier = paretoFrontier(points);
       const xDomain = extent(points.map((point) => point.x));
+      const xOptions: Plot.ScaleOptions = {
+        type: xDomain[0] === 0 ? 'linear' : 'log',
+        domain: xDomain,
+      };
+
       const x = Plot.scale({
         x: {
-          type: 'log',
-          domain: xDomain,
+          ...xOptions,
           range: [MARGIN.left + INSET.x, width - MARGIN.right - INSET.x],
         },
       });
+
       const y = Plot.scale({
         y: {
           domain: [
@@ -168,6 +174,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
           range: [HEIGHT - MARGIN.bottom - INSET.y, MARGIN.top + INSET.y],
         },
       });
+
       const placements = placeLabels(
         frontier,
         points,
@@ -185,7 +192,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
         marginRight: MARGIN.right,
         marginBottom: MARGIN.bottom,
         marginLeft: MARGIN.left,
-        x: { type: 'log', domain: xDomain, inset: INSET.x },
+        x: { ...xOptions, inset: INSET.x },
         y: { domain: y.domain, label: 'Score', grid: true, inset: INSET.y },
         marks: [
           Plot.gridX(ticks),

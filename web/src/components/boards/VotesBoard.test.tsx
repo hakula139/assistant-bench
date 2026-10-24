@@ -13,10 +13,14 @@ import { stubPlotFrame } from '@/test/plot';
 
 const search = vi.hoisted(() => new URLSearchParams());
 vi.mock('@/lib/use-search-param', () => ({
-  useSearchParam: (name: string, fallback: string) => [
+  useSearchParam: (name: string, fallback: string | null) => [
     search.get(name) ?? fallback,
-    (value: string) => {
-      search.set(name, value);
+    (value: string | null) => {
+      if (value === null) {
+        search.delete(name);
+      } else {
+        search.set(name, value);
+      }
     },
   ],
 }));
@@ -301,10 +305,46 @@ describe('VotesBoard', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'message' } });
+    await userEvent.setup().selectOptions(screen.getByLabelText('Category'), 'message');
 
     expect(search.get('category')).toBe('message');
   });
+
+  test.each(['all', '', 'category:all', 'a&b + %'])(
+    'selects literal category %j separately from all categories',
+    async (category) => {
+      const report = await load();
+      const categoryBoard = report.results.categories[0];
+      categoryBoard.category = category;
+      categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
+      const { round, results } = report;
+      stubPlotFrame();
+      renderInDom(
+        <VotesBoard
+          base={BOARD}
+          rounds={[{ round, results }]}
+          names={FIXTURE_NAMES}
+          labels={CASES}
+        />,
+      );
+      const select = screen.getByLabelText<HTMLSelectElement>('Category');
+      const option = [...select.options].find((item) => item.textContent === category);
+      expect(option).toBeDefined();
+
+      fireEvent.change(select, { target: { value: option?.value } });
+
+      expect(search.get('category')).toBe(category);
+      const selected = render(report);
+      expect(text(head(selected))).toMatch(/^ System /);
+      expect(text(parse(selected).querySelector('tbody')?.innerHTML ?? '')).toContain('1,100');
+
+      const aggregate = [...select.options].find((item) => item.textContent === 'All categories');
+      fireEvent.change(select, { target: { value: aggregate?.value } });
+
+      expect(search.has('category')).toBe(false);
+      expect(text(head(render(report)))).toMatch(/^ Rank What Rank means System /);
+    },
+  );
 
   test.each([
     ['95% interval', 'max-lg:hidden'],

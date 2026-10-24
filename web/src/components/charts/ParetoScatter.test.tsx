@@ -67,6 +67,39 @@ describe('ParetoScatter', () => {
 
   afterEach(cleanup);
 
+  test.each([
+    ['mixed free and paid systems', [point('free', 0, 900), point('paid', 1, 1000)]],
+    ['only free systems', [point('free', 0, 900), point('best-free', 0, 1000)]],
+  ])('draws finite positions for %s and keeps their zero-cost points', async (_, points) => {
+    const { container } = render(
+      <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
+    );
+
+    const svg = await vi.waitFor(() => {
+      const found = container.querySelector('svg');
+      expect(found).not.toBeNull();
+      return found as SVGSVGElement;
+    });
+    const positions = [...svg.querySelectorAll('g[aria-label="dot"] circle')].map((dot) => [
+      Number(dot.getAttribute('cx')),
+      Number(dot.getAttribute('cy')),
+    ]);
+    const labels = [...svg.querySelectorAll('g[aria-label="text"] text')].map(
+      (node) => node.textContent,
+    );
+
+    expect(positions).toHaveLength(points.length);
+    expect(positions.flat().every(Number.isFinite)).toBe(true);
+    expect(positions.every(([x]) => x >= 0 && x <= 600)).toBe(true);
+    expect(labels.toSorted()).toEqual(
+      paretoFrontier(points)
+        .map((item) => item.name)
+        .toSorted(),
+    );
+    expect(svg.textContent).toContain('$0');
+    expect(svg.outerHTML).not.toMatch(/NaN|Infinity/);
+  });
+
   test('labels the frontier and its tips by display name', async () => {
     const points = [point('cheap', 1, 900), point('best', 4, 1000), point('dominated', 3, 850)];
 
