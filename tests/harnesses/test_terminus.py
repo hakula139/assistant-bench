@@ -10,7 +10,11 @@ import pytest
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
-from harbor.llms.base import LLMResponse, OutputLengthExceededError
+from harbor.llms.base import (
+    ContextLengthExceededError,
+    LLMResponse,
+    OutputLengthExceededError,
+)
 from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.task import config as task_config
@@ -152,6 +156,33 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
 
 
 class TestTerminus:
+    @pytest.mark.parametrize(
+        ('change', 'message'),
+        [
+            ({'llm_backend': 'tinker'}, 'requires the LiteLLM backend'),
+            ({'model_info': None}, 'requires resolved model capacities'),
+        ],
+        ids=['unsupported-backend', 'missing-capacities'],
+    )
+    def test_rejects_an_incompatible_native_configuration(
+        self,
+        endpoint: StubEndpoint,
+        tmp_path: Path,
+        change: dict[str, Any],
+        message: str,
+    ) -> None:
+        kwargs = options.terminus(make_system(harness='terminus-2')) | change
+
+        with pytest.raises(ValueError, match=message):
+            NativeProbe(
+                logs_dir=tmp_path,
+                model_name='openai/acme/large',
+                extra_env=endpoint.env,
+                **kwargs,
+            )
+
+        assert endpoint.requests == []
+
     def test_keeps_each_systems_context_reserve_when_routes_are_shared(
         self, endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
@@ -335,6 +366,52 @@ class TestTerminus:
             ]
 
     class TestRun:
+        def test_keeps_http_failure_usage_unknown_through_native_retries(
+            self,
+            endpoint: StubEndpoint,
+            responses_agent: NativeProbe,
+            terminal_session: TmuxSession,
+        ) -> None:
+            endpoint.status = 503
+            endpoint.response = {'error': {'message': 'Unavailable.'}}
+            context = AgentContext()
+
+            with pytest.raises(openai.InternalServerError):
+                asyncio.run(responses_agent.execute(terminal_session, context))
+
+            assert len(endpoint.requests) == 3
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+                context.cost_usd,
+            ) == (None, None, None, None)
+            assert context.metadata is not None
+            assert [
+                call['response_status'] for call in context.metadata['responses']
+            ] == [
+                'request_failed',
+                'request_failed',
+                'request_failed',
+            ]
+
+        def test_maps_the_provider_context_error_to_native_context_management(
+            self, endpoint: StubEndpoint, responses_agent: NativeProbe
+        ) -> None:
+            endpoint.status = 400
+            endpoint.response = {
+                'error': {
+                    'code': 'context_length_exceeded',
+                    'message': 'The input context is full.',
+                    'type': 'invalid_request_error',
+                }
+            }
+
+            with pytest.raises(ContextLengthExceededError):
+                asyncio.run(responses_agent.request('Greet me.'))
+
+            assert len(endpoint.requests) == 1
+
         def test_native_budget_reissue_preserves_partial_items_and_all_reported_usage(
             self,
             endpoint: StubEndpoint,
@@ -625,6 +702,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
+                temperature=0.7,
                 **options.terminus(system),
             )
 
@@ -632,6 +710,7 @@ class TestTerminus:
 
             (request,) = endpoint.requests
             assert request.body['model'] == system.route
+            assert request.body['temperature'] == 0.7
             if api == 'openai-responses':
                 assert request.path == '/v1/responses'
                 assert request.body['reasoning'] == {'effort': effort}
