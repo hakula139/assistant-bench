@@ -106,6 +106,7 @@ class TestNativeRuntime:
                 assert inspected == {
                     'heavy_import': False,
                     'actual_app': True,
+                    'direct_entrypoint': runtime.coverage is None,
                     'actual_renderer': 'assistant_bench_arena.rendering',
                 }
                 points = point_snapshot(

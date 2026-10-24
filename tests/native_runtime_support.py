@@ -104,7 +104,9 @@ _CONTROL = """
                     'heavy_import': any(name in sys.modules for name in (
                         'numpy', 'scipy', 'harbor', 'assistant_bench',
                     )),
-                    'actual_app': Default.__bases__ == (app.Default,),
+                    'actual_app': Default is app.Default
+                        or Default.__bases__ == (app.Default,),
+                    'direct_entrypoint': Default is app.Default,
                     'actual_renderer': render.Default.__module__,
                 }})
             if payload.get('operation') == 'configure_provider':
@@ -352,9 +354,8 @@ class NativeRuntime:
         (self.directory / 'src' / 'test_coverage.py').write_text(
             dedent(instrumentation)
         )
-        (self.directory / 'src' / 'test_control.py').write_text(dedent(_CONTROL))
-        (self.directory / 'src' / 'test_renderer.py').write_text(
-            dedent("""
+        control = dedent(_CONTROL)
+        renderer_source = dedent("""
                 from test_coverage import finish, report, start
 
                 start()
@@ -378,7 +379,19 @@ class NativeRuntime:
                     async def dump(self):
                         return report()
             """)
-        )
+        if self.coverage is None:
+            control += dedent("""
+
+                Default = AppDefault
+                Management = AppManagement
+                RenderLookup = AppRenderLookup
+            """)
+            renderer_source += dedent("""
+
+                Default = RenderDefault
+            """)
+        (self.directory / 'src' / 'test_control.py').write_text(control)
+        (self.directory / 'src' / 'test_renderer.py').write_text(renderer_source)
         assets = self.directory / 'assets'
         assets.mkdir()
         (assets / 'arena-families.json').write_text(
