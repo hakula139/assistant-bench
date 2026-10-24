@@ -1,7 +1,5 @@
 # Data
 
-What the bench stores and where each kind of data lives.
-
 ## Data Classes
 
 Each case or task declares its `source`, which determines where it and everything generated from it may live:

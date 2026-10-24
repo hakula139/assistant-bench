@@ -19,13 +19,11 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 .
 ├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
 ├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
-├── docs/                                   # Guides, conventions, design, and research
-├── families/                               # One directory per family and leaderboard, described in docs/guide/authoring.md
+├── families/                               # One directory per family and leaderboard
 ├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
 ├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
-├── tests/                                  # pytest suite mirroring the package, with fixtures under tests/fixtures/
 └── web/                                    # The results site and the local vote page, a pnpm workspace package
 ```
 
@@ -50,9 +48,9 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
-- Commit only synthetic or public cases. As [Data](docs/conventions/data.md) describes, transcript-derived and held-out cases, their outputs, and Harbor jobs live in the data directory, and a test fails if a committed case file or task holds a private source.
+- Commit only synthetic or public cases. Keep transcript-derived and held-out cases, all outputs, and Harbor jobs in the data directory, as [Data](docs/conventions/data.md) describes.
 - Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
-- Keep the lockfiles and requirements files on public registries, with `pyproject.toml` naming PyPI and `.npmrc` naming npm, as a test fails if any lockfile or requirements file in the repository or under `families/` names another host.
+- Keep lockfiles and requirements files throughout the repository, including `families/`, on public registries, with `pyproject.toml` naming PyPI and `.npmrc` naming npm.
 - Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config. Harbor writes each agent's `kwargs` and `env` into the job's `config.json`, so a secret reaches an agent only through a file one of those values names.
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort, or the model's snapshot. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and the data directory.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.

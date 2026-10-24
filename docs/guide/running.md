@@ -96,7 +96,9 @@ Each record holds:
 uv run bench serve
 ```
 
-`bench serve` collects every family scored by votes that has jobs, then builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for every such family that has outputs, and it runs until interrupted. It reads the outputs at start, so restart it after a run. Open that address exactly, since the API admits no other host. A session runs until every case has a vote, and each vote is recorded as soon as it is cast. [Voting](voting.md) covers the keys and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
+`bench serve` collects every family scored by votes that has jobs, then builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for each family with outputs. It runs until interrupted and reads outputs at start, so restart it after a run. Open that address exactly, since the API admits no other host.
+
+A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ## Closing a Round
 

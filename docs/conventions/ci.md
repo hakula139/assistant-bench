@@ -1,7 +1,5 @@
 # CI
 
-Learn what each GitHub Actions workflow runs, how the site deploys, and how workflow steps are written.
-
 ## Checks
 
 CI runs on pushes to `main`, pull requests, and manual dispatch:
