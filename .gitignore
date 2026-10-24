@@ -1,5 +1,6 @@
 # Build output
 .coverage
+.coverage.*
 coverage/
 coverage.xml
 dist/
