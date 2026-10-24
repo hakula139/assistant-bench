@@ -367,6 +367,19 @@ BEGIN
     JOIN claims c ON c.id = t.claim_id JOIN evidence_events e ON e.command_id = NEW.command_id
     WHERE t.plan_id = NEW.plan_id;
 
+    INSERT INTO event_targets(event_seq, ordinal, receipt_seq, claim_id,
+        expected_version, transition, lease_id)
+    SELECT e.seq, p.target_count + row_number() OVER (ORDER BY l.id) - 1,
+        l.repeat_of, l.claim_id, c.version, 'revoke', l.id
+    FROM pair_leases l JOIN claims c ON c.id = l.claim_id
+    JOIN attribution_plans p ON p.id = NEW.plan_id
+    JOIN evidence_events e ON e.command_id = NEW.command_id
+    WHERE l.status = 'pending' AND l.repeat_of IN (
+        SELECT selected_receipt FROM attribution_targets
+        WHERE plan_id = NEW.plan_id AND claim_id != winner_id)
+        AND NOT EXISTS (SELECT 1 FROM event_targets target
+            WHERE target.event_seq = e.seq AND target.lease_id = l.id);
+
     UPDATE pair_leases SET status = 'revoked' WHERE id IN (
         SELECT lease_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
     UPDATE session_state SET version = version + 1, current_lease = NULL WHERE current_lease IN (
@@ -379,6 +392,11 @@ BEGIN
     UPDATE claims SET canonical_actor = (SELECT owner_id FROM attribution_plans WHERE id = NEW.plan_id),
         current_lease = NULL, version = version + 1
     WHERE id IN (SELECT claim_id FROM attribution_targets WHERE plan_id = NEW.plan_id);
+    UPDATE claims SET current_lease = NULL, version = version + 1
+    WHERE id NOT IN (SELECT claim_id FROM attribution_targets WHERE plan_id = NEW.plan_id)
+        AND current_lease IN (SELECT lease_id FROM event_targets
+            WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+                AND transition = 'revoke');
     UPDATE actor_resolution SET canonical_actor = (SELECT owner_id FROM attribution_plans WHERE id = NEW.plan_id),
         event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE family = (SELECT family FROM attribution_plans WHERE id = NEW.plan_id)
