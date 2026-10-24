@@ -23,7 +23,11 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 
 Letter and digit shortcuts work while the voting panel has focus. Each new pair focuses the panel, and leaving the note with `Escape` returns focus there. Header controls and open popovers keep their own keyboard behavior.
 
-An issue counts against the output you tag, whatever your verdict. Each family lists its own issues, such as wrong facts or a wrong tone on writing and off-scope changes or weak tests on code, and each output's Issues button shows what each issue means and toggles the same issues, which is how a phone tags them. A family that lists none shows no Issues button. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
+An issue counts against the output you tag, whatever your verdict. Each family lists its own issues, such as wrong facts or a wrong tone on writing and off-scope changes or weak tests on code. Each output's Issues button explains and toggles them, including on phones. A family that lists none shows no Issues button.
+
+The note stays in the vote store, where no report reads it.
+
+Outputs appear exactly as written. The Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
 
 ## Diffs
 
