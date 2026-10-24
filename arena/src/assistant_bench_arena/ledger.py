@@ -1219,7 +1219,35 @@ class Ledger:
         if not rows or rows[0]['family'] != family:
             raise CommandRejected('conflict')
 
-        return _decode(Export, rows[0], 'policy')
+        counts = await self.manifest(export_id)
+        sections: dict[str, JsonValue] = {
+            str(key): value for key, value in counts.items()
+        }
+        return _decode(Export, {**rows[0], 'sections': sections}, 'policy')
+
+    async def manifest(self, export_id: str) -> dict[ExportSection, int]:
+        """Read source counts independently of downloaded pages."""
+        exists = await self._rows(
+            'SELECT id FROM analysis_exports WHERE id = ?', export_id
+        )
+
+        if not exists:
+            raise CommandRejected('conflict')
+
+        counts: dict[ExportSection, int] = {}
+
+        for section, view in _EXPORT_VIEWS.items():
+            rows = await self._rows(
+                f'SELECT count(*) AS count FROM {view} WHERE export_id = ?', export_id
+            )
+            count = rows[0]['count']
+
+            if not isinstance(count, int):
+                raise TypeError('A frozen section count must be an integer.')
+
+            counts[section] = count
+
+        return counts
 
     async def freshness(self, export_id: str) -> Literal['current', 'stale', 'unknown']:
         rows = await self._rows(

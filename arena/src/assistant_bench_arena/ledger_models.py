@@ -1,6 +1,6 @@
 """Private ledger facts and control-plane inputs, independent of browser views."""
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 from pydantic import (
     Field,
@@ -623,30 +623,6 @@ class ImportPlan(Record):
         return self
 
 
-class Export(Record):
-    id: str
-    family: str
-    schema_version: Literal[1]
-    namespace: str
-    created_at: Milliseconds
-    event_cutoff: NonNegativeInt
-    receipt_cutoff: NonNegativeInt
-    import_cutoff: NonNegativeInt
-    import_source_cutoff: NonNegativeInt
-    family_revision: NonNegativeInt
-    analysis_sequence: NonNegativeInt
-    evaluation_id: str
-    publication_id: str
-    point_id: str
-    policy_id: str
-    policy: AnalysisPolicy
-
-
-class Page(Record):
-    rows: list[Row]
-    cursor: str | None
-
-
 type ExportSection = Literal[
     'evaluation',
     'publication',
@@ -664,6 +640,39 @@ type ExportSection = Literal[
     'import_sources',
     'import_rows',
 ]
+
+
+class Export(Record):
+    id: str
+    family: str
+    schema_version: Literal[1]
+    namespace: str
+    created_at: Milliseconds
+    event_cutoff: NonNegativeInt
+    receipt_cutoff: NonNegativeInt
+    import_cutoff: NonNegativeInt
+    import_source_cutoff: NonNegativeInt
+    family_revision: NonNegativeInt
+    analysis_sequence: NonNegativeInt
+    evaluation_id: str
+    publication_id: str
+    point_id: str
+    policy_id: str
+    policy: AnalysisPolicy
+    sections: dict[ExportSection, NonNegativeInt]
+    """Authoritative row counts derived from the immutable frozen views."""
+
+    @model_validator(mode='after')
+    def complete_sections(self) -> Self:
+        if set(self.sections) != set(get_args(ExportSection.__value__)):
+            raise ValueError('An export manifest must name every section exactly once.')
+
+        return self
+
+
+class Page(Record):
+    rows: list[Row]
+    cursor: str | None
 
 
 class Cursor(Record):
