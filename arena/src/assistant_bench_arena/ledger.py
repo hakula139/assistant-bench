@@ -15,6 +15,7 @@ from assistant_bench_arena.ledger_models import (
     AttributionClaim,
     AttributionPlan,
     AttributionTarget,
+    BootstrapConfiguration,
     Case,
     Context,
     Credential,
@@ -121,17 +122,15 @@ class Ledger:
         local_key_id: str | None = None,
     ) -> None:
         """Initialize an empty database before any serving command is exposed."""
-        if mode == 'public' and (attribution_ms is None or attribution_ms <= 0):
-            raise ValueError(
-                'A public profile requires an explicit attribution lifetime.'
-            )
+        config = BootstrapConfiguration(
+            namespace=namespace,
+            mode=mode,
+            quotas=quotas,
+            attribution_ms=attribution_ms,
+            local_key_id=local_key_id,
+        )
 
-        if (mode == 'local' and not local_key_id) or (
-            mode == 'public' and local_key_id is not None
-        ):
-            raise ValueError('Only a local profile requires a keyring identity.')
-
-        lifetime = attribution_ms or 0
+        lifetime = config.attribution_ms or 0
         quota_body = canonical(
             [
                 quota.model_dump(mode='json')

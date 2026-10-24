@@ -174,6 +174,37 @@ class Quota(Record):
     limit: Annotated[int, Field(strict=True, gt=0)]
 
 
+class BootstrapConfiguration(Record):
+    namespace: Identifier
+    mode: Mode
+    quotas: tuple[Quota, ...]
+    attribution_ms: Annotated[int, Field(strict=True, ge=0, le=5_184_000_000)] | None
+    """Live keyed association lifetime, at most 60 days."""
+
+    local_key_id: Identifier | None
+
+    @model_validator(mode='after')
+    def profile(self) -> Self:
+        if self.mode == 'public' and not self.attribution_ms:
+            raise ValueError(
+                'A public profile requires an explicit attribution lifetime.'
+            )
+
+        if (self.mode == 'local' and self.local_key_id is None) or (
+            self.mode == 'public' and self.local_key_id is not None
+        ):
+            raise ValueError('Only a local profile requires a keyring identity.')
+
+        keys = {
+            (quota.operation, quota.scope, quota.window_ms) for quota in self.quotas
+        }
+
+        if len(keys) != len(self.quotas):
+            raise ValueError('Quota policies must have distinct operation windows.')
+
+        return self
+
+
 class Attribution(Record):
     version: Identifier
     kind: Literal['exact', 'prefix']
