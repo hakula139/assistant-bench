@@ -30,6 +30,7 @@ function decadeTicks(min: number, max: number, count: number): number[] {
       return values;
     }
   }
+
   const low = Math.ceil(Math.log10(min));
   const high = Math.floor(Math.log10(max));
   for (let hint = Math.min(high - low, count); hint > 0; hint--) {
@@ -38,6 +39,7 @@ function decadeTicks(min: number, max: number, count: number): number[] {
       return exponents.map((exponent) => 10 ** exponent);
     }
   }
+
   return [];
 }
 
@@ -49,5 +51,6 @@ function linearTicks(min: number, max: number, count: number): number[] {
       return values;
     }
   }
+
   return [min, max];
 }

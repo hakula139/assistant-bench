@@ -42,9 +42,11 @@ class Endpoint(BaseModel):
     base_url: HttpUrl = Field(validation_alias=BASE_URL_VAR)
     key_file: FilePath = Field(validation_alias=KEY_FILE_VAR)
     ca_file: FilePath | None = Field(default=None, validation_alias=CA_FILE_VAR)
+
     headers: Json[dict[str, str]] | None = Field(
         default=None, validation_alias=HEADERS_VAR
     )
+
     local_address: IPvAnyAddress | None = Field(
         default=None, validation_alias=LOCAL_ADDRESS_VAR
     )
@@ -73,6 +75,7 @@ class Endpoint(BaseModel):
             if self.local_address
             else None
         )
+
         return AsyncOpenAI(
             base_url=str(self.base_url),
             api_key=self.api_key(),

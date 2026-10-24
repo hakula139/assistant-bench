@@ -7,7 +7,6 @@ from assistant_bench.families import Settings
 
 
 def generate(system: System, settings: Settings) -> dict[str, Any]:
-    """Return the kwargs that send `system`'s request to the endpoint."""
     assert settings.max_output_tokens is not None
     return _labels(system) | {
         'effort': system.effort,
@@ -17,7 +16,6 @@ def generate(system: System, settings: Settings) -> dict[str, Any]:
 
 
 def terminus(system: System, settings: Settings) -> dict[str, Any]:
-    """Return the kwargs that run `system` as terminus-2."""
     assert settings.max_turns is not None
     assert settings.max_output_tokens is not None
     values = _labels(system) | {
@@ -26,6 +24,7 @@ def terminus(system: System, settings: Settings) -> dict[str, Any]:
         'record_terminal_session': False,
         'suppress_max_turns_warning': True,
     }
+
     if system.effort is not None:
         values['reasoning_effort'] = system.effort
     return values

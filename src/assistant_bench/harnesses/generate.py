@@ -19,8 +19,6 @@ OUTPUT_FILE = 'output.txt'
 
 
 class GenerateOptions(Labels):
-    """The agent's `kwargs`, adding the request settings to the trial labels."""
-
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int

@@ -23,30 +23,30 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
 class _Settings(BaseModel):
-    """Settings every family shares.
-
-    `aspect` names the skill the family measures, which the site groups families
-    by and validates, and a public family's ID starts with it. `display_name` is
-    the family's short name within its aspect, or its whole name without one.
-    `categories` lists the categories its cases may carry, which reports publish,
-    and `public` says whether the public site lists the family.
-
-    `harness` names the agent that runs every listed system of a task family,
-    and `max_turns` bounds that agent's turns, while a case family runs every
-    system as `generate`.
-    """
+    """Settings every family shares."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 
     aspect: str | None = None
+    """Site grouping and public family ID prefix, validated by the site."""
+
     display_name: str = Field(min_length=1)
+    """Short name within the aspect, or the whole name without one."""
+
     systems: list[str] = []
     samples: int = Field(ge=1)
+
     harness: str | None = None
+    """Agent for every listed task-family system. Cases always use `generate`."""
+
     max_turns: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
+
     categories: list[str] = []
+    """Allowed case categories, published in reports."""
+
     public: bool = False
+    """Whether the public site lists the family."""
 
     @model_validator(mode='after')
     def _check_systems(self) -> Self:
@@ -92,16 +92,14 @@ class Gate(StrEnum):
 
 
 class Gates(BaseModel):
-    """Eligibility bounds for voted outputs, in characters of the stripped text.
-
-    `script = "hans"` rejects Traditional-only characters the instruction lacks.
-    """
+    """Eligibility bounds for voted outputs, in characters of the stripped text."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 
     min_chars: int | None = Field(default=None, ge=1)
     max_chars: int | None = Field(default=None, ge=1)
     script: Literal['hans'] | None = None
+    """Rejects Traditional-only characters absent from the instruction."""
 
     @model_validator(mode='after')
     def _check_bounds(self) -> Self:
@@ -117,24 +115,24 @@ class Gates(BaseModel):
 
 
 class VotesSettings(_Settings):
-    """A family ranked by the owner's blind pairwise votes.
-
-    `reference` names the listed system whose score anchors the board at
-    `ranking.ANCHOR` when the round ranks it, and otherwise the most-voted
-    system anchors in its place. `render` says whether the vote page shows
-    outputs as text, as sandboxed HTML, or as diffs, which only a task family
-    yields, and `language` is the language every output must be written in,
-    which the gates check when it is set. A task family's only gate is its
-    tests, so it sets neither `language` nor `gates`. `defects` lists the
-    issues the owner can tag an output with, in the vote page's key order.
-    """
+    """A family ranked by the owner's blind pairwise votes."""
 
     scorer: Literal['votes']
     reference: str
+    """Listed system anchoring at `ranking.ANCHOR` when ranked.
+
+    The most-voted system anchors when the reference does not rank.
+    """
+
     render: Literal['text', 'html', 'diff'] = 'text'
+    """Output presentation. Only task families yield diffs."""
+
     language: Language | None = None
     gates: Gates = Gates()
+    """Text eligibility checks. Task families set neither `language` nor `gates`."""
+
     defects: list[Defect] = Field(default=[], max_length=MAX_DEFECTS)
+    """Available output tags, in the vote page's key order."""
 
     @model_validator(mode='after')
     def _check_reference(self) -> Self:
@@ -248,6 +246,7 @@ def load_family(name: str) -> Family:
         raise ValueError(
             f'No family named `{name}`. Choose among {code(family_names())}.'
         )
+
     has_cases = (directory / 'cases.jsonl').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
@@ -263,6 +262,7 @@ def load_family(name: str) -> Family:
     except ValidationError as error:
         # The first part of each error's path is the scorer's tag.
         raise ValueError(error_lines(error, prefix, skip=1)) from error
+
     if settings.public:
         if settings.aspect is None:
             raise ValueError(f'Family `{name}`: a public family needs an `aspect`.')
@@ -271,9 +271,11 @@ def load_family(name: str) -> Family:
                 f'Family `{name}`: a public family ID starts with its aspect, '
                 f'as in `{settings.aspect}-<name>`.'
             )
+
     family = Family(
         name=name, source='cases' if has_cases else 'tasks', settings=settings
     )
+
     _check_source_settings(family)
     return family
 
@@ -292,6 +294,7 @@ def _check_source_settings(family: Family) -> None:
             raise ValueError(
                 f'{prefix}: a `cases.jsonl` family needs `max_output_tokens`.'
             )
+
         agent_keys = [
             key for key in ('harness', 'max_turns') if key in settings.model_fields_set
         ]
@@ -300,6 +303,7 @@ def _check_source_settings(family: Family) -> None:
                 f'{prefix}: a `cases.jsonl` family runs every system as `generate`, '
                 f'so remove {code(agent_keys)}.'
             )
+
         if settings.render == 'diff':
             raise ValueError(
                 f'{prefix}: a `cases.jsonl` family yields replies, so set `render` '
@@ -321,6 +325,7 @@ def _check_source_settings(family: Family) -> None:
                 f'{prefix}: a `tasks/` family scored by `votes` yields diffs, so set '
                 '`render = "diff"`.'
             )
+
     if settings.systems:
         missing = [
             key
@@ -364,6 +369,7 @@ def load_cases(family: Family) -> list[Case]:
             )
         cases[case.id] = case
         locations[case.id] = location
+
     return list(cases.values())
 
 
@@ -372,6 +378,7 @@ def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
         FAMILIES_DIR / family.name / 'cases.jsonl',
         data_dir() / 'cases' / f'{family.name}.jsonl',
     ]
+
     for path in paths:
         if not path.exists():
             continue
@@ -404,6 +411,7 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
             f'Family `{family.name}`: task `{directory.name}` at `{location}` '
             'has no `task.toml`.'
         )
+
     prefix = f'Family `{family.name}`: `{location}/task.toml`'
     try:
         manifest = _TaskManifest.model_validate(tomllib.loads(config_path.read_text()))
@@ -411,18 +419,21 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
         raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
     except ValidationError as error:
         raise ValueError(error_lines(error, prefix)) from error
+
     expected = f'{family.name}/{directory.name}'
     if manifest.task.name != expected:
         raise ValueError(
             f'Family `{family.name}`: set `[task] name` to `"{expected}"` in '
             f'`{location}/task.toml`.'
         )
+
     instruction_path = directory / 'instruction.md'
     if not instruction_path.is_file():
         raise ValueError(
             f'Family `{family.name}`: task `{directory.name}` at `{location}` '
             'has no `instruction.md`.'
         )
+
     try:
         return Case(
             id=directory.name,
@@ -469,6 +480,7 @@ def case_task(family: Family, case_id: str) -> Path:
     """
     if family.source == 'cases':
         return tasks_dir(family) / case_id
+
     (committed, _), (local, _) = _task_roots(family)
     if (committed / case_id).is_dir():
         return committed / case_id

@@ -31,10 +31,6 @@ export const list = 'flex flex-col gap-2 pl-6 marker:text-muted-foreground';
 
 export const note = `${measure} text-sm text-muted-foreground`;
 
-/**
- * A page's title, with `context` such as a breadcrumb above it, `status` beside it, and `children`
- * such as an introduction or stats below it.
- */
 export function PageHeader({
   title,
   context,
@@ -58,14 +54,12 @@ export function PageHeader({
   );
 }
 
-/** A titled part of a page or board, ruled off from the part above by the same gap as `stack`. */
 export function Section({
   title,
   id,
   children,
 }: {
   title: string;
-  /** The heading's id, for a page whose links target its sections. */
   id?: string;
   children: ReactNode;
 }) {
@@ -79,7 +73,6 @@ export function Section({
   );
 }
 
-/** A titled part of a `Section`, set off from the block above it without a rule. */
 export function Part({ title, id, children }: { title: string; id: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-4 pt-4">
@@ -94,7 +87,6 @@ export function Part({ title, id, children }: { title: string; id: string; child
 /** A row of labelled figures, for use inside a `<dl>` of `Stat`s. */
 export const statList = 'grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:flex sm:flex-wrap';
 
-/** One figure in a summary: its label, its value, and an optional qualifier after the value. */
 export function Stat({
   label,
   detail,

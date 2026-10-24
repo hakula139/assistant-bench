@@ -6,15 +6,13 @@ import { aspects, type Aspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
 import type { BoardLink } from '@/lib/reports';
 
-/**
- * Links between an aspect's boards by their short names, behind a disclosure so that any number of
- * boards takes one line, drawn once there are two to link.
- */
 export function BoardSwitcher({ aspect, boards }: { aspect: Aspect; boards: BoardLink[] }) {
   if (boards.length < 2) {
     return null;
   }
+
   const { title } = aspects[aspect];
+
   return (
     <nav aria-label={`${title} boards`}>
       <Disclosure summary={formatCountOf(boards.length, `${title} board`)}>

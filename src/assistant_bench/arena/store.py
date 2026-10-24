@@ -112,11 +112,7 @@ class Defects(BaseModel):
 
 
 class Ballot(BaseModel):
-    """An owner's vote to record, with side A shown on the left.
-
-    `duration_sec` runs from serving the pair to receiving the vote, and
-    `repeat_of` names the vote that a side-swapped repeat repeats.
-    """
+    """An owner's vote to record, with side A shown on the left."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -128,7 +124,10 @@ class Ballot(BaseModel):
     defects: Defects = Defects()
     note: str | None = None
     duration_sec: float
+    """Seconds from serving the pair to receiving the vote."""
+
     repeat_of: int | None = None
+    """Original vote ID for a side-swapped repeat."""
 
     @property
     def systems(self) -> tuple[str, str]:
@@ -185,6 +184,7 @@ class VoteStore:
             for action in ('UPDATE', 'DELETE'):
                 self._db.execute(_APPEND_ONLY.format(table=table, action=action))
             self._db.execute(_NO_REPLACE.format(table=table, key=key))
+
         self._db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
     def close(self) -> None:
@@ -196,12 +196,14 @@ class VoteStore:
             'INSERT INTO sessions (id, family, started_at) VALUES (?, ?, ?)',
             (session.id, family, at.isoformat()),
         )
+
         return session
 
     def session(self, session_id: str) -> Session | None:
         row = self._db.execute(
             'SELECT * FROM sessions WHERE id = ?', (session_id,)
         ).fetchone()
+
         return None if row is None else Session.model_validate(dict(row))
 
     def sessions(self, family: str) -> list[Session]:
@@ -210,6 +212,7 @@ class VoteStore:
             'SELECT * FROM sessions WHERE family = ? ORDER BY started_at, id',
             (family,),
         )
+
         return [Session.model_validate(dict(row)) for row in rows]
 
     def record(self, ballot: Ballot, at: datetime) -> Vote:
@@ -229,6 +232,7 @@ class VoteStore:
             'repeat_of': ballot.repeat_of,
             'recorded_at': at.isoformat(),
         }
+
         cursor = self._db.execute(
             f'INSERT INTO votes ({", ".join(row)}) '
             f'VALUES ({", ".join(f":{column}" for column in row)})',
@@ -253,6 +257,7 @@ class VoteStore:
             'ORDER BY votes.id',
             (family,),
         )
+
         return [_vote(row) for row in rows]
 
 
@@ -265,6 +270,7 @@ def _vote(row: sqlite3.Row) -> Vote:
         side: Side(**{key: row[f'{side}_{key}'] for key in Side.model_fields})
         for side in ('a', 'b')
     }
+
     return Vote(
         id=row['id'],
         session=row['session'],

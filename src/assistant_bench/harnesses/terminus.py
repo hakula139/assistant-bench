@@ -15,7 +15,7 @@ from assistant_bench.harnesses.labels import Labels
 
 
 class TerminusOptions(Labels, Terminus2Options):
-    """The agent's `kwargs`, which extend terminus-2's options with the trial labels."""
+    pass
 
 
 class Terminus(Terminus2):
