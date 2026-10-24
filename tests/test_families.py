@@ -92,7 +92,6 @@ class TestLoadFamily:
             display_name = "Family F"
             systems = ["small", "large"]
             samples = 2
-            max_output_tokens = 300
             reference = "large"
             render = "html"
             public = true
@@ -112,7 +111,6 @@ class TestLoadFamily:
                 display_name='Family F',
                 systems=['small', 'large'],
                 samples=2,
-                max_output_tokens=300,
                 reference='large',
                 render='html',
                 public=True,
@@ -150,8 +148,6 @@ class TestLoadFamily:
                 defects=list(CODE_DEFECTS),
                 samples=1,
                 harness='terminus-2',
-                max_turns=4,
-                max_output_tokens=64,
                 categories=['smoke'],
             ),
         )
@@ -175,7 +171,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 public = true
                 """,
@@ -192,7 +187,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 public = true
                 """,
@@ -234,11 +228,13 @@ class TestLoadFamily:
                 systems = ["large"]
                 samples = 1
                 reference = "large"
+                max_output_tokens = 300
                 """,
                 True,
                 False,
-                'Family `f`: a `cases.jsonl` family needs `max_output_tokens`.',
-                id='cases-without-an-output-bound',
+                'Family `f`: `family.toml`: `max_output_tokens`: Extra inputs '
+                'are not permitted.',
+                id='case-output-budget',
             ),
             pytest.param(
                 'f',
@@ -246,7 +242,6 @@ class TestLoadFamily:
                 scorer = "tests"
                 display_name = "Family F"
                 samples = 1
-                max_output_tokens = 300
                 """,
                 True,
                 False,
@@ -261,15 +256,13 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 harness = "terminus-2"
-                max_turns = 10
                 """,
                 True,
                 False,
                 'Family `f`: a `cases.jsonl` family runs every system as `generate`, '
-                'so remove `harness`, `max_turns`.',
+                'so remove `harness`.',
                 id='cases-with-an-agent-harness',
             ),
             pytest.param(
@@ -279,10 +272,8 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 harness = "terminus-2"
-                max_turns = 10
                 render = "diff"
                 language = "en"
 
@@ -301,10 +292,8 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 harness = "terminus-2"
-                max_turns = 10
                 """,
                 False,
                 True,
@@ -319,7 +308,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 render = "diff"
                 """,
@@ -336,7 +324,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large", "small", "large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 """,
                 True,
@@ -352,8 +339,6 @@ class TestLoadFamily:
                 systems = ["large", "small", "large"]
                 samples = 1
                 harness = "terminus-2"
-                max_turns = 10
-                max_output_tokens = 300
                 """,
                 False,
                 True,
@@ -367,7 +352,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 defects = ["tone", "scope", "tone"]
                 """,
@@ -383,7 +367,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 defects = [
                   "facts", "punctuation", "tone", "formulaic", "length", "scope"
@@ -402,7 +385,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
                 defects = ["typos"]
                 """,
@@ -421,12 +403,13 @@ class TestLoadFamily:
                 reference = "large"
                 render = "diff"
                 harness = "terminus-2"
+                max_turns = 10
                 """,
                 False,
                 True,
-                'Family `f`: a `tasks/` family that lists systems needs `max_turns`, '
-                '`max_output_tokens`.',
-                id='tasks-without-a-turn-budget',
+                'Family `f`: `family.toml`: `max_turns`: Extra inputs are not '
+                'permitted.',
+                id='task-turn-budget',
             ),
             pytest.param(
                 'f',
@@ -435,8 +418,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_turns = 10
-                max_output_tokens = 300
                 """,
                 False,
                 True,
@@ -450,7 +431,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large", "small"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "medium"
                 """,
                 True,
@@ -465,7 +445,6 @@ class TestLoadFamily:
                 display_name = "Family F"
                 systems = ["large"]
                 samples = 1
-                max_output_tokens = 300
                 reference = "large"
 
                 [gates]
@@ -539,7 +518,6 @@ class TestLoadFamily:
             display_name = "Family F"
             systems = ["large"]
             samples = 1
-            max_output_tokens = 300
             reference = "large"
 
             [gates]

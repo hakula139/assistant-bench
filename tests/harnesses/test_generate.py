@@ -1,5 +1,4 @@
 import asyncio
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -10,9 +9,11 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.generation import generation_version
+from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
-from support import StubEndpoint, completion
+from support import StubEndpoint, completion, make_system
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -27,6 +28,7 @@ def run_agent(
     env: dict[str, str] | None = None,
     **options: Any,
 ) -> tuple[AgentContext, Path]:
+    logs_dir.mkdir(parents=True, exist_ok=True)
     defaults: dict[str, Any] = {
         'system': 'acme-large',
         'fingerprint': 'f1',
@@ -45,12 +47,12 @@ def run_agent(
 
 class TestGenerate:
     class TestVersion:
-        def test_reports_the_bench_version(self, tmp_path: Path) -> None:
+        def test_reports_the_generation_protocol(self, tmp_path: Path) -> None:
             agent = Generate(logs_dir=tmp_path, model_name='acme/large', **OPTIONS)
 
             version = agent.version()
 
-            assert version == metadata.version('assistant-bench')
+            assert version == generation_version('generate')
 
     class TestPreflight:
         def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:
@@ -66,6 +68,51 @@ class TestGenerate:
                 Generate.preflight(OPTIONS, {})
 
     class TestRun:
+        def test_preserves_a_truncated_attempt_when_a_new_protocol_regenerates_it(
+            self, endpoint: StubEndpoint, tmp_path: Path
+        ) -> None:
+            bounded = make_system(max_output_tokens=16000, context_window=131072)
+            endpoint.response = completion(
+                content=None,
+                finish_reason='length',
+                usage={
+                    'prompt_tokens': 100,
+                    'completion_tokens': 16000,
+                    'total_tokens': 16100,
+                    'completion_tokens_details': {'reasoning_tokens': 16000},
+                },
+            )
+
+            first, first_output = run_agent(
+                endpoint, tmp_path / 'bounded', **options.generate(bounded)
+            )
+
+            assert first_output.read_text() == ''
+            assert first.n_output_tokens == 16000
+            assert first.metadata is not None
+            assert first.metadata['finish_reason'] == 'length'
+            assert first.metadata['reasoning_tokens'] == 16000
+            assert len(endpoint.requests) == 1
+
+            generous = bounded.model_copy(
+                update={'max_output_tokens': 65536, 'context_window': 262144}
+            )
+            endpoint.response = completion(content='A complete answer.')
+
+            second, second_output = run_agent(
+                endpoint, tmp_path / 'generous', **options.generate(generous)
+            )
+
+            assert [
+                request.body['max_completion_tokens'] for request in endpoint.requests
+            ] == [16000, 65536]
+            assert generous.fingerprint != bounded.fingerprint
+            assert second_output.read_text() == 'A complete answer.'
+            assert second.metadata is not None
+            assert second.metadata['finish_reason'] == 'stop'
+            assert first_output.read_text() == ''
+            assert first.metadata['finish_reason'] == 'length'
+
         def test_uses_the_same_agent_export_for_preflight_and_metadata(
             self,
             agent_export: tuple[dict[str, str], NixosConfigExport],
@@ -82,10 +129,11 @@ class TestGenerate:
             assert context.metadata is not None
             assert context.metadata['nixos_config_rev'] == export.rev
 
+        @pytest.mark.parametrize('effort', ['high', 'max'])
         def test_sends_one_request_and_records_the_reply(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, tmp_path: Path, effort: str
         ) -> None:
-            context, output = run_agent(endpoint, tmp_path, effort='high')
+            context, output = run_agent(endpoint, tmp_path, effort=effort)
 
             (request,) = endpoint.requests
             assert request.path == '/v1/chat/completions'
@@ -95,7 +143,7 @@ class TestGenerate:
                 'model': 'acme/large',
                 'messages': [{'role': 'user', 'content': 'Greet me.'}],
                 'max_completion_tokens': 64,
-                'reasoning_effort': 'high',
+                'reasoning_effort': effort,
             }
             assert output.read_text() == 'Hello there.'
             assert (

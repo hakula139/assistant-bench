@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from assistant_bench.harnesses import options
-from support import TASK_SETTINGS, make_system
+from support import make_system
 
 
 class TestGenerate:
@@ -27,7 +27,7 @@ class TestGenerate:
     ) -> None:
         system = make_system(**fields)
 
-        kwargs = options.generate(system, TASK_SETTINGS)
+        kwargs = options.generate(system)
 
         assert kwargs == {
             'system': 'acme-large',
@@ -41,21 +41,20 @@ class TestTerminus:
     def test_builds_the_kwargs_a_system_yields(self) -> None:
         system = make_system(harness='terminus-2')
 
-        kwargs = options.terminus(system, TASK_SETTINGS)
+        kwargs = options.terminus(system)
 
         assert kwargs == {
             'system': 'acme-large',
             'fingerprint': system.fingerprint,
-            'max_turns': 8,
             'llm_call_kwargs': {'max_completion_tokens': 64},
+            'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
             'reasoning_effort': 'medium',
             'record_terminal_session': False,
-            'suppress_max_turns_warning': True,
         }
 
     def test_omits_the_effort_the_catalog_resolves_none(self) -> None:
         system = make_system(harness='terminus-2', effort=None)
 
-        kwargs = options.terminus(system, TASK_SETTINGS)
+        kwargs = options.terminus(system)
 
         assert 'reasoning_effort' not in kwargs

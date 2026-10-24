@@ -87,8 +87,6 @@ TASK_SETTINGS = TaskTestsSettings(
     display_name='Family',
     samples=1,
     harness='terminus-2',
-    max_turns=8,
-    max_output_tokens=64,
 )
 
 
@@ -103,7 +101,6 @@ def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 1
-            max_output_tokens = 64
             categories = ["message"]
             reference = "{systems[0]}"
             """
@@ -136,8 +133,6 @@ def write_task_family(
         render = "diff"
         defects = {json.dumps(list(defects))}
         harness = "terminus-2"
-        max_turns = 4
-        max_output_tokens = 64
         """
         if systems
         else 'scorer = "tests"\n'
@@ -174,6 +169,8 @@ def make_system(**overrides: Any) -> System:
         'display_name': 'Acme Large',
         'vendor': 'acme',
         'route': 'acme/large',
+        'max_output_tokens': 64,
+        'context_window': 8192,
         'effort': 'medium',
         'prompt': None,
         'price': Price(input=2.0, output=10.0, cache_read=0.2),
@@ -203,6 +200,8 @@ def write_trial(
     workspace: dict[str, str] | None = None,
     source: UUID | None = None,
     agent_execution: TimingInfo | None = None,
+    environment: EnvironmentConfig | None = None,
+    verifier_disabled: bool = False,
 ) -> UUID:
     """Write a trial's result and lock, its job's files, and its task's instruction.
 
@@ -243,6 +242,7 @@ def write_trial(
         config=TrialConfig(
             task=TaskConfig(path=Path('/tasks') / task),
             agent=agent,
+            environment=environment or EnvironmentConfig(),
             source_trial=None
             if source is None
             else SourceTrialConfig(
@@ -265,8 +265,8 @@ def write_trial(
             digest=f'sha256:{"0" * 64}',
         ),
         agent=agent,
-        environment=EnvironmentConfig(),
-        verifier=VerifierLock(),
+        environment=environment or EnvironmentConfig(),
+        verifier=VerifierLock(disable=verifier_disabled),
     )
     (trial_dir / 'result.json').write_text(result.model_dump_json())
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
@@ -528,7 +528,6 @@ def write_votes_family(
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 2
-            max_output_tokens = 64
             categories = {json.dumps(sorted(set(categories.values())))}
             reference = "{systems[0]}"
             render = "{render}"

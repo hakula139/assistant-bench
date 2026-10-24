@@ -42,6 +42,13 @@ class TestHostEnvironment:
         family = load_family('smoke-text')
         cases = load_cases(family)
         system = make_system()
+        family = family.model_copy(
+            update={
+                'settings': family.settings.model_copy(
+                    update={'systems': [system.name], 'reference': system.name}
+                )
+            }
+        )
 
         # Harbor names a job after the second it starts, so the two jobs get names
         # of their own. The first runs in-process for coverage, and the rerun goes

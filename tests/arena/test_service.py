@@ -94,18 +94,23 @@ class TestLoadFamilies:
         assert list(families) == ['f']
         assert families['f'].checklists == {'c1': ['Stays on topic']}
 
-    def test_shows_the_instruction_the_trials_ran(
-        self, families_dir: Path, data_dir: Path
+    @pytest.mark.parametrize('installed', ['stale', 'missing'])
+    def test_shows_the_current_case_instruction_without_requiring_a_rendered_task(
+        self, families_dir: Path, data_dir: Path, installed: str
     ) -> None:
         write_votes_family(families_dir, 'f', ARENA_SYSTEMS, ARENA_CASES)
-        (data_dir / 'tasks' / 'f' / 'c1' / 'instruction.md').write_text('As rendered.')
+        instruction = data_dir / 'tasks' / 'f' / 'c1' / 'instruction.md'
+        if installed == 'stale':
+            instruction.write_text('A previous instruction.')
+        else:
+            instruction.unlink()
         write_outputs(
             'f', [make_output(case='c1', system='large', text='Hi.', gate_failures=[])]
         )
 
         families = load_families()
 
-        assert families['f'].instructions == {'c1': 'As rendered.'}
+        assert families['f'].instructions == {'c1': 'Write about c1.'}
 
 
 class TestArena:

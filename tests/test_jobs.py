@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 import tomli_w
@@ -37,9 +38,15 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import HOST_ENVIRONMENT, options
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.outputs import Output
-from assistant_bench.paths import FAMILIES_DIR
+from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
-from support import finish_job, make_system, write_task_family, write_trial
+from support import (
+    finish_job,
+    make_system,
+    write_case_family,
+    write_task_family,
+    write_trial,
+)
 
 
 VOTES = Family(
@@ -50,8 +57,8 @@ VOTES = Family(
         display_name='Family F',
         systems=['acme-large'],
         samples=2,
-        max_output_tokens=300,
         reference='acme-large',
+        categories=['reply'],
     ),
 )
 START = datetime(2026, 10, 21, tzinfo=UTC)
@@ -67,11 +74,60 @@ def votes_family(**settings: Any) -> Family:
     )
 
 
-def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
-    settings = VOTES.settings.model_copy(
-        update={'max_output_tokens': max_output_tokens}
+def request(system: System, max_output_tokens: int | None = None) -> dict[str, Any]:
+    if max_output_tokens is not None:
+        system = system.model_copy(update={'max_output_tokens': max_output_tokens})
+    return options.generate(system)
+
+
+def current_agent(
+    family: Family = VOTES, system: System | None = None
+) -> trial_config.AgentConfig:
+    resolved = jobs.family_systems(family, [system or make_system()])
+    return jobs.job(family, resolved, []).agents[0]
+
+
+def record_trial(
+    job_dir: Path,
+    name: str,
+    agent: trial_config.AgentConfig,
+    *,
+    family: Family = VOTES,
+    **fields: Any,
+) -> UUID:
+    if family.source == 'cases' and fields.get('instruction', 'Hi.') is not None:
+        existing = {case.id: case for case in load_cases(family)}
+        case_id = Path(fields['task']).name
+        existing[case_id] = Case(
+            id=case_id,
+            category=family.settings.categories[0]
+            if family.settings.categories
+            else 'reply',
+            source='synthetic',
+            instruction=fields.get('instruction', 'Hi.'),
+        )
+        declare_cases(family, list(existing.values()))
+
+    config = jobs.job(family, jobs.family_systems(family, [make_system()]), [])
+    return write_trial(
+        job_dir,
+        name,
+        agent,
+        environment=config.environment,
+        verifier_disabled=config.verifier.disable,
+        **fields,
     )
-    return options.generate(system, settings)
+
+
+def declare_cases(family: Family, cases: list[Case]) -> None:
+    path = bench_data_dir() / 'cases' / f'{family.name}.jsonl'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(case.model_dump_json() + '\n' for case in cases))
+
+
+def render_cases(family: Family, cases: list[Case]) -> list[Path]:
+    declare_cases(family, cases)
+    return jobs.render_tasks(family, cases)
 
 
 def finish_generation(
@@ -349,7 +405,7 @@ class TestJob:
             'fingerprint': large.fingerprint,
             'effort': 'medium',
             'system_prompt': 'Be brief.',
-            'max_output_tokens': 300,
+            'max_output_tokens': 64,
         }
         assert job.n_attempts == 2
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_TRIALS
@@ -379,11 +435,10 @@ class TestJob:
         assert agent.kwargs == {
             'system': 'acme-large',
             'fingerprint': systems[0].fingerprint,
-            'max_turns': 4,
             'llm_call_kwargs': {'max_completion_tokens': 64},
+            'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
             'reasoning_effort': 'medium',
             'record_terminal_session': False,
-            'suppress_max_turns_warning': True,
         }
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert not job.verifier.disable
@@ -810,40 +865,69 @@ class TestRunJob:
 
 
 class TestCollect:
+    @pytest.fixture(autouse=True)
+    def current_sources(self, families_dir: Path, data_dir: Path) -> None:
+        write_case_family(families_dir, ['acme-large'], name='smoke-text')
+        cases = data_dir / 'cases' / 'smoke-text.jsonl'
+        cases.parent.mkdir(parents=True)
+        cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.jsonl').read_text())
+
+    @pytest.mark.parametrize('deleted', [False, True], ids=['edited', 'removed'])
+    def test_excludes_stale_case_sources_without_rerendering_installed_tasks(
+        self, data_dir: Path, deleted: bool
+    ) -> None:
+        family = votes_family(samples=1)
+        system = make_system()
+        original = Case(id='a', category='reply', source='synthetic', instruction='Hi.')
+        tasks = render_cases(family, [original])
+        config = jobs.job(family, [system], tasks)
+        finish_generation(
+            config.model_copy(update={'job_name': 'job-1'}), 'Old answer.'
+        )
+        current = original.model_copy(update={'instruction': 'Write a new answer.'})
+        declare_cases(family, [] if deleted else [current])
+
+        outputs = jobs.collect(family, {system.name: system})
+
+        assert outputs == []
+        assert (tasks[0] / 'instruction.md').read_text() == 'Hi.'
+
     def test_keeps_only_trials_of_the_current_task(self, data_dir: Path) -> None:
-        family = load_family('smoke-text')
+        family = with_settings(
+            load_family('smoke-text'), systems=['a', 'b'], reference='a'
+        )
         job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
+        systems = {side: make_system(name=side) for side in ('a', 'b')}
         agents = {
-            side: trial_config.AgentConfig(
-                import_path='x:Y', kwargs={'system': side, 'fingerprint': f'fp-{side}'}
-            )
-            for side in ('a', 'b')
+            side: current_agent(family, system) for side, system in systems.items()
         }
-        write_trial(
+        record_trial(
             job,
             'en-greeting__a-old',
             agents['a'],
             task='smoke-text/en-greeting',
             output='old',
             version=jobs.TASK_VERSION,
+            family=family,
         )
         for case, side in (
             ('en-greeting', 'b'),
             ('zh-greeting', 'a'),
             ('zh-greeting', 'b'),
         ):
-            write_trial(
+            record_trial(
                 job,
                 f'{case}__{side}',
                 agents[side],
                 task=f'smoke-text/{case}',
                 output=f'{case} {side}',
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
+                family=family,
             )
 
         (data_dir / 'tasks' / 'smoke-text' / 'stray.md').write_text('Stray.')
 
-        outputs = jobs.collect(family, {})
+        outputs = jobs.collect(family, systems)
 
         assert {(output.case, output.system) for output in outputs} == {
             ('en-greeting', 'b'),
@@ -859,19 +943,20 @@ class TestCollect:
             Case(id='a', category='reply', source='held-out', instruction='Hi.'),
             Case(id='b', category='reply', source='held-out', instruction='Hi.'),
         ]
-        for path in jobs.render_tasks(family, cases):
-            write_trial(
+        for path in render_cases(family, cases):
+            record_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 f'{path.name}__1',
-                trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+                current_agent(family),
                 task=f'f/{path.name}',
                 output='你好。',
                 instruction=None,
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
+                family=family,
             )
-        jobs.render_tasks(family, cases[:1])
+        render_cases(family, cases[:1])
 
-        (output,) = jobs.collect(family, {})
+        (output,) = jobs.collect(family, {'acme-large': make_system()})
 
         assert output.case == 'a'
 
@@ -881,53 +966,52 @@ class TestCollect:
         family = load_family('smoke-text')
         case = Case(
             id='en-greeting',
-            category='reply',
+            category='message',
             source='held-out',
             instruction='Line one.\r\nLine two.',
         )
-        (path,) = jobs.render_tasks(family, [case])
-        write_trial(
+        (path,) = render_cases(family, [case])
+        record_trial(
             data_dir / 'jobs' / 'smoke-text' / 'job-1',
             'en-greeting__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            current_agent(family),
             task='smoke-text/en-greeting',
             output='Hi.',
             instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=family,
         )
 
-        (output,) = jobs.collect(family, {})
+        (output,) = jobs.collect(family, {'acme-large': make_system()})
 
         assert output.case == path.name
 
-    def test_keeps_trials_when_a_bench_constant_changes(
+    def test_excludes_trials_after_a_generation_timeout_changes(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = load_family('smoke-text')
-        jobs.render_tasks(family, load_cases(family)[:1])
-        write_trial(
+        render_cases(family, load_cases(family)[:1])
+        record_trial(
             data_dir / 'jobs' / 'smoke-text' / 'job-1',
             'en-greeting__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            current_agent(family),
             task='smoke-text/en-greeting',
             output='Hi.',
             instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=family,
         )
         monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 60.0)
 
-        (output,) = jobs.collect(family, {})
+        outputs = jobs.collect(family, {'acme-large': make_system()})
 
-        assert output.case == 'en-greeting'
+        assert outputs == []
 
     def test_collects_generations_and_errors(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
         system = make_system()
-        generate = trial_config.AgentConfig(
-            import_path='assistant_bench.harnesses.generate:Generate',
-            kwargs={'system': system.name, 'fingerprint': system.fingerprint},
-        )
-        write_trial(
+        generate = current_agent(VOTES, system)
+        record_trial(
             job_dir,
             'b__1',
             generate,
@@ -946,8 +1030,11 @@ class TestCollect:
                     'nixos_config_rev': 'rev-a',
                 },
             ),
+            family=VOTES,
         )
-        write_trial(job_dir, 'a__1', generate, task='f/a', error='TimeoutError')
+        record_trial(
+            job_dir, 'a__1', generate, task='f/a', error='TimeoutError', family=VOTES
+        )
 
         outputs = jobs.collect(VOTES, {system.name: system})
 
@@ -983,8 +1070,8 @@ class TestCollect:
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1)
-        system = make_system()
-        tasks = jobs.render_tasks(
+        system = make_system(max_output_tokens=300)
+        tasks = render_cases(
             family,
             [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
         )
@@ -993,7 +1080,7 @@ class TestCollect:
             ('2026-10-21__10-00-00', 300, 'current request'),
         ):
             config = jobs.job(
-                votes_family(samples=1, max_output_tokens=tokens), [system], tasks
+                family, [system.model_copy(update={'max_output_tokens': tokens})], tasks
             )
             finish_generation(
                 config.model_copy(update={'job_name': job}), output, tokens
@@ -1032,7 +1119,7 @@ class TestCollect:
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
-        tasks = jobs.render_tasks(
+        tasks = render_cases(
             family,
             [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
         )
@@ -1059,14 +1146,18 @@ class TestCollect:
         (output,) = jobs.collect(family, {system.name: system})
 
         assert (output.job, output.text) == ('job-2', 'current config')
-        gates.assert_called_once_with(family.settings, 'current config', 'stop', '')
+        gates.assert_called_once_with(family.settings, 'current config', 'stop', 'Hi.')
+
+        shutil.rmtree(data_dir / 'jobs' / 'f' / 'job-2')
+
+        assert jobs.collect(family, {system.name: system}) == []
 
     def test_keeps_the_oldest_trial_that_sent_the_current_request(
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
-        tasks = jobs.render_tasks(
+        tasks = render_cases(
             family,
             [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
         )
@@ -1087,20 +1178,22 @@ class TestCollect:
         family = votes_family(samples=1)
         system = make_system()
         jobs_dir = data_dir / 'jobs' / 'f'
-        write_trial(
+        record_trial(
             jobs_dir / '2026-10-20__10-00-00',
             'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
+            current_agent(family, system),
             task='f/a',
             output='kept',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=family,
         )
-        write_trial(
+        record_trial(
             jobs_dir / '2026-10-21__10-00-00',
             'a__2',
-            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
+            current_agent(family, system),
             task='f/a',
             error='TimeoutError',
+            family=family,
         )
 
         outputs = jobs.collect(family, {system.name: system})
@@ -1109,48 +1202,59 @@ class TestCollect:
             ('2026-10-20__10-00-00', None, 'kept')
         ]
 
-    def test_keeps_a_success_on_an_old_request_over_an_error_on_the_current(
+    def test_excludes_an_old_success_even_when_the_current_request_failed(
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
         jobs_dir = data_dir / 'jobs' / 'f'
-        write_trial(
+        record_trial(
             jobs_dir / '2026-10-20__10-00-00',
             'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
+            current_agent(family, system),
             task='f/a',
             error='TimeoutError',
+            family=family,
         )
-        write_trial(
+        record_trial(
             jobs_dir / '2026-10-21__10-00-00',
             'a__2',
-            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system, 600)),
+            current_agent(family, system.model_copy(update={'max_output_tokens': 600})),
             task='f/a',
             output='old request',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=family,
         )
 
         outputs = jobs.collect(family, {system.name: system})
 
         assert [(output.job, output.error, output.text) for output in outputs] == [
-            ('2026-10-21__10-00-00', None, 'old request')
+            ('2026-10-20__10-00-00', 'TimeoutError', None)
         ]
 
     def test_keeps_a_rerun_success_over_the_error_it_replaced(
         self, data_dir: Path
     ) -> None:
         system = make_system()
-        generate = trial_config.AgentConfig(
-            import_path='assistant_bench.harnesses.generate:Generate',
-            kwargs={'system': system.name, 'fingerprint': system.fingerprint},
-        )
         family = votes_family(samples=1)
+        generate = current_agent(family, system)
         jobs_dir = data_dir / 'jobs' / 'f'
-        write_trial(
-            jobs_dir / 'job-1', 'a__1', generate, task='f/a', error='TimeoutError'
+        record_trial(
+            jobs_dir / 'job-1',
+            'a__1',
+            generate,
+            task='f/a',
+            error='TimeoutError',
+            family=family,
         )
-        write_trial(jobs_dir / 'job-2', 'a__2', generate, task='f/a', output='Hi.')
+        record_trial(
+            jobs_dir / 'job-2',
+            'a__2',
+            generate,
+            task='f/a',
+            output='Hi.',
+            family=family,
+        )
 
         outputs = jobs.collect(family, {system.name: system})
 
@@ -1159,40 +1263,42 @@ class TestCollect:
         ] == [('job-2', 'a', None, 'Hi.')]
 
     @pytest.mark.parametrize(
-        ('names', 'fingerprints'),
+        'change',
         [
-            (('old-name', 'new-name'), ('fp', 'fp')),
-            (('acme-large', 'acme-large'), ('fp-old', 'fp-new')),
+            pytest.param({'name': 'old-name'}, id='renamed'),
+            pytest.param({'route': 'acme/old'}, id='new-fingerprint'),
         ],
-        ids=['renamed', 'new-fingerprint'],
     )
-    def test_keeps_samples_per_name_and_fingerprint(
-        self, data_dir: Path, names: tuple[str, str], fingerprints: tuple[str, str]
+    def test_excludes_a_previous_system_identity(
+        self, data_dir: Path, change: dict[str, str]
     ) -> None:
         family = votes_family(samples=1)
-        jobs_dir = data_dir / 'jobs' / 'f'
-        samples = list(zip(('job-1', 'job-2'), names, fingerprints, strict=True))
-        for job, name, fingerprint in samples:
-            agent = trial_config.AgentConfig(
-                import_path='assistant_bench.harnesses.generate:Generate',
-                kwargs={'system': name, 'fingerprint': fingerprint},
+        system = make_system()
+        previous = system.model_copy(update=change)
+        for job, recorded in (('job-1', previous), ('job-2', system)):
+            record_trial(
+                data_dir / 'jobs' / 'f' / job,
+                'a__1',
+                current_agent(family, recorded),
+                task='f/a',
+                output=job,
+                family=family,
             )
-            write_trial(jobs_dir / job, 'a__1', agent, task='f/a', output=job)
 
-        outputs = jobs.collect(family, {})
+        outputs = jobs.collect(family, {system.name: system})
 
-        assert sorted(
+        assert [
             (output.system, output.fingerprint, output.text) for output in outputs
-        ) == sorted((name, fingerprint, job) for job, name, fingerprint in samples)
+        ] == [(system.name, system.fingerprint, 'job-2')]
 
     def test_gates_each_output_against_its_case_instruction(
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1, language='zh', gates=Gates(script='hans'))
-        generate = trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'})
+        generate = current_agent(family)
         stop = AgentContext(metadata={'finish_reason': 'stop'})
         for case, output in (('a', '臺北今天很热。'), ('b', '臺北今天很熱。')):
-            write_trial(
+            record_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 f'{case}__1',
                 generate,
@@ -1200,9 +1306,10 @@ class TestCollect:
                 output=output,
                 instruction='介绍一下臺北的天气。',
                 context=stop,
+                family=family,
             )
 
-        outputs = jobs.collect(family, {})
+        outputs = jobs.collect(family, {'acme-large': make_system()})
 
         assert [(output.case, output.gate_failures) for output in outputs] == [
             ('a', []),
@@ -1210,49 +1317,60 @@ class TestCollect:
         ]
 
     def test_reads_no_instruction_without_the_script_gate(self, data_dir: Path) -> None:
+        declare_cases(
+            VOTES,
+            [Case(id='a', category='reply', source='synthetic', instruction='Hi.')],
+        )
         task = data_dir / 'tasks' / 'f' / 'a'
         task.mkdir(parents=True)
         (task / 'task.toml').write_text(
             jobs.render_task_config('f/a', 'Hi.').model_dump_toml()
         )
-        write_trial(
+        record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            current_agent(VOTES),
             task='f/a',
             output='Hi.',
             instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=VOTES,
         )
 
-        (output,) = jobs.collect(VOTES, {})
+        (output,) = jobs.collect(VOTES, {'acme-large': make_system()})
 
         assert output.gate_failures == []
 
     def test_reads_the_reward_only_for_a_task_family(
         self, families_dir: Path, data_dir: Path
     ) -> None:
-        write_task_family(families_dir, 'a', name='g')
-        oracle = trial_config.AgentConfig(name='oracle')
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1', 'a__1', oracle, task='f/a', reward=1.0
+        write_task_family(families_dir, 'a', name='g', systems=('acme-large',))
+        task_family = load_family('g')
+        record_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            current_agent(VOTES),
+            task='f/a',
+            reward=1.0,
+            family=VOTES,
         )
-        write_trial(
+        record_trial(
             data_dir / 'jobs' / 'g' / 'job-1',
             'a__1',
-            oracle,
+            current_agent(task_family),
             task='g/a',
             reward=1.0,
             instruction=None,
             version='1.0.0',
             workspace={'greeting.txt': 'hello'},
+            family=task_family,
         )
 
-        (scored,) = jobs.collect(load_family('g'), {})
-        (voted,) = jobs.collect(VOTES, {})
+        (scored,) = jobs.collect(task_family, {'acme-large': make_system()})
+        (voted,) = jobs.collect(VOTES, {'acme-large': make_system()})
 
-        assert (scored.case, scored.system, scored.reward) == ('a', 'oracle', 1.0)
-        assert (scored.text, scored.gate_failures) == (None, None)
+        assert (scored.case, scored.system, scored.reward) == ('a', 'acme-large', 1.0)
+        assert scored.gate_failures == []
         assert voted.reward is None
 
     @pytest.mark.parametrize(
@@ -1273,19 +1391,18 @@ class TestCollect:
         family = voted_tasks(families_dir, 'echo')
         break_setting(case_task(family, 'echo'), ('task', 'version'), current)
         for task in ('echo', 'deleted'):
-            write_trial(
+            record_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 f'{task}__1',
-                trial_config.AgentConfig(
-                    import_path='x:Y', kwargs={'system': 'acme-large'}
-                ),
+                current_agent(family),
                 task=f'f/{task}',
                 reward=1.0,
                 instruction=None,
                 version='1.0.0',
+                family=family,
             )
 
-        outputs = jobs.collect(family, {})
+        outputs = jobs.collect(family, {'acme-large': make_system()})
 
         assert [output.case for output in outputs] == (['echo'] if kept else [])
 
@@ -1312,21 +1429,20 @@ class TestCollect:
         base = case_task(family, 'echo') / 'environment' / 'app'
         base.mkdir()
         (base / 'README.md').write_text('Echo.\n')
-        write_trial(
+        record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__1',
-            trial_config.AgentConfig(
-                import_path='x:Y', kwargs={'system': 'acme-large'}
-            ),
+            current_agent(family),
             task='f/echo',
             reward=reward,
             error=error,
             instruction=None,
             version='1.0.0',
             workspace={'README.md': 'Echo.\n', 'greeting.txt': 'hello\n'},
+            family=family,
         )
 
-        (output,) = jobs.collect(family, {})
+        (output,) = jobs.collect(family, {'acme-large': make_system()})
 
         assert (output.error, output.reward, output.gate_failures) == (
             error,
@@ -1352,11 +1468,9 @@ class TestCollect:
         rewards = [0.0, 1.0, 0.5]
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
-        agent = trial_config.AgentConfig(
-            import_path='x:Y', kwargs={'system': system.name, 'fingerprint': 'fp'}
-        )
+        agent = current_agent(family, system)
         origin = data_dir / 'jobs' / 'f' / 'job-1'
-        source = write_trial(
+        source = record_trial(
             origin,
             'echo__origin',
             agent,
@@ -1373,13 +1487,14 @@ class TestCollect:
             agent_execution=TimingInfo(
                 started_at=START, finished_at=START + timedelta(seconds=30)
             ),
+            family=family,
         )
         (origin / 'echo__origin' / 'artifacts' / 'app' / 'link').symlink_to(
             'greeting.txt'
         )
         for minor in range(1, regrades + 1):
             # Harbor's regrade copies the artifacts with symlinks dereferenced.
-            source = write_trial(
+            source = record_trial(
                 data_dir / 'jobs' / 'f' / f'job-{minor + 1}',
                 f'echo__regrade-{minor}',
                 agent,
@@ -1390,6 +1505,7 @@ class TestCollect:
                 workspace={'greeting.txt': 'hello\n', 'link': 'hello\n'},
                 context=AgentContext(n_input_tokens=1, n_output_tokens=1),
                 source=source,
+                family=family,
             )
         break_setting(case_task(family, 'echo'), ('task', 'version'), f'1.{regrades}.0')
 
@@ -1421,6 +1537,54 @@ class TestCollect:
             'gate_failures': verdict,
         }
 
+    @pytest.mark.parametrize('changed', ['agent', 'environment'])
+    def test_regrading_cannot_turn_an_old_generation_contract_into_a_current_one(
+        self, families_dir: Path, data_dir: Path, changed: str
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        system = make_system()
+        config = jobs.job(family, jobs.family_systems(family, [system]), [])
+        agent = config.agents[0]
+        old_agent = (
+            agent.model_copy(update={'kwargs': agent.kwargs | {'max_turns': 40}})
+            if changed == 'agent'
+            else agent
+        )
+        old_environment = (
+            config.environment.model_copy(update={'force_build': True})
+            if changed == 'environment'
+            else config.environment
+        )
+        source = write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'echo__origin',
+            old_agent,
+            task='f/echo',
+            reward=0.0,
+            instruction=None,
+            version='1.0.0',
+            workspace={'greeting.txt': 'hello\n'},
+            environment=old_environment,
+            verifier_disabled=config.verifier.disable,
+        )
+        record_trial(
+            data_dir / 'jobs' / 'f' / 'job-2',
+            'echo__regrade',
+            agent,
+            task='f/echo',
+            reward=1.0,
+            instruction=None,
+            version='1.1.0',
+            workspace={'greeting.txt': 'hello\n'},
+            source=source,
+            family=family,
+        )
+        break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
+
+        outputs = jobs.collect(family, {system.name: system})
+
+        assert outputs == []
+
     @pytest.mark.parametrize(
         ('source_known', 'expected'),
         [
@@ -1444,10 +1608,8 @@ class TestCollect:
         expected: tuple[str, str, str, float | None, list[Gate] | None],
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
-        agent = trial_config.AgentConfig(
-            import_path='x:Y', kwargs={'system': 'acme-large'}
-        )
-        source = write_trial(
+        agent = current_agent(family)
+        source = record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__origin',
             agent,
@@ -1455,10 +1617,11 @@ class TestCollect:
             reward=1.0,
             instruction=None,
             version='1.0.0',
+            family=family,
         )
         if not source_known:
             shutil.rmtree(data_dir / 'jobs' / 'f' / 'job-1')
-        write_trial(
+        record_trial(
             data_dir / 'jobs' / 'f' / 'job-2',
             'echo__regrade',
             agent,
@@ -1467,10 +1630,11 @@ class TestCollect:
             instruction=None,
             version='1.1.0',
             source=source,
+            family=family,
         )
         break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
 
-        (output,) = jobs.collect(family, {})
+        (output,) = jobs.collect(family, {'acme-large': make_system()})
 
         assert (
             output.job,
@@ -1487,10 +1651,8 @@ class TestCollect:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         family = with_settings(voted_tasks(families_dir, 'echo'), samples=2)
-        agent = trial_config.AgentConfig(
-            import_path='x:Y', kwargs={'system': 'acme-large'}
-        )
-        origin = write_trial(
+        agent = current_agent(family)
+        origin = record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__origin',
             agent,
@@ -1499,9 +1661,10 @@ class TestCollect:
             instruction=None,
             version='1.0.0',
             workspace={'greeting.txt': 'hello\n'},
+            family=family,
         )
         for job, trial in (('job-2', 'echo__first'), ('job-3', 'echo__second')):
-            write_trial(
+            record_trial(
                 data_dir / 'jobs' / 'f' / job,
                 trial,
                 agent,
@@ -1511,12 +1674,13 @@ class TestCollect:
                 version='1.1.0',
                 workspace={'greeting.txt': 'hello\n'},
                 source=origin,
+                family=family,
             )
         break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
         diff = Mock(wraps=workspace_diff)
         monkeypatch.setattr(jobs, 'workspace_diff', diff)
 
-        outputs = jobs.collect(family, {})
+        outputs = jobs.collect(family, {'acme-large': make_system()})
 
         assert [(output.job, output.trial) for output in outputs] == [
             ('job-1', 'echo__origin')
@@ -1557,26 +1721,24 @@ class TestCollect:
 
         assert output.job == 'job-2'
 
-    def test_prefers_the_current_request_of_a_system_the_family_no_longer_lists(
-        self, data_dir: Path
-    ) -> None:
+    def test_excludes_a_system_the_family_no_longer_lists(self, data_dir: Path) -> None:
         system = make_system()
         family = votes_family(systems=['other'], reference='other', samples=1)
-        tasks = jobs.render_tasks(
+        tasks = render_cases(
             family,
             [Case(id='c', category='reply', source='held-out', instruction='Hi.')],
         )
         for job, bound in (('job-1', 100), ('job-2', 300)):
             config = jobs.job(
-                with_settings(family, max_output_tokens=bound), [system], tasks
+                family, [system.model_copy(update={'max_output_tokens': bound})], tasks
             )
             finish_generation(
                 config.model_copy(update={'job_name': job}), f'reply at {bound}'
             )
 
-        (output,) = jobs.collect(family, {system.name: system})
+        outputs = jobs.collect(family, {system.name: system})
 
-        assert (output.job, output.text) == ('job-2', 'reply at 300')
+        assert outputs == []
 
     @pytest.mark.parametrize(
         ('metadata', 'timing', 'latency'),
@@ -1606,16 +1768,17 @@ class TestCollect:
         timing: TimingInfo | None,
         latency: float | None,
     ) -> None:
-        write_trial(
+        record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            current_agent(VOTES),
             task='f/a',
             context=AgentContext(metadata=metadata),
             agent_execution=timing,
+            family=VOTES,
         )
 
-        (output,) = jobs.collect(VOTES, {})
+        (output,) = jobs.collect(VOTES, {'acme-large': make_system()})
 
         assert output.latency_sec == latency
 
@@ -1630,35 +1793,34 @@ class TestCollect:
             'Family `f`: harness `claude-code` is not one of `generate`, `terminus-2`.'
         )
 
-    def test_leaves_a_system_missing_from_the_catalog_unpriced(
+    def test_leaves_a_current_system_without_a_price_unpriced(
         self, data_dir: Path
     ) -> None:
-        write_trial(
+        system = make_system(price=None)
+        record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 'retired'}),
+            current_agent(VOTES, system),
             task='f/a',
             context=AgentContext(n_input_tokens=10, n_output_tokens=5),
+            family=VOTES,
         )
 
-        (output,) = jobs.collect(VOTES, {})
+        (output,) = jobs.collect(VOTES, {system.name: system})
 
-        assert output.system == 'retired'
+        assert output.system == system.name
         assert output.cost_usd is None
 
     def test_names_a_trial_whose_result_is_truncated(self, data_dir: Path) -> None:
         trial = data_dir / 'jobs' / 'f' / 'job-1' / 'a__1'
-        write_trial(
-            trial.parent,
-            trial.name,
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
-            task='f/a',
+        record_trial(
+            trial.parent, trial.name, current_agent(VOTES), task='f/a', family=VOTES
         )
         result = trial / 'result.json'
         result.write_text(result.read_text()[:20])
 
         with pytest.raises(ValueError) as error:
-            jobs.collect(VOTES, {})
+            jobs.collect(VOTES, {'acme-large': make_system()})
 
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"
@@ -1666,7 +1828,32 @@ class TestCollect:
 
 
 class TestReadTrials:
+    def test_skips_a_removed_case_without_reading_its_installed_instruction(
+        self, data_dir: Path
+    ) -> None:
+        case = Case(id='a', category='reply', source='synthetic', instruction='Hi.')
+        (task,) = render_cases(VOTES, [case])
+        job = data_dir / 'jobs' / 'f' / 'job-1'
+        write_trial(
+            job,
+            'a__1',
+            current_agent(),
+            task='f/a',
+            output='An old reply.',
+            instruction=None,
+        )
+        declare_cases(VOTES, [])
+        (task / 'instruction.md').unlink()
+
+        outputs = jobs.read_trials(VOTES, job, {'acme-large': make_system()})
+
+        assert outputs == []
+
     def test_returns_one_output_per_finished_trial(self, data_dir: Path) -> None:
+        declare_cases(
+            VOTES,
+            [Case(id='a', category='reply', source='synthetic', instruction='Hi.')],
+        )
         job = data_dir / 'jobs' / 'f' / 'job-1'
         for attempt in range(3):
             write_trial(
