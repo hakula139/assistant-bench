@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/fix-lru-cache"
 description = "Fix an LRU cache from a bug report and add regression tests that fail on the old code"
-version = "1.0.0"
+version = "1.1.0"
 
 [metadata]
 category = "bug-fix"

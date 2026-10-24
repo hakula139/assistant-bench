@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -82,6 +83,71 @@ def test_coding_tasks_share_their_common_files(shared: str) -> None:
     contents = {(task / shared).read_bytes() for task in tasks}
 
     assert len(contents) == 1, f'`{shared}` differs across the coding tasks'
+
+
+@pytest.mark.parametrize(
+    ('regression_tests', 'passes'),
+    [('missing', False), ('return-value', True), ('recency', True)],
+    ids=['missing', 'return-value', 'recency'],
+)
+def test_lru_verifier_requires_regressions_with_different_private_storage(
+    regression_tests: str, passes: bool, tmp_path: Path
+) -> None:
+    task = REPO_ROOT / 'families' / 'coding-repo' / 'tasks' / 'fix-lru-cache'
+    workspace = tmp_path / 'app'
+    shutil.copytree(task / 'environment' / 'app', workspace)
+    visible_tests = workspace / 'tests' / 'test_lru.py'
+    original_tests = visible_tests.read_text()
+    env = {
+        'PATH': os.environ['PATH'],
+        'BENCH_APP_DIR': str(workspace),
+        'TMPDIR': str(tmp_path),
+    }
+    solution = (
+        (task / 'solution' / 'solve.sh')
+        .read_text()
+        .replace('cd /app', 'cd "$BENCH_APP_DIR"')
+    )
+    subprocess.run(['bash', '-s'], input=solution, env=env, text=True, check=True)
+    implementation = workspace / 'cachelite' / 'lru.py'
+    implementation.write_text(implementation.read_text().replace('_data', '_entries'))
+    if regression_tests == 'missing':
+        visible_tests.write_text(original_tests)
+    elif regression_tests == 'recency':
+        before, assertion, after = visible_tests.read_text().partition(
+            '        self.assertEqual(cache.get("a", "missing"), 0)\n'
+        )
+        assert assertion
+        recency = textwrap.indent(
+            textwrap.dedent(
+                """\
+                cache.put("b", 1)
+                cache.get("a")
+                cache.put("c", 2)
+                self.assertEqual(cache.keys(), ["a", "c"])
+                """
+            ),
+            '        ',
+        )
+        visible_tests.write_text(before + recency + after)
+
+    result = subprocess.run(
+        [sys.executable, str(task / 'tests' / 'verify.py')],
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=60,
+    )
+
+    assert (result.returncode == 0) is passes, result.stdout + result.stderr
+    assert 'PASS the hidden spec tests pass' in result.stdout
+    assert 'AttributeError' not in result.stdout + result.stderr
+    for bug in (
+        'get treats a falsy value as missing',
+        'put of a cached key evicts another when full',
+    ):
+        verdict = 'PASS' if passes else 'FAIL'
+        assert f'{verdict} tests/test_lru.py fails when {bug}' in result.stdout
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:
