@@ -650,6 +650,20 @@ class TestKnownFamilies:
 
 
 class TestRun:
+    def test_rejects_repeated_systems_before_submitting_a_job(
+        self, families_dir: Path, submitted: list[JobConfig]
+    ) -> None:
+        write_case_family(families_dir, ['opus-5.5', 'opus-5.5'])
+
+        result = invoke('run', 'f')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            1,
+            '',
+            'Family `f`: `family.toml`: `systems` repeats `opus-5.5`.\n',
+        )
+        assert submitted == []
+
     def test_generates_the_listed_systems_on_every_case(
         self, submitted: list[JobConfig]
     ) -> None:
