@@ -13,13 +13,15 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Build Site      | `pnpm build`, uploading `web/dist` as the `site-dist` artifact that the deploy jobs publish                                                                                 |
 | Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check                                          |
 | Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below |
-| CI Result       | Fails when any job above fails or is cancelled, so the `main` ruleset requires only this job and Codecov's `codecov/patch`                                                  |
+| CI Result       | Fails when any job above fails or is cancelled                                                                                                                              |
 
 The fingerprint check enforces the rule in [Systems](../design/systems.md#fingerprints) by running `uv run bench fingerprints <base>` against a PR's base commit, and on a push to `main` against the previous head, which flags two PRs that pass alone but conflict once both land. Python Check checks out the full history with `fetch-depth: 0`, since the check builds the base commit's nixos-config export.
 
 On a PR, Harbor Smoke checks each current coding task whose files differ from the PR's base, passing its ID through `bench check coding-repo --task <id>`. Added and renamed tasks are checked, while deleted tasks need no trial. Changes to the Python package, `systems.toml`, the coding family's `family.toml`, Python dependencies or version, Nix inputs or shell, or Harbor Smoke's workflow, setup action, or selector check every coding task. Other changes skip the coding-family trials. Pushes to `main` and manual runs check every coding task.
 
-Python Check and Node Check upload their coverage under the `python` and `web` flags, and `codecov.yml` gives each flag its own project and patch status, so the required `codecov/patch` covers Python alone and `codecov/patch/web` covers the site. Both jobs authenticate the upload with a GitHub OIDC token, so they alone hold `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing `codecov/patch` check shows the cause in CI.
+The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. Python Check and Node Check upload their coverage under the `python` and `web` flags, and `codecov.yml` gives each flag its own project and patch status.
+
+Both jobs authenticate the upload with a GitHub OIDC token, so they alone hold `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing patch check shows the cause in CI.
 
 Only the deploy jobs below read secrets, and each reads them in its deploy step alone. List each new check job in CI Result's `needs`.
 
