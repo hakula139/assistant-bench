@@ -13,6 +13,8 @@ node_modules/
 
 # Environment
 .env
+.env.*
+!.env.example
 
 # Nix
 /.direnv/
@@ -22,6 +24,7 @@ result
 
 # Tool caches
 .mypy_cache/
+.pnpm-store/
 .pytest_cache/
 .ruff_cache/
 .wrangler/
