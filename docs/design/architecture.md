@@ -28,7 +28,7 @@ src/assistant_bench/
 │   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
-│   └── ranking.py                          # Bradley-Terry fit, clustered bootstrap, rank spread
+│   └── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors

@@ -33,21 +33,11 @@ import {
   legendMarks,
   type LegendMark,
 } from '@/lib/forest';
-import {
-  formatCountOf,
-  formatInterval,
-  formatPercent,
-  formatRank,
-  formatScore,
-  MISSING,
-} from '@/lib/format';
+import { formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
-import type { Interval, Standing } from '@/lib/report';
+import type { Standing } from '@/lib/report';
 
-/**
- * A system's row, whose score fields come from the board in view: the family's, or a category's
- * refit, which carries no rank spread.
- */
+/** Score fields belong to the selected overall or category fit. */
 export interface LeaderboardRow {
   system: string;
   /** The system's display name, which the row shows and sorts by. */
@@ -58,7 +48,6 @@ export interface LeaderboardRow {
    */
   standing: Standing | undefined;
   score: number;
-  interval: Interval;
   votes: number;
   preliminary: boolean;
 }
@@ -71,6 +60,7 @@ interface LeaderboardProps {
   anchorSystem: string;
   /** The mark's definition, which names the reference when the anchor stands in for it. */
   anchorTerm: Term;
+  preliminaryTerm: Term;
   /** Links a system name to its page, which only systems with a family standing have. */
   href: (system: string) => string;
   /** The gate-failure column's label and meaning. */
@@ -97,7 +87,6 @@ const features = tableFeatures({
 });
 const helper = createColumnHelper<typeof features, LeaderboardRow>();
 
-/** The shared x scale, so the header axis and every row's interval line up. */
 function forestScale(domain: [number, number]): Plot.ScaleOptions {
   return { domain, insetLeft: FOREST_MARGIN, insetRight: FOREST_MARGIN };
 }
@@ -122,7 +111,7 @@ function ForestAxis({ domain }: { domain: [number, number] }) {
   return <PlotFigure plot={plot} height={28} />;
 }
 
-function IntervalCell({
+function ScoreCell({
   row,
   domain,
   anchor,
@@ -149,7 +138,7 @@ function IntervalCell({
     [row, domain, anchor],
   );
 
-  const summary = `${row.name}: ${formatScore(row.score)}, 95% interval ${formatInterval(row.interval)}`;
+  const summary = `${row.name}: ${formatScore(row.score)}`;
   return (
     <div role="img" aria-label={summary} title={summary}>
       <PlotFigure plot={plot} height={ROW_HEIGHT} />
@@ -161,9 +150,11 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   if (direction === 'asc') {
     return <ArrowUp className="size-3.5" aria-hidden="true" />;
   }
+
   if (direction === 'desc') {
     return <ArrowDown className="size-3.5" aria-hidden="true" />;
   }
+
   return null;
 }
 
@@ -196,16 +187,13 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
   );
 }
 
-/**
- * The leaderboard table, whose interval column is a forest plot on one shared axis. Below `lg` the
- * table leaves that column out, keeping each interval as text under its score, and below `md` it
- * also leaves out the `detail` columns, which each score opens, so the table fits without scrolling.
- */
+/** Point scores share one axis. Narrow views keep the same values in the score column. */
 export function Leaderboard({
   rows,
   ranked,
   anchorSystem,
   anchorTerm,
+  preliminaryTerm,
   href,
   gateFailures,
 }: LeaderboardProps) {
@@ -222,17 +210,16 @@ export function Leaderboard({
               <span className="text-xs font-normal">all categories</span>
             </span>
           );
+
     return helper.columns([
       ...(ranked
         ? [
-            helper.accessor((row) => row.standing?.best_rank, {
+            helper.accessor((row) => row.standing?.rank, {
               id: 'rank',
               header: terms.rank.term,
               sortDescFirst: false,
               cell: ({ row: { original } }) =>
-                original.standing
-                  ? formatRank(original.standing.best_rank, original.standing.worst_rank)
-                  : MISSING,
+                original.standing ? original.standing.rank : MISSING,
               meta: { numeric: true, term: terms.rank },
             }),
           ]
@@ -253,15 +240,15 @@ export function Leaderboard({
               <span className="font-medium text-balance sm:whitespace-nowrap">{original.name}</span>
             )}
             {original.system === anchorSystem && <StatusMark status="anchor" term={anchorTerm} />}
-            {original.preliminary && <StatusMark status="preliminary" />}
+            {original.preliminary && <StatusMark status="preliminary" term={preliminaryTerm} />}
           </span>
         ),
         meta: { wraps: true },
       }),
       helper.display({
-        id: 'interval',
+        id: 'point',
         header: () => <ForestAxis domain={domain} />,
-        cell: ({ row }) => <IntervalCell row={row.original} domain={domain} anchor={anchor} />,
+        cell: ({ row }) => <ScoreCell row={row.original} domain={domain} anchor={anchor} />,
         meta: { forest: true },
       }),
       helper.accessor('score', {
@@ -272,9 +259,6 @@ export function Leaderboard({
             <Hint term={rowDetails(row.original, ranked, gateFailures)}>
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
-            <span className="text-xs text-muted-foreground">
-              {formatInterval(row.original.interval)}
-            </span>
           </span>
         ),
         meta: { numeric: true },
@@ -301,7 +285,7 @@ export function Leaderboard({
         meta: { numeric: true, term: gateFailures, detail: true },
       }),
     ]);
-  }, [ranked, domain, anchor, anchorSystem, anchorTerm, href, gateFailures]);
+  }, [ranked, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, href, gateFailures]);
 
   const table = useTable({
     features,
@@ -320,12 +304,14 @@ export function Leaderboard({
               if (forest) {
                 return (
                   <TableHead key={header.id} className="w-[38%] p-0 align-bottom max-lg:hidden">
-                    <span className="sr-only">95% interval</span>
+                    <span className="sr-only">Point score</span>
                     <table.FlexRender header={header} />
                   </TableHead>
                 );
               }
+
               const sorted = header.column.getIsSorted();
+
               return (
                 <TableHead
                   key={header.id}

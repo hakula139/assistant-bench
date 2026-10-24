@@ -78,7 +78,7 @@ describe('methodSteps', () => {
     expect(steps.slice(1).map(({ hint }) => hint)).toEqual([
       gateRule(family),
       'One rater votes on two outputs for a case without seeing which systems wrote them.',
-      "Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at 1,000.",
+      'Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Uncertainty for new cases and voters is unavailable until the method is calibrated.',
     ]);
   });
 

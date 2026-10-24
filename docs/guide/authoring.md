@@ -124,15 +124,15 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
 | `display_name` | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
 
-Every page names a system by its display name, while URLs, outputs, and reports keep the table name. Display names must be unique across `systems.toml`, so a variant or a snapshot sets a `display_name` that tells it apart.
+Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
 Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results, unless the recipe below cannot pin its `prompt`. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 
 When the catalog moves a model key to a new snapshot, keep the old name on its old resolution:
 
 1. Run `uv run bench fingerprints <base>`, which names each system whose fingerprint changed and prints the `route` table that `<base>` resolved it to from that revision's catalog. A system with a `prompt` cannot be pinned this way, so the command prints only a notice for it.
-2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `vendor`, `effort`, `price`, and `display_name` and sets no `model`. The pinned `price` matters because collection prices each output from the current system table, so a pin without it leaves the frozen outputs unpriced and out of the cost tie-break.
+2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `vendor`, `effort`, `price`, and `display_name` and sets no `model`. Collection prices outputs from this table, so keep its prices for subsequent collection.
 3. Add the new snapshot in a table whose key ends in the snapshot, as `deepseek-v4.1-flash-1017` does, and set a `display_name` that tells it apart from the pinned table.
 4. Replace the old name with the new one in each family's `systems` list, including `reference` where it named the old one. `bench close` anchors the board at the new snapshot once it ranks, through its votes or the results its gates and tests settle, and until then anchors it at the most-voted system and records that system as the round's `anchor`.
-5. For a system with a `prompt`, drop its table and keep the old name only in closed reports, since its fingerprint cannot be pinned.
+5. Before removing a runnable table, close a valid report while its public metadata is available. Retired outputs can enter a later report only when their known fingerprint matches that ID's latest prior report. A system with a `prompt` cannot be pinned by this recipe, so retire it after closing.
 6. Run `uv run bench fingerprints <base>` again to confirm that no system keeps a name under another fingerprint.

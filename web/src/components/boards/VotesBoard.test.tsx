@@ -30,23 +30,30 @@ async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRo
   if (report.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
   }
-  return { round: report.round, results: report.results };
+  return {
+    round: report.round,
+    closed_at: report.closed_at,
+    systems: report.systems,
+    results: report.results,
+  };
 }
 
 const BOARD = '/writing/arena/';
 
 const CASES = boardLabels({ render: 'text' });
 
-function render({ round, results }: VotesRound, names = FIXTURE_NAMES, labels = CASES): string {
-  // The fixture lists standings by score, so reversing them leaves the board to sort.
-  const reversed = { ...results, standings: results.standings.toReversed() };
+function render(round: VotesRound, names?: Record<string, string>, labels = CASES): string {
+  const reversed = { ...round.results, standings: round.results.standings.toReversed() };
+  const systems = names
+    ? Object.fromEntries(
+        Object.entries(names).map(([id, display_name]) => [
+          id,
+          { display_name, fingerprint: null },
+        ]),
+      )
+    : round.systems;
   return renderToString(
-    <VotesBoard
-      base={BOARD}
-      rounds={[{ round, results: reversed }]}
-      names={names}
-      labels={labels}
-    />,
+    <VotesBoard base={BOARD} rounds={[{ ...round, systems, results: reversed }]} labels={labels} />,
   );
 }
 
@@ -54,7 +61,6 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
 
 const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
 
-/** The x positions of a row's vertical rules, which only the anchor draws. */
 function verticalRules(row: Element): number[] {
   return [...row.querySelectorAll('g[aria-label="rule"] line')]
     .filter((line) => line.getAttribute('y1') !== line.getAttribute('y2'))
@@ -70,7 +76,6 @@ const stats = (html: string) =>
     stat.querySelector('dd')?.textContent,
   ]);
 
-/** The text of each hint trigger in the round summary. */
 const statHints = (html: string) =>
   [...parse(html).querySelectorAll('dl [aria-haspopup="dialog"]')].map((hint) => hint.textContent);
 
@@ -82,6 +87,56 @@ describe('VotesBoard', () => {
     search.delete('category');
     search.delete('round');
     cleanup();
+  });
+
+  test('switches historical labels, coverage marks, and copy with the selected round', async () => {
+    const earlier = await load('report-early');
+    const current = await load();
+    earlier.systems['acme-pro'].display_name = 'Historical Pro';
+    current.systems['acme-pro'].display_name = 'Current Pro';
+    earlier.results.rules.preliminary_decisive_votes = 12;
+    earlier.results.rules.rater_agreement_floor = 0.5;
+    earlier.results.method.anchor_score = 1234;
+    for (const row of earlier.results.standings) {
+      row.score += 234;
+    }
+    for (const board of earlier.results.categories) {
+      for (const row of board.standings) {
+        row.score += 234;
+      }
+    }
+    for (const round of [earlier, current]) {
+      const pro = round.results.standings.find((row) => row.system === 'acme-pro');
+      if (pro === undefined) {
+        throw new Error('Fixture ranks acme-pro');
+      }
+      pro.decisive_votes = 13;
+    }
+    const draw = () =>
+      renderToString(<VotesBoard base={BOARD} rounds={[earlier, current]} labels={CASES} />);
+    search.set('round', earlier.round);
+
+    const historical = draw();
+
+    const historicalRow = [...parse(historical).querySelectorAll('tbody tr')].find((row) =>
+      row.querySelector(`a[href="${BOARD}acme-pro/"]`),
+    );
+    expect(historicalRow?.textContent).toContain('Historical Pro');
+    expect(historicalRow?.textContent).not.toContain('Preliminary');
+    expect(text(historical)).not.toContain('Current Pro');
+    expect(text(historical)).toContain('anchor 1234');
+    expect(text(historical)).toContain('12 raw decisive votes');
+    expect(text(historical)).toContain('floor is 0.5');
+
+    search.set('round', current.round);
+    const latest = draw();
+
+    const currentRow = [...parse(latest).querySelectorAll('tbody tr')].find((row) =>
+      row.querySelector(`a[href="${BOARD}acme-pro/"]`),
+    );
+    expect(currentRow?.textContent).toContain('Current ProPreliminary');
+    expect(text(latest)).not.toContain('Historical Pro');
+    expect(text(latest)).toContain('40 raw decisive votes');
   });
 
   test('lists the ranked systems by score, best first', async () => {
@@ -101,23 +156,18 @@ describe('VotesBoard', () => {
     ]);
   });
 
-  test('names the leader and the votes left out, with hints on the tie and the left-out votes', async () => {
+  test('shows descriptive diagnostics and unavailable population inference', async () => {
     const html = render(await load());
 
     expect(stats(html)).toEqual([
-      ['Leader', 'Acme Large, tied'],
       ['Votes', '340 over 10 sessions, 20 left out'],
       ['Rater agreement', '83% on 23 repeats'],
-      ['Separated pairs', '67%'],
       ['Split-half τ', '0.60'],
       ['Length bias', 'Favors shorter, 6.5'],
     ]);
     expect(statHints(html)).toEqual([
-      'Leader',
-      'tied',
       '20 left out',
       'Rater agreement',
-      'Separated pairs',
       'Split-half τ',
       'Length bias',
     ]);
@@ -146,7 +196,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
-    expect(stats(html)[1]).toEqual(['Votes', '340 over 10 sessions']);
+    expect(stats(html)[0]).toEqual(['Votes', '340 over 10 sessions']);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -165,12 +215,12 @@ describe('VotesBoard', () => {
   test('keys the legend to the marks the board draws', async () => {
     const round = await load();
     for (const standing of round.results.standings) {
-      standing.preliminary = false;
+      standing.decisive_votes = round.results.rules.preliminary_decisive_votes;
     }
 
     const html = render(round);
 
-    expect(legend(html)).toBe('Score, 95% interval Interval past the axis Anchor, 1,000');
+    expect(legend(html)).toBe('Point score Score below the axis Anchor, 1,000');
   });
 
   test('marks only the anchor and the preliminary systems', async () => {
@@ -186,6 +236,7 @@ describe('VotesBoard', () => {
   test('marks the stand-in anchor when the reference is not ranked', async () => {
     const round = await load();
     round.results.reference = 'acme-new';
+    round.systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
 
     const html = render(round);
 
@@ -195,16 +246,12 @@ describe('VotesBoard', () => {
   });
 
   test('names the reference the stand-in anchor replaces', async () => {
-    const { round, results } = await load();
+    const { round, results, systems, closed_at } = await load();
     results.reference = 'acme-new';
+    systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        rounds={[{ round, results }]}
-        names={FIXTURE_NAMES}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
     );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
@@ -222,10 +269,10 @@ describe('VotesBoard', () => {
     );
   });
 
-  test("labels each system's interval with its display name and score", async () => {
+  test("labels each system's point with its display name and score", async () => {
     const html = render(await load());
 
-    expect(html).toContain('aria-label="Acme Pro: 1,004, 95% interval 955–1,065"');
+    expect(html).toContain('aria-label="Acme Pro: 1,004"');
   });
 
   test.each(['all', 'message'])(
@@ -249,17 +296,16 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(parse(html).body.textContent).toContain(
-      'Agreement below 70%, so the intervals overstate separation.',
+      'Repeat consistency is below the recorded 70% floor.',
     );
   });
 
-  test('names no leader while a preliminary system ties with the top score', async () => {
+  test('keeps population inference unavailable for a preliminary round', async () => {
     const html = render(await load('report-early'));
 
-    expect(stats(html).slice(0, 2)).toEqual([
-      ['Leader', 'No leader yet'],
-      ['Votes', '34 over 1 session, 2 left out'],
-    ]);
+    expect(stats(html)[0]).toEqual(['Votes', '34 over 1 session, 2 left out']);
+    expect(stats(html).map(([label]) => label)).not.toContain('Leader');
+    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -280,7 +326,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toBe(
-      ' System 95% interval Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means ',
+      ' System Point score Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means ',
     );
   });
 
@@ -290,19 +336,14 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toMatch(/^ Rank What Rank means System /);
-    expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
+    expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
   test('writes the category picked to the address', async () => {
-    const { round, results } = await load();
+    const { round, results, systems, closed_at } = await load();
     stubPlotFrame();
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        rounds={[{ round, results }]}
-        names={FIXTURE_NAMES}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
     );
 
     await userEvent.setup().selectOptions(screen.getByLabelText('Category'), 'message');
@@ -317,13 +358,12 @@ describe('VotesBoard', () => {
       const categoryBoard = report.results.categories[0];
       categoryBoard.category = category;
       categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
-      const { round, results } = report;
+      const { round, results, systems, closed_at } = report;
       stubPlotFrame();
       renderInDom(
         <VotesBoard
           base={BOARD}
-          rounds={[{ round, results }]}
-          names={FIXTURE_NAMES}
+          rounds={[{ round, results, systems, closed_at }]}
           labels={CASES}
         />,
       );
@@ -347,7 +387,7 @@ describe('VotesBoard', () => {
   );
 
   test.each([
-    ['95% interval', 'max-lg:hidden'],
+    ['Point score', 'max-lg:hidden'],
     ['Votes', 'max-md:hidden'],
     ['Both bad', 'max-md:hidden'],
     ['Gate failures', 'max-md:hidden'],
@@ -371,7 +411,7 @@ describe('VotesBoard', () => {
     expect(new Set(rules), name).toEqual(new Set([hidden]));
   });
 
-  test('shows the category legend where the leaderboard legend hides with the interval column', async () => {
+  test('shows the category legend where the leaderboard legend hides with the point column', async () => {
     const document = parse(render(await load()));
 
     const legends = [...document.querySelectorAll('ul[aria-label="Legend"]')].map((list) => [
@@ -394,13 +434,12 @@ describe('VotesBoard', () => {
     "opens a system's votes and rates from its score on the %s board of a %s family",
     async (category, score, render, details) => {
       search.set('category', category);
-      const { round, results } = await load();
+      const { round, results, systems, closed_at } = await load();
       stubPlotFrame();
       renderInDom(
         <VotesBoard
           base={BOARD}
-          rounds={[{ round, results }]}
-          names={FIXTURE_NAMES}
+          rounds={[{ round, results, systems, closed_at }]}
           labels={boardLabels({ render })}
         />,
       );
@@ -414,17 +453,13 @@ describe('VotesBoard', () => {
   );
 
   test("draws the anchor's score as one rule through every row", async () => {
-    const { round, results } = await load();
+    const { round, results, systems, closed_at } = await load();
     results.reference = 'acme-new';
+    systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard
-        base={BOARD}
-        rounds={[{ round, results }]}
-        names={FIXTURE_NAMES}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -448,7 +483,7 @@ describe('VotesBoard', () => {
   });
 
   test('draws no anchor rule in a category that leaves the anchor out', async () => {
-    const { round, results } = await load();
+    const { round, results, systems, closed_at } = await load();
     const message = results.categories.find((board) => board.category === 'message');
     if (!message) {
       throw new Error('the fixture has a message category');
@@ -458,12 +493,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard
-        base={BOARD}
-        rounds={[{ round, results }]}
-        names={FIXTURE_NAMES}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -489,9 +519,9 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('Acme Edge Preliminary 890 798–1,044 41 – –');
+    expect(text(html)).toContain('Acme Edge Preliminary 890 41 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
-    expect(text(html)).toContain('Acme Mini 769 (696–867), 38 votes, preliminary – 789');
-    expect(text(html)).toContain('Acme Edge – 890 (798–1,044), 41 votes, preliminary – Score');
+    expect(text(html)).toContain('Acme Mini 769, 38 votes, preliminary – 789');
+    expect(text(html)).toContain('Acme Edge – 890, 41 votes, preliminary – Score');
   });
 });

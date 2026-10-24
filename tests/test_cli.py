@@ -29,9 +29,12 @@ from assistant_bench.cli import app
 from assistant_bench.families import Gate, family_names, load_cases, load_family
 from assistant_bench.outputs import Output, write_outputs
 from support import (
+    AT,
     finish_job,
+    make_ballot,
     make_output,
     make_system,
+    passing_outputs,
     write_case_family,
     write_task_family,
     write_trial,
@@ -109,8 +112,6 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 
 @dataclass
 class Site:
-    """The stub site build and what `bench serve` served from it."""
-
     path: Path
     builds: list[tuple[list[str], str | None]] = field(default_factory=list)
     served: list[tuple[list[str], Path]] = field(default_factory=list)
@@ -1390,6 +1391,51 @@ class TestServe:
 
 
 class TestClose:
+    def test_closes_with_verified_retired_metadata_from_an_earlier_report(
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        outputs = passing_outputs({'c1': 'reply'}, ['large', 'small'])
+        write_outputs('f', list(outputs.values()))
+        session = store.start_session('f', AT)
+        store.record(
+            make_ballot(
+                outputs['c1', 'large'], outputs['c1', 'small'], session=session.id
+            ),
+            AT,
+        )
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        prior = report.close(
+            load_family('f'),
+            store,
+            AT,
+            system_names={'large': 'Prior Large', 'small': 'Retired Small'},
+            previous_reports=[],
+        )
+        report.write_report(prior)
+        monkeypatch.setattr(
+            cli,
+            '_load_systems',
+            lambda: {'large': make_system(display_name='Current Large')},
+        )
+        monkeypatch.setattr(cli, '_collect', lambda family: None)
+
+        result = invoke('close', 'f')
+        assert result.exit_code == 0, result.output
+
+        current = report.read_reports('f', datetime.max.replace(tzinfo=UTC))[-1]
+        assert current.systems['large'].display_name == 'Current Large'
+        assert current.systems['small'].display_name == 'Retired Small'
+        assert report.read_reports('f', current.closed_at) == [prior]
+        assert set(current.systems['small'].model_dump()) == {
+            'display_name',
+            'fingerprint',
+        }
+
     def test_collects_the_family_before_writing_the_report(
         self,
         families_dir: Path,
@@ -1434,6 +1480,11 @@ class TestClose:
             )
         (data_dir / 'outputs' / 'f.jsonl').unlink()
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        systems = {
+            'large': make_system(display_name='Acme Large'),
+            'small': make_system(display_name='Acme Small'),
+        }
+        monkeypatch.setattr(cli, '_load_systems', lambda: systems)
 
         result = invoke('close', 'f')
         assert result.exit_code == 0, result.output
@@ -1445,6 +1496,15 @@ class TestClose:
         closed = report.Report.model_validate_json(path.read_text())
         assert isinstance(closed.results, report.VotesResults)
         assert closed.family == 'f'
+        assert {
+            name: metadata.display_name for name, metadata in closed.systems.items()
+        } == {name: systems[name].display_name for name in ('large', 'small')}
+        assert {
+            name: metadata.fingerprint for name, metadata in closed.systems.items()
+        } == {
+            'large': 'fp-large',
+            'small': 'fp-small',
+        }
         assert {standing.system for standing in closed.results.standings} == {
             'large',
             'small',

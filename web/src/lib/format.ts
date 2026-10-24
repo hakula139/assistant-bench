@@ -36,12 +36,6 @@ export const formatCost = (value: number | null) => (value === null ? MISSING : 
 export const formatSeconds = (value: number | null) =>
   value === null ? MISSING : seconds.format(value);
 
-export const formatInterval = ({ lower, upper }: { lower: number; upper: number }) =>
-  `${formatScore(lower)}–${formatScore(upper)}`;
-
 /** Names the output length the rater favors and by how many points, as in "Favors shorter, 6.5". */
 export const formatLengthBias = (value: number) =>
   `Favors ${value >= 0 ? 'longer' : 'shorter'}, ${bias.format(Math.abs(value))}`;
-
-export const formatRank = (best: number, worst: number) =>
-  best === worst ? `${best}` : `${best}–${worst}`;

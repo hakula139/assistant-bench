@@ -16,7 +16,6 @@ import {
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
 import { TableTwin } from '@/components/charts/TableTwin';
-import { Leader } from '@/components/scorers/votes/Leader';
 import { ForestLegend } from '@/components/site/Forest';
 import { note, Section, stack, Stat, statList } from '@/components/site/PageParts';
 import { Hint } from '@/components/site/Term';
@@ -32,7 +31,6 @@ import {
   formatCost,
   formatCount,
   formatCountOf,
-  formatInterval,
   formatLengthBias,
   formatPercent,
   formatScore,
@@ -40,13 +38,21 @@ import {
   formatTau,
   MISSING,
 } from '@/lib/format';
-import { fallbackAnchor, terms, type Term } from '@/lib/glossary';
-import type { BoardLabels } from '@/lib/method';
+import {
+  agreementTerm,
+  fallbackAnchor,
+  inferenceNote,
+  preliminaryTerm,
+  anchorTerm as recordedAnchor,
+  terms,
+  type Term,
+} from '@/lib/glossary';
+import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
-import { AGREEMENT_FLOOR } from '@/lib/ranking';
+import { isPreliminary } from '@/lib/ranking';
 import type { Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
-import { systemName, type SystemNames } from '@/lib/systems';
+import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
 
 interface VotesBoardProps {
@@ -54,7 +60,6 @@ interface VotesBoardProps {
   base: string;
   /** Closed rounds, oldest first. */
   rounds: VotesRound[];
-  names: SystemNames;
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
@@ -72,15 +77,17 @@ function leaderboardRows(
     name: systemName(names, fit.system),
     standing,
     score: fit.score,
-    interval: fit.interval,
     votes: fit.votes,
-    preliminary: fit.preliminary,
+    preliminary: isPreliminary(fit, results.rules),
   });
+
   if (category === null) {
     return results.standings.map((standing) => row(standing, standing));
   }
+
   const standings = new Map(results.standings.map((standing) => [standing.system, standing]));
   const board = results.categories.find((item) => item.category === category);
+
   return (board?.standings ?? []).map((refit) => row(refit, standings.get(refit.system)));
 }
 
@@ -88,34 +95,26 @@ function leaderboardRows(
 function categorySystems(results: VotesResults): string[] {
   const ranked = results.standings.toSorted((a, b) => b.score - a.score);
   const refits = results.categories.flatMap((board) => board.standings);
+
   return [...new Set([...ranked, ...refits].map((item) => item.system))];
 }
 
 function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number | null) {
   return rows.flatMap((row): ScatterPoint[] => {
     const value = row.standing ? x(row.standing) : null;
+
     return value === null
       ? []
-      : [{ system: row.system, name: row.name, x: value, score: row.score, ...row.interval }];
+      : [{ system: row.system, name: row.name, x: value, score: row.score }];
   });
 }
 
-function RoundSummary({
-  results,
-  names,
-  lengthBias,
-}: {
-  results: VotesResults;
-  names: SystemNames;
-  lengthBias: Term;
-}) {
-  const { decision, rater_agreement: agreement, length } = results;
+function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBias: Term }) {
+  const { rater_agreement: agreement, length } = results;
+
   return (
     <div className="flex flex-col gap-3">
       <dl className={statList}>
-        <Stat label={<Hint term={terms.leader} />}>
-          <Leader decision={decision} name={decision && systemName(names, decision.leader)} />
-        </Stat>
         <Stat
           label={terms.votes.term}
           detail={
@@ -132,23 +131,22 @@ function RoundSummary({
           {formatCount(results.votes)}
         </Stat>
         <Stat
-          label={<Hint term={terms.raterAgreement} />}
+          label={<Hint term={agreementTerm(results.rules)} />}
           detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}
         >
           {formatPercent(agreement.agreement)}
-        </Stat>
-        <Stat label={<Hint term={terms.separatedPairs} />}>
-          {formatPercent(results.separability)}
         </Stat>
         <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
         {length !== null && (
           <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
         )}
       </dl>
+      <p className={note}>{inferenceNote}</p>
       {agreement.below_floor && (
         <p className={cn(note, 'flex gap-2')}>
           <TriangleAlert className="h-lh w-4 shrink-0" aria-hidden="true" />
-          Agreement below {formatPercent(AGREEMENT_FLOOR)}, so the intervals overstate separation.
+          Repeat consistency is below the recorded{' '}
+          {formatPercent(results.rules.rater_agreement_floor)} floor.
         </p>
       )}
     </div>
@@ -156,12 +154,17 @@ function RoundSummary({
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
+export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', null);
 
-  const { round: activeRound, results } = rounds.find((item) => item.round === roundName) ?? latest;
+  const {
+    round: activeRound,
+    systems,
+    results,
+  } = rounds.find((item) => item.round === roundName) ?? latest;
+  const names = useMemo(() => reportNames(systems), [systems]);
   const categories = results.categories.map((board) => board.category);
   const activeCategory = category !== null && categories.includes(category) ? category : null;
   const unranked =
@@ -174,6 +177,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
     [results, activeCategory, names],
   );
   const order = useMemo(() => categorySystems(results), [results]);
+
   const measured = useMemo(
     () =>
       rows
@@ -181,24 +185,33 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
         .flatMap((row) => (row.standing ? [{ ...row, standing: row.standing }] : [])),
     [rows],
   );
+
   const costPoints = useMemo(
     () => scatterPoints(rows, (standing) => standing.mean_cost_usd),
     [rows],
   );
+
   const latencyPoints = useMemo(
     () => scatterPoints(rows, (standing) => standing.p50_latency_sec),
     [rows],
   );
+
   const unpriced = measured
     .filter((row) => row.standing.mean_cost_usd === null)
     .map((row) => row.name);
+
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
+
   const href = (system: string) => systemPagePath(base, system);
   const anchorTerm =
     results.anchor === results.reference
-      ? terms.anchor
-      : fallbackAnchor(systemName(names, results.anchor), systemName(names, results.reference));
+      ? recordedAnchor(results.method)
+      : fallbackAnchor(
+          systemName(names, results.anchor),
+          systemName(names, results.reference),
+          results.method,
+        );
 
   return (
     <div className={stack}>
@@ -227,7 +240,11 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
         )}
       </div>
 
-      <RoundSummary results={results} names={names} lengthBias={labels.lengthBias} />
+      <RoundSummary results={results} lengthBias={labels.lengthBias} />
+      <details className={note}>
+        <summary>Round settings</summary>
+        <p>{roundMethod(results.method, results.rules)}</p>
+      </details>
 
       <div className="flex flex-col gap-4">
         <Leaderboard
@@ -235,6 +252,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
           ranked={activeCategory === null}
           anchorSystem={results.anchor}
           anchorTerm={anchorTerm}
+          preliminaryTerm={preliminaryTerm(results.rules)}
           href={href}
           gateFailures={labels.gateFailures}
         />
@@ -247,13 +265,27 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
               .join(', ')}`}
           </p>
         )}
-        <ForestLegend className="max-lg:hidden" marks={leaderboardMarks(rows, results.anchor)} />
+        <ForestLegend
+          className="max-lg:hidden"
+          marks={leaderboardMarks(rows, results.anchor)}
+          anchorScore={results.method.anchor_score}
+        />
       </div>
 
       {categories.length > 0 && (
         <Section title="Categories">
-          <ForestLegend className="lg:hidden" marks={categoryMarks(results.categories)} />
-          <CategoryForests categories={results.categories} systems={order} names={names} />
+          <ForestLegend
+            className="lg:hidden"
+            marks={categoryMarks(results.categories, results.method.anchor_score, results.rules)}
+            anchorScore={results.method.anchor_score}
+          />
+          <CategoryForests
+            categories={results.categories}
+            systems={order}
+            names={names}
+            anchorScore={results.method.anchor_score}
+            rules={results.rules}
+          />
           <TableTwin>
             <Table>
               <TableHeader>
@@ -275,7 +307,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
                       return (
                         <TableCell key={board.category} numeric>
                           {refit
-                            ? `${formatScore(refit.score)} (${formatInterval(refit.interval)}), ${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`
+                            ? `${formatScore(refit.score)}, ${formatCountOf(refit.votes, 'vote')}${isPreliminary(refit, results.rules) ? ', preliminary' : ''}`
                             : MISSING}
                         </TableCell>
                       );
@@ -341,9 +373,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
                   return (
                     <TableRow key={system}>
                       <TableCell>{row.name}</TableCell>
-                      <TableCell numeric>
-                        {formatScore(row.score)} ({formatInterval(row.interval)})
-                      </TableCell>
+                      <TableCell numeric>{formatScore(row.score)}</TableCell>
                       <TableCell numeric>{formatCost(row.standing.mean_cost_usd)}</TableCell>
                       <TableCell numeric>{formatSeconds(row.standing.p50_latency_sec)}</TableCell>
                       <TableCell>{frontiers.join(' and ') || MISSING}</TableCell>

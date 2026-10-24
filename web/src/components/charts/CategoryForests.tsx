@@ -3,8 +3,8 @@ import { useMemo } from 'react';
 import { ForestPlot } from '@/components/charts/ForestPlot';
 import { legendMarks, sharedDomain, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
-import { ANCHOR_SCORE } from '@/lib/ranking';
-import type { CategoryBoard } from '@/lib/report';
+import { isPreliminary } from '@/lib/ranking';
+import type { CategoryBoard, VotesRules } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 interface CategoryForestsProps {
@@ -12,24 +12,36 @@ interface CategoryForestsProps {
   /** Systems from top to bottom, in the leaderboard's order. */
   systems: string[];
   names: SystemNames;
+  anchorScore: number;
+  rules: VotesRules;
 }
 
 /** Returns the marks the category forests draw, for their legend. */
-export function categoryMarks(categories: CategoryBoard[]): LegendMark[] {
+export function categoryMarks(
+  categories: CategoryBoard[],
+  anchorScore: number,
+  rules: VotesRules,
+): LegendMark[] {
   const domain = sharedDomain(categories.map((board) => board.standings));
   const rows = categories.flatMap((board) =>
     board.standings.map((refit) => ({
       system: refit.system,
       name: refit.system,
       estimate: refit,
-      preliminary: refit.preliminary,
+      preliminary: isPreliminary(refit, rules),
     })),
   );
-  return legendMarks(rows, domain, domain[0] <= ANCHOR_SCORE && ANCHOR_SCORE <= domain[1]);
+  return legendMarks(rows, domain, domain[0] <= anchorScore && anchorScore <= domain[1]);
 }
 
 /** One forest plot per category, on an axis every category shares. */
-export function CategoryForests({ categories, systems, names }: CategoryForestsProps) {
+export function CategoryForests({
+  categories,
+  systems,
+  names,
+  anchorScore,
+  rules,
+}: CategoryForestsProps) {
   const domain = useMemo(
     () => sharedDomain(categories.map((board) => board.standings)),
     [categories],
@@ -38,6 +50,7 @@ export function CategoryForests({ categories, systems, names }: CategoryForestsP
     () => systems.map((system) => systemName(names, system)),
     [systems, names],
   );
+
   return (
     <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
       {categories.map((board) => (
@@ -53,6 +66,8 @@ export function CategoryForests({ categories, systems, names }: CategoryForestsP
             }))}
             labels={labels}
             domain={domain}
+            anchorScore={anchorScore}
+            rules={rules}
           />
         </figure>
       ))}

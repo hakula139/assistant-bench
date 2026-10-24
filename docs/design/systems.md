@@ -18,6 +18,8 @@ On every PR and push to `main`, the [fingerprint check](../conventions/ci.md#che
 
 A local `bench run` refuses each selected system whose earlier trials recorded a fingerprint other than its fingerprint under the family's harness, naming both and pointing at [Authoring](../guide/authoring.md#systems), so the same drift fails before Harbor starts. Every output also records the nixos-config rev it ran under.
 
+Closed reports freeze each public label and output fingerprint in `Report.systems`, including unranked entrants. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity. Display-name changes affect only later reports. [Reports](reports.md#frozen-identity) defines these checks.
+
 ## Harnesses
 
 `System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder returns the agent's kwargs from a system and the family's settings, and the job sends the system's route after its `model_prefix` as the model name.

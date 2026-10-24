@@ -3,7 +3,7 @@ import * as Plot from '@observablehq/plot';
 import type { Clipped } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
-/** One interval on a forest plot, already clipped to the plot's domain. */
+/** One score point, clipped to the plot's domain. */
 export interface ForestDatum {
   /** The row's position on the y scale. */
   y: string | number;
@@ -15,38 +15,17 @@ export interface ForestDatum {
 
 const SERIES = 'var(--chart-series)';
 const SURFACE = 'var(--background)';
-const DASH = '5 4';
 
 /** The rule a forest plot draws at the anchor score, as the static `Forest` draws it. */
 export function anchorRule(score: number): Plot.Markish {
   return Plot.ruleX([score], { stroke: 'var(--faint)', strokeOpacity: 0.4 });
 }
 
-/**
- * The marks of a forest plot: each interval as a 3 px rule, dashed while preliminary, then an
- * arrowhead where the axis cuts it, then a dot at the score, hollow while preliminary. A score
- * below the axis start keeps only the arrowhead. Plots taking these marks need an identity color
- * scale, `color: { type: 'identity' }`.
- */
+/** Hollow points mark preliminary coverage. A clipped point keeps an arrowhead. */
 export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plot.Markish[] {
-  const rule = (preliminary: boolean) =>
-    Plot.ruleY(
-      data.filter((datum) => datum.preliminary === preliminary),
-      {
-        y: 'y',
-        x1: (datum: ForestDatum) => datum.clipped.lower,
-        x2: (datum: ForestDatum) => datum.clipped.upper,
-        stroke: SERIES,
-        strokeWidth: 3,
-        ariaDescription: '95% interval',
-        strokeDasharray: preliminary ? DASH : undefined,
-      },
-    );
   return [
-    rule(false),
-    rule(true),
     Plot.dot(
-      data.filter((datum) => datum.clipped.cutLow),
+      data.filter((datum) => datum.clipped.offScale),
       { x: start, y: 'y', symbol: 'triangle', rotate: -90, r: 5, fill: SERIES },
     ),
     Plot.dot(
@@ -63,15 +42,12 @@ export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plo
   ];
 }
 
-/**
- * Prints the score of each row whose score lies below the axis start, after whatever part of its
- * interval the axis keeps, for forest plots without a score column.
- */
+/** Keeps a clipped point's actual value visible on plots without a score column. */
 export function offScaleLabels(data: ForestDatum[]): Plot.Markish {
   return Plot.text(
     data.filter((datum) => datum.clipped.offScale),
     {
-      x: (datum: ForestDatum) => datum.clipped.upper,
+      x: (datum: ForestDatum) => datum.clipped.score,
       y: 'y',
       text: (datum: ForestDatum) => formatScore(datum.score),
       dx: 9,

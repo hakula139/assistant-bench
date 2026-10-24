@@ -9,11 +9,10 @@ import {
 } from '@/components/charts/forest-marks';
 import { LABEL_GAP, PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { clip, forestTicks, labelledTicks } from '@/lib/forest';
-import { formatCountOf, formatInterval, formatScore } from '@/lib/format';
-import { ANCHOR_SCORE } from '@/lib/ranking';
-import type { CategoryBoard } from '@/lib/report';
+import { formatCountOf, formatScore } from '@/lib/format';
+import { isPreliminary } from '@/lib/ranking';
+import type { CategoryBoard, VotesRules } from '@/lib/report';
 
-/** A category refit, which carries its votes and preliminary status. */
 export type Refit = CategoryBoard['standings'][number];
 
 export interface ForestPlotRow {
@@ -25,8 +24,10 @@ interface ForestPlotProps {
   rows: ForestPlotRow[];
   /** Every row label from top to bottom, including labels without a row. */
   labels: string[];
-  /** The x domain, which callers share across plots so their intervals compare. */
+  /** Shared across category plots so their points use the same scale. */
   domain: [number, number];
+  anchorScore: number;
+  rules: VotesRules;
   /** Names the chart, unless an enclosing figure's caption already does. */
   label?: string;
 }
@@ -39,19 +40,21 @@ const ARROW_INSET = 8;
 export const forestPlotHeight = (labels: string[]) => labels.length * ROW_HEIGHT + 36;
 
 export function forestPlotOptions(
-  { rows, labels, domain }: ForestPlotProps,
+  { rows, labels, domain, anchorScore, rules }: ForestPlotProps,
   { width, measure }: PlotFrame,
 ): Plot.PlotOptions {
   const data = rows.map(({ label, refit }): ForestDatum & { refit: Refit } => ({
     y: label,
     score: refit.score,
     clipped: clip(refit, domain),
-    preliminary: refit.preliminary,
+    preliminary: isPreliminary(refit, rules),
     refit,
   }));
+
   const marginLeft = Math.max(...labels.map(measure)) + LABEL_GAP;
   const ticks = forestTicks(domain);
-  const labelled = new Set(labelledTicks(domain, width - marginLeft - ARROW_INSET));
+  const labelled = new Set(labelledTicks(domain, width - marginLeft - ARROW_INSET, anchorScore));
+
   return {
     marginLeft,
     marginRight: 16,
@@ -67,7 +70,7 @@ export function forestPlotOptions(
     y: { domain: labels, label: null, tickSize: 0, tickPadding: LABEL_GAP },
     color: { type: 'identity' },
     marks: [
-      anchorRule(ANCHOR_SCORE),
+      anchorRule(anchorScore),
       forestMarks(data, domain),
       offScaleLabels(data),
       Plot.tip(
@@ -76,7 +79,7 @@ export function forestPlotOptions(
           x: (datum: (typeof data)[number]) => datum.clipped.score,
           y: 'y',
           title: ({ y, refit }: (typeof data)[number]) =>
-            `${String(y)}\n${formatScore(refit.score)} (${formatInterval(refit.interval)})\n${formatCountOf(refit.votes, 'vote')}${refit.preliminary ? ', preliminary' : ''}`,
+            `${String(y)}\n${formatScore(refit.score)}\n${formatCountOf(refit.votes, 'vote')}${isPreliminary(refit, rules) ? ', preliminary' : ''}`,
           fontFamily: 'inherit',
         }),
       ),
@@ -85,10 +88,11 @@ export function forestPlotOptions(
 }
 
 /** One forest plot of category refits, labelled by system or by category. */
-export function ForestPlot({ rows, labels, domain, label }: ForestPlotProps) {
+export function ForestPlot({ rows, labels, domain, anchorScore, rules, label }: ForestPlotProps) {
   const plot = useCallback(
-    (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain }, frame),
-    [rows, labels, domain],
+    (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain, anchorScore, rules }, frame),
+    [rows, labels, domain, anchorScore, rules],
   );
+
   return <PlotFigure plot={plot} height={forestPlotHeight(labels)} label={label} />;
 }

@@ -39,7 +39,7 @@ Commands stay minimal, and settings live in config files:
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
 | Repeat share, seed votes, and the refit interval                              | `arena/scheduler.py`                                                                                                  |
 | The arena's loopback ports and render policy                                  | `arena/api.py`                                                                                                        |
-| Bootstrap resamples, the penalty, and the preliminary threshold               | `scoring/ranking.py` and `report.py`                                                                                  |
+| Point-fit parameters and diagnostic coverage rules                            | `scoring/ranking.py` and `report.py`, frozen in each voted report                                                     |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |

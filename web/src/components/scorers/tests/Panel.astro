@@ -10,15 +10,17 @@ import {
 } from '@/components/ui/table';
 import { formatPercent } from '@/lib/format';
 import { testsRounds, type Family } from '@/lib/reports';
-import { systemName } from '@/lib/systems';
+import { reportNames, systemName } from '@/lib/systems';
 
 interface Props {
   family: Family;
 }
 
 const { family } = Astro.props;
-const results = testsRounds(family).at(-1)?.results;
-const name = (system: string) => systemName(family.systemNames, system);
+const round = testsRounds(family).at(-1);
+const results = round?.results;
+const names = round ? reportNames(round.systems) : family.systemNames;
+const name = (system: string) => systemName(names, system);
 ---
 
 {results ? (

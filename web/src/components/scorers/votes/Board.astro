@@ -29,11 +29,5 @@ const rows = unmeasuredRows(config.systems, config.reference, family.systemNames
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard
-    client:load
-    base={boardPath(family)}
-    rounds={rounds}
-    names={family.systemNames}
-    labels={boardLabels(config)}
-  />
+  <VotesBoard client:load base={boardPath(family)} rounds={rounds} labels={boardLabels(config)} />
 )}

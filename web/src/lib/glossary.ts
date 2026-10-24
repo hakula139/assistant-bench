@@ -1,6 +1,5 @@
 import { formatPercent, formatScore } from '@/lib/format';
-import { AGREEMENT_FLOOR, ANCHOR_SCORE, PRELIMINARY_VOTES } from '@/lib/ranking';
-import type { Decision, Defect } from '@/lib/report';
+import type { Defect, VotesMethod, VotesRules } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {
@@ -8,23 +7,23 @@ export interface Term {
   definition: string;
 }
 
-const score = formatScore(ANCHOR_SCORE);
-const floor = formatPercent(AGREEMENT_FLOOR);
+export const inferenceNote =
+  'Uncertainty for new cases and voters is unavailable until the method is calibrated.';
 
 /** The board terms, shared by the boards' labels, their definitions on tap, and the methodology. */
 export const terms = {
   rank: {
     term: 'Rank',
-    definition:
-      'The range of ranks the intervals allow: 1 plus the systems clearly above this one, up to 1 plus every system that might be above it.',
+    definition: 'The order of fitted point scores within this round. Equal scores share a rank.',
   },
   anchor: {
     term: 'Anchor',
-    definition: `The system every score is relative to, fixed at ${score}: the family's reference, or the most-voted system when a round cannot rank it.`,
+    definition:
+      "The system every score is relative to: the family's reference, or the most-voted system when a round cannot rank it.",
   },
   preliminary: {
     term: 'Preliminary',
-    definition: `Fewer than ${PRELIMINARY_VOTES} votes with a winner, so the score may still move.`,
+    definition: "A coverage marker for systems below the round's recorded decisive-vote threshold.",
   },
   decisive: {
     term: 'Decisive',
@@ -58,17 +57,10 @@ export const terms = {
     definition:
       "The mean cost of a solution at list prices and the median time of the agent's whole run on a task.",
   },
-  leader: {
-    term: 'Leader',
-    definition: `The top system, once every system tied with it has ${PRELIMINARY_VOTES} votes with a winner. A tie goes to the lower cost, then the lower latency, then the higher score.`,
-  },
   raterAgreement: {
     term: 'Rater agreement',
-    definition: `How often a side-swapped repeat matched the original vote. Below ${floor}, the intervals overstate how well systems separate.`,
-  },
-  separatedPairs: {
-    term: 'Separated pairs',
-    definition: 'The share of system pairs whose intervals do not overlap.',
+    definition:
+      'How often a side-swapped repeat matched the original vote. This describes repeat consistency.',
   },
   splitHalf: {
     term: 'Split-half τ',
@@ -149,10 +141,35 @@ export const defectTerms: Record<Defect, Term> = {
 };
 
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */
-export function fallbackAnchor(anchorName: string, referenceName: string): Term {
+export function anchorTerm(method: VotesMethod): Term {
   return {
     ...terms.anchor,
-    definition: `The most-voted system, ${anchorName}, fixed at ${score} in place of the reference ${referenceName}, which that round could not rank.`,
+    definition: `${terms.anchor.definition} Its recorded score is ${formatScore(method.anchor_score)}.`,
+  };
+}
+
+export function preliminaryTerm(rules: VotesRules): Term {
+  return {
+    ...terms.preliminary,
+    definition: `Fewer than ${rules.preliminary_decisive_votes} raw votes with a winner. This marks coverage and does not measure confidence.`,
+  };
+}
+
+export function agreementTerm(rules: VotesRules): Term {
+  return {
+    ...terms.raterAgreement,
+    definition: `${terms.raterAgreement.definition} Below ${formatPercent(rules.rater_agreement_floor)} is flagged as low consistency.`,
+  };
+}
+
+export function fallbackAnchor(
+  anchorName: string,
+  referenceName: string,
+  method: VotesMethod,
+): Term {
+  return {
+    ...terms.anchor,
+    definition: `The most-voted system, ${anchorName}, fixed at ${formatScore(method.anchor_score)} in place of the reference ${referenceName}, which that round could not rank.`,
   };
 }
 
@@ -161,32 +178,6 @@ export function fingerprintTerm(fingerprint: string): Term {
   return {
     term: 'Fingerprint',
     definition: `${fingerprint}, a hash of the route, effort, harness, and prompt the system ran with that round.`,
-  };
-}
-
-const tieBreaks: Record<Decision['tie_break'], string> = {
-  score: 'the higher score',
-  cost: 'the lower cost',
-  latency: 'the lower latency',
-};
-
-/**
- * Qualifies a round's leader: why the round has none, how it broke a tie with the top score, or
- * null when no other ranked system ties with the leader.
- */
-export function leaderNote(decision: Decision | null): Term | null {
-  if (decision === null) {
-    return {
-      term: 'No leader yet',
-      definition: `None until every system tied for the top has ${PRELIMINARY_VOTES} votes with a winner.`,
-    };
-  }
-  if (decision.separated) {
-    return null;
-  }
-  return {
-    term: 'Tied',
-    definition: `Tied with the top score, and chosen by ${tieBreaks[decision.tie_break]}.`,
   };
 }
 

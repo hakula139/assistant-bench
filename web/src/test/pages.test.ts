@@ -18,14 +18,12 @@ import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
 
-/** The families pages list, since the content collections stay empty under Vitest. */
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
 vi.mock(import('@/lib/reports'), async (importOriginal) => ({
   ...(await importOriginal()),
   getFamilies: () => Promise.resolve(listed.families),
 }));
 
-/** The fixture's systems and families, whose table and directory names pages hide. */
 const SLUGS = {
   ...FIXTURE_NAMES,
   'writing-arena': 'Arena Writing',
@@ -45,10 +43,6 @@ const arenaConfig: VotesConfig = {
   public: true,
 };
 
-/**
- * The fixture's round, after an earlier one in which every system scored 900, with each round's
- * fingerprints as long as real ones and naming the round, such as `20261007abcdef01`.
- */
 async function family(): Promise<Family> {
   const latest = reportSchema.parse(await readFixture());
   const earlier = structuredClone(latest);
@@ -61,14 +55,13 @@ async function family(): Promise<Family> {
     standing.score = 900;
   }
   for (const report of [earlier, latest]) {
-    for (const standing of report.results.standings) {
-      standing.fingerprint = `${report.round.replaceAll('-', '')}abcdef01`;
+    for (const metadata of Object.values(report.systems)) {
+      metadata.fingerprint = `${report.round.replaceAll('-', '')}abcdef01`;
     }
   }
   return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
 }
 
-/** A coding family over the fixture's rounds, whose systems' solutions render as diffs. */
 async function codingFamily(): Promise<Family> {
   const config: VotesConfig = {
     ...arenaConfig,
@@ -83,14 +76,12 @@ async function codingFamily(): Promise<Family> {
   return listedFamily('coding-repo', config, (await family()).rounds);
 }
 
-/** The page header's figures as `label value`, read as the page shows them. */
 function headerStats(html: string): string[] {
   return [...new JSDOM(html).window.document.querySelectorAll('header dl dt')].map(
     (label) => `${label.textContent} ${label.nextElementSibling?.textContent ?? ''}`,
   );
 }
 
-/** A family as `publicFamilies` lists it under its aspect. */
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
   if (config.aspect === undefined) {
     throw new Error(`family ${name} has no aspect`);
@@ -125,18 +116,22 @@ const text = (html: string) =>
     .replace(/&#(?:x27|39);/g, "'")
     .replace(/\s+/g, ' ');
 
-/** A family scored by tests, with one round that lists the weaker system first. */
 function testsFamily(): Family {
   const report = reportSchema.parse({
     family: 'writing-smoke',
     round: '2026-10-21',
     closed_at: '2026-10-21T18:00:00Z',
+    systems: Object.fromEntries(
+      ['acme-small', 'acme-pro'].map((system) => [
+        system,
+        { display_name: FIXTURE_NAMES[system], fingerprint: null },
+      ]),
+    ),
     results: {
       scorer: 'tests',
       standings: [
         {
           system: 'acme-small',
-          fingerprint: null,
           trials: 4,
           errored: 0,
           pass_rate: 0.25,
@@ -145,7 +140,6 @@ function testsFamily(): Family {
         },
         {
           system: 'acme-pro',
-          fingerprint: null,
           trials: 4,
           errored: 1,
           pass_rate: 0.75,
@@ -168,7 +162,6 @@ function testsFamily(): Family {
   );
 }
 
-/** The methodology section a family page's "How to read this board" link names. */
 function guide(html: string): string {
   const match = /href="\/methodology\/#([\w-]+)"/.exec(html);
   if (!match) {
@@ -184,7 +177,6 @@ function boardLinks(html: string): string[] {
     .filter((href) => !href.startsWith('/methodology/') && !/\.\w+$/.test(href));
 }
 
-/** The text of each scoring step's detail that opens a hint, in strip order. */
 function stepHints(html: string): string[] {
   return [...html.matchAll(/<ol aria-label="\w+ scoring steps"[\s\S]*?<\/ol>/g)].flatMap(
     ([strip]) =>
@@ -194,12 +186,10 @@ function stepHints(html: string): string[] {
   );
 }
 
-/** The hydrated island of the component that its module exports as `name`. */
 function island(html: string, name: string): Element | null {
   return new JSDOM(html).window.document.querySelector(`astro-island[component-export="${name}"]`);
 }
 
-/** The text of each hint trigger in the hydrated island of the component exported as `name`. */
 function islandHints(html: string, name: string): (string | null)[] {
   return [...(island(html, name)?.querySelectorAll('[aria-haspopup="dialog"]') ?? [])].map(
     (hint) => hint.textContent,
@@ -229,19 +219,19 @@ describe('family page', () => {
       'ranked from votes',
     ]);
     expect(new JSDOM(html).window.document.querySelector('dl dd')?.textContent).toBe(
-      'Acme Large, tied',
+      '340 over 10 sessions, 20 left out',
     );
-    expect(text(html)).toContain('1–3 Acme Pro 1,004 955–1,065 114');
+    expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
-  test('lists the systems with unbounded intervals before the first round closes', async () => {
+  test('lists systems as unmeasured before the first round closes', async () => {
     const empty: Family = { ...(await family()), rounds: [] };
 
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(text(html)).toContain('No round has closed yet.');
-    expect(text(html)).toContain('Acme Large Fixed at 1,000 as the anchor 1,000');
-    expect(text(html)).toContain('Acme Pro Unbounded no votes');
+    expect(text(html)).toContain('Acme Large unmeasured');
+    expect(text(html)).toContain('Acme Pro no votes');
     expect(text(html)).not.toMatch(/\bLeader\b/);
   });
 
@@ -250,9 +240,9 @@ describe('family page', () => {
 
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
-    expect(text(html)).toContain('Anchor, 1,000 Unbounded');
+    expect(new JSDOM(html).window.document.querySelector('ul[aria-label="Legend"]')).toBeNull();
     expect(html).not.toContain('Score, 95% interval');
-    expect(islandHints(html, 'Forest')).toEqual(['1,000', 'no votes', 'no votes', 'no votes']);
+    expect(islandHints(html, 'Forest')).toEqual(['unmeasured', 'no votes', 'no votes', 'no votes']);
   });
 
   test.each([
@@ -357,10 +347,10 @@ describe('methodology page', () => {
     expect(stepHints(html)).toEqual([]);
   });
 
-  test("states the bootstrap count and opens the example figure's hints", async () => {
+  test('states unavailable population inference and opens the example points', async () => {
     const html = await render(MethodologyPage, {});
 
-    expect(text(html)).toContain('95% intervals 1,000 bootstraps resampling whole cases');
+    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
     expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
   });
 
@@ -386,9 +376,9 @@ describe('methodology page', () => {
 
     const row = [
       ...new JSDOM(html).window.document.querySelectorAll<HTMLTableRowElement>('tbody tr'),
-    ].find((item) => item.cells[0].textContent === terms.separatedPairs.term);
-    expect(row?.cells[1].textContent).toBe(terms.separatedPairs.definition);
-    expect(row?.cells[1].querySelector('.text-nowrap')?.textContent).toBe('not overlap.');
+    ].find((item) => item.cells[0].textContent === terms.bothBad.term);
+    expect(row?.cells[1].textContent).toBe(terms.bothBad.definition);
+    expect(row?.cells[1].querySelector('.text-nowrap')?.textContent).toBe('both bad.');
   });
 });
 
@@ -399,7 +389,7 @@ describe('home page', () => {
     const html = await render(HomePage, {});
 
     const legend = /<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '';
-    expect(text(legend).trim()).toBe('Anchor, 1,000 Unbounded');
+    expect(text(legend).trim()).toBe('');
   });
 
   test("titles each aspect's section with its icon and the anchor its breadcrumbs link", async () => {
@@ -430,28 +420,29 @@ describe('family panel', () => {
     expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
   });
 
-  test("draws the latest round's intervals and names its leader", async () => {
+  test("draws the latest round's points and states unavailable inference", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
     const leader = new JSDOM(html).window.document.querySelector('[aria-label="Leader"]');
 
     expect(text(html)).toContain('Votes: Round 2026-10-21 · 340 votes');
-    expect(text(html)).toContain('Acme Pro 955–1,065 1,004');
-    expect(leader?.parentElement?.textContent).toBe('Acme Large, tied');
-    expect(islandHints(html, 'Leader')).toEqual(['tied']);
+    expect(text(html)).toContain('Acme Pro 1,004');
+    expect(leader).toBeNull();
+    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
+    expect(islandHints(html, 'Leader')).toEqual([]);
   });
 
-  test("gives each row's score a hint with its interval", async () => {
+  test("gives each row's point score a hint", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
     expect(islandHints(html, 'Forest')).toContain('1,004');
   });
 
-  test('keeps the unranked systems and those without votes after the round', async () => {
+  test('keeps only the report\x27s unranked systems after the round', async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
-    expect(text(html)).toContain('Acme Edge Unbounded, too few comparisons to place it unranked');
-    expect(text(html)).toContain('Acme New Unbounded no votes');
+    expect(text(html)).toContain('Acme Edge unranked');
+    expect(text(html)).not.toContain('Acme New');
   });
 
   test.each([
@@ -475,6 +466,20 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test('renders closed labels after runnable entries retire or change their names', async () => {
+    const arena = await family();
+    arena.systemNames = {};
+    arena.rounds[0].systems['acme-pro'].display_name = 'Historical Pro';
+    arena.rounds[1].systems['acme-pro'].display_name = 'Current Pro';
+
+    const html = await render(SystemPage, { family: arena, system: 'acme-pro', boards: [] });
+
+    expect(html).toContain('<title>Current Pro on Writing · Arena Writing | HAKULA†BENCH</title>');
+    expect(html).toContain('Historical Pro');
+    expect(islandHints(html, 'RoundsTable')).toContain('2026-10-07');
+    expect(shownSlugs(html, SLUGS)).toEqual([]);
+  });
+
   test.each([
     [
       'cases',
@@ -501,8 +506,8 @@ describe('system page', () => {
 
     expect(text(html)).toContain('Writing Arena Writing Acme Pro Score');
     expect(headerStats(html)).toEqual([
-      'Score 1,004 (955–1,065)',
-      'Rank 1–3',
+      'Score 1,004',
+      'Rank 1',
       'Votes 114 (89 decisive)',
       'Round 2026-10-21',
     ]);
@@ -527,7 +532,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '2026-10-07']);
+    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,004', '2026-10-07', '900']);
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -587,8 +592,8 @@ describe('system page', () => {
       appearances: [number, [number, Record<string, unknown>][]];
     };
     expect(props.appearances[1].map(([, row]) => Object.keys(row).sort())).toEqual([
-      ['anchor', 'reference', 'round', 'standing'],
-      ['anchor', 'reference', 'round', 'standing'],
+      ['anchor', 'method', 'reference', 'round', 'rules', 'standing', 'systems'],
+      ['anchor', 'method', 'reference', 'round', 'rules', 'standing', 'systems'],
     ]);
   });
 
@@ -606,7 +611,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).toContain('Round Score Votes');
     expect(text(html)).toMatch(/2026-10-07 Anchor/);
     expect(text(html)).not.toMatch(/2026-10-21 Anchor/);
   });
@@ -618,7 +623,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain('Round Score 95% interval Votes');
+    expect(text(html)).toContain('Round Score Votes');
     expect(text(html)).not.toContain('Anchor');
   });
 
@@ -629,11 +634,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(headerStats(html).slice(0, 3)).toEqual([
-      'Score 233 (81–321)',
-      'Rank 6',
-      'Votes 0 (0 decisive)',
-    ]);
+    expect(headerStats(html).slice(0, 3)).toEqual(['Score 233', 'Rank 6', 'Votes 0 (0 decisive)']);
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
     expect(islandHints(html, 'StatusMark')).toEqual(['Preliminary']);
@@ -684,6 +685,7 @@ describe('stacks', () => {
   ])('space the islands on the %s with gap', async (_, page) => {
     const html = await render(page, { family: await family(), system: 'acme-pro', boards: [] });
     // An island inside a run of text, such as a hint in a stat's detail, flows with the text.
+
     const parents = [...new JSDOM(html).window.document.querySelectorAll('astro-island')]
       .map((island) => island.parentElement)
       .filter((parent) => parent?.localName !== 'span')
@@ -714,6 +716,7 @@ describe('stacks', () => {
         .flatMap(blocks)
         .map(classesOf)
         .filter((classes) => /(^|[\s:])-?m[tby]-/.test(classes));
+
       expect(margined).toEqual([]);
     },
   );
@@ -734,7 +737,6 @@ function navLinks(html: string, label: string): [string, string, string | null][
   ]);
 }
 
-/** The props of the page at `params` among a route's static paths. */
 function propsAt<Props>(
   paths: { params: Record<string, string>; props: Props }[],
   params: Record<string, string>,

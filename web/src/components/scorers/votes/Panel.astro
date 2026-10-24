@@ -1,18 +1,15 @@
 ---
-import { Trophy } from 'lucide-react';
-
 import { panelForest } from '@/components/scorers/votes/forest';
-import { Leader } from '@/components/scorers/votes/Leader';
 import { Forest } from '@/components/site/Forest';
+import { inferenceNote } from '@/lib/glossary';
 import { latest, type Family } from '@/lib/reports';
-import { systemName } from '@/lib/systems';
 
 interface Props {
   family: Family;
 }
 
 const { family } = Astro.props;
-const { rows, domain } = panelForest(family);
+const { rows, domain, anchorScore } = panelForest(family);
 const { title } = family;
 const results = latest(family)?.results;
 ---
@@ -21,18 +18,12 @@ const results = latest(family)?.results;
   <>
     <Forest
       client:visible
-      caption={`${title} scores with 95% intervals`}
+      caption={`${title} point scores`}
       rows={rows}
       domain={domain}
+      anchorScore={anchorScore}
     />
-    <p class="flex items-center gap-2 text-sm">
-      <Trophy role="img" aria-label="Leader" className="size-4 shrink-0 text-muted-foreground" />
-      <Leader
-        client:visible
-        decision={results.decision}
-        name={results.decision && systemName(family.systemNames, results.decision.leader)}
-      />
-    </p>
+    <p class="text-sm text-muted-foreground">{inferenceNote}</p>
   </>
 ) : (
   <Forest

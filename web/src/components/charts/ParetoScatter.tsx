@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { logTicks } from '@/components/charts/ticks';
-import { formatInterval, formatScore } from '@/lib/format';
+import { formatScore } from '@/lib/format';
 
 export interface ScatterPoint {
   system: string;
@@ -11,8 +11,6 @@ export interface ScatterPoint {
   name: string;
   x: number;
   score: number;
-  lower: number;
-  upper: number;
 }
 
 /**
@@ -23,6 +21,7 @@ export function paretoFrontier(points: ScatterPoint[]): ScatterPoint[] {
   const frontier: ScatterPoint[] = [];
   for (const point of points.toSorted((a, b) => a.x - b.x || b.score - a.score)) {
     const best = frontier.at(-1);
+
     if (
       best === undefined ||
       point.score > best.score ||
@@ -31,6 +30,7 @@ export function paretoFrontier(points: ScatterPoint[]): ScatterPoint[] {
       frontier.push(point);
     }
   }
+
   return frontier;
 }
 
@@ -81,10 +81,8 @@ const span = (x1: number, y1: number, x2: number, y2: number): Box => ({
 });
 
 /**
- * Places each frontier label at the first spot inside the plot that stays clear of the dots, the
- * earlier labels, the interval whiskers, and the step line, giving up the whiskers and the line
- * before the dots and labels when nothing is clear. Above and to the left of a frontier point
- * comes first, since every dominated point lies below or to the right of it.
+ * Places frontier labels clear of existing marks, preferring the upper-left.
+ * Dots and prior labels take precedence over the step line.
  */
 export function placeLabels(
   frontier: ScatterPoint[],
@@ -96,16 +94,13 @@ export function placeLabels(
   const marks = points.map((point) =>
     around(...position(point.x, point.score), DOT_RADIUS, DOT_RADIUS),
   );
-  const lines = [
-    ...points.map((point) =>
-      span(...position(point.x, point.lower), ...position(point.x, point.upper)),
-    ),
-    ...frontier.slice(1).flatMap((point, i) => {
-      const [x1, y1] = position(frontier[i].x, frontier[i].score);
-      const [x2, y2] = position(point.x, point.score);
-      return [span(x1, y1, x2, y1), span(x2, y1, x2, y2)];
-    }),
-  ];
+  const lines = frontier.slice(1).flatMap((point, i) => {
+    const [x1, y1] = position(frontier[i].x, frontier[i].score);
+    const [x2, y2] = position(point.x, point.score);
+
+    return [span(x1, y1, x2, y1), span(x2, y1, x2, y2)];
+  });
+
   const inside = (box: Box) =>
     box.left >= bounds.left &&
     box.right <= bounds.right &&
@@ -114,11 +109,13 @@ export function placeLabels(
   const clear = (box: Box, obstacles: Box[]) => !obstacles.some((other) => overlaps(box, other));
 
   const placed = new Map<ScatterPoint, Placement>();
+
   for (const point of frontier) {
     const [x, y] = position(point.x, point.score);
     const width = measure(point.name);
     const box = ({ dx, dy, textAnchor }: Placement): Box => {
       const left = textAnchor === 'end' ? x + dx - width : x + dx;
+
       return {
         left,
         right: left + width,
@@ -126,24 +123,28 @@ export function placeLabels(
         bottom: y + dy + LABEL_HEIGHT / 2,
       };
     };
+
     const tiers = [
       (candidate: Box) => inside(candidate) && clear(candidate, marks) && clear(candidate, lines),
       (candidate: Box) => inside(candidate) && clear(candidate, marks),
       inside,
     ];
+
     const placement =
       tiers.map((fits) => PLACEMENTS.find((candidate) => fits(box(candidate)))).find(Boolean) ??
       PLACEMENTS[0];
+
     placed.set(point, placement);
     marks.push(box(placement));
   }
+
   return placed;
 }
 
 const extent = (values: number[]): [number, number] => [Math.min(...values), Math.max(...values)];
 
 /**
- * Score with its interval against cost or latency, using a linear axis when the metric includes
+ * Score against cost or latency, using a linear axis when the metric includes
  * zero. The Pareto frontier is drawn and its systems labelled, while the others name themselves
  * on hover and in the table twin.
  */
@@ -167,8 +168,8 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
       const y = Plot.scale({
         y: {
           domain: [
-            Math.min(...points.map((point) => point.lower)),
-            Math.max(...points.map((point) => point.upper)),
+            Math.min(...points.map((point) => point.score)),
+            Math.max(...points.map((point) => point.score)),
           ],
           nice: true,
           range: [HEIGHT - MARGIN.bottom - INSET.y, MARGIN.top + INSET.y],
@@ -183,10 +184,12 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
         { left: MARGIN.left, right: width, top: 0, bottom: HEIGHT - MARGIN.bottom },
       );
       const tickWidth = Math.max(...xDomain.map((value) => measure(format(value))));
+
       const ticks = logTicks(
         xDomain,
         Math.max(2, Math.floor((width - MARGIN.left - MARGIN.right) / (tickWidth + 24))),
       );
+
       return {
         marginTop: MARGIN.top,
         marginRight: MARGIN.right,
@@ -204,14 +207,6 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
             stroke: 'var(--faint)',
             strokeWidth: 1.5,
           }),
-          Plot.ruleX(points, {
-            x: 'x',
-            y1: 'lower',
-            y2: 'upper',
-            stroke: 'var(--chart-series)',
-            strokeOpacity: 0.45,
-            strokeWidth: 2,
-          }),
           Plot.dot(points, {
             x: 'x',
             y: 'score',
@@ -225,17 +220,6 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
               frontier.filter((point) => placements.get(point) === placement),
               { x: 'x', y: 'score', text: 'name', fill: 'var(--foreground)', ...placement },
             ),
-          ),
-          Plot.ruleX(
-            points,
-            Plot.pointer({
-              x: 'x',
-              y1: 'lower',
-              y2: 'upper',
-              py: 'score',
-              stroke: 'var(--chart-emphasis)',
-              strokeWidth: 2,
-            }),
           ),
           Plot.dot(
             points,
@@ -256,7 +240,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
               title: (point: ScatterPoint) =>
                 [
                   point.name,
-                  `Score ${formatScore(point.score)} (${formatInterval(point)})`,
+                  `Score ${formatScore(point.score)}`,
                   `${label} ${format(point.x)}`,
                 ].join('\n'),
               fontFamily: 'inherit',

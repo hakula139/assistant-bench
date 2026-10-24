@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { boardSlug, publicFamilies, systemPages } from '@/lib/reports';
+import { boardSlug, publicFamilies, systemPages, testsRounds, votesRounds } from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
@@ -37,6 +37,61 @@ describe('boardSlug', () => {
 });
 
 describe('publicFamilies', () => {
+  test('keeps closed identity metadata independently of the current runnable names', async () => {
+    const earlier = await report('writing-prose', '2026-10-07', '2026-10-07T18:00:00Z');
+    const later = structuredClone(earlier);
+    later.round = '2026-10-21';
+    later.closed_at = '2026-10-21T18:00:00Z';
+    later.systems['acme-large'].display_name = 'Renamed Large';
+
+    const [family] = publicFamilies(
+      [{ name: 'writing-prose', config: votes(true) }],
+      [later, earlier],
+      {},
+    );
+    const rounds = votesRounds(family);
+
+    expect(rounds.map(({ systems }) => systems['acme-large'].display_name)).toEqual([
+      'Acme Large',
+      'Renamed Large',
+    ]);
+    expect(rounds.map(({ closed_at }) => closed_at)).toEqual([earlier.closed_at, later.closed_at]);
+    expect(systemPages(family).has('acme-large')).toBe(true);
+  });
+
+  test('keeps tests-scorer identities and descriptive results without a runnable system', () => {
+    const closed: Report = {
+      family: 'writing-prose',
+      round: '2026-10-21',
+      closed_at: '2026-10-21T18:00:00Z',
+      systems: { retired: { display_name: 'Retired System', fingerprint: null } },
+      results: {
+        scorer: 'tests',
+        standings: [
+          {
+            system: 'retired',
+            trials: 4,
+            errored: 1,
+            pass_rate: 0.5,
+            mean_cost_usd: null,
+            p50_latency_sec: null,
+          },
+        ],
+      },
+    };
+    const [family] = publicFamilies([{ name: 'writing-prose', config: votes(true) }], [closed], {});
+
+    expect(testsRounds(family)).toEqual([
+      {
+        round: closed.round,
+        closed_at: closed.closed_at,
+        systems: closed.systems,
+        results: closed.results,
+      },
+    ]);
+    expect(votesRounds(family)).toEqual([]);
+  });
+
   test('pairs each public family with its rounds, oldest first', async () => {
     const later = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
     const earlier = await report('writing-prose', '2026-10-07', '2026-10-07T18:00:00Z');
