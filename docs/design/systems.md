@@ -43,6 +43,8 @@ The `openai/` prefix pins LiteLLM's Chat Completions path to its OpenAI-compatib
 
 The resolved API selects Responses or Chat Completions for either harness. Responses calls use `store=False` and retain native output text, status, request ID, and usage. A writing response that exhausts its allowance or refuses remains an incomplete attempt. Terminus propagates failed, refused, or filtered responses without retrying for quality, while Harbor retains its native context and output-length handling. Collection prices reported tokens from the shared catalog.
 
+Terminus retains reported usage from completed responses when a later request is cancelled. With no reported usage, or a completed response that omits it, aggregate tokens and cost remain unknown. Explicitly reported zero usage remains zero.
+
 Terminus attaches complete SDK output items to each private assistant message and replays the currently selected conversation, including encrypted reasoning and message phases. Context slices and summarized handoffs retain the items owned by their messages. Metadata stays outside model-visible user text and public outputs. Harbor owns the terminal command loop, conversation accounting, and summarization.
 
 `bench` loads the first `.env` in the working directory or a parent, then sets `LITELLM_MODE=PRODUCTION`, which Harbor inherits, so LiteLLM never loads a `.env` of its own.
@@ -61,4 +63,6 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 
 ## Concurrency
 
-Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time. A case family's job runs at most eight trials at once and a task family's job four, since each task trial can hold an agent and a verifier container. A rendered case has a 900-second operational timeout, and authored tasks set `[agent] timeout_sec`. Terminus uses its native completion loop without a family turn cutoff. Harbor retries a failed trial once.
+Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time. A case family's job runs at most eight trials at once and a task family's job four, since each task trial can hold an agent and a verifier container.
+
+A rendered case has a one-hour operational watchdog, while authored tasks keep their `[agent] timeout_sec`. Harbor cancels the agent at that deadline. HTTP read timeouts are disabled, while connection, write, and pool timeouts remain finite. Terminus uses its native completion loop without a family turn cutoff. Harbor retries eligible failures once and excludes agent timeouts.

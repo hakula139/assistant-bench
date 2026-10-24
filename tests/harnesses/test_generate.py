@@ -1,8 +1,10 @@
 import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
 import openai
 import pytest
 from harbor.environments.base import BaseEnvironment
@@ -71,6 +73,71 @@ class TestGenerate:
                 Generate.preflight(OPTIONS, {})
 
     class TestRun:
+        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+        def test_cancels_the_pending_request_and_closes_without_fabricating_usage(
+            self,
+            endpoint: StubEndpoint,
+            endpoint_clients: list[openai.AsyncOpenAI],
+            export: NixosConfigExport,
+            model_requests: list[httpx.Request],
+            tmp_path: Path,
+            api: str,
+        ) -> None:
+            gate = endpoint.response_gate = threading.Event()
+            agent = Generate(
+                logs_dir=tmp_path,
+                model_name='acme/large',
+                extra_env=endpoint.env,
+                api=api,
+                **OPTIONS,
+            )
+            context = AgentContext()
+
+            async def cancel() -> None:
+                task = asyncio.create_task(
+                    agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context)
+                )
+                try:
+                    assert await asyncio.to_thread(endpoint.request_received.wait, 5)
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await asyncio.wait_for(task, 5)
+                finally:
+                    gate.set()
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+            asyncio.run(cancel())
+
+            (request,) = endpoint.requests
+            assert request.path == (
+                '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
+            )
+            (sent,) = model_requests
+            assert sent.extensions['timeout'] == {
+                'connect': 5.0,
+                'read': None,
+                'write': 600.0,
+                'pool': 600.0,
+            }
+            (client,) = endpoint_clients
+            assert client.max_retries == 0
+            assert client.is_closed()
+            assert not (tmp_path / OUTPUT_FILE).exists()
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+                context.cost_usd,
+            ) == (None, None, None, None)
+            assert context.metadata is not None
+            assert context.metadata == {
+                'latency_sec': context.metadata['latency_sec'],
+                'nixos_config_rev': export.rev,
+            }
+            assert context.metadata['latency_sec'] >= 0
+
         @pytest.mark.parametrize('effort', [None, 'high', 'max'])
         def test_sends_a_stateless_responses_request_and_records_actual_usage(
             self, endpoint: StubEndpoint, tmp_path: Path, effort: str | None

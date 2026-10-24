@@ -7,10 +7,11 @@ from typing import Any
 import httpx
 import pytest
 import trustme
+from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
-from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
+from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
 from support import EXPORT_FILE, StubEndpoint, serve_stub
 
@@ -60,6 +61,35 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
         return await send(client, request, **kwargs)
 
     monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
+
+
+@pytest.fixture
+def model_requests(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    requests: list[httpx.Request] = []
+    send = httpx.AsyncClient.send
+
+    async def record(
+        client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
+    ) -> httpx.Response:
+        requests.append(request)
+        return await send(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, 'send', record)
+    return requests
+
+
+@pytest.fixture
+def endpoint_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncOpenAI]:
+    clients: list[AsyncOpenAI] = []
+    build = Endpoint.client
+
+    def record(endpoint: Endpoint) -> AsyncOpenAI:
+        client = build(endpoint)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(Endpoint, 'client', record)
+    return clients
 
 
 @pytest.fixture(autouse=True)

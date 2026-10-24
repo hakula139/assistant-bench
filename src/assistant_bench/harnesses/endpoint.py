@@ -34,6 +34,8 @@ ENDPOINT_VARS = (
     LOCAL_ADDRESS_VAR,
 )
 
+REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=5.0, read=None)
+
 
 class Endpoint(BaseModel):
     """The endpoint variables, where an empty value counts as unset."""
@@ -72,6 +74,7 @@ class Endpoint(BaseModel):
             base_url=str(self.base_url),
             api_key=self.api_key(),
             max_retries=0,
+            timeout=REQUEST_TIMEOUT,
             http_client=self.http_client(),
         )
 
@@ -91,6 +94,7 @@ class Endpoint(BaseModel):
             verify=verify,
             auth=_EndpointAuth(self),
             follow_redirects=False,
+            timeout=REQUEST_TIMEOUT,
         )
 
 

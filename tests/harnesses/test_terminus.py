@@ -1,10 +1,13 @@
 import asyncio
+import json
+import threading
 from collections.abc import Callable, Iterator
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from unittest.mock import MagicMock
 
+import httpx
 import openai
 import pytest
 from harbor.agents.terminus_2.terminus_2 import Terminus2
@@ -18,10 +21,15 @@ from harbor.llms.base import (
 from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
 from harbor.models.task import config as task_config
+from harbor.models.trajectories import SubagentTrajectoryRef
 from harbor.models.trial.paths import TrialPaths
+from litellm.exceptions import ServiceUnavailableError
+from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
+from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.families import load_family
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
@@ -30,10 +38,13 @@ from assistant_bench.harnesses.responses import ResponsesChat, ResponsesLLM
 from assistant_bench.harnesses.terminus import Terminus
 from support import (
     StubEndpoint,
+    completion,
     make_system,
     reasoned_response,
     response,
     terminus_completion,
+    write_task_family,
+    write_trial,
 )
 
 
@@ -132,8 +143,13 @@ class NativeProbe(Terminus):
 
     async def summarize(self, chat: NativeConversation, session: TmuxSession) -> str:
         assert isinstance(chat, Chat)
-        handoff, _ = await self._summarize(chat, 'Greet me.', session)
+        handoff, _ = await self.summarize_result(chat, 'Greet me.', session)
         return handoff
+
+    async def summarize_result(
+        self, chat: Chat, instruction: str, session: TmuxSession
+    ) -> tuple[str, list[SubagentTrajectoryRef] | None]:
+        return await self._summarize(chat, instruction, session)
 
 
 @pytest.fixture
@@ -366,6 +382,272 @@ class TestTerminus:
             ]
 
     class TestRun:
+        def test_counts_native_chat_summary_subagents_once_with_main_requests(
+            self,
+            endpoint: StubEndpoint,
+            monkeypatch: pytest.MonkeyPatch,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+        ) -> None:
+            endpoint.responses = [
+                terminus_completion(task_complete=False),
+                completion('Summary.'),
+                completion('Questions.'),
+                completion('Answers.'),
+                terminus_completion(),
+                terminus_completion(),
+            ]
+            system = make_system(
+                harness='terminus-2', max_output_tokens=32768, context_window=131072
+            )
+            api_log = tmp_path / 'api.json'
+            kwargs = options.terminus(system)
+            kwargs['llm_call_kwargs']['logging_path'] = api_log
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **kwargs,
+            )
+            context = AgentContext()
+
+            async def summarize_once(
+                self: Terminus2,
+                chat: Chat,
+                original_instruction: str,
+                session: TmuxSession,
+            ) -> tuple[str, list[SubagentTrajectoryRef] | None] | None:
+                if len(endpoint.requests) == 1:
+                    assert isinstance(self, NativeProbe)
+                    return await self.summarize_result(
+                        chat, original_instruction, session
+                    )
+                return None
+
+            monkeypatch.setattr(
+                Terminus2, '_check_proactive_summarization', summarize_once
+            )
+
+            asyncio.run(agent.execute(terminal_session, context))
+
+            _, _, questions, answers, continued, confirmed = endpoint.requests
+            assert 'Summary.' in questions.body['messages'][-1]['content']
+            assert 'Questions.' in answers.body['messages'][-1]['content']
+            assert 'Answers.' in continued.body['messages'][-1]['content']
+            assert (
+                confirmed.body['messages'][: len(continued.body['messages'])]
+                == continued.body['messages']
+            )
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == (720, 600, 240)
+            assert context.metadata is not None
+            assert context.metadata['summarization_count'] == 1
+            assert (
+                context.metadata['responses']
+                == [{'input_tokens': 120, 'cache_tokens': 100, 'output_tokens': 40}] * 6
+            )
+            logged = json.loads(api_log.read_text())
+            assert logged['log_event_type'] == 'post_api_call'
+            assert ChatCompletion.model_validate_json(
+                logged['original_response']
+            ) == ChatCompletion.model_validate(terminus_completion())
+
+        def test_retryable_chat_errors_keep_native_attempts_without_sdk_retries(
+            self,
+            endpoint: StubEndpoint,
+            endpoint_clients: list[openai.AsyncOpenAI],
+            tmp_path: Path,
+        ) -> None:
+            endpoint.status = 503
+            endpoint.response = {'error': {'message': 'Unavailable.'}}
+            system = make_system(harness='terminus-2')
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+
+            with pytest.raises(ServiceUnavailableError):
+                asyncio.run(agent.request('Greet me.'))
+
+            assert [request.path for request in endpoint.requests] == [
+                '/v1/chat/completions'
+            ] * 3
+            assert [
+                request.headers['x-stainless-retry-count']
+                for request in endpoint.requests
+            ] == ['0', '0', '0']
+            (client,) = endpoint_clients
+            assert client.max_retries == 0
+            assert client.is_closed()
+
+        @pytest.mark.parametrize(
+            ('prior_usage', 'tokens', 'cost'),
+            [
+                (None, (None, None, None), None),
+                ('reported', (120, 100, 40), 0.00046),
+                ('zero', (0, 0, 0), 0.0),
+                ('null', (None, None, None), None),
+                ('omitted', (None, None, None), None),
+            ],
+            ids=[
+                'before-first',
+                'reported-first',
+                'zero-first',
+                'null-first',
+                'omitted-first',
+            ],
+        )
+        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+        def test_cancellation_preserves_reported_native_usage_and_closes_the_request(
+            self,
+            endpoint: StubEndpoint,
+            endpoint_clients: list[openai.AsyncOpenAI],
+            export: NixosConfigExport,
+            families_dir: Path,
+            data_dir: Path,
+            model_requests: list[httpx.Request],
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            api: str,
+            prior_usage: str | None,
+            tokens: tuple[int | None, int | None, int | None],
+            cost: float | None,
+        ) -> None:
+            gate = endpoint.response_gate = threading.Event()
+            if prior_usage is not None:
+                first = terminus_completion(task_complete=False)
+                if api == 'openai-responses':
+                    first = response(first['choices'][0]['message']['content'])
+                if prior_usage == 'omitted':
+                    first.pop('usage')
+                elif prior_usage == 'null':
+                    first['usage'] = None
+                elif prior_usage == 'zero':
+                    if api == 'openai-responses':
+                        first['usage'] = {
+                            'input_tokens': 0,
+                            'input_tokens_details': {'cached_tokens': 0},
+                            'output_tokens': 0,
+                            'output_tokens_details': {'reasoning_tokens': 0},
+                            'total_tokens': 0,
+                        }
+                    else:
+                        first['usage'] = {
+                            'prompt_tokens': 0,
+                            'completion_tokens': 0,
+                            'total_tokens': 0,
+                            'prompt_tokens_details': {'cached_tokens': 0},
+                            'completion_tokens_details': {'reasoning_tokens': 0},
+                        }
+                endpoint.responses = [first]
+                endpoint.response_gate_after = 1
+            system = make_system(
+                harness='terminus-2',
+                api=api,
+                max_output_tokens=32768,
+                context_window=131072,
+            )
+            write_task_family(families_dir, 'echo', systems=(system.name,))
+            family = load_family('f')
+            config = jobs.job(family, [system], [])
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+            context = AgentContext()
+
+            async def cancel() -> str:
+                task = asyncio.create_task(agent.execute(terminal_session, context))
+                try:
+                    assert await asyncio.to_thread(endpoint.response_waiting.wait, 5)
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError) as error:
+                        await asyncio.wait_for(task, 5)
+                    return type(error.value).__name__
+                finally:
+                    gate.set()
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+            error = asyncio.run(cancel())
+            job_dir = data_dir / 'jobs' / family.name / 'cancelled'
+            write_trial(
+                job_dir,
+                'echo__cancelled',
+                config.agents[0],
+                task='f/echo',
+                version='1.0.0',
+                context=context,
+                error=error,
+                instruction=None,
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+            reread = jobs.read_trials(family, job_dir, {system.name: system})
+            collected = jobs.collect(family, {system.name: system})
+
+            path = (
+                '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
+            )
+            assert [request.path for request in endpoint.requests] == [path] * (
+                1 if prior_usage is None else 2
+            )
+            (client,) = endpoint_clients
+            assert client.is_closed()
+            assert context.cost_usd is None
+            if prior_usage is None:
+                assert context.rollout_details == []
+            assert context.metadata is not None
+            assert context.metadata['nixos_config_rev'] == export.rev
+            assert context.metadata['harbor_version'] == metadata.version('harbor')
+            assert len(context.metadata['api_request_times_msec']) == (
+                0 if prior_usage is None else 1
+            )
+            (recorded,) = reread
+            (current,) = collected
+            for output in (recorded, current):
+                assert output.error == 'CancelledError'
+                assert (
+                    output.input_tokens,
+                    output.cached_tokens,
+                    output.output_tokens,
+                ) == tokens
+                if cost is None:
+                    assert output.cost_usd is None
+                else:
+                    assert output.cost_usd == pytest.approx(cost)
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == tokens
+            if api == 'openai-responses':
+                assert [
+                    result['response_status']
+                    for result in context.metadata['responses']
+                ] == ([] if prior_usage is None else ['completed'])
+                assert sorted(
+                    path.name for path in tmp_path.glob('response-*.json')
+                ) == ([] if prior_usage is None else ['response-1.json'])
+            trajectory = json.loads((tmp_path / 'trajectory.json').read_text())
+            assert [
+                step['message']
+                for step in trajectory['steps']
+                if step['source'] == 'agent'
+            ] == ([] if prior_usage is None else [''])
+            assert [sent.extensions['timeout'] for sent in model_requests] == [
+                {'connect': 5.0, 'read': None, 'write': 600.0, 'pool': 600.0}
+            ] * (1 if prior_usage is None else 2)
+            assert client.max_retries == 0
+
         def test_keeps_http_failure_usage_unknown_through_native_retries(
             self,
             endpoint: StubEndpoint,
@@ -457,25 +739,174 @@ class TestTerminus:
                 'stop',
             ]
 
-        @pytest.mark.parametrize('unknown', [0, 1], ids=['first', 'last'])
-        def test_keeps_aggregate_usage_unknown_if_any_native_response_omits_it(
+        @pytest.mark.parametrize(
+            'missing_usage', [False, True], ids=['reported', 'omitted']
+        )
+        def test_chat_budget_reissue_preserves_partial_text_and_reported_usage(
             self,
             endpoint: StubEndpoint,
-            responses_agent: NativeProbe,
             terminal_session: TmuxSession,
+            tmp_path: Path,
+            missing_usage: bool,
+        ) -> None:
+            partial_text = '{"analysis": "partial'
+            partial = completion(partial_text, finish_reason='length')
+            if missing_usage:
+                partial.pop('usage')
+            endpoint.responses = [partial, terminus_completion(), terminus_completion()]
+            system = make_system(
+                harness='terminus-2', max_output_tokens=32768, context_window=131072
+            )
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+            context = AgentContext()
+
+            asyncio.run(agent.execute(terminal_session, context))
+
+            first, reissued, confirmed = endpoint.requests
+            assert reissued.body['messages'][:-2] == first.body['messages']
+            assert reissued.body['messages'][-2] == {
+                'role': 'assistant',
+                'content': partial_text,
+            }
+            assert reissued.body['messages'][-1]['role'] == 'user'
+            assert '32768 tokens' in reissued.body['messages'][-1]['content']
+            assert (
+                confirmed.body['messages'][: len(reissued.body['messages'])]
+                == reissued.body['messages']
+            )
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == ((None, None, None) if missing_usage else (360, 300, 120))
+            assert context.cost_usd is None
+            assert context.metadata is not None
+            recorded, reissued_usage, confirmed_usage = context.metadata['responses']
+            assert ('input_tokens' not in recorded) == missing_usage
+            if not missing_usage:
+                assert recorded == {
+                    'input_tokens': 120,
+                    'cache_tokens': 100,
+                    'output_tokens': 40,
+                }
+            assert (
+                reissued_usage
+                == confirmed_usage
+                == {
+                    'input_tokens': 120,
+                    'cache_tokens': 100,
+                    'output_tokens': 40,
+                }
+            )
+
+        @pytest.mark.parametrize(
+            'object_type',
+            [None, 'unexpected'],
+            ids=['missing-object', 'unexpected-object'],
+        )
+        def test_keeps_usage_unknown_for_an_unrecognized_completion_envelope(
+            self,
+            endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            object_type: str | None,
+        ) -> None:
+            second = terminus_completion()
+            if object_type is None:
+                second.pop('object')
+            else:
+                second['object'] = object_type
+            endpoint.responses = [terminus_completion(), second]
+            system = make_system(
+                harness='terminus-2', max_output_tokens=32768, context_window=131072
+            )
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+            context = AgentContext()
+
+            asyncio.run(agent.execute(terminal_session, context))
+
+            assert len(endpoint.requests) == 2
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+                context.cost_usd,
+            ) == (None, None, None, None)
+            assert context.metadata is not None
+            assert context.metadata['responses'] == [
+                {'input_tokens': 120, 'cache_tokens': 100, 'output_tokens': 40},
+                {},
+            ]
+
+        @pytest.mark.parametrize(
+            ('api', 'usage'),
+            [
+                ('openai-chat-completions', 'omitted'),
+                ('openai-responses', 'omitted'),
+                ('openai-chat-completions', 'incomplete'),
+                ('openai-chat-completions', 'negative'),
+            ],
+            ids=[
+                'chat-omitted',
+                'responses-omitted',
+                'chat-incomplete',
+                'chat-negative',
+            ],
+        )
+        @pytest.mark.parametrize('unknown', [0, 1], ids=['first', 'last'])
+        def test_keeps_aggregate_usage_unknown_if_any_native_response_lacks_valid_usage(
+            self,
+            endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            api: str,
+            usage: str,
             unknown: int,
         ) -> None:
             text = terminus_completion()['choices'][0]['message']['content']
-            endpoint.responses = [
-                reasoned_response(text, 'first'),
-                reasoned_response(text, 'last', 'final_answer'),
-            ]
-            endpoint.responses[unknown].pop('usage')
+            endpoint.responses = (
+                [
+                    reasoned_response(text, 'first'),
+                    reasoned_response(text, 'last', 'final_answer'),
+                ]
+                if api == 'openai-responses'
+                else [terminus_completion(), terminus_completion()]
+            )
+            if usage == 'omitted':
+                endpoint.responses[unknown].pop('usage')
+            elif usage == 'negative':
+                endpoint.responses[unknown]['usage']['prompt_tokens'] = -1
+            else:
+                endpoint.responses[unknown]['usage'] = {'total_tokens': 160}
+            if api == 'openai-chat-completions':
+                endpoint.response = terminus_completion()
+            system = make_system(
+                harness='terminus-2',
+                api=api,
+                max_output_tokens=32768,
+                context_window=131072,
+            )
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
             context = AgentContext()
 
-            asyncio.run(responses_agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(terminal_session, context))
 
-            assert len(endpoint.requests) == 2
+            assert len(endpoint.requests) == (3 if usage == 'negative' else 2)
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -806,5 +1237,5 @@ class TestTerminus:
                 'n_episodes': 1,
                 'nixos_config_rev': export.rev,
                 'harbor_version': metadata.version('harbor'),
-                **({'responses': []} if api == 'openai-responses' else {}),
+                'responses': [],
             }

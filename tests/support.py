@@ -9,6 +9,7 @@ import ssl
 import textwrap
 import threading
 from collections.abc import Iterable, Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -446,6 +447,10 @@ class StubEndpoint:
     response_headers: dict[str, str] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=completion)
     responses: list[dict[str, Any]] = field(default_factory=list)
+    request_received: threading.Event = field(default_factory=threading.Event)
+    response_gate: threading.Event | None = None
+    response_gate_after: int = 0
+    response_waiting: threading.Event = field(default_factory=threading.Event)
 
     @property
     def env(self) -> dict[str, str]:
@@ -481,6 +486,13 @@ def serve_stub(
                     body=json.loads(self.rfile.read(length)),
                 )
             )
+            stub.request_received.set()
+            if (
+                stub.response_gate is not None
+                and len(stub.requests) > stub.response_gate_after
+            ):
+                stub.response_waiting.set()
+                stub.response_gate.wait()
             reply = stub.responses.pop(0) if stub.responses else stub.response
             payload = json.dumps(reply).encode()
             self.send_response(stub.status)
@@ -489,8 +501,9 @@ def serve_stub(
             self.send_header('x-request-id', 'req-1')
             for name, value in stub.response_headers.items():
                 self.send_header(name, value)
-            self.end_headers()
-            self.wfile.write(payload)
+            with suppress(BrokenPipeError, ConnectionResetError):
+                self.end_headers()
+                self.wfile.write(payload)
 
         def log_message(self, format: str, *args: Any) -> None:
             pass
@@ -510,10 +523,14 @@ def serve_stub(
         target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True
     )
     thread.start()
-    yield stub
-    server.shutdown()
-    thread.join()
-    server.server_close()
+    try:
+        yield stub
+    finally:
+        if stub.response_gate is not None:
+            stub.response_gate.set()
+        server.shutdown()
+        thread.join()
+        server.server_close()
 
 
 # ── Arena ──
