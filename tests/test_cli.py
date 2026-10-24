@@ -1291,31 +1291,29 @@ class TestClose:
     def test_collects_real_test_trials_before_writing_their_aggregate(
         self,
         families_dir: Path,
-        data_dir: Path,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         write_task_family(families_dir, 'echo')
-        task = TaskConfig.model_validate_toml(
-            (families_dir / 'f/tasks/echo/task.toml').read_text()
+        settings = families_dir / 'f/family.toml'
+        settings.write_text(
+            settings.read_text()
+            + textwrap.dedent(
+                """\
+                systems = ["large"]
+                harness = "terminus-2"
+                """
+            )
         )
-        assert task.task is not None
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'echo__large',
-            AgentConfig(
-                import_path='x:Y', kwargs={'system': 'large', 'fingerprint': 'fp-large'}
-            ),
-            task='f/echo',
-            reward=1.0,
-            instruction=None,
-            version=task.task.version,
-        )
-        monkeypatch.setattr(
-            cli,
-            '_load_systems',
-            lambda: {'large': make_system(name='large', display_name='Public Large')},
-        )
+        task = families_dir / 'f/tasks/echo'
+        config = TaskConfig.model_validate_toml((task / 'task.toml').read_text())
+        config.metadata['author'] = 'large'
+        (task / 'task.toml').write_text(config.model_dump_toml())
+        family = load_family('f')
+        system = make_system(name='large', display_name='Public Large')
+        (resolved,) = jobs.family_systems(family, [system])
+        finish_job(jobs.job(family, [resolved], [task]))
+        monkeypatch.setattr(cli, '_load_systems', lambda: {'large': system})
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
 
         result = invoke('close', 'f')
@@ -1326,7 +1324,7 @@ class TestClose:
         assert closed.results.scorer == 'tests'
         assert closed.results.standings[0].pass_rate == 1.0
         assert closed.systems['large'].display_name == 'Public Large'
-        assert closed.systems['large'].fingerprint == 'fp-large'
+        assert closed.systems['large'].fingerprint == resolved.fingerprint
         assert 'Family `f`: 1 outputs, 0 errored.' in result.output
 
 
