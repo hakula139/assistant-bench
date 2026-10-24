@@ -40,8 +40,6 @@ For private administration, `bench arena investigate <target> filters.json` retu
 
 The browser receives the approved instruction and checklist, two output panes and opaque capabilities. The owner keeps the mapping to systems, fingerprints and source trials. Pane responses omit system names, timing, token counts, errors and request metadata. Output text can still identify its author, so public content review must check the exact rendered bytes.
 
-A task family with `render = "diff"` presents each solution as the diff of its workspace against the task repository. Collection excludes repository history and tool caches. The browser receives no trajectory, command history, test output or reward.
-
 ## Sessions and Pairs
 
 A browser session belongs to one family. The server retains its current lease and accepted choices, so tabs and retries share one authoritative state. A submitted command keeps its identity while its outcome is unresolved. Changing families preserves that pending command for its original session.
