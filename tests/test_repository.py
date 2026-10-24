@@ -31,6 +31,28 @@ def hosts(path: Path) -> set[str | None]:
     }
 
 
+class TestHosts:
+    @pytest.mark.parametrize(
+        ('url', 'host'),
+        [
+            ('https://internal.corp?@pypi.org/x', 'internal.corp'),
+            ('https://internal.corp#@pypi.org/x', 'internal.corp'),
+            ('HTTPS://internal.corp/x', 'internal.corp'),
+            ('Git+SSH://git@internal.corp/x', 'internal.corp'),
+            ('https://internal.corp:8080/x', 'internal.corp'),
+            ('https://user:pass@internal.corp/x', 'internal.corp'),
+            ('file:///etc/passwd', None),
+        ],
+    )
+    def test_reads_the_url_authority(
+        self, url: str, host: str | None, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'lockfile'
+        path.write_text(url)
+
+        assert hosts(path) == {host}
+
+
 @pytest.mark.parametrize(
     'path',
     sorted((REPO_ROOT / 'families').glob('*/cases.jsonl')),
@@ -217,27 +239,6 @@ def registry(name: str) -> set[str]:
     if name == 'pnpm-lock.yaml':
         return {'registry.npmjs.org'}
     return {'pypi.org', 'files.pythonhosted.org'}
-
-
-@pytest.mark.parametrize(
-    ('url', 'host'),
-    [
-        ('https://internal.corp?@pypi.org/x', 'internal.corp'),
-        ('https://internal.corp#@pypi.org/x', 'internal.corp'),
-        ('HTTPS://internal.corp/x', 'internal.corp'),
-        ('Git+SSH://git@internal.corp/x', 'internal.corp'),
-        ('https://internal.corp:8080/x', 'internal.corp'),
-        ('https://user:pass@internal.corp/x', 'internal.corp'),
-        ('file:///etc/passwd', None),
-    ],
-)
-def test_hosts_reads_the_url_authority(
-    url: str, host: str | None, tmp_path: Path
-) -> None:
-    path = tmp_path / 'lockfile'
-    path.write_text(url)
-
-    assert hosts(path) == {host}
 
 
 @pytest.mark.parametrize(
