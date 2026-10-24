@@ -18,7 +18,7 @@ from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
 from harbor.models.trial import config as trial_config
-from harbor.models.trial.result import TimingInfo
+from harbor.models.trial.result import TimingInfo, TrialResult
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System
@@ -33,6 +33,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.harnesses import HOST_ENVIRONMENT, options
+from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_task_family, write_trial
@@ -70,6 +71,22 @@ def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
         update={'max_output_tokens': max_output_tokens}
     )
     return options.generate(system, settings)
+
+
+def finish_generation(
+    job: JobConfig, text: str, output_tokens: int | None = None
+) -> None:
+    """Write one finished generation with Harbor's planned config and lock."""
+    job_dir = finish_job(job)
+    (result_file,) = job_dir.glob('*/result.json')
+    result = TrialResult.model_validate_json(result_file.read_text())
+    result.agent_result = AgentContext(
+        n_output_tokens=output_tokens, metadata={'finish_reason': 'stop'}
+    )
+    result_file.write_text(result.model_dump_json())
+    agent_dir = result_file.parent / 'agent'
+    agent_dir.mkdir()
+    (agent_dir / OUTPUT_FILE).write_text(text)
 
 
 def version(config: task_config.TaskConfig) -> str:
@@ -900,22 +917,19 @@ class TestCollect:
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
-        jobs_dir = data_dir / 'jobs' / 'f'
+        tasks = jobs.render_tasks(
+            family,
+            [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
+        )
         for job, tokens, output in (
             ('2026-10-20__10-00-00', 600, 'old request'),
             ('2026-10-21__10-00-00', 300, 'current request'),
         ):
-            write_trial(
-                jobs_dir / job,
-                'a__1',
-                trial_config.AgentConfig(
-                    import_path='x:Y', kwargs=request(system, tokens)
-                ),
-                task='f/a',
-                output=output,
-                context=AgentContext(
-                    n_output_tokens=tokens, metadata={'finish_reason': 'stop'}
-                ),
+            config = jobs.job(
+                votes_family(samples=1, max_output_tokens=tokens), [system], tasks
+            )
+            finish_generation(
+                config.model_copy(update={'job_name': job}), output, tokens
             )
 
         outputs = jobs.collect(family, {system.name: system})
@@ -924,24 +938,70 @@ class TestCollect:
             (output.job, output.text, output.output_tokens) for output in outputs
         ] == [('2026-10-21__10-00-00', 'current request', 300)]
 
+    @pytest.mark.parametrize(
+        ('section', 'changes'),
+        [
+            pytest.param(
+                'environment',
+                {'type': EnvironmentType.DOCKER, 'import_path': None},
+                id='environment-type',
+            ),
+            pytest.param(
+                'environment', {'kwargs': {'legacy': True}}, id='environment-kwargs'
+            ),
+            pytest.param('agent', {'model_name': 'acme/old'}, id='agent-route'),
+            pytest.param(
+                'agent', {'import_path': 'legacy:Generate'}, id='agent-import'
+            ),
+            pytest.param('verifier', {'disable': False}, id='verifier-enabled'),
+        ],
+    )
+    def test_prefers_a_trial_with_the_current_execution_config(
+        self, data_dir: Path, section: str, changes: dict[str, Any]
+    ) -> None:
+        family = votes_family(samples=1)
+        system = make_system()
+        tasks = jobs.render_tasks(
+            family,
+            [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
+        )
+        current = jobs.job(family, [system], tasks)
+        if section == 'environment':
+            old = current.model_copy(
+                update={'environment': current.environment.model_copy(update=changes)}
+            )
+        elif section == 'verifier':
+            old = current.model_copy(
+                update={'verifier': current.verifier.model_copy(update=changes)}
+            )
+        else:
+            old = current.model_copy(
+                update={'agents': [current.agents[0].model_copy(update=changes)]}
+            )
+        finish_generation(old.model_copy(update={'job_name': 'job-1'}), 'old config')
+        finish_generation(
+            current.model_copy(update={'job_name': 'job-2'}), 'current config'
+        )
+
+        (output,) = jobs.collect(family, {system.name: system})
+
+        assert (output.job, output.text) == ('job-2', 'current config')
+
     def test_keeps_the_oldest_trial_that_sent_the_current_request(
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
-        jobs_dir = data_dir / 'jobs' / 'f'
+        tasks = jobs.render_tasks(
+            family,
+            [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
+        )
+        config = jobs.job(family, [system], tasks)
         for job, output in (
             ('2026-10-20__10-00-00', 'first'),
             ('2026-10-21__10-00-00', 'second'),
         ):
-            write_trial(
-                jobs_dir / job,
-                'a__1',
-                trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
-                task='f/a',
-                output=output,
-                context=AgentContext(metadata={'finish_reason': 'stop'}),
-            )
+            finish_generation(config.model_copy(update={'job_name': job}), output)
 
         outputs = jobs.collect(family, {system.name: system})
 
@@ -1387,19 +1447,20 @@ class TestCollect:
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
         (run,) = jobs.family_systems(family, [system])
-        current = options.terminus(run, family.settings)
+        config = jobs.job(family, [run], [case_task(family, 'echo')])
+        agent = config.agents[0]
+        current = agent.kwargs
         for job, kwargs in (
             ('job-1', {**current, 'max_turns': 99}),
             ('job-2', current),
         ):
-            write_trial(
-                data_dir / 'jobs' / 'f' / job,
-                'echo__1',
-                trial_config.AgentConfig(import_path='x:Y', kwargs=kwargs),
-                task='f/echo',
-                reward=1.0,
-                instruction=None,
-                version='1.0.0',
+            finish_job(
+                config.model_copy(
+                    update={
+                        'job_name': job,
+                        'agents': [agent.model_copy(update={'kwargs': kwargs})],
+                    }
+                )
             )
 
         (output,) = jobs.collect(family, {system.name: system})
@@ -1411,15 +1472,16 @@ class TestCollect:
     ) -> None:
         system = make_system()
         family = votes_family(systems=['other'], reference='other', samples=1)
+        tasks = jobs.render_tasks(
+            family,
+            [Case(id='c', category='reply', source='held-out', instruction='Hi.')],
+        )
         for job, bound in (('job-1', 100), ('job-2', 300)):
-            write_trial(
-                data_dir / 'jobs' / 'f' / job,
-                'c__1',
-                trial_config.AgentConfig(
-                    import_path='x:Y', kwargs=request(system, bound)
-                ),
-                task='f/c',
-                output=f'reply at {bound}',
+            config = jobs.job(
+                with_settings(family, max_output_tokens=bound), [system], tasks
+            )
+            finish_generation(
+                config.model_copy(update={'job_name': job}), f'reply at {bound}'
             )
 
         (output,) = jobs.collect(family, {system.name: system})

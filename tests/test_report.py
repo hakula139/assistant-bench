@@ -883,6 +883,7 @@ class TestClose:
             {
                 'trial': '3',
                 'error': 'TimeoutError',
+                'reward': 1.0,
                 'cost_usd': 1.0,
                 'latency_sec': 60.0,
             },
