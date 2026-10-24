@@ -56,7 +56,7 @@ uv run bench collect smoke-text
 
 `bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
 
-It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns). The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several.
+It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns). The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several. When the family lists systems, each system's verifier pass rate on tasks its own vendor authored appears beside its rate on other vendors' tasks, with a reward of at least 1 counting as a pass and an ungraded trial as a failure.
 
 Each record holds:
 

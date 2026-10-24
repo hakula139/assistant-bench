@@ -4,7 +4,7 @@ A system is one configuration under test: a model route, an effort, a harness, a
 
 ## Resolution
 
-A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its route from its single channel, its prices, the default [display name](../guide/authoring.md#systems), and its effort rules: the system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A catalog model without exactly one channel fails to resolve, so such a system sets its `route` and `price` directly. Both a channel priced at zero and a route without a `price` report as unpriced.
+A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its vendor, its route from its single channel, its prices, the default [display name](../guide/authoring.md#systems), and its effort rules: the system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A catalog model without exactly one channel fails to resolve, so such a system sets its `route`, `vendor`, and `price` directly. Both a channel priced at zero and a route without a `price` report as unpriced.
 
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 

@@ -183,6 +183,13 @@ class TestCheckSystems:
         ('harness', 'system', 'message'),
         [
             pytest.param(
+                'terminus-2',
+                make_system(vendor=None),
+                'Family `f`: set vendor metadata for `acme-large` in the model '
+                'catalog or their `route` tables in `systems.toml`.',
+                id='missing-vendor',
+            ),
+            pytest.param(
                 'claude-code',
                 make_system(),
                 'Family `f`: harness `claude-code` is not one of `generate`, '
@@ -219,6 +226,7 @@ class TestCheckSystems:
         ('family', 'system'),
         [
             pytest.param(VOTES, make_system(prompt='Be brief.'), id='case-family'),
+            pytest.param(VOTES, make_system(vendor=None), id='legacy-case-system'),
             pytest.param(None, make_system(), id='task-family'),
         ],
     )
@@ -630,6 +638,65 @@ class TestCheckTasks:
         assert str(error.value).startswith(
             'Family `f` has tasks to fix:\n`tasks/echo/task.toml`: '
             '`environment.cpus`: Input should be a valid integer'
+        )
+
+
+class TestAuthorVendors:
+    def test_resolves_an_author_outside_the_participating_systems(
+        self, families_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        task = case_task(family, 'echo')
+        break_setting(task, ('metadata', 'author'), 'writer')
+        systems = {
+            'acme-large': make_system(),
+            'writer': make_system(name='writer', vendor='other'),
+        }
+
+        vendors = jobs.author_vendors(family, [task], systems)
+
+        assert vendors == {'echo': 'other'}
+
+    @pytest.mark.parametrize(
+        ('author', 'vendor', 'message'),
+        [
+            (None, 'acme', 'set `[metadata] author` to a system name.'),
+            ('', 'acme', 'set `[metadata] author` to a system name.'),
+            (42, 'acme', 'set `[metadata] author` to a system name.'),
+            ('unknown', 'acme', 'author `unknown` is not defined in `systems.toml`.'),
+            (
+                'acme-large',
+                None,
+                'author `acme-large` needs vendor metadata in the model catalog '
+                'or its `route` table in `systems.toml`.',
+            ),
+        ],
+        ids=[
+            'missing-author',
+            'empty-author',
+            'non-string-author',
+            'unknown-author',
+            'unowned-author',
+        ],
+    )
+    def test_names_invalid_author_metadata(
+        self,
+        families_dir: Path,
+        author: str | int | None,
+        vendor: str | None,
+        message: str,
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        task = case_task(family, 'echo')
+        break_setting(task, ('metadata', 'author'), author)
+
+        with pytest.raises(ValueError) as error:
+            jobs.author_vendors(
+                family, [task], {'acme-large': make_system(vendor=vendor)}
+            )
+
+        assert str(error.value) == (
+            f'Family `f` has authors to fix:\n`tasks/echo/task.toml`: {message}'
         )
 
 
