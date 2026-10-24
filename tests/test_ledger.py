@@ -1426,6 +1426,153 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestRenewalCredential:
+        @pytest.mark.parametrize('state', ['active', 'replaced', 'revoked'])
+        def test_recovery_respects_the_original_expiry_and_exact_replacement(
+            self, d1_runtime: D1Runtime, state: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='deployment',
+                            mode='public',
+                            quotas=tuple(
+                                Quota(
+                                    operation=operation,
+                                    scope='actor',
+                                    window_ms=1_000,
+                                    limit=10,
+                                )
+                                for operation in ('admit', 'renew')
+                            ),
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
+                    )
+                    await ledger.admit(
+                        Context(command_id='new', principal='bootstrap', now=10),
+                        Admission(
+                            operation='new',
+                            context_digest='bootstrap',
+                            proof_digest='new-proof',
+                            actor_id='actor',
+                            credential_id='original',
+                            rate_subject='rate',
+                            expires_at=1_000,
+                            challenge_until=100,
+                        ),
+                    )
+                    original = await ledger.credential('original', 11)
+                    assert original is not None
+                    renewal = Admission(
+                        operation='renew',
+                        context_digest='original-cookie',
+                        proof_digest='renewal-proof',
+                        original_credential='original',
+                        actor_id='actor',
+                        credential_id='replacement',
+                        rate_subject='rate',
+                        expires_at=2_000_000,
+                        challenge_until=10_000,
+                    )
+                    expected = original
+
+                    if state == 'replaced':
+                        result = await ledger.admit(
+                            Context(command_id='renew', principal='actor', now=20),
+                            renewal,
+                        )
+                        expected = original.model_copy(
+                            update={'revoked_at': 20, 'renewal_command': 'renew'}
+                        )
+
+                        assert (
+                            await ledger.resolve_admission(
+                                Context(
+                                    command_id='renew',
+                                    principal='actor',
+                                    now=600_999,
+                                ),
+                                'renew',
+                                'original-cookie',
+                                'original',
+                            )
+                            == result
+                        )
+                    elif state == 'revoked':
+                        await transport.execute(
+                            Statement(
+                                sql='UPDATE credentials SET revoked_at = 20 '
+                                "WHERE id = 'original'"
+                            )
+                        )
+
+                    tables = ('credentials', 'admission_results', 'quota_windows')
+                    before = {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    }
+
+                    for now in (999, 1_000, 600_999, 601_000, 601_001):
+                        for command in ('renew', 'different'):
+                            recovered = await ledger.renewal_credential(
+                                'original', command, now
+                            )
+                            allowed = now < 601_000 and (
+                                state == 'active'
+                                or (state == 'replaced' and command == 'renew')
+                            )
+                            assert recovered == (expected if allowed else None), (
+                                state,
+                                command,
+                                now,
+                            )
+
+                    assert (
+                        await ledger.renewal_credential('absent', 'renew', 30) is None
+                    )
+                    assert await ledger.credential('original', 999) == (
+                        original if state == 'active' else None
+                    )
+                    assert await ledger.credential('original', 1_000) is None
+
+                    if state != 'replaced':
+                        assert (
+                            await ledger.resolve_admission(
+                                Context(
+                                    command_id='renew', principal='actor', now=1_000
+                                ),
+                                'renew',
+                                'original-cookie',
+                                'original',
+                            )
+                            is None
+                        )
+
+                    with pytest.raises(CommandRejected, match='^credential_context$'):
+                        await ledger.admit(
+                            Context(
+                                command_id='fresh',
+                                principal='actor',
+                                now=1_000 if state == 'active' else 30,
+                            ),
+                            renewal.model_copy(
+                                update={
+                                    'proof_digest': 'fresh-proof',
+                                    'credential_id': 'fresh',
+                                }
+                            ),
+                        )
+
+                    assert {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    } == before
+
+            asyncio.run(scenario())
+
     class TestAdmit:
         def test_renewals_share_the_global_owner_budget_across_family_links(
             self, d1_runtime: D1Runtime
