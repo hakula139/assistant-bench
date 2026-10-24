@@ -12,6 +12,8 @@ from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
 from litellm import Message
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from assistant_bench.catalog import load_export
@@ -71,6 +73,7 @@ class Terminus(Terminus2):
     """
 
     options_model: ClassVar[type[Terminus2Options]] = TerminusOptions
+    _endpoint_client: AsyncOpenAI | AsyncHTTPHandler
 
     @override
     def version(self) -> str:
@@ -107,9 +110,12 @@ class Terminus(Terminus2):
             raise ValueError('Terminus requires resolved model capacities.')
 
         endpoint = Endpoint.read(self._get_env)
+        self._endpoint_client = (
+            endpoint.litellm_client() if use_responses_api else endpoint.client()
+        )
         constructor_kwargs: dict[str, Any] = {
             **(llm_kwargs or {}),
-            'client': endpoint.client(),
+            'client': self._endpoint_client,
         }
         if temperature is not None:
             constructor_kwargs['temperature'] = temperature
@@ -119,7 +125,7 @@ class Terminus(Terminus2):
             context_limit=model_info['max_input_tokens'],
             output_limit=model_info['max_output_tokens'],
             model_name=model_name,
-            api_base=api_base,
+            api_base=str(endpoint.base_url),
             collect_rollout_details=collect_rollout_details,
             session_id=session_id,
             max_thinking_tokens=max_thinking_tokens,
@@ -140,6 +146,7 @@ class Terminus(Terminus2):
         try:
             await super().run(instruction, environment, context)
         finally:
+            await self._endpoint_client.close()
             context.metadata = {
                 **(context.metadata or {}),
                 'nixos_config_rev': nixos_config_rev,

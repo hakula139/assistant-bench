@@ -159,7 +159,8 @@ jobs:
       - name: Check partial dependency type contracts
         run: >-
           uv run python -m mypy.stubtest --mypy-config-file pyproject.toml
-          --ignore-missing-stub harbor.llms.lite_llm statsmodels.discrete.discrete_model
+          --ignore-missing-stub harbor.llms.lite_llm
+          litellm.llms.custom_httpx.http_handler statsmodels.discrete.discrete_model
 
       - name: Check registered controller contract
         run: uv run python typings/checks/controllers.py

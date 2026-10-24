@@ -2,9 +2,11 @@
 
 import os
 import ssl
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from typing import Any, override
 
 import httpx
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from openai import AsyncOpenAI
 from pydantic import (
     BaseModel,
@@ -67,6 +69,19 @@ class Endpoint(BaseModel):
 
     def client(self) -> AsyncOpenAI:
         """Build the native client, bound to the local address if set."""
+        return AsyncOpenAI(
+            base_url=str(self.base_url),
+            api_key=self.api_key(),
+            max_retries=0,
+            http_client=self.http_client(),
+        )
+
+    def litellm_client(self) -> AsyncHTTPHandler:
+        """Build LiteLLM's native Responses transport with endpoint-owned auth."""
+        return _EndpointHTTPHandler(self)
+
+    def http_client(self) -> httpx.AsyncClient:
+        """Authenticate only the configured origin and refuse automatic redirects."""
         verify = self.verify()
         transport = (
             httpx.AsyncHTTPTransport(
@@ -76,13 +91,41 @@ class Endpoint(BaseModel):
             else None
         )
 
-        return AsyncOpenAI(
-            base_url=str(self.base_url),
-            api_key=self.api_key(),
-            default_headers=self.headers,
-            max_retries=0,
-            http_client=httpx.AsyncClient(transport=transport, verify=verify),
+        return httpx.AsyncClient(
+            transport=transport,
+            verify=verify,
+            auth=_EndpointAuth(self),
+            follow_redirects=False,
         )
+
+
+class _EndpointAuth(httpx.Auth):
+    def __init__(self, endpoint: Endpoint) -> None:
+        self._endpoint = endpoint
+        url = httpx.URL(str(endpoint.base_url))
+        self._origin = (url.scheme, url.host, url.port)
+
+    @override
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        url = request.url
+        if (url.scheme, url.host, url.port) != self._origin:
+            raise ValueError('Endpoint credentials cannot authenticate another origin.')
+
+        request.headers.update(self._endpoint.headers or {})
+        request.headers['Authorization'] = f'Bearer {self._endpoint.api_key()}'
+        yield request
+
+
+class _EndpointHTTPHandler(AsyncHTTPHandler):
+    def __init__(self, endpoint: Endpoint) -> None:
+        self._endpoint = endpoint
+        super().__init__()
+
+    @override
+    def create_client(self, *args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        return self._endpoint.http_client()
 
 
 def preflight(env: Mapping[str, str] | None = None) -> None:
