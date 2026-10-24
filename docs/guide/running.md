@@ -35,13 +35,23 @@ uv run bench run smoke-text
 uv run bench run --system <name>
 ```
 
-`bench run` renders each case into a Harbor task, or checks each task of a task family as `bench check` does without running it, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI. A run without a family sends every family that lists systems, naming families limits it to those, and `--system` alone sends the named systems to every family that lists them, failing only when no family lists one. Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial. A case family's trials start no container, so they need no Docker.
+`bench run` renders each case into a Harbor task, or checks each task of a task family as `bench check` does without running it, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI.
+
+A run without a family sends every family that lists systems, naming families limits it to those, and `--system` alone sends the named systems to every family that lists them, failing only when no family lists one.
+
+Each case and system pair runs `samples` times, retrying a failed trial once, and systems that share a route share one concurrency limit. A reply cut off by the token limit counts as an output, while an HTTP error fails the trial. A case family's trials start no container, so they need no Docker.
 
 On a task family, the family's `harness` drives each task's container through the endpoint for at most `max_turns` turns, and the task's tests then grade its `/app` in a fresh container, which needs Docker. Harbor reruns every errored trial on the next run. Until a rerun succeeds, a trial whose agent timed out or failed keeps its tests' verdict, while one the tests never graded has none.
 
 When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails, so finished trials land before the command exits.
 
-Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone. An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists. Editing a case's instruction reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out. To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit. Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
+Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
+
+An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists. Editing a case's instruction reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out.
+
+To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit.
+
+Removing a system from the family's `systems` stops new trials while its votes keep it on the board, and a removed `reference` needs a replacement.
 
 A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
@@ -56,7 +66,11 @@ uv run bench collect smoke-text
 
 `bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
 
-It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns). The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several. When the family lists systems, each system's verifier pass rate on tasks its own vendor authored appears beside its rate on other vendors' tasks, with a reward of at least 1 counting as a pass and an ungraded trial as a failure.
+It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
+
+The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several.
+
+When the family lists systems, each system's verifier pass rate on tasks its own vendor authored appears beside its rate on other vendors' tasks, with a reward of at least 1 counting as a pass and an ungraded trial as a failure.
 
 Each record holds:
 
@@ -69,7 +83,7 @@ Each record holds:
 | `text`                                                               | A case's reply, or on a voted task the git-style diff of the graded `/app` against the task's `environment/app/`, without `.git` or tool caches such as `__pycache__` |
 | `reward`                                                             | A task's reward from its tests                                                                                                                                        |
 | `gate_failures`                                                      | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed, which on a task is `tests` when its reward is below 1                                 |
-| `error`                                                              | The error type of a failed trial, whose `text` is null                                                                                                                |
+| `error`                                                              | The error type of a failed trial. A graded task can retain its diff and gate verdict after an agent error                                                             |
 | `finish_reason`                                                      | The endpoint's finish reason                                                                                                                                          |
 | `input_tokens`, `cached_tokens`, `output_tokens`, `reasoning_tokens` | Token counts, where the endpoint reports them                                                                                                                         |
 | `cost_usd`                                                           | The cost at catalog prices, null when the catalog channel has no price                                                                                                |

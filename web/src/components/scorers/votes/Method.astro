@@ -70,7 +70,7 @@ const diagnostics = [
 
 <Part id={id('scores')} title={votesParts.scores}>
   <p>
-    <KeptTail text="A Bradley-Terry model turns the votes, and the pairs settled without a vote, into Elo-like scores, counting ties and both-bad votes as half a win. Each family fits its own scores around its own anchor, so compare scores only within one family." />
+    <KeptTail text="A Bradley-Terry model turns the votes, and the pairs settled without a vote, into Elo-like scores, counting ties and both-bad votes as half a win. Compare scores only within one round of one family, since each round sets its own anchor." />
   </p>
   <dl class={statList}>
     <Stat label="A 100-point gap" detail="of the votes between them">

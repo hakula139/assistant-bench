@@ -35,10 +35,9 @@ const ROW_HEIGHT = 30;
 /** Room between the plot's left edge and the axis start, where an arrowhead points. */
 const ARROW_INSET = 8;
 
-/** The height of a plot with one row per label, in CSS pixels. */
+/** Height in CSS pixels. */
 export const forestPlotHeight = (labels: string[]) => labels.length * ROW_HEIGHT + 36;
 
-/** Builds the plot for a measured frame. */
 export function forestPlotOptions(
   { rows, labels, domain }: ForestPlotProps,
   { width, measure }: PlotFrame,
