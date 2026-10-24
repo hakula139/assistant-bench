@@ -29,6 +29,8 @@ bench = "assistant_bench.cli:app"
 
 [dependency-groups]
 dev = [
+  "assistant-bench-typing",
+  "basedpyright>=1.40.2",
   "httpx2>=2.16.0",
   "jsonschema>=4.26.0",
   "mypy>=2.4.0",
@@ -39,6 +41,7 @@ dev = [
   "statsmodels>=0.15.0",
   "trustme>=1.2.1",
   "types-jsonschema>=4.26.0.20261006",
+  "types-pyOpenSSL>=24.1.0.20240722",
 ]
 
 [build-system]
@@ -58,6 +61,7 @@ members = ["arena"]
 
 [tool.uv.sources]
 assistant-bench-arena = { workspace = true }
+assistant-bench-typing = { path = "typings" }
 
 # This index overrides any registry set in the user's uv config, so the lockfile names only PyPI.
 [[tool.uv.index]]
@@ -80,7 +84,7 @@ quote-style = "single"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["B", "C4", "D", "E", "F", "I", "SIM", "UP", "W"]
+select = ["B", "C4", "D", "E", "F", "I", "PGH003", "PGH004", "RUF100", "RUF102", "SIM", "UP", "W"]
 ignore = ["D101", "D102", "D103", "D105", "D106", "D107"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -116,19 +120,20 @@ source = ["assistant_bench", "assistant_bench_arena"]
 [tool.coverage.report]
 exclude_also = ['case _:\n\s*assert_never\(']
 
+[tool.basedpyright]
+include = ["src", "tests", "arena/src", "typings"]
+extraPaths = ["src", "tests", "arena/src"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportIgnoreCommentWithoutRule = true
+reportUnnecessaryTypeIgnoreComment = true
+
 [tool.mypy]
 files = ["src", "tests", "arena/src"]
 exclude_gitignore = true
 strict = true
-# threadpoolctl leaves `threadpool_limits` unannotated.
-untyped_calls_exclude = ["threadpoolctl"]
-
-# Harbor, threadpoolctl, and zhon lack a `py.typed` marker, so mypy follows their imports.
+# Harbor lacks typing metadata, so mypy follows its annotated source.
 [[tool.mypy.overrides]]
-module = ["harbor.*", "threadpoolctl", "zhon.*"]
+module = ["harbor.*"]
 follow_untyped_imports = true
-
-# statsmodels leaves its models unannotated, so the ranking cross-check treats them as untyped.
-[[tool.mypy.overrides]]
-module = ["statsmodels.*"]
-ignore_missing_imports = true

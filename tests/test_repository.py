@@ -26,7 +26,31 @@ URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
 
 
 def hosts(path: Path) -> set[str | None]:
-    return {urlsplit(url).hostname for url in URL.findall(path.read_text())}
+    return {
+        urlsplit(match.group()).hostname for match in URL.finditer(path.read_text())
+    }
+
+
+class TestHosts:
+    @pytest.mark.parametrize(
+        ('url', 'host'),
+        [
+            ('https://internal.corp?@pypi.org/x', 'internal.corp'),
+            ('https://internal.corp#@pypi.org/x', 'internal.corp'),
+            ('HTTPS://internal.corp/x', 'internal.corp'),
+            ('Git+SSH://git@internal.corp/x', 'internal.corp'),
+            ('https://internal.corp:8080/x', 'internal.corp'),
+            ('https://user:pass@internal.corp/x', 'internal.corp'),
+            ('file:///etc/passwd', None),
+        ],
+    )
+    def test_reads_the_url_authority(
+        self, url: str, host: str | None, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'lockfile'
+        path.write_text(url)
+
+        assert hosts(path) == {host}
 
 
 @pytest.mark.parametrize(
@@ -175,7 +199,11 @@ def test_committed_families_name_only_tabled_systems() -> None:
 @pytest.mark.parametrize(
     ('family', 'report', 'expected'),
     [
-        ({'systems': ['tabled']}, {'results': {'reference': 'retired'}}, set()),
+        (
+            {'systems': ['tabled']},
+            {'results': {'reference': 'retired'}},
+            set[tuple[str, str]](),
+        ),
         ({'systems': ['untabled']}, {}, {('f', 'untabled')}),
         ({'reference': 'untabled'}, {}, {('f', 'untabled')}),
     ],
@@ -211,27 +239,6 @@ def registry(name: str) -> set[str]:
     if name == 'pnpm-lock.yaml':
         return {'registry.npmjs.org'}
     return {'pypi.org', 'files.pythonhosted.org'}
-
-
-@pytest.mark.parametrize(
-    ('url', 'host'),
-    [
-        ('https://internal.corp?@pypi.org/x', 'internal.corp'),
-        ('https://internal.corp#@pypi.org/x', 'internal.corp'),
-        ('HTTPS://internal.corp/x', 'internal.corp'),
-        ('Git+SSH://git@internal.corp/x', 'internal.corp'),
-        ('https://internal.corp:8080/x', 'internal.corp'),
-        ('https://user:pass@internal.corp/x', 'internal.corp'),
-        ('file:///etc/passwd', None),
-    ],
-)
-def test_hosts_reads_the_url_authority(
-    url: str, host: str | None, tmp_path: Path
-) -> None:
-    path = tmp_path / 'lockfile'
-    path.write_text(url)
-
-    assert hosts(path) == {host}
 
 
 @pytest.mark.parametrize(
@@ -313,7 +320,7 @@ def test_tests_never_see_a_dotenv_above_litellm(tmp_path: Path) -> None:
         """\
         import os
 
-        import litellm  # noqa: F401
+        import litellm
         import pytest
 
         AT_IMPORT = os.environ.get('BENCH_TEST_SECRET')

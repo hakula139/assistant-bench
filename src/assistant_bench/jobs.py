@@ -97,7 +97,7 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     """
     directory = tasks_dir(family)
     directory.mkdir(parents=True, exist_ok=True)
-    paths = []
+    paths: list[Path] = []
     for case in cases:
         installed = case_task(family, case.id)
         if installed.exists():
@@ -285,7 +285,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
             f'sha256:{content_hash}',
         )
 
-    changed = set()
+    changed: set[tuple[str, str]] = set()
     for trial in load_source_trials(_sources(family)):
         if trial.task_name not in current:
             continue
@@ -309,7 +309,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
         A task's `task.toml` does not parse, or it leaves a required setting at
         its default, naming the task and the value to set.
     """
-    problems = []
+    problems: list[str] = []
     for task in tasks:
         location = f'`{task_location(family, task)}/task.toml`'
         try:
@@ -329,8 +329,8 @@ def author_vendors(
     family: Family, tasks: list[Path], systems: dict[str, System]
 ) -> dict[str, str]:
     """Return each task author's vendor, refusing missing or unknown authors."""
-    authors = {}
-    problems = []
+    authors: dict[str, str] = {}
+    problems: list[str] = []
     for task in tasks:
         location = f'`{task_location(family, task)}/task.toml`'
         author = _task_config(task).metadata.get('author')
@@ -356,7 +356,7 @@ def author_vendors(
 
 
 def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
-    problems = []
+    problems: list[str] = []
     if config.task is None or config.task.version is None:
         problems.append(f'{location}: set `[task] version`.')
     elif not semver.Version.is_valid(config.task.version):
@@ -599,7 +599,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         list
     )
 
-    solutions = set()
+    solutions: set[tuple[str, str]] = set()
     for candidate, _ in candidates:
         if (candidate.job, candidate.name) in solutions:
             continue
@@ -671,7 +671,7 @@ def _read_trials(
     """
     trials = load_source_trials(sources)
     by_id = {trial.id: trial for trial in trials}
-    records = []
+    records: list[_Candidate] = []
     for trial in trials:
         case = trial.task_name.removeprefix(f'{family.name}/')
         if versions is not None and not _is_current(
@@ -729,10 +729,13 @@ def _origin(trial: SourceTrial, trials: dict[UUID, SourceTrial]) -> SourceTrial:
     outside `trials` ends the chain at the regrade, which holds copies of its
     source's agent result and artifacts, with symlinks dereferenced.
     """
-    while (source := trial.result.config.source_trial) is not None and (
-        source.trial_id in trials
-    ):
-        trial = trials[source.trial_id]
+    while (source := trial.result.config.source_trial) is not None:
+        trial_id = source.trial_id
+        if trial_id is None or trial_id not in trials:
+            break
+
+        trial = trials[trial_id]
+
     return trial
 
 

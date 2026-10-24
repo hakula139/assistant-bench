@@ -4,6 +4,7 @@ import pytest
 
 from assistant_bench.arena.resolution import settled_score
 from assistant_bench.diffs import workspace_diff
+from assistant_bench.outputs import Output
 from support import make_output
 
 
@@ -185,7 +186,7 @@ class TestWorkspaceDiff:
     ) -> None:
         base = tmp_path / 'base'
         write_tree(base, {'asset.bin': b'base\0'})
-        outputs = []
+        outputs: list[Output] = []
         for name, content in [('left', left), ('right', right)]:
             workspace = tmp_path / name
             write_tree(workspace, {'asset.bin': content})

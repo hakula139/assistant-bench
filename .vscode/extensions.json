@@ -1,9 +1,11 @@
 {
   "recommendations": [
     "charliermarsh.ruff",
+    "detachhead.basedpyright",
     "esbenp.prettier-vscode",
     "jnoortheen.nix-ide",
     "mkhl.shfmt",
+    "ms-python.python",
     "tamasfe.even-better-toml"
   ]
 }

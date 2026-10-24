@@ -1,5 +1,5 @@
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import timedelta
 from itertools import permutations
 
@@ -216,7 +216,7 @@ class TestDraw:
         pool = make_pool()
         rng = np.random.default_rng(0)
         votes: list[Vote] = []
-        counts = []
+        counts: list[Counter[tuple[str, str]]] = []
 
         for vote_id in range(1, 13):
             picked = draw(pool, matched(pool, votes), set(), AT, rng, Board(SYSTEMS))
@@ -234,7 +234,7 @@ class TestDraw:
         pool = make_pool(cases=3)
         rng = np.random.default_rng(0)
 
-        cases = set()
+        cases: set[str] = set()
         for _ in range(10):
             picked = draw(pool, [], {'c0', 'c2'}, AT, rng, Board(SYSTEMS))
             assert picked is not None
@@ -256,7 +256,7 @@ class TestDraw:
         rng = np.random.default_rng(0)
         board = Board(SYSTEMS)
 
-        pairs = set()
+        pairs: set[frozenset[str]] = set()
         for _ in range(10):
             picked = draw(pool, matched(pool, votes), set(), AT, rng, board)
             assert picked is not None
@@ -302,20 +302,11 @@ class TestDraw:
         )
 
     @pytest.mark.parametrize(
-        ('age', 'history', 'used'),
+        ('age', 'repeated', 'used'),
         [
-            (timedelta(hours=23), lambda vote: [vote], set()),
-            (
-                timedelta(days=2),
-                lambda vote: [
-                    vote,
-                    vote.model_copy(
-                        update={'id': 2, 'a': vote.b, 'b': vote.a, 'repeat_of': 1}
-                    ),
-                ],
-                set(),
-            ),
-            (timedelta(days=1), lambda vote: [vote], {'c0'}),
+            (timedelta(hours=23), False, set[str]()),
+            (timedelta(days=2), True, set[str]()),
+            (timedelta(days=1), False, {'c0'}),
         ],
         ids=['too-recent', 'already-repeated', 'case-used'],
     )
@@ -323,13 +314,20 @@ class TestDraw:
         self,
         monkeypatch: pytest.MonkeyPatch,
         age: timedelta,
-        history: Callable[[Vote], list[Vote]],
+        repeated: bool,
         used: set[str],
     ) -> None:
         monkeypatch.setattr(scheduler, 'REPEAT_SHARE', 1.0)
         pool = make_pool(systems=('large', 'small'))
         (original,) = votes_between(pool, 'large', 'small', ['a'])
-        votes = history(original.model_copy(update={'recorded_at': AT - age}))
+        original = original.model_copy(update={'recorded_at': AT - age})
+        votes = [original]
+        if repeated:
+            votes.append(
+                original.model_copy(
+                    update={'id': 2, 'a': original.b, 'b': original.a, 'repeat_of': 1}
+                )
+            )
 
         picked = draw(
             pool,

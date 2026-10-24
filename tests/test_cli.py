@@ -8,7 +8,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -24,9 +24,15 @@ from assistant_bench import catalog, cli, jobs, report, revisions
 from assistant_bench.arena import api
 from assistant_bench.arena.service import Arena
 from assistant_bench.arena.store import Ballot, Side, VoteStore, votes_file
-from assistant_bench.catalog import EXPORT_VAR, load_export, load_systems
+from assistant_bench.catalog import (
+    EXPORT_VAR,
+    NixosConfigExport,
+    System,
+    load_export,
+    load_systems,
+)
 from assistant_bench.cli import app
-from assistant_bench.families import Gate, family_names, load_cases, load_family
+from assistant_bench.families import Family, Gate, family_names, load_cases, load_family
 from assistant_bench.outputs import Output, write_outputs
 from support import (
     AT,
@@ -199,9 +205,13 @@ class TestCheck:
             *trials('c', 'oracle', 1.0),
             *trials('c', 'nop', 0.0),
         ]
-        monkeypatch.setattr(
-            jobs, 'read_trials', lambda family, job_dir, systems: outputs
-        )
+
+        def read_trials(
+            family: Family, job_dir: Path, systems: dict[str, System]
+        ) -> list[Output]:
+            return outputs
+
+        monkeypatch.setattr(jobs, 'read_trials', read_trials)
 
         result = invoke('check', 'f', 'f', '--task', 'c', '--task', 'b', '--task', 'b')
         assert result.exit_code == (0 if reward == 1.0 else 1), result.output
@@ -366,9 +376,13 @@ class TestCheck:
         message: str,
     ) -> None:
         write_task_family(families_dir, *tasks)
-        monkeypatch.setattr(
-            jobs, 'read_trials', lambda family, job_dir, systems: outputs
-        )
+
+        def read_trials(
+            family: Family, job_dir: Path, systems: dict[str, System]
+        ) -> list[Output]:
+            return outputs
+
+        monkeypatch.setattr(jobs, 'read_trials', read_trials)
         verdicts = {0: (message, ''), 1: ('', message)}
 
         result = invoke('check', 'f')
@@ -418,9 +432,13 @@ class TestCheck:
             'f': [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
             'g': [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
         }
-        monkeypatch.setattr(
-            jobs, 'read_trials', lambda family, job_dir, systems: outputs[family.name]
-        )
+
+        def read_trials(
+            family: Family, job_dir: Path, systems: dict[str, System]
+        ) -> list[Output]:
+            return outputs[family.name]
+
+        monkeypatch.setattr(jobs, 'read_trials', read_trials)
 
         result = invoke('check')
 
@@ -605,9 +623,11 @@ class TestCheck:
         write_task_family(families_dir, 'echo', systems=('opus-5.5',))
         systems = load_systems(load_export())
         prompted = systems['opus-5.5'].model_copy(update={'prompt': 'Be brief.'})
-        monkeypatch.setattr(
-            cli, 'load_systems', lambda export: systems | {'opus-5.5': prompted}
-        )
+
+        def prompted_systems(export: NixosConfigExport) -> dict[str, System]:
+            return systems | {'opus-5.5': prompted}
+
+        monkeypatch.setattr(cli, 'load_systems', prompted_systems)
 
         result = invoke('check', 'f')
 
@@ -638,9 +658,11 @@ class TestCheck:
     ) -> None:
         path = tmp_path / 'systems.toml'
         path.write_text('[broken]\neffort = "low"\n')
-        monkeypatch.setattr(
-            cli, 'load_systems', lambda export: catalog.load_systems(export, path)
-        )
+
+        def invalid_systems(export: NixosConfigExport) -> dict[str, System]:
+            return catalog.load_systems(export, path)
+
+        monkeypatch.setattr(cli, 'load_systems', invalid_systems)
 
         result = invoke('check', 'smoke-text')
 
@@ -1078,7 +1100,11 @@ class TestCollect:
         monkeypatch.setattr(
             cli, '_load_systems', lambda: {'large': make_system(name='large')}
         )
-        monkeypatch.setattr(jobs, 'collect', lambda family, systems: [])
+
+        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+            return []
+
+        monkeypatch.setattr(jobs, 'collect', collect)
 
         result = invoke('collect', 'f')
 
@@ -1119,7 +1145,11 @@ class TestCollect:
             for system in ('large', 'small')
         ]
         monkeypatch.setattr(cli, '_load_systems', lambda: systems)
-        monkeypatch.setattr(jobs, 'collect', lambda family, systems: outputs)
+
+        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+            return outputs
+
+        monkeypatch.setattr(jobs, 'collect', collect)
 
         result = invoke('collect', 'f')
         assert result.exit_code == 0, result.output
@@ -1144,13 +1174,11 @@ class TestCollect:
         monkeypatch.setattr(
             cli, '_load_systems', lambda: {'large': make_system(name='large')}
         )
-        monkeypatch.setattr(
-            jobs,
-            'collect',
-            lambda family, systems: [
-                make_output(case='one', system='large', reward=reward)
-            ],
-        )
+
+        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+            return [make_output(case='one', system='large', reward=reward)]
+
+        monkeypatch.setattr(jobs, 'collect', collect)
 
         result = invoke('collect', 'f')
         assert result.exit_code == 0, result.output
@@ -1218,7 +1246,10 @@ class TestCollect:
         outputs: list[Output],
         summary: str,
     ) -> None:
-        monkeypatch.setattr(jobs, 'collect', lambda family, systems: outputs)
+        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+            return outputs
+
+        monkeypatch.setattr(jobs, 'collect', collect)
 
         result = invoke('collect', name)
         assert result.exit_code == 0, result.output
@@ -1305,8 +1336,15 @@ class TestServe:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
         write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
         monkeypatch.setattr(cli, 'SITE_DIR', tmp_path / 'dist')
-        monkeypatch.setattr(subprocess, 'run', lambda args, **options: None)
-        monkeypatch.setattr(api, 'serve', lambda arena, site: pytest.fail('served'))
+
+        def build(args: list[str], *, check: bool, cwd: Path) -> None:
+            pass
+
+        def serve(arena: Arena, site: Path) -> Never:
+            pytest.fail('served')
+
+        monkeypatch.setattr(subprocess, 'run', build)
+        monkeypatch.setattr(api, 'serve', serve)
 
         result = invoke('serve')
 
@@ -1380,9 +1418,11 @@ class TestServe:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
         write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
         write_version_one_store()
-        monkeypatch.setattr(
-            subprocess, 'run', lambda *args, **options: pytest.fail('built the site')
-        )
+
+        def build(args: list[str], *, check: bool, cwd: Path) -> Never:
+            pytest.fail('built the site')
+
+        monkeypatch.setattr(subprocess, 'run', build)
 
         result = invoke('serve')
 
@@ -1422,7 +1462,11 @@ class TestClose:
             '_load_systems',
             lambda: {'large': make_system(display_name='Current Large')},
         )
-        monkeypatch.setattr(cli, '_collect', lambda family: None)
+
+        def collect(family: Family) -> None:
+            pass
+
+        monkeypatch.setattr(cli, '_collect', collect)
 
         result = invoke('close', 'f')
         assert result.exit_code == 0, result.output
@@ -1547,7 +1591,11 @@ class TestFingerprints:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         base = load_systems(load_export())
-        monkeypatch.setattr(revisions, 'systems_at', lambda revision: base)
+
+        def systems_at(revision: str) -> dict[str, System]:
+            return base
+
+        monkeypatch.setattr(revisions, 'systems_at', systems_at)
 
         result = invoke('fingerprints', 'origin/main')
 
@@ -1570,9 +1618,11 @@ class TestFingerprints:
     ) -> None:
         head = load_systems(load_export())
         old = head['opus-5.5'].model_copy(update={'route': 'moved'} | fields)
-        monkeypatch.setattr(
-            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
-        )
+
+        def systems_at(revision: str) -> dict[str, System]:
+            return head | {'opus-5.5': old}
+
+        monkeypatch.setattr(revisions, 'systems_at', systems_at)
 
         result = invoke('fingerprints', 'origin/main')
 
@@ -1591,9 +1641,11 @@ class TestFingerprints:
         head = load_systems(load_export())
         opus = head['opus-5.5']
         old = opus.model_copy(update={'route': 'moved', 'prompt': 'Be brief.'})
-        monkeypatch.setattr(
-            revisions, 'systems_at', lambda revision: head | {'opus-5.5': old}
-        )
+
+        def systems_at(revision: str) -> dict[str, System]:
+            return head | {'opus-5.5': old}
+
+        monkeypatch.setattr(revisions, 'systems_at', systems_at)
 
         result = invoke('fingerprints', 'origin/main')
 

@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -29,7 +29,7 @@ def simulate(
     """Draw votes from Bradley-Terry with a left-side advantage and 20% ties."""
     rng = np.random.default_rng(seed)
     names = list(STRENGTHS)
-    comparisons = []
+    comparisons: list[Comparison] = []
     for _ in range(n):
         left, right = rng.choice(names, size=2, replace=False)
         p = 1 / (1 + np.exp(-(STRENGTHS[left] - STRENGTHS[right] + position)))
@@ -190,7 +190,11 @@ class TestFit:
             ]
         )
         failure = SimpleNamespace(success=False, message='iteration limit')
-        monkeypatch.setattr(optimize, 'minimize', lambda *args, **kwargs: failure)
+
+        def minimize(*args: object, **kwargs: object) -> SimpleNamespace:
+            return failure
+
+        monkeypatch.setattr(optimize, 'minimize', minimize)
 
         with pytest.raises(RuntimeError, match='did not converge: iteration limit'):
             fit(matchups)
@@ -219,7 +223,7 @@ class TestRatePoint:
         minimize = optimize.minimize
 
         @contextmanager
-        def limit_threads(*, limits: int, user_api: str) -> Iterator[None]:
+        def limit_threads(*, limits: int, user_api: str) -> Generator[None]:
             nonlocal thread_limit
             assert user_api == 'blas'
             previous, thread_limit = thread_limit, limits
