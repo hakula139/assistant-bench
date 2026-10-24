@@ -322,7 +322,6 @@ export function VoteApp() {
     setSavedAt(null);
   };
 
-  // Shows the pair the family's session holds now, which another tab may have moved on.
   const follow = async (family: string) => {
     try {
       show(await enterFamily(family));
@@ -332,7 +331,6 @@ export function VoteApp() {
     }
   };
 
-  // Shows the session that `action` returns, and marks `saved` once a vote is recorded.
   const run = async (action: () => Promise<SessionView>, saved = false) => {
     setBusy(true);
     try {
