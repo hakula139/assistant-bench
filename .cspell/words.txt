@@ -32,6 +32,7 @@ isinstance
 isort
 jitless
 jnoortheen
+journalctl
 katex
 kimi
 kwarg

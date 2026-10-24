@@ -170,6 +170,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Check Docker
+        run: time docker info
+
       - name: Run trials under Docker
         run: uv run pytest -m docker
 
@@ -183,6 +186,13 @@ jobs:
             args+=("$BASE_SHA")
           fi
           nix develop .#python -c uv run python -m assistant_bench.ci "${args[@]}"
+
+      - name: Diagnose Docker failure
+        if: failure()
+        shell: bash
+        run: |
+          timeout 10s systemctl status docker --no-pager || true
+          timeout 10s journalctl --unit docker --since '-10 min' --lines 100 --no-pager
 
   result:
     name: CI Result
