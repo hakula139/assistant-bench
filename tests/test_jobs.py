@@ -7,6 +7,7 @@ import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import tomli_w
@@ -22,6 +23,7 @@ from harbor.models.trial.result import TimingInfo, TrialResult
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System
+from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
     Family,
@@ -36,6 +38,7 @@ from assistant_bench.harnesses import HOST_ENVIRONMENT, options
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
+from assistant_bench.scoring.gates import failed_gates
 from support import finish_job, make_system, write_task_family, write_trial
 
 
@@ -1024,7 +1027,11 @@ class TestCollect:
         ],
     )
     def test_prefers_a_trial_with_the_current_execution_config(
-        self, data_dir: Path, section: str, changes: dict[str, Any]
+        self,
+        data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        section: str,
+        changes: dict[str, Any],
     ) -> None:
         family = votes_family(samples=1)
         system = make_system()
@@ -1049,10 +1056,16 @@ class TestCollect:
         finish_generation(
             current.model_copy(update={'job_name': 'job-2'}), 'current config'
         )
+        text = Mock(wraps=jobs._text)
+        gates = Mock(wraps=failed_gates)
+        monkeypatch.setattr(jobs, '_text', text)
+        monkeypatch.setattr(jobs, 'failed_gates', gates)
 
         (output,) = jobs.collect(family, {system.name: system})
 
         assert (output.job, output.text) == ('job-2', 'current config')
+        text.assert_called_once()
+        gates.assert_called_once_with(family.settings, 'current config', 'stop', '')
 
     def test_keeps_the_oldest_trial_that_sent_the_current_request(
         self, data_dir: Path
@@ -1474,7 +1487,10 @@ class TestCollect:
         ) == expected
 
     def test_keeps_one_output_for_a_solution_harbor_regraded_twice(
-        self, families_dir: Path, data_dir: Path
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         family = with_settings(voted_tasks(families_dir, 'echo'), samples=2)
         agent = trial_config.AgentConfig(
@@ -1488,6 +1504,7 @@ class TestCollect:
             reward=1.0,
             instruction=None,
             version='1.0.0',
+            workspace={'greeting.txt': 'hello\n'},
         )
         for job, trial in (('job-2', 'echo__first'), ('job-3', 'echo__second')):
             write_trial(
@@ -1498,15 +1515,27 @@ class TestCollect:
                 reward=1.0,
                 instruction=None,
                 version='1.1.0',
+                workspace={'greeting.txt': 'hello\n'},
                 source=origin,
             )
         break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
+        diff = Mock(wraps=workspace_diff)
+        monkeypatch.setattr(jobs, 'workspace_diff', diff)
 
         outputs = jobs.collect(family, {})
 
         assert [(output.job, output.trial) for output in outputs] == [
             ('job-1', 'echo__origin')
         ]
+        assert (outputs[0].text, outputs[0].reward, outputs[0].gate_failures) == (
+            GREETING_DIFF,
+            1.0,
+            [],
+        )
+        diff.assert_called_once_with(
+            case_task(family, 'echo') / 'environment' / 'app',
+            data_dir / 'jobs' / 'f' / 'job-1' / 'echo__origin' / 'artifacts' / 'app',
+        )
 
     def test_prefers_the_current_request_of_a_task_family_under_its_harness(
         self, families_dir: Path, data_dir: Path
@@ -1645,14 +1674,17 @@ class TestCollect:
 class TestReadTrials:
     def test_returns_one_output_per_finished_trial(self, data_dir: Path) -> None:
         job = data_dir / 'jobs' / 'f' / 'job-1'
-        write_trial(
-            job,
-            'a__1',
-            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
-            task='f/a',
-            output='Hi.',
-        )
+        for attempt in range(3):
+            write_trial(
+                job,
+                f'a__{attempt}',
+                trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+                task='f/a',
+                output=f'Reply {attempt}.',
+            )
 
-        (output,) = jobs.read_trials(VOTES, job, {})
+        outputs = jobs.read_trials(VOTES, job, {})
 
-        assert (output.case, output.system, output.text) == ('a', 's', 'Hi.')
+        assert sorted(
+            (output.case, output.system, output.text) for output in outputs
+        ) == [('a', 's', f'Reply {attempt}.') for attempt in range(3)]
