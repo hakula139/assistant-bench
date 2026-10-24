@@ -15,7 +15,11 @@ RUNTIME_FILES = {
     'systems.toml',
     'uv.lock',
 }
-RUNTIME_DIRS = ('.github/actions/setup-nix/', 'src/assistant_bench/')
+RUNTIME_DIRS = (
+    '.github/actions/setup-nix/',
+    'families/coding-repo/shared/',
+    'src/assistant_bench/',
+)
 TASKS_DIR = Path('families/coding-repo/tasks')
 
 

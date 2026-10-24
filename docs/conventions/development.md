@@ -25,7 +25,7 @@ The hook runs the fast subset of the [verification](../../AGENTS.md#verification
 
 Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-Ruff, Prettier, markdownlint, and cspell skip each task's `environment/`, and Ruff also skips its `tests/hidden/`, since those hold the project under test in its own style.
+Ruff, Prettier, markdownlint, and cspell skip each task's `environment/app/`, and Ruff also skips its `tests/hidden/`, since those hold the project under test in its own style.
 
 The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 

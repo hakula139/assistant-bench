@@ -73,7 +73,7 @@ default = true
 target-version = "py314"
 src = ["src", "tests", "arena/src"]
 # A task's repository and hidden tests keep the style of the project under test.
-extend-exclude = ["families/*/tasks/*/environment/", "families/*/tasks/*/tests/hidden/"]
+extend-exclude = ["families/*/tasks/*/environment/app/", "families/*/tasks/*/tests/hidden/"]
 # The pre-commit hook passes staged paths, which Ruff checks despite the excludes otherwise.
 force-exclude = true
 # Task scripts run on the Python of the task's image.
@@ -126,14 +126,14 @@ include = [
   "tests",
   "arena/src",
   "typings",
-  "families/coding-repo/shared/tests",
+  "families/coding-repo/shared",
   "families/coding-repo/tasks",
 ]
 extraPaths = ["src", "tests", "arena/src"]
 exclude = [
   "**/node_modules",
   "**/__pycache__",
-  "families/coding-repo/tasks/*/environment",
+  "families/coding-repo/tasks/*/environment/app",
   "families/coding-repo/tasks/*/tests/hidden",
 ]
 pythonVersion = "3.14"
@@ -147,7 +147,7 @@ root = "families/coding-repo/shared"
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/add-matrix-channel/tests"
+root = "families/coding-repo/tasks/add-matrix-channel"
 extraPaths = [
   "families/coding-repo/tasks/add-matrix-channel/tests",
   "families/coding-repo/tasks/add-matrix-channel/environment/app",
@@ -155,7 +155,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/add-top-words/tests"
+root = "families/coding-repo/tasks/add-top-words"
 extraPaths = [
   "families/coding-repo/tasks/add-top-words/tests",
   "families/coding-repo/tasks/add-top-words/environment/app",
@@ -163,7 +163,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/fix-lru-cache/tests"
+root = "families/coding-repo/tasks/fix-lru-cache"
 extraPaths = [
   "families/coding-repo/tasks/fix-lru-cache/tests",
   "families/coding-repo/tasks/fix-lru-cache/environment/app",
@@ -171,7 +171,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/fix-pagination/tests"
+root = "families/coding-repo/tasks/fix-pagination"
 extraPaths = [
   "families/coding-repo/tasks/fix-pagination/tests",
   "families/coding-repo/tasks/fix-pagination/environment/app",
@@ -179,7 +179,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/implement-durations/tests"
+root = "families/coding-repo/tasks/implement-durations"
 extraPaths = [
   "families/coding-repo/tasks/implement-durations/tests",
   "families/coding-repo/tasks/implement-durations/environment/app",
@@ -187,7 +187,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/refactor-parsers/tests"
+root = "families/coding-repo/tasks/refactor-parsers"
 extraPaths = [
   "families/coding-repo/tasks/refactor-parsers/tests",
   "families/coding-repo/tasks/refactor-parsers/environment/app",
@@ -195,7 +195,7 @@ extraPaths = [
 pythonVersion = "3.13"
 
 [[tool.basedpyright.executionEnvironments]]
-root = "families/coding-repo/tasks/rename-customer-api/tests"
+root = "families/coding-repo/tasks/rename-customer-api"
 extraPaths = [
   "families/coding-repo/tasks/rename-customer-api/tests",
   "families/coding-repo/tasks/rename-customer-api/environment/app",
