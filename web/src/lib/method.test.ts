@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { boardGuide, boardLabels, gateRule, methodSteps } from '@/lib/method';
 
-const config = (overrides: Partial<VotesConfig> = {}): VotesConfig => ({
+const config = (overrides: Partial<Omit<VotesConfig, 'aspect' | 'public'>> = {}): VotesConfig => ({
   scorer: 'votes',
   display_name: 'Arena Writing',
   systems: ['acme-large'],

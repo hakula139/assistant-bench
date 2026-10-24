@@ -3,13 +3,16 @@ import { z } from 'astro/zod';
 import { aspectIds } from '@/lib/aspects';
 
 const shared = {
-  aspect: z.enum(aspectIds).optional(),
   display_name: z.string(),
   systems: z.array(z.string()).default([]),
   harness: z.enum(['terminus-2']).optional(),
   max_turns: z.int().optional(),
-  public: z.boolean().default(false),
 };
+
+const visibility = z.discriminatedUnion('public', [
+  z.object({ public: z.literal(true), aspect: z.enum(aspectIds).optional() }),
+  z.object({ public: z.literal(false).default(false), aspect: z.string().optional() }),
+]);
 
 /** The bounds the votes scorer's gates check beyond a blank or truncated output. */
 const gatesSchema = z.object({
@@ -21,19 +24,21 @@ const gatesSchema = z.object({
 /**
  * The fields of `families/<family>/family.toml` the site reads. The pydantic settings model
  * validates the whole file, so these objects drop the keys they do not list. The site alone knows
- * the aspects and names the renders and harnesses, so it rejects an unknown one.
+ * the public aspects and names the renders and harnesses, so it rejects an unknown one.
  */
-export const familyConfigSchema = z.discriminatedUnion('scorer', [
-  z.object({
-    scorer: z.literal('votes'),
-    reference: z.string(),
-    render: z.enum(['text', 'html', 'diff']).default('text'),
-    language: z.enum(['en', 'zh']).optional(),
-    gates: gatesSchema.default({}),
-    ...shared,
-  }),
-  z.object({ scorer: z.literal('tests'), ...shared }),
-]);
+export const familyConfigSchema = z
+  .discriminatedUnion('scorer', [
+    z.object({
+      scorer: z.literal('votes'),
+      reference: z.string(),
+      render: z.enum(['text', 'html', 'diff']).default('text'),
+      language: z.enum(['en', 'zh']).optional(),
+      gates: gatesSchema.default({}),
+      ...shared,
+    }),
+    z.object({ scorer: z.literal('tests'), ...shared }),
+  ])
+  .and(visibility);
 
 export type FamilyConfig = z.infer<typeof familyConfigSchema>;
 

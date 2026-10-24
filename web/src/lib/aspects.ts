@@ -8,24 +8,34 @@ export type Aspect = keyof typeof aspects;
 
 export const aspectIds = Object.keys(aspects) as [Aspect, ...Aspect[]];
 
-/** A family's full name: its aspect's title, then its short name, when it has an aspect. */
+export function isAspect(value: string): value is Aspect {
+  return Object.hasOwn(aspects, value);
+}
+
+/** Private aspect IDs remain visible in family titles. */
 export function familyTitle({
   aspect,
   display_name: name,
 }: {
-  aspect?: Aspect | null;
+  aspect?: string | null;
   display_name: string;
 }): string {
-  return aspect ? `${aspects[aspect].title} · ${name}` : name;
+  const title = aspect && isAspect(aspect) ? aspects[aspect].title : aspect;
+
+  return title ? `${title} · ${name}` : name;
 }
 
 /**
- * Groups by registry order, preserving member order and placing `null` aspects last.
+ * Groups registered aspects first, then others in input order, with `null` last.
  */
-export function groupByAspect<T extends { aspect: Aspect | null }>(
+export function groupByAspect<T extends { aspect: string | null }>(
   items: T[],
 ): { aspect: T['aspect']; members: T[] }[] {
-  return [...aspectIds, null]
+  const unregistered = [...new Set(items.map(({ aspect }) => aspect))].filter(
+    (aspect) => aspect !== null && !isAspect(aspect),
+  );
+
+  return [...aspectIds, ...unregistered, null]
     .map((aspect) => ({
       aspect,
       members: items.filter((item) => item.aspect === aspect),

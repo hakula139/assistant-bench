@@ -30,7 +30,7 @@ import {
   type SessionView,
   type TaggedDefects,
 } from '@/lib/arena';
-import { familyTitle, groupByAspect } from '@/lib/aspects';
+import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
 import { formatCountOf } from '@/lib/format';
 import type { Defect } from '@/lib/report';
 
@@ -148,6 +148,7 @@ interface StartScreenProps {
 }
 
 function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
+  const groupsId = useId();
   const [families, setFamilies] = useState<FamilyView[] | null>(null);
   const [error, setError] = useState<ReactNode>(null);
 
@@ -167,13 +168,21 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
         </p>
       )}
       {families &&
-        groupByAspect(families).map(({ aspect, members }) => {
-          const id = `aspect-${aspect ?? 'unlisted'}`;
+        groupByAspect(families).map(({ aspect, members }, index) => {
+          const id = `${groupsId}-${index}`;
 
           return (
-            <section key={id} className="flex flex-col gap-3" aria-labelledby={id}>
+            <section
+              key={JSON.stringify(aspect)}
+              className="flex flex-col gap-3"
+              aria-labelledby={id}
+            >
               <h2 id={id} className={cn(sectionTitle, 'flex items-center gap-2')}>
-                {aspect ? <AspectTitle aspect={aspect} /> : 'Unlisted'}
+                {aspect !== null && isAspect(aspect) ? (
+                  <AspectTitle aspect={aspect} />
+                ) : (
+                  (aspect ?? 'Unlisted')
+                )}
               </h2>
               <ul className="flex flex-wrap gap-2">
                 {members.map((family) => (

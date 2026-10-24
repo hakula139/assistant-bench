@@ -6,8 +6,9 @@ import uvicorn
 from fastapi.testclient import TestClient
 
 from assistant_bench.arena import api
-from assistant_bench.arena.service import Arena, HtmlPane
-from assistant_bench.arena.store import Defects, VoteStore
+from assistant_bench.arena.service import Arena
+from assistant_bench.arena.store import VoteStore
+from assistant_bench_arena.models import Defects, HtmlPane
 from support import PROSE_DEFECTS, Clock, make_arena
 
 

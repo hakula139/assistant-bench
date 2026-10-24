@@ -1,6 +1,6 @@
 # Python
 
-Conventions for Python code under `src/` and `tests/` that the tooling and the module map don't already state.
+Conventions for Python code and tests that the tooling and the module map don't already state.
 
 ## Architecture
 

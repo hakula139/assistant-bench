@@ -9,18 +9,15 @@ import pytest
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.service import (
     Arena,
-    DiffPane,
-    HtmlPane,
     NothingToUndo,
-    PairView,
-    TextPane,
     UnknownItem,
     UnlistedDefects,
     load_families,
 )
-from assistant_bench.arena.store import Ballot, Defects, Side, Vote, VoteStore
+from assistant_bench.arena.store import Ballot, Side, Vote, VoteStore
 from assistant_bench.families import Gate
 from assistant_bench.outputs import read_outputs, write_outputs
+from assistant_bench_arena.models import Defects, DiffPane, HtmlPane, PairView, TextPane
 from support import (
     ARENA_CASES,
     ARENA_SYSTEMS,

@@ -28,12 +28,10 @@ from assistant_bench.arena.resolution import MatchedVote, reconcile, settled
 from assistant_bench.arena.store import (
     LEFT_SCORE,
     SWAPPED,
-    Choice,
     Vote,
     VoteStore,
 )
 from assistant_bench.families import (
-    Defect,
     Family,
     TaskTestsSettings,
     VotesSettings,
@@ -42,6 +40,7 @@ from assistant_bench.families import (
 from assistant_bench.outputs import Output, read_outputs
 from assistant_bench.paths import REPORTS_DIR, write_atomically
 from assistant_bench.scoring import ranking
+from assistant_bench_arena.models import Choice, Defect
 
 
 PRELIMINARY_DECISIVE_VOTES = 40

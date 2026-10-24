@@ -17,6 +17,7 @@ from pydantic import (
 
 from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench_arena.models import Defect
 
 
 # ── Settings ──
@@ -57,19 +58,6 @@ class _Settings(BaseModel):
 
 
 type Language = Literal['en', 'zh']
-
-type Defect = Literal[
-    'facts',
-    'punctuation',
-    'tone',
-    'formulaic',
-    'length',
-    'scope',
-    'conventions',
-    'complexity',
-    'testing',
-    'clarity',
-]
 
 MAX_DEFECTS = 5
 

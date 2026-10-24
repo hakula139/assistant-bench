@@ -11,8 +11,8 @@ from pydantic import ValidationError
 
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
-from assistant_bench.arena.store import Ballot, Choice, Defects, Vote, VoteStore
-from assistant_bench.families import Defect, Family, Gate, load_family
+from assistant_bench.arena.store import Ballot, Vote, VoteStore
+from assistant_bench.families import Family, Gate, load_family
 from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.report import (
     Distribution,
@@ -21,6 +21,7 @@ from assistant_bench.report import (
     text_length,
     write_report,
 )
+from assistant_bench_arena.models import Choice, Defect, Defects
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,

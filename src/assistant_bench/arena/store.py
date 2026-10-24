@@ -5,17 +5,15 @@ import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from assistant_bench.families import Defect
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.ranking import Comparison
+from assistant_bench_arena.models import Choice, Defects
 
-
-type Choice = Literal['a', 'b', 'tie', 'both_bad']
 
 LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 SWAPPED: dict[Choice, Choice] = {
@@ -100,15 +98,6 @@ class Side(BaseModel):
             job=output.job,
             trial=output.trial,
         )
-
-
-class Defects(BaseModel):
-    """The defects the owner tagged on each side's output."""
-
-    model_config = ConfigDict(extra='forbid', frozen=True)
-
-    a: frozenset[Defect] = frozenset()
-    b: frozenset[Defect] = frozenset()
 
 
 class Ballot(BaseModel):

@@ -43,19 +43,18 @@ from assistant_bench.arena.service import Arena, load_families
 from assistant_bench.arena.store import (
     SWAPPED,
     Ballot,
-    Choice,
-    Defects,
     Side,
     Vote,
     VoteStore,
 )
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import Defect, Gate, TaskTestsSettings
+from assistant_bench.families import Gate, TaskTestsSettings
 from assistant_bench.harnesses.endpoint import BASE_URL_VAR, HEADERS_VAR, KEY_FILE_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench_arena.models import Choice, Defect, Defects
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'

@@ -38,6 +38,8 @@ src/assistant_bench/
 
 ## Import Layers
 
+`arena/src/assistant_bench_arena` owns shared voting requests and blinded browser views. It depends only on Pydantic and never imports the offline `assistant_bench` package. The offline package imports those contracts for family validation, storage, and the vote API.
+
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
@@ -46,6 +48,7 @@ Imports point downward through these layers, so a module never imports one above
 4. `outputs`, `harnesses`, and `scoring`
 5. `families` and `catalog`
 6. `messages`, `paths`, and `diffs`
+7. `assistant_bench_arena`
 
 `families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 

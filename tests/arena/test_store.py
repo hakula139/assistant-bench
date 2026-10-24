@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from assistant_bench.arena.store import Choice, Defects, VoteStore, votes_file
+from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.scoring.ranking import Comparison
+from assistant_bench_arena.models import Choice, Defects
 from support import AT, make_ballot, make_output, make_vote
 
 

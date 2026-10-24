@@ -4,24 +4,20 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Literal, assert_never
+from typing import Literal, assert_never
 
 import numpy as np
-from pydantic import BaseModel, Field
 
 from assistant_bench.arena.resolution import reconcile
 from assistant_bench.arena.scheduler import Board, Draw, Pool, draw
 from assistant_bench.arena.store import (
     Ballot,
-    Choice,
-    Defects,
     Session,
     Side,
     Vote,
     VoteStore,
 )
 from assistant_bench.families import (
-    Defect,
     TaskTestsSettings,
     VotesSettings,
     case_task,
@@ -30,6 +26,18 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.outputs import Output, read_outputs
+from assistant_bench_arena.models import (
+    Choice,
+    Defect,
+    Defects,
+    DiffPane,
+    FamilyView,
+    HtmlPane,
+    PairView,
+    Pane,
+    SessionView,
+    TextPane,
+)
 
 
 OUTPUTS_PATH = '/outputs'
@@ -49,69 +57,6 @@ class NothingToUndo(Exception):
 
 class UnlistedDefects(ValueError):
     """A vote tags an output with defects its family does not list."""
-
-
-# ── Views ──
-
-
-class TextPane(BaseModel):
-    render: Literal['text']
-    text: str
-
-
-class HtmlPane(BaseModel):
-    """An HTML output, loaded in a sandboxed frame from the render origin."""
-
-    render: Literal['html']
-    url: str
-
-
-class DiffPane(BaseModel):
-    """A solution as a unified diff of the task's repository."""
-
-    render: Literal['diff']
-    text: str
-
-
-type Pane = Annotated[TextPane | HtmlPane | DiffPane, Field(discriminator='render')]
-
-
-class PairView(BaseModel):
-    """A pair as the vote page receives it, identifying no system."""
-
-    token: str
-    """Opaque and valid until the pair is voted on or undone."""
-
-    instruction: str
-    checklist: list[str]
-    a: Pane
-    b: Pane
-
-
-class FamilyView(BaseModel):
-    """A family the vote page can start a session on."""
-
-    name: str
-    """Stable family ID."""
-
-    aspect: str | None
-    display_name: str
-
-    defects: list[Defect]
-    """Available output tags, in the family's order."""
-
-
-class SessionView(BaseModel):
-    """A session's votes and the pair to show."""
-
-    id: str
-    family: FamilyView
-    votes: int
-    remaining: int
-    """Cases still eligible for this session, including the open pair's."""
-
-    pair: PairView | None
-    """Absent once no eligible case remains."""
 
 
 # ── Arena ──

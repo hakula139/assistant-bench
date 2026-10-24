@@ -34,8 +34,8 @@ web/src/
 - `lib/report.ts` mirrors the Pydantic `Report` model field for field with strict Zod objects. Change both schemas in one PR so the build rejects unknown fields and invalid values.
 - `pnpm test` parses both report fixtures and compares Zod's JSON Schema with the Pydantic-generated `tests/fixtures/report.schema.json`. It checks field types, nullability, constants, enums, required and allowed keys, and map keys within each results variant. Numeric bounds, formats and descriptions are not compared.
 - Add a scorer's schema variant and register its views in `components/scorers/index.ts`, its metadata and steps in `lib/method.ts`, and its icons in `components/site/Method.tsx`. Pages dispatch through the registry, and methodology links must reach the registered section. Keep render-specific steps, labels, and sections in those shared registries, keyed by scorer and render, never by family name.
-- Register an aspect's title in `lib/aspects.ts` and its icon in `components/site/Method.tsx`. The registry determines listing order.
-- A new defect ID updates the `Defect` type in `families.py`, the `defects` schema in `lib/report.ts`, and its label in `lib/glossary.ts`. A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
+- Register a public aspect's title in `lib/aspects.ts` and its icon in `components/site/Method.tsx`. The registry determines listing order.
+- A new defect ID updates the `Defect` type in `arena/src/assistant_bench_arena/models.py`, the `defects` schema in `lib/report.ts`, and its label in `lib/glossary.ts`. A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
 
 ## Components
 

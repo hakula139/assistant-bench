@@ -6,6 +6,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
+  "assistant-bench-arena>=0.1.0",
   "fastapi>=0.156.4",
   "harbor==0.24.0",
   "httpx>=0.28.1",
@@ -48,8 +49,15 @@ build-backend = "hatchling.build"
 packages = ["src/assistant_bench"]
 
 [tool.uv]
+required-version = ">=0.13.4"
 # Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
 python-preference = "only-managed"
+
+[tool.uv.workspace]
+members = ["arena"]
+
+[tool.uv.sources]
+assistant-bench-arena = { workspace = true }
 
 # This index overrides any registry set in the user's uv config, so the lockfile names only PyPI.
 [[tool.uv.index]]
@@ -59,7 +67,7 @@ default = true
 
 [tool.ruff]
 target-version = "py314"
-src = ["src", "tests"]
+src = ["src", "tests", "arena/src"]
 # A task's repository and hidden tests keep the style of the project under test.
 extend-exclude = ["families/*/tasks/*/environment/", "families/*/tasks/*/tests/hidden/"]
 # The pre-commit hook passes staged paths, which Ruff checks despite the excludes otherwise.
@@ -103,13 +111,13 @@ pythonpath = ["tests"]
 markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
 
 [tool.coverage.run]
-source = ["assistant_bench"]
+source = ["assistant_bench", "assistant_bench_arena"]
 
 [tool.coverage.report]
 exclude_also = ['case _:\n\s*assert_never\(']
 
 [tool.mypy]
-files = ["src", "tests"]
+files = ["src", "tests", "arena/src"]
 exclude_gitignore = true
 strict = true
 # threadpoolctl leaves `threadpool_limits` unannotated.

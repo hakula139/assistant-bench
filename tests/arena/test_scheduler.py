@@ -9,7 +9,7 @@ import pytest
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.resolution import MatchedVote, reconcile
 from assistant_bench.arena.scheduler import Board, Draw, Pool, draw, pair_weights
-from assistant_bench.arena.store import Choice, Side, Vote
+from assistant_bench.arena.store import Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.ranking import (
@@ -18,6 +18,7 @@ from assistant_bench.scoring.ranking import (
     Comparison,
     PointRatings,
 )
+from assistant_bench_arena.models import Choice
 from support import AT, Refits, make_output, make_vote, passing_outputs
 
 
