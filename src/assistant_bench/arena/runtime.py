@@ -56,6 +56,9 @@ class _Environment(BaseModel):
     model_config = ConfigDict(extra='allow', strict=True)
 
     name: str
+    compatibility_date: str | None = None
+    account_id: str | None = None
+
     vars: dict[str, JsonValue]
     d1_databases: list[_Database]
     assets: _Assets | None = None
@@ -95,8 +98,16 @@ def load_target(name: TargetName, *, manifest_path: Path = CONFIG) -> RuntimeTar
         name=name,
         manifest_path=manifest_path.resolve(),
         worker_name=environment.name,
-        compatibility_date=manifest.compatibility_date,
-        account_id=manifest.account_id,
+        compatibility_date=(
+            environment.compatibility_date
+            if environment.compatibility_date is not None
+            else manifest.compatibility_date
+        ),
+        account_id=(
+            environment.account_id
+            if environment.account_id is not None
+            else manifest.account_id
+        ),
         profile=profile,
         database_id=databases[0].database_id,
     )
