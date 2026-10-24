@@ -17,6 +17,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
+from rich.text import Text
 from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, jobs, report, revisions
@@ -248,7 +249,7 @@ class TestCheck:
         result = invoke('check', *arguments)
         assert result.exit_code == 2, result.output
 
-        assert message in result.stderr
+        assert message in Text.from_ansi(result.stderr).plain
         assert submitted == []
 
     @pytest.mark.parametrize(
