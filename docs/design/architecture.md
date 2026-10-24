@@ -46,7 +46,7 @@ Imports point downward through these layers, so a module never imports one above
 5. `families` and `catalog`
 6. `messages`, `paths`, and `diffs`
 
-`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 

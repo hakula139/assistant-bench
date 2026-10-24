@@ -18,19 +18,13 @@ from support import StubEndpoint, make_system
 pytestmark = pytest.mark.usefixtures('export')
 
 
-async def run_in_process(config: JobConfig, name: str) -> None:
-    """Run the job in this process under a name of its own.
-
-    Harbor names a job after the second it starts, so two jobs started within one
-    second would otherwise share a directory.
-    """
-    job = await Job.create(config.model_copy(update={'job_name': name}))
-    await job.run()
+async def run_in_process(config: JobConfig) -> None:
+    await (await Job.create(config)).run()
 
 
 class TestHostEnvironment:
     def test_runs_generate_on_each_case_once_across_reruns(
-        self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+        self, data_dir: Path, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         for name, value in endpoint.env.items():
             monkeypatch.setenv(name, value)
@@ -38,10 +32,20 @@ class TestHostEnvironment:
         cases = load_cases(family)
         system = make_system()
 
-        for run in range(2):
-            config = jobs.job(family, [system], jobs.render_tasks(family, cases))
-            asyncio.run(run_in_process(config, f'job-{run}'))
+        # Harbor names a job after the second it starts, so the two jobs get names
+        # of their own. The first runs in-process for coverage, and the rerun goes
+        # through the Harbor CLI, which `bench run` uses.
+        first = jobs.job(family, [system], jobs.render_tasks(family, cases))
+        asyncio.run(run_in_process(first.model_copy(update={'job_name': 'job-1'})))
+        rerun = jobs.job(family, [system], jobs.render_tasks(family, cases))
+        jobs.run_job(rerun.model_copy(update={'job_name': 'job-2'}))
 
+        logs = [
+            path.read_text()
+            for path in (data_dir / 'jobs' / 'smoke-text').glob('*/*/trial.log')
+        ]
+        assert logs
+        assert not any('starts no container' in log for log in logs)
         outputs = jobs.collect(family, {system.name: system})
         assert [
             (output.case, output.error, output.text, output.output_tokens)
