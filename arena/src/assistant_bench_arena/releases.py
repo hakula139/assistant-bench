@@ -53,6 +53,7 @@ class Release(EvaluationBundle):
     @model_validator(mode='after')
     def complete_publication(self) -> Self:
         validate_publication(self, self.publication, self.rendered)
+
         if (
             self.points.evaluation_id != self.evaluation.id
             or self.points.policy_id != self.evaluation.policy_id
@@ -152,14 +153,17 @@ def settlements(outputs: Sequence[Output]) -> tuple[NumericalInput, ...]:
     grouped: defaultdict[str, defaultdict[str, list[Output]]] = defaultdict(
         lambda: defaultdict(list)
     )
+
     for output in sorted(outputs, key=lambda row: row.key):
         if output.verdict != 'ungraded':
             grouped[output.case_key][output.system_id].append(output)
 
     rows: list[NumericalInput] = []
+
     for case, systems in sorted(grouped.items()):
         for left, right in combinations(sorted(systems), 2):
             weight = 1 / (len(systems[left]) * len(systems[right]))
+
             for a, b in product(systems[left], systems[right]):
                 if a.verdict == b.verdict == 'fail':
                     score = 0.5

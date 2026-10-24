@@ -329,14 +329,19 @@ class Lease(Record):
     id: str
     command_id: str
     request_hash: str
+
     actor_id: str
     family: str
     session_id: str
+
     claim_id: str
     claim_version: NonNegativeInt
+    """Claim revision after issuance, required unchanged at acceptance."""
+
     evaluation_id: str
     publication_id: str
     point_id: str
+
     case_key: str
     a_output: str
     b_output: str
@@ -344,9 +349,12 @@ class Lease(Record):
     b_system: str
     a_fingerprint: str
     b_fingerprint: str
+
     issued_at: Milliseconds
     expires_at: Milliseconds
     repeat_of: NonNegativeInt | None
+    """Original ordinary receipt sequence for a swapped delayed repeat."""
+
     status: Literal['pending', 'accepted', 'revoked']
     receipt_seq: NonNegativeInt | None
 
@@ -354,10 +362,12 @@ class Lease(Record):
 class ObservationFacts(Record):
     seq: NonNegativeInt
     acknowledgment: str
+
     actor_id: str
     session_id: str
     family: str
     claim_id: str
+
     case_key: str
     a_output: str
     b_output: str
@@ -365,9 +375,12 @@ class ObservationFacts(Record):
     b_system: str
     a_fingerprint: str
     b_fingerprint: str
+
     choice: Choice
     defects: Defects
     repeat_of: NonNegativeInt | None
+    """Original ordinary receipt sequence. Repeats carry zero fitting mass."""
+
     recorded_at: Milliseconds
     """Server acceptance time for served votes or the original legacy timestamp."""
 
@@ -378,7 +391,10 @@ class Receipt(ObservationFacts):
     evaluation_id: str
     publication_id: str
     point_id: str
+
     claim_version: NonNegativeInt
+    """Served revision before acceptance advances the claim's selection."""
+
     duration_ms: NonNegativeInt
 
 
@@ -649,17 +665,31 @@ class Export(Record):
     schema_version: Literal[1]
     namespace: str
     created_at: Milliseconds
+
     event_cutoff: NonNegativeInt
+    """Inclusive global event sequence captured for this family's history."""
+
     receipt_cutoff: NonNegativeInt
+    """Inclusive global receipt sequence, including normalized legacy evidence."""
+
     import_cutoff: NonNegativeInt
+    """Inclusive raw-import row sequence, including unresolved source rows."""
+
     import_source_cutoff: NonNegativeInt
+    """Inclusive imported-source registration sequence."""
+
     family_revision: NonNegativeInt
+    """Captured control revision, including presentation and point changes."""
+
     analysis_sequence: NonNegativeInt
+    """Captured numerical-input revision used to assess analysis freshness."""
+
     evaluation_id: str
     publication_id: str
     point_id: str
     policy_id: str
     policy: AnalysisPolicy
+
     sections: dict[ExportSection, NonNegativeInt]
     """Authoritative row counts derived from the immutable frozen views."""
 

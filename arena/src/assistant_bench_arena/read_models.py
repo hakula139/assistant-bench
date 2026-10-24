@@ -13,8 +13,12 @@ class FamilyState(Record):
     publication_id: str
     point_id: str
     policy_id: str
+
     last_evidence_seq: NonNegativeInt
+    """Latest numerical-input revision, excluding point/presentation refreshes."""
+
     revision: NonNegativeInt
+    """Latest guarded control or evidence transition."""
 
 
 class OwnedSession(Record):
