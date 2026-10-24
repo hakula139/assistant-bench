@@ -12,6 +12,7 @@ from harbor.llms.chat import Chat
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
+from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
 from tenacity import retry_if_not_exception_type
@@ -37,6 +38,7 @@ class _ConfiguredLiteLLM(LiteLLM):
 
     _context_limit: int
     _output_limit: int
+    results: list[dict[str, Any]]
 
     @classmethod
     def configured(
@@ -45,6 +47,7 @@ class _ConfiguredLiteLLM(LiteLLM):
         llm = cls(model_name=model_name, **kwargs)
         llm._context_limit = context_limit
         llm._output_limit = output_limit
+        llm.results = []
         return llm
 
     @override
@@ -54,6 +57,24 @@ class _ConfiguredLiteLLM(LiteLLM):
     @override
     def get_model_output_limit(self) -> int:
         return self._output_limit
+
+    @override
+    def _extract_usage_info(self, response: Any) -> UsageInfo | None:
+        usage = (
+            super()._extract_usage_info(response)
+            if response.usage is not None
+            else None
+        )
+        self.results.append(
+            {
+                'input_tokens': usage.prompt_tokens,
+                'cache_tokens': usage.cache_tokens,
+                'output_tokens': usage.completion_tokens,
+            }
+            if usage is not None
+            else {}
+        )
+        return usage
 
 
 class Terminus(Terminus2):
@@ -118,6 +139,7 @@ class Terminus(Terminus2):
         constructor_kwargs: dict[str, Any] = {
             **(llm_kwargs or {}),
             'client': self._endpoint_client,
+            'max_retries': self._endpoint_client.max_retries,
             'timeout': self._endpoint_client.timeout,
         }
         if temperature is not None:
@@ -215,7 +237,7 @@ class Terminus(Terminus2):
                 'nixos_config_rev': nixos_config_rev,
                 'harbor_version': harbor_version,
             }
-            if isinstance(self._llm, ResponsesLLM):
+            if isinstance(self._llm, (ResponsesLLM, _ConfiguredLiteLLM)):
                 context.metadata['responses'] = self._llm.results
                 results = self._llm.results
                 if results and all('input_tokens' in result for result in results):
