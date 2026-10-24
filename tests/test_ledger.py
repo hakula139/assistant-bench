@@ -1044,7 +1044,7 @@ class TestLedger:
                         )
                     )
                     release = make_release(
-                        family=identifier('family'),
+                        family='family' + 'x' * 250 if wide else 'family',
                         systems=(identifier('large', 244), identifier('small', 244)),
                         cases=1,
                     )
@@ -1682,7 +1682,7 @@ class TestLedger:
                             proof_digest='other-proof',
                             actor_id='other',
                             credential_id='other-credential',
-                            rate_subject='rate',
+                            rate_subject='other-rate',
                             expires_at=10_000,
                             challenge_until=1_000,
                         ),
@@ -2850,6 +2850,7 @@ class TestLedger:
                         'writing\n',
                         'writing\r\n',
                         'Writing',
+                        'x' * 257,
                         '',
                     ):
                         exported = frozen.model_dump(mode='json')
