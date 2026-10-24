@@ -38,7 +38,21 @@ src/assistant_bench/
 
 ## Import Layers
 
-`arena/src/assistant_bench_arena` owns shared voting requests and blinded browser views. It depends only on Pydantic and never imports the offline `assistant_bench` package. The offline package imports those contracts for family validation, storage, and the vote API.
+`arena/src/assistant_bench_arena` owns voting contracts and the durable ledger. It depends only on Pydantic and never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports these contracts for family validation, release preparation, and evidence analysis.
+
+```text
+arena/src/assistant_bench_arena/
+├── ledger.py              # Atomic commands and authenticated command recovery
+├── ledger_models.py       # Private evidence, control inputs, and export contracts
+├── maintenance.py         # Bounded expiry of private and unaccepted state
+├── models.py              # Shared record policy and blinded browser views
+├── read_models.py         # Private scheduling projections
+├── reads.py               # Bounded inventory, scheduling, and rendered content reads
+├── releases.py            # Shared release identities and persisted-fact validation
+├── serialization.py       # Canonical JSON and content identities
+├── snapshots.py           # Numerical policy and approved presentation contracts
+└── transport.py           # Prepared statements and exact database rejection mapping
+```
 
 Imports point downward through these layers, so a module never imports one above it:
 
