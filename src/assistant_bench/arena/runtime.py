@@ -58,6 +58,7 @@ class _Environment(BaseModel):
     name: str
     compatibility_date: str | None = None
     account_id: str | None = None
+    main: str | None = None
 
     vars: dict[str, JsonValue]
     d1_databases: list[_Database]
@@ -69,6 +70,7 @@ class _Manifest(BaseModel):
 
     compatibility_date: str
     account_id: str
+    main: str | None = None
     env: dict[str, _Environment] = Field(default_factory=dict)
 
 
@@ -127,6 +129,17 @@ def deploy(target: RuntimeTarget) -> None:
         raise ValueError('Voting deployment requires its configured challenge sitekey.')
 
     directory = target.manifest_path.parent
+    main = selected.main if selected.main is not None else manifest.main
+    app = directory / 'src' / 'app.py'
+
+    if main is None or (directory / main).resolve() != app.resolve():
+        raise ValueError('Voting deployment requires its native app entrypoint.')
+
+    sources = (app, directory / 'src' / 'render.py', directory / 'rpc.ts')
+
+    if any(not source.is_file() for source in sources):
+        raise ValueError('Voting deployment requires its owner, renderer and facade.')
+
     body = (directory / selected.assets.directory / 'arena-families.json').read_bytes()
 
     if len(body) > 1_048_576:
@@ -180,13 +193,11 @@ def deploy(target: RuntimeTarget) -> None:
         except subprocess.CalledProcessError:
             raise ValueError('The native voting deployment failed.') from None
 
-    run(target.manifest_path, '--env', target.name)
-
-    with facade_config(target) as config:
-        run(config)
-
-    with renderer_config(target) as config:
-        run(config)
+    with facade_config(target) as facade, renderer_config(target) as renderer:
+        for arguments in (('--dry-run',), ()):
+            run(target.manifest_path, '--env', target.name, *arguments)
+            run(facade, *arguments)
+            run(renderer, *arguments)
 
 
 @contextmanager
