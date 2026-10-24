@@ -6,7 +6,6 @@ import queue
 import re
 import signal
 import socket
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -29,7 +28,7 @@ from assistant_bench_arena.ledger_models import (
     Statement,
 )
 from assistant_bench_arena.releases import Release
-from assistant_bench_arena.schema import bootstrap_statements
+from assistant_bench_arena.schema import bootstrap_statements, parse_schema
 from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
@@ -107,23 +106,8 @@ async def publish_presentation(ledger: Ledger, release: Release) -> None:
 
 
 def schema_statements() -> list[Statement]:
-    statements: list[Statement] = []
-    pending = ''
-
-    for line in (
-        files('assistant_bench_arena')
-        .joinpath('schema.sql')
-        .read_text()
-        .splitlines(keepends=True)
-    ):
-        pending += line
-
-        if sqlite3.complete_statement(pending):
-            statements.append(Statement(sql=pending))
-            pending = ''
-
-    assert not pending.strip()
-    return statements
+    source = files('assistant_bench_arena').joinpath('schema.sql').read_text()
+    return list(parse_schema(source))
 
 
 class Reply(BaseModel):

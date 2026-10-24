@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import Iterator
+from textwrap import dedent
 from typing import get_args
 
 import pytest
@@ -38,7 +39,7 @@ from assistant_bench_arena.ledger_models import (
     VoteMeaning,
 )
 from assistant_bench_arena.releases import Release, evaluation_identity, settlements
-from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements
+from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements, parse_schema
 from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
@@ -163,6 +164,63 @@ def issue(*, session: str = 'session', lease: str = 'lease', case: int = 0) -> I
         b_output=output_key(case, 'small'),
         expires_at=10_000,
     )
+
+
+class TestParseSchema:
+    @pytest.mark.parametrize('source', ['', ' \n\t '], ids=['empty', 'whitespace'])
+    def test_empty_input_has_no_statements(self, source: str) -> None:
+        assert parse_schema(source) == ()
+
+    @pytest.mark.parametrize(
+        'source',
+        ['CREATE TABLE unfinished(value)', 'SELECT 1; SELECT 2', '-- Comment tail.'],
+        ids=['missing-terminator', 'partial-tail', 'comment-tail'],
+    )
+    def test_nonempty_unterminated_tail_is_rejected(self, source: str) -> None:
+        with pytest.raises(ValueError, match='unterminated SQL statement'):
+            parse_schema(source)
+
+    def test_trigger_body_comments_and_quoted_semicolons_execute_together(
+        self, d1_runtime: D1Runtime
+    ) -> None:
+        source = dedent("""
+            -- A prefix comment containing a semicolon ;
+            CREATE TABLE samples(id INTEGER PRIMARY KEY, value TEXT);
+            CREATE TABLE audit(sample_id INTEGER, phase TEXT, value TEXT);
+            CREATE TRIGGER record_sample AFTER INSERT ON samples BEGIN
+                /* A body comment containing a semicolon ; */
+                INSERT INTO audit VALUES (NEW.id, 'before;', NEW.value);
+                UPDATE samples SET value = value || '; changed' WHERE id = NEW.id;
+                INSERT INTO audit SELECT id, 'after;', value FROM samples
+                    WHERE id = NEW.id;
+            END;
+        """)
+
+        async def scenario() -> None:
+            async with d1_runtime.client() as (_, transport):
+                await transport.reset()
+                await transport.request(list(parse_schema(source)), batch=True)
+
+                await transport.execute(
+                    Statement(
+                        sql='INSERT INTO samples(id, value) VALUES (?, ?)',
+                        params=(7, 'original; value'),
+                    )
+                )
+
+                assert await transport.rows('SELECT * FROM samples') == [
+                    {'id': 7, 'value': 'original; value; changed'}
+                ]
+                assert await transport.rows('SELECT * FROM audit ORDER BY rowid') == [
+                    {'sample_id': 7, 'phase': 'before;', 'value': 'original; value'},
+                    {
+                        'sample_id': 7,
+                        'phase': 'after;',
+                        'value': 'original; value; changed',
+                    },
+                ]
+
+        asyncio.run(scenario())
 
 
 class TestLedger:
@@ -1541,7 +1599,7 @@ class TestLedger:
                         release = await publish(ledger, family=family)
                         await ledger.activate(
                             Context(
-                                command_id=f'activate:{index}',
+                                command_id=f'activate:{family}',
                                 principal='admin',
                                 now=4,
                             ),
@@ -1576,11 +1634,13 @@ class TestLedger:
                             )
 
                     tables = (
+                        'actor_resolution',
                         'claims',
                         'evidence_events',
-                        'lease_idempotency',
+                        'lease_revocations',
                         'pair_leases',
                         'quota_windows',
+                        'session_state',
                         'sessions',
                     )
                     before = {
@@ -1589,7 +1649,7 @@ class TestLedger:
                     }
                     assert (
                         sum(
-                            TypeAdapter(int).validate_python(row['count'])
+                            TypeAdapter(int).validate_python(row['consumed'])
                             for row in before['quota_windows']
                         )
                         == 4
