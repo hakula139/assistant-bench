@@ -17,6 +17,7 @@ jobs:
   flake-check:
     name: Nix Flake Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,6 +33,7 @@ jobs:
   node-check:
     name: Node Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}
@@ -76,6 +78,7 @@ jobs:
   build:
     name: Build Site
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}
@@ -105,6 +108,7 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         shell: nix develop .#python -c bash -eo pipefail {0}
@@ -154,6 +158,7 @@ jobs:
   harbor-smoke:
     name: Harbor Smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: nix develop .#python -c bash -eo pipefail {0}
@@ -205,6 +210,7 @@ jobs:
       - python-check
       - harbor-smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check results
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
@@ -219,6 +225,7 @@ jobs:
       github.event.pull_request.user.login != 'dependabot[bot]'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}
@@ -336,6 +343,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: result
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         shell: nix develop -c bash -eo pipefail {0}

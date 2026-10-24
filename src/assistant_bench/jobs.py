@@ -103,6 +103,7 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
         if installed.exists():
             shutil.rmtree(installed)
         paths.append(_render_task(family, case, installed))
+
     rendered = {path.name for path in paths}
     for installed in directory.iterdir():
         if installed.name in rendered:
@@ -111,6 +112,7 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
             shutil.rmtree(installed)
         else:
             installed.unlink()
+
     return paths
 
 
@@ -163,9 +165,11 @@ def check_systems(family: Family, systems: list[System]) -> None:
                 f'Family `{family.name}`: set vendor metadata for {code(unowned)} '
                 'in the model catalog or their `route` tables in `systems.toml`.'
             )
+
     harness = family.settings.harness
     if harness is None or HARNESSES[harness].sends_prompt:
         return
+
     prompted = [system.name for system in systems if system.prompt is not None]
     if prompted:
         raise ValueError(
@@ -209,6 +213,7 @@ def drifted_systems(
         fingerprint = kwargs.get('fingerprint')
         if name in current and isinstance(fingerprint, str):
             recorded[name].add(fingerprint)
+
     return sorted(
         (name, fingerprint, current[name])
         for name, fingerprints in recorded.items()
@@ -279,6 +284,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
             _task_version(task),
             f'sha256:{content_hash}',
         )
+
     changed = set()
     for trial in load_source_trials(_sources(family)):
         if trial.task_name not in current:
@@ -290,6 +296,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
             and trial.lock.task.digest != digest
         ):
             changed.add((trial.task_name.removeprefix(f'{family.name}/'), version))
+
     return sorted(changed)
 
 
@@ -311,6 +318,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
             problems.append(error_lines(error, location))
             continue
         problems.extend(_task_problems(config, location))
+
     if problems:
         raise ValueError(
             f'Family `{family.name}` has tasks to fix:\n' + '\n'.join(problems)
@@ -339,6 +347,7 @@ def author_vendors(
             )
         else:
             authors[task.name] = vendor
+
     if problems:
         raise ValueError(
             f'Family `{family.name}` has authors to fix:\n' + '\n'.join(problems)
@@ -355,6 +364,7 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
             f'{location}: `[task] version` `{config.task.version}` is not a '
             'semantic version, such as `1.0.0`.'
         )
+
     if (
         config.verifier.environment_mode
         is not task_config.VerifierEnvironmentMode.SEPARATE
@@ -383,11 +393,13 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
         ):
             if policy.network_mode is not task_config.NetworkMode.NO_NETWORK:
                 problems.append(f'{location}: the {phase} phase needs `no-network`.')
+
     workspaces = [
         artifact
         for artifact in config.artifacts
         if (artifact if isinstance(artifact, str) else artifact.source) == WORKSPACE
     ]
+
     if not workspaces:
         problems.append(f'{location}: list `"{WORKSPACE}"` under `[[artifacts]]`.')
     if any(
@@ -398,11 +410,13 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
             f'{location}: remove the `destination` of the `"{WORKSPACE}"` '
             'artifact, since collection reads the workspace at its source path.'
         )
+
     for field in ('cpus', 'memory_mb'):
         if getattr(config.environment, field) is None:
             problems.append(f'{location}: set `[environment] {field}`.')
     if config.agent.timeout_sec is None:
         problems.append(f'{location}: set `[agent] timeout_sec`.')
+
     return problems
 
 
@@ -428,7 +442,6 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
 
 
 def has_jobs(family: Family) -> bool:
-    """Return whether the family has at least one Harbor job."""
     return bool(_family_jobs(family))
 
 
@@ -472,7 +485,6 @@ def _job(
 
 
 def job_path(config: JobConfig) -> Path:
-    """Return the directory Harbor writes the job to."""
     return config.jobs_dir / config.job_name
 
 
@@ -493,6 +505,7 @@ def run_job(config: JobConfig) -> Path:
         file.write(config.model_dump_json())
         file.close()
         subprocess.run([harbor, 'run', '--config', file.name, '--yes'], check=True)
+
     return job_path(config)
 
 
@@ -572,6 +585,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
             family, _sources(family), _current_versions(family)
         )
     ]
+
     candidates.sort(
         key=lambda candidate: (
             candidate[0].error is not None,
@@ -580,9 +594,11 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
             candidate[0].name,
         )
     )
+
     groups: defaultdict[tuple[str, str, str | None], list[_Candidate]] = defaultdict(
         list
     )
+
     solutions = set()
     for candidate, _ in candidates:
         if (candidate.job, candidate.name) in solutions:
@@ -591,6 +607,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         groups[(candidate.case, candidate.system, candidate.fingerprint)].append(
             candidate
         )
+
     outputs = sorted(
         (
             _output(family, candidate, systems)
@@ -662,6 +679,7 @@ def _read_trials(
         ):
             continue
         records.append(_Candidate(trial, _origin(trial, by_id), case))
+
     return records
 
 
@@ -675,6 +693,7 @@ def _current_versions(family: Family) -> dict[str, str]:
             tasks = [case_task(family, case.id) for case in load_cases(family)]
         case _:
             assert_never(family.source)
+
     return {
         task.name: version
         for task in tasks
@@ -694,6 +713,7 @@ def _is_current(family: Family, version: str | None, current: str | None) -> boo
         return False
     if version == current or family.source == 'cases':
         return version == current
+
     recorded = semver.Version.parse(version)
     installed = semver.Version.parse(current)
     return (recorded.major, recorded.minor) == (
@@ -819,11 +839,13 @@ def _gate_failures(
                 return [Gate.TESTS] if reward < 1 else []
             if errored:
                 return None
+
             instruction = (
                 (case_task(family, case) / 'instruction.md').read_text()
                 if gates.script
                 else ''
             )
+
             return failed_gates(family.settings, text or '', finish_reason, instruction)
         case TaskTestsSettings():
             return None

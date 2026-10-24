@@ -57,15 +57,12 @@ class Catalog(BaseModel):
 
 
 class NixosConfigExport(BaseModel):
-    """The flake's `nixos-config` package, exported to the dev shell.
-
-    `instructions` maps each client, such as `claudeCode`, to its rendered global
-    instruction file.
-    """
+    """The flake's `nixos-config` package, exported to the dev shell."""
 
     rev: str
     catalog: Catalog
     instructions: dict[str, str]
+    """Rendered global instructions keyed by client, such as `claudeCode`."""
 
 
 def load_export(
@@ -108,12 +105,7 @@ class Price(BaseModel):
 
 
 class SystemConfig(BaseModel):
-    """One table of `systems.toml`, naming either a catalog model or a bare route.
-
-    `prompt` is `nixos-config:<client>`, a rendered instruction file that becomes
-    the system message. `display_name` overrides the catalog model's name, and a
-    `route` requires it.
-    """
+    """One table of `systems.toml`, naming either a catalog model or a bare route."""
 
     model_config = ConfigDict(extra='forbid')
 
@@ -123,7 +115,10 @@ class SystemConfig(BaseModel):
     price: Price | None = None
     effort: str | None = None
     prompt: str | None = None
+    """`nixos-config:<client>` selects global instructions as the system message."""
+
     display_name: str | None = Field(default=None, min_length=1)
+    """Overrides the catalog model's name. Required for a bare route."""
 
     @model_validator(mode='after')
     def _check_source(self) -> Self:
@@ -142,21 +137,21 @@ _CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems
 
 
 class System(BaseModel):
-    """A system resolved to the route, effort, prompt, and price of every call.
-
-    `name` is the table name, which data and URLs use, while the site shows
-    `display_name`. Neither enters the fingerprint.
-    """
+    """A system resolved to the route, effort, prompt, and price of every call."""
 
     model_config = ConfigDict(frozen=True)
 
     name: str
+    """Table name used by data and URLs, excluded from the fingerprint."""
+
     route: str
     price: Price | None
     effort: str | None
     prompt: str | None
     harness: str = 'generate'
     display_name: str
+    """Public label, excluded from the fingerprint."""
+
     vendor: str | None = None
 
     @property
@@ -169,10 +164,12 @@ class System(BaseModel):
             'harness': self.harness,
             'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
         }
+
         encoded = json.dumps(
             {key: value for key, value in identity.items() if value is not None},
             sort_keys=True,
         )
+
         return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
@@ -199,9 +196,11 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
         ) from error
     except ValidationError as error:
         raise ValueError(error_lines(error, f'`{SYSTEMS_FILE}`')) from error
+
     systems = {
         name: resolve_system(name, config, export) for name, config in configs.items()
     }
+
     owners: dict[str, str] = {}
     for name, system in systems.items():
         owner = owners.setdefault(system.display_name, name)
@@ -210,6 +209,7 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
                 f'Systems `{owner}` and `{name}` share the display name '
                 f'`{system.display_name}`. Set a distinct `display_name`.'
             )
+
     return systems
 
 

@@ -28,16 +28,15 @@ REFIT_VOTES = 5
 
 @dataclass(frozen=True)
 class Pool:
-    """The current outputs of a family's listed systems on its current cases.
-
-    `outputs_by_case` keeps the outputs that pass every gate to reach the owner,
-    while `settled` holds the results that `outputs` decide without a vote.
-    """
+    """The current outputs of a family's listed systems on its current cases."""
 
     systems: tuple[str, ...]
     outputs: list[Output]
     outputs_by_case: dict[str, dict[str, list[Output]]]
+    """Outputs that pass every gate and can reach the owner."""
+
     settled: list[Comparison]
+    """Results the outputs decide without a vote."""
 
     @classmethod
     def build(
@@ -50,11 +49,13 @@ class Pool:
             for output in outputs
             if output.system in listed and output.case in cases
         ]
+
         outputs_by_case: dict[str, dict[str, list[Output]]] = {}
         for output in current:
             if output.gate_failures == []:
                 by_system = outputs_by_case.setdefault(output.case, {})
                 by_system.setdefault(output.system, []).append(output)
+
         return cls(listed, current, outputs_by_case, settled(current))
 
     def pairings(self, case: str, left: str, right: str) -> list[tuple[Output, Output]]:
@@ -97,8 +98,8 @@ class Board:
 
     The board refits when `REFIT_VOTES` votes have been cast or undone since the
     last point fit, when it lacks a system the draw weighs, or after `reset`.
-    Each fit roots at the most-voted system, and
-    `order`, the family's `systems` list, breaks a tie.
+    Each fit roots at the most-voted system, and `order`, the family's `systems`
+    list, breaks a tie.
     """
 
     def __init__(self, order: Sequence[str]) -> None:
@@ -126,6 +127,7 @@ class Board:
             matchups = Matchups.build([m.vote.comparison() for m in votes] + settled)
             self._ratings = rate_point(matchups, matchups.root(self._order))
             self._fitted = current
+
         return self._ratings
 
 
@@ -151,6 +153,7 @@ def draw(
     shared = {
         frozenset(pair): pool.cases(*pair) for pair in combinations(pool.systems, 2)
     }
+
     open_cases = {
         pair: [case for case in shared[frozenset(pair)] if case not in used]
         for pair in permutations(pool.systems, 2)
@@ -158,6 +161,7 @@ def draw(
     open_cases = {pair: cases for pair, cases in open_cases.items() if cases}
     if not open_cases:
         return None
+
     counts = Counter(m.vote.systems for m in votes)
     pair = _seed_pair(open_cases, counts, rng) or _adaptive_pair(
         open_cases,
@@ -165,6 +169,7 @@ def draw(
         board.ratings(votes, pool.settled, {s for pair in open_cases for s in pair}),
         rng,
     )
+
     case = open_cases[pair][rng.integers(len(open_cases[pair]))]
     pairings = pool.pairings(case, *pair)
     a, b = pairings[rng.integers(len(pairings))]
@@ -211,6 +216,7 @@ def _seed_pair(
     short = [pair for pair in open_cases if counts[pair] < SEED_VOTES_PER_SIDE]
     if not short:
         return None
+
     fewest = min(counts[pair] for pair in short)
     pairs = [pair for pair in short if counts[pair] == fewest]
     return pairs[rng.integers(len(pairs))]

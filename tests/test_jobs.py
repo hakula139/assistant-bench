@@ -62,14 +62,12 @@ GREETING_DIFF = (
 
 
 def votes_family(**settings: Any) -> Family:
-    """Return `VOTES` with these settings replaced."""
     return VOTES.model_copy(
         update={'settings': VOTES.settings.model_copy(update=settings)}
     )
 
 
 def request(system: System, max_output_tokens: int = 300) -> dict[str, Any]:
-    """Return the agent kwargs that a family with this bound sends a system."""
     settings = VOTES.settings.model_copy(
         update={'max_output_tokens': max_output_tokens}
     )
@@ -175,7 +173,6 @@ def voted_tasks(families_dir: Path, *task_ids: str) -> Family:
 
 
 def with_settings(family: Family, **settings: Any) -> Family:
-    """Return the family with these settings replaced."""
     return family.model_copy(
         update={'settings': family.settings.model_copy(update=settings)}
     )

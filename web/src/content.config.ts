@@ -36,9 +36,11 @@ const models = defineCollection({
     if (!path) {
       throw new Error(`${EXPORT_VAR} is unset. Build the site inside \`nix develop\`.`);
     }
+
     const exported = z
       .object({ catalog: z.object({ models: z.record(z.string(), catalogModelSchema) }) })
       .parse(JSON.parse(await readFile(path, 'utf8')));
+
     return Object.entries(exported.catalog.models).map(([id, model]) => ({ id, ...model }));
   },
   schema: catalogModelSchema,

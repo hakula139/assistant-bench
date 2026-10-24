@@ -20,8 +20,7 @@ export function familyTitle({
 }
 
 /**
- * Groups items by aspect in registry order, keeping each group's items in their given order, with
- * the items that have no aspect last.
+ * Groups by registry order, preserving member order and placing `null` aspects last.
  */
 export function groupByAspect<T extends { aspect: Aspect | null }>(
   items: T[],
