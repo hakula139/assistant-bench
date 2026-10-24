@@ -631,13 +631,15 @@ class Ledger:
             session.model_dump(mode='json'),
         )
 
-    async def open_session(self, context: Context, family: str) -> OwnedSession:
+    async def open_session(
+        self, actor_id: str, session_id: str, family: str, now: int
+    ) -> OwnedSession:
         """Retain the first server clock while replaying the same owner/family."""
         session = Session(
-            id=context.command_id,
-            actor_id=context.principal,
+            id=session_id,
+            actor_id=actor_id,
             family=family,
-            created_at=context.now,
+            created_at=now,
         )
         expected = session.model_dump(mode='json', exclude={'created_at'})
         await self._fact(
