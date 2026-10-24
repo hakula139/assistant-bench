@@ -21,7 +21,7 @@ class Record(BaseModel):
 # ── Identifiers ──
 
 
-type FamilyName = Annotated[str, Field(pattern=r'^[a-z0-9][a-z0-9-]*$')]
+type FamilyName = Annotated[str, Field(pattern=r'^[a-z0-9][a-z0-9-]*$', max_length=256)]
 
 
 # ── Choices ──
