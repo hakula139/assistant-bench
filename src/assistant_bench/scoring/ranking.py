@@ -174,7 +174,8 @@ class Ratings:
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     """Fit Bradley-Terry with a left-side intercept by penalized logistic loss.
 
-    `covariate` adds a per-vote feature, such as a length difference.
+    `covariate` adds a per-vote feature, such as a length difference, when it is
+    identifiable apart from system and position effects on positive-weight rows.
     """
     columns = [] if covariate is None else [covariate]
     x = _design(
@@ -183,6 +184,12 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     # With a thread per core, scipy's OpenBLAS burns several cores during each tiny
     # L-BFGS-B fit, which on a loaded host slows the fit itself.
     with threadpool_limits(limits=1, user_api='blas'):
+        if covariate is not None:
+            observed = x[matchups.weight > 0]
+            if np.linalg.matrix_rank(observed) <= np.linalg.matrix_rank(
+                observed[:, :-1]
+            ):
+                x = x[:, :-1]
         theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
     return _fit(theta, len(matchups.systems))
 

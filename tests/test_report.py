@@ -573,15 +573,29 @@ class TestClose:
         assert results.length > 50
 
     @pytest.mark.parametrize(
-        'texts',
+        ('texts', 'swap'),
         [
-            {'x': '{case} answer', 'y': '{case} reply'},
-            {'x': '{case} gives an answer', 'y': '{case}'},
+            pytest.param(
+                {'x': '{case} answer', 'y': '{case} reply'}, False, id='equal'
+            ),
+            pytest.param(
+                {'x': '{case} gives an answer', 'y': '{case}'},
+                False,
+                id='constant-ratio',
+            ),
+            pytest.param(
+                {'x': '{case} gives an answer', 'y': '{case}'},
+                True,
+                id='pane-swapped-system-lengths',
+            ),
         ],
-        ids=['equal', 'constant-ratio'],
     )
-    def test_leaves_length_out_when_no_vote_varies_it(
-        self, families_dir: Path, store: VoteStore, texts: dict[str, str]
+    def test_leaves_length_out_when_it_cannot_be_identified(
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        texts: dict[str, str],
+        swap: bool,
     ) -> None:
         cases = {f'c{i}': 'reply' for i in range(4)}
         write_votes_family(families_dir, 'f', ['x', 'y'], cases)
@@ -594,15 +608,23 @@ class TestClose:
         write_outputs('f', list(outputs.values()))
         session = store.start_session('f', AT)
         for case in cases:
-            for choice in ('a', 'b', 'tie'):
-                x, y = outputs[(case, 'x')], outputs[(case, 'y')]
+            x, y = outputs[(case, 'x')], outputs[(case, 'y')]
+            for choice in ('a', 'a', 'a', 'b'):
                 store.record(make_ballot(x, y, session=session.id, choice=choice), AT)
+                if swap:
+                    reverse: Choice = 'b' if choice == 'a' else 'a'
+                    store.record(
+                        make_ballot(y, x, session=session.id, choice=reverse), AT
+                    )
 
         results = close(load_family('f'), store, AT).results
 
         assert results.scorer == 'votes'
         assert {standing.system for standing in results.standings} == {'x', 'y'}
         assert results.length is None
+        if swap:
+            scores = {standing.system: standing.score for standing in results.standings}
+            assert scores['x'] > scores['y']
 
     @pytest.mark.parametrize('empty', [False, True], ids=['voted', 'empty-session'])
     def test_agrees_across_halves_split_by_session_parity(
