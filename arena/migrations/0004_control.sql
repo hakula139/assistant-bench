@@ -21,7 +21,9 @@ BEGIN
 
     INSERT INTO evidence_events(command_id, kind, family, principal, request_hash, created_at, data)
     VALUES (NEW.command_id, 'activate', NEW.family, NEW.principal, NEW.request_hash, NEW.now_ms,
-        json_object('evaluation_id', NEW.evaluation_id, 'publication_id', NEW.publication_id, 'point_id', NEW.point_id));
+        json_object('evaluation_id', NEW.evaluation_id, 'publication_id', NEW.publication_id,
+            'point_id', NEW.point_id,
+            'previous_evaluation_id', (SELECT evaluation_id FROM family_state WHERE family = NEW.family)));
     INSERT INTO family_state(family, evaluation_id, publication_id, point_id, policy_id, last_evidence_seq, revision)
     SELECT NEW.family, NEW.evaluation_id, NEW.publication_id, NEW.point_id, policy_id,
         (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
@@ -34,15 +36,27 @@ BEGIN
         publication_id = excluded.publication_id, point_id = excluded.point_id,
         policy_id = excluded.policy_id, revision = excluded.revision;
 
-    UPDATE pair_leases SET status = 'revoked' WHERE family = NEW.family AND status = 'pending'
-        AND id NOT IN (SELECT id FROM compatible_leases);
-    UPDATE claims SET version = version + 1, current_lease = NULL WHERE family = NEW.family
-        AND current_lease IN (SELECT id FROM pair_leases WHERE status = 'revoked');
+    INSERT INTO event_targets(event_seq, ordinal, claim_id, expected_version, transition, lease_id)
+    SELECT e.seq, row_number() OVER (ORDER BY l.id) - 1, c.id, c.version, 'revoke', l.id
+    FROM pair_leases l JOIN claims c ON c.id = l.claim_id
+    JOIN evidence_events e ON e.command_id = NEW.command_id
+    WHERE l.family = NEW.family AND l.status = 'pending'
+        AND json_extract(e.data, '$.previous_evaluation_id') IS NOT NEW.evaluation_id
+        AND l.id NOT IN (SELECT id FROM compatible_leases WHERE family = NEW.family);
+    UPDATE pair_leases SET status = 'revoked' WHERE id IN (SELECT lease_id FROM event_targets
+        WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
+    UPDATE claims SET version = version + 1, current_lease = NULL WHERE id IN (SELECT claim_id FROM event_targets
+        WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
     UPDATE session_state SET version = version + 1, current_lease = NULL
-    WHERE current_lease IN (SELECT id FROM pair_leases WHERE family = NEW.family AND status = 'revoked');
-    DELETE FROM coverage_members WHERE family = NEW.family;
+    WHERE current_lease IN (SELECT lease_id FROM event_targets
+        WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
+    DELETE FROM coverage_members WHERE family = NEW.family AND (
+        SELECT json_extract(data, '$.previous_evaluation_id') IS NOT NEW.evaluation_id
+        FROM evidence_events WHERE command_id = NEW.command_id);
     INSERT INTO coverage_members(receipt_seq, claim_id, family, a_system, b_system)
-    SELECT receipt_seq, claim_id, family, a_system, b_system FROM eligible_claims WHERE family = NEW.family;
+    SELECT receipt_seq, claim_id, family, a_system, b_system FROM eligible_claims WHERE family = NEW.family
+        AND (SELECT json_extract(data, '$.previous_evaluation_id') IS NOT NEW.evaluation_id
+            FROM evidence_events WHERE command_id = NEW.command_id);
 END;
 
 CREATE TABLE moderation_batches (
@@ -184,9 +198,10 @@ BEGIN
         json_object('batch_id', id, 'chunk_index', NEW.chunk_index)
     FROM moderation_batches WHERE id = NEW.batch_id;
     INSERT INTO event_targets(event_seq, ordinal, receipt_seq, claim_id, expected_version, transition, reference_seq)
-    SELECT e.seq, t.ordinal % 250, t.receipt_seq, r.claim_id, t.claim_version, b.action, t.exclusion_seq
+    SELECT e.seq, t.ordinal % 250, t.receipt_seq, r.claim_id, c.version, b.action, t.exclusion_seq
     FROM moderation_targets t JOIN moderation_batches b ON b.id = t.batch_id
-    JOIN vote_receipts r ON r.seq = t.receipt_seq JOIN evidence_events e ON e.command_id = NEW.command_id
+    JOIN vote_receipts r ON r.seq = t.receipt_seq JOIN claims c ON c.id = r.claim_id
+    JOIN evidence_events e ON e.command_id = NEW.command_id
     WHERE t.batch_id = NEW.batch_id AND t.ordinal / 250 = NEW.chunk_index;
 
     INSERT INTO event_targets(event_seq, ordinal, claim_id, expected_version, transition, lease_id)
@@ -220,9 +235,78 @@ BEGIN
     WHERE family = (SELECT family FROM moderation_batches WHERE id = NEW.batch_id);
 END;
 
+CREATE TABLE attribution_plans (
+    id TEXT PRIMARY KEY,
+    family TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    actor_id TEXT NOT NULL REFERENCES actors(id),
+    owner_id TEXT NOT NULL REFERENCES actors(id),
+    target_count INTEGER NOT NULL CHECK (target_count >= 0),
+    target_digest TEXT NOT NULL,
+    sealed_at INTEGER CHECK (sealed_at >= 0)
+) STRICT;
+
+CREATE TABLE attribution_targets (
+    plan_id TEXT NOT NULL REFERENCES attribution_plans(id),
+    claim_id TEXT NOT NULL REFERENCES claims(id),
+    version INTEGER NOT NULL CHECK (version >= 0),
+    canonical_actor TEXT NOT NULL REFERENCES actors(id),
+    kind TEXT NOT NULL CHECK (kind IN ('ordinary', 'repeat')),
+    comparison_key TEXT NOT NULL,
+    selected_receipt INTEGER REFERENCES vote_receipts(seq),
+    winner_id TEXT NOT NULL REFERENCES claims(id),
+    PRIMARY KEY (plan_id, claim_id)
+) STRICT;
+
+CREATE INDEX attribution_groups ON attribution_targets(plan_id, kind, comparison_key);
+
+CREATE TRIGGER attribution_plans_no_replace BEFORE INSERT ON attribution_plans
+WHEN EXISTS (SELECT 1 FROM attribution_plans WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER attribution_plans_guard BEFORE UPDATE ON attribution_plans
+WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR OLD.id != NEW.id
+    OR OLD.family != NEW.family OR OLD.revision != NEW.revision OR OLD.actor_id != NEW.actor_id
+    OR OLD.owner_id != NEW.owner_id OR OLD.target_count != NEW.target_count OR OLD.target_digest != NEW.target_digest
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER attribution_plans_no_delete BEFORE DELETE ON attribution_plans
+WHEN OLD.sealed_at IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER attribution_targets_no_insert BEFORE INSERT ON attribution_targets
+WHEN (SELECT sealed_at FROM attribution_plans WHERE id = NEW.plan_id) IS NOT NULL
+    OR EXISTS (SELECT 1 FROM attribution_targets WHERE plan_id = NEW.plan_id AND claim_id = NEW.claim_id)
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER attribution_targets_no_update BEFORE UPDATE ON attribution_targets
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER attribution_targets_no_delete BEFORE DELETE ON attribution_targets
+WHEN (SELECT sealed_at FROM attribution_plans WHERE id = OLD.plan_id) IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+
+CREATE VIEW seal_attribution AS SELECT NULL AS plan_id, NULL AS now_ms WHERE 0;
+CREATE TRIGGER seal_attribution_insert INSTEAD OF INSERT ON seal_attribution
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM attribution_plans p WHERE p.id = NEW.plan_id
+        AND p.sealed_at IS NULL AND p.target_count = (SELECT count(*) FROM attribution_targets WHERE plan_id = p.id))
+        THEN RAISE(ABORT, 'attribution_stale') END;
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM attribution_targets t LEFT JOIN attribution_targets w
+            ON w.plan_id = t.plan_id AND w.claim_id = t.winner_id
+        WHERE t.plan_id = NEW.plan_id AND (w.claim_id IS NULL OR w.winner_id != w.claim_id
+            OR w.kind != t.kind OR w.comparison_key != t.comparison_key)
+    ) THEN RAISE(ABORT, 'attribution_stale') END;
+    UPDATE attribution_plans SET sealed_at = NEW.now_ms WHERE id = NEW.plan_id;
+END;
+
+CREATE VIEW attribution_candidates AS
+SELECT p.id AS plan_id, c.id AS claim_id FROM attribution_plans p
+JOIN claims c ON c.family = p.family AND c.merged_into IS NULL
+WHERE (p.actor_id != p.owner_id AND c.canonical_actor IN (p.actor_id, p.owner_id))
+    OR (p.actor_id = p.owner_id AND (c.selected_receipt IN (
+        SELECT seq FROM vote_receipts WHERE actor_id = p.actor_id)
+        OR c.current_lease IN (SELECT id FROM pair_leases WHERE actor_id = p.actor_id AND status = 'pending')));
+
 CREATE VIEW attribute_owner AS
 SELECT NULL AS command_id, NULL AS request_hash, NULL AS principal, NULL AS now_ms,
-    NULL AS family, NULL AS revision, NULL AS actor_id, NULL AS owner_id WHERE 0;
+    NULL AS plan_id WHERE 0;
 
 CREATE TRIGGER attribute_owner_insert INSTEAD OF INSERT ON attribute_owner
 BEGIN
@@ -232,75 +316,68 @@ BEGIN
     SELECT CASE WHEN EXISTS (SELECT 1 FROM evidence_events WHERE command_id = NEW.command_id)
         THEN RAISE(ABORT, 'command_exists') END;
     SELECT CASE WHEN NOT EXISTS (
-        SELECT 1 FROM family_state f JOIN actor_resolution a ON a.family = f.family
-        JOIN actors o ON o.id = NEW.owner_id
-        WHERE f.family = NEW.family AND f.revision = NEW.revision AND a.actor_id = NEW.actor_id
-            AND (NEW.actor_id = NEW.owner_id OR (o.owner_namespace IS NOT NULL
-                AND NOT EXISTS (SELECT 1 FROM actor_resolution WHERE family = NEW.family AND actor_id = o.id AND canonical_actor != o.id)))
-            AND NOT EXISTS (SELECT 1 FROM actors WHERE id = NEW.actor_id AND owner_namespace IS NOT NULL AND id != NEW.owner_id)
-            AND (a.canonical_actor = a.actor_id OR NEW.owner_id = NEW.actor_id)
+        SELECT 1 FROM attribution_plans p JOIN family_state f ON f.family = p.family
+        JOIN actor_resolution a ON a.family = p.family AND a.actor_id = p.actor_id
+        JOIN actors o ON o.id = p.owner_id
+        WHERE p.id = NEW.plan_id AND p.sealed_at IS NOT NULL AND p.revision = f.revision
+            AND (p.actor_id = p.owner_id OR (o.owner_namespace IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM actor_resolution WHERE family = p.family AND actor_id = o.id AND canonical_actor != o.id)))
+            AND NOT EXISTS (SELECT 1 FROM actors WHERE id = p.actor_id AND owner_namespace IS NOT NULL AND id != p.owner_id)
+            AND (a.canonical_actor = a.actor_id OR p.owner_id = p.actor_id)
+            AND p.target_count = (SELECT count(*) FROM attribution_candidates WHERE plan_id = p.id)
+            AND NOT EXISTS (SELECT 1 FROM attribution_candidates c WHERE c.plan_id = p.id
+                AND NOT EXISTS (SELECT 1 FROM attribution_targets WHERE plan_id = p.id AND claim_id = c.claim_id))
+    ) THEN RAISE(ABORT, 'attribution_stale') END;
+
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM attribution_targets t JOIN claims c ON c.id = t.claim_id
+        WHERE t.plan_id = NEW.plan_id AND (c.version != t.version OR c.canonical_actor != t.canonical_actor
+            OR c.kind != t.kind OR c.comparison_key != t.comparison_key OR c.selected_receipt IS NOT t.selected_receipt
+            OR c.merged_into IS NOT NULL)
+    ) THEN RAISE(ABORT, 'attribution_stale') END;
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM attribution_targets t JOIN attribution_targets w ON w.plan_id = t.plan_id AND w.claim_id = t.winner_id
+        LEFT JOIN vote_receipts r ON r.seq = t.selected_receipt
+        LEFT JOIN vote_receipts winner ON winner.seq = w.selected_receipt
+        WHERE t.plan_id = NEW.plan_id AND (
+            COALESCE(r.recorded_at, -1) > COALESCE(winner.recorded_at, -1)
+            OR (COALESCE(r.recorded_at, -1) = COALESCE(winner.recorded_at, -1) AND COALESCE(r.seq, 0) > COALESCE(winner.seq, 0))
+            OR (r.seq IS winner.seq AND t.claim_id < w.claim_id))
     ) THEN RAISE(ABORT, 'attribution_stale') END;
 
     INSERT INTO evidence_events(command_id, kind, family, principal, request_hash, created_at, data)
-    VALUES (NEW.command_id, 'attribute', NEW.family, NEW.principal, NEW.request_hash, NEW.now_ms,
-        json_object('actor_id', NEW.actor_id, 'canonical_actor', NEW.owner_id));
+    SELECT NEW.command_id, 'attribute', family, NEW.principal, NEW.request_hash, NEW.now_ms,
+        json_object('plan_id', id, 'actor_id', actor_id, 'canonical_actor', owner_id)
+    FROM attribution_plans WHERE id = NEW.plan_id;
+    INSERT INTO event_targets(event_seq, ordinal, receipt_seq, claim_id, expected_version,
+        transition, lease_id, target_claim, target_actor)
+    SELECT e.seq, row_number() OVER (ORDER BY t.claim_id) - 1, t.selected_receipt,
+        t.claim_id, t.version, CASE WHEN t.claim_id = t.winner_id THEN 'attribute' ELSE 'supersede' END,
+        c.current_lease, t.winner_id, p.owner_id
+    FROM attribution_targets t JOIN attribution_plans p ON p.id = t.plan_id
+    JOIN claims c ON c.id = t.claim_id JOIN evidence_events e ON e.command_id = NEW.command_id
+    WHERE t.plan_id = NEW.plan_id;
 
-    INSERT INTO event_targets(event_seq, ordinal, receipt_seq, claim_id, expected_version, transition)
-    SELECT e.seq, row_number() OVER (ORDER BY c.id) - 1, c.selected_receipt, c.id, c.version, 'attribute'
-    FROM claims c JOIN evidence_events e ON e.command_id = NEW.command_id
-    WHERE c.family = NEW.family AND c.merged_into IS NULL
-        AND (c.canonical_actor = NEW.actor_id OR c.selected_receipt IN (
-            SELECT seq FROM vote_receipts WHERE actor_id = NEW.actor_id)
-            OR c.current_lease IN (SELECT id FROM pair_leases WHERE actor_id = NEW.actor_id))
-        AND (NEW.actor_id != NEW.owner_id OR c.selected_receipt IN (
-            SELECT seq FROM vote_receipts WHERE actor_id = NEW.actor_id)
-            OR c.current_lease IN (SELECT id FROM pair_leases WHERE actor_id = NEW.actor_id));
-
-    UPDATE pair_leases SET status = 'revoked' WHERE status = 'pending' AND family = NEW.family
-        AND (actor_id = NEW.actor_id OR claim_id IN (SELECT id FROM claims WHERE canonical_actor = NEW.owner_id AND family = NEW.family));
-    UPDATE claims SET current_lease = NULL, version = version + 1 WHERE family = NEW.family
-        AND (id IN (SELECT claim_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id))
-            OR current_lease IN (SELECT id FROM pair_leases WHERE status = 'revoked'));
-    UPDATE session_state SET version = version + 1, current_lease = NULL
-    WHERE current_lease IN (SELECT id FROM pair_leases WHERE status = 'revoked');
-
-    UPDATE claims SET merged_into = (
-        SELECT winner.id FROM claims winner
-        WHERE winner.family = NEW.family AND winner.merged_into IS NULL
-            AND winner.kind = claims.kind AND winner.comparison_key = claims.comparison_key
-            AND (winner.canonical_actor = NEW.owner_id OR winner.id IN (
-                SELECT claim_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)))
-        ORDER BY COALESCE(winner.selected_receipt, 0) DESC, winner.id LIMIT 1)
-    WHERE family = NEW.family AND merged_into IS NULL
-        AND (canonical_actor = NEW.owner_id OR id IN (SELECT claim_id FROM event_targets
-            WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)))
-        AND id != (SELECT winner.id FROM claims winner
-            WHERE winner.family = NEW.family AND winner.merged_into IS NULL
-                AND winner.kind = claims.kind AND winner.comparison_key = claims.comparison_key
-                AND (winner.canonical_actor = NEW.owner_id OR winner.id IN (
-                    SELECT claim_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)))
-            ORDER BY COALESCE(winner.selected_receipt, 0) DESC, winner.id LIMIT 1);
-
-    INSERT INTO event_targets(event_seq, ordinal, receipt_seq, claim_id, expected_version, transition)
-    SELECT e.seq, (SELECT count(*) FROM event_targets WHERE event_seq = e.seq) + row_number() OVER (ORDER BY c.id) - 1,
-        c.selected_receipt, c.id, c.version, 'supersede'
-    FROM claims c JOIN evidence_events e ON e.command_id = NEW.command_id
-    WHERE c.family = NEW.family AND c.merged_into IS NOT NULL AND c.selected_receipt IS NOT NULL
-        AND EXISTS (SELECT 1 FROM receipt_state WHERE receipt_seq = c.selected_receipt AND superseded IS NULL);
+    UPDATE pair_leases SET status = 'revoked' WHERE id IN (
+        SELECT lease_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
+    UPDATE session_state SET version = version + 1, current_lease = NULL WHERE current_lease IN (
+        SELECT lease_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id));
     UPDATE receipt_state SET superseded = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE receipt_seq IN (SELECT receipt_seq FROM event_targets
         WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id) AND transition = 'supersede');
-
-    UPDATE claims SET canonical_actor = NEW.owner_id WHERE family = NEW.family
-        AND id IN (SELECT claim_id FROM event_targets WHERE event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id) AND transition = 'attribute');
-    UPDATE actor_resolution SET canonical_actor = NEW.owner_id,
+    UPDATE claims SET merged_into = (SELECT winner_id FROM attribution_targets WHERE plan_id = NEW.plan_id AND claim_id = claims.id)
+    WHERE id IN (SELECT claim_id FROM attribution_targets WHERE plan_id = NEW.plan_id AND claim_id != winner_id);
+    UPDATE claims SET canonical_actor = (SELECT owner_id FROM attribution_plans WHERE id = NEW.plan_id),
+        current_lease = NULL, version = version + 1
+    WHERE id IN (SELECT claim_id FROM attribution_targets WHERE plan_id = NEW.plan_id);
+    UPDATE actor_resolution SET canonical_actor = (SELECT owner_id FROM attribution_plans WHERE id = NEW.plan_id),
         event_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
-    WHERE family = NEW.family AND actor_id = NEW.actor_id;
-    DELETE FROM coverage_members WHERE family = NEW.family;
-    INSERT INTO coverage_members(receipt_seq, claim_id, family, a_system, b_system)
-    SELECT receipt_seq, claim_id, family, a_system, b_system FROM eligible_claims WHERE family = NEW.family;
+    WHERE family = (SELECT family FROM attribution_plans WHERE id = NEW.plan_id)
+        AND actor_id = (SELECT actor_id FROM attribution_plans WHERE id = NEW.plan_id);
+    INSERT INTO refresh_coverage(claim_id) SELECT claim_id FROM attribution_targets WHERE plan_id = NEW.plan_id;
     UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
-        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id) WHERE family = NEW.family;
+        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+    WHERE family = (SELECT family FROM attribution_plans WHERE id = NEW.plan_id);
 END;
 
 CREATE TABLE analysis_exports (
@@ -465,7 +542,8 @@ CREATE VIEW export_targets(export_id, section, row_key, body) AS
 SELECT x.id, 'targets', printf('%020d/%020d', t.event_seq, t.ordinal), json_object(
     'event_seq', t.event_seq, 'ordinal', t.ordinal, 'receipt_seq', t.receipt_seq,
     'claim_id', t.claim_id, 'expected_version', t.expected_version,
-    'transition', t.transition, 'reference_seq', t.reference_seq, 'lease_id', t.lease_id)
+    'transition', t.transition, 'reference_seq', t.reference_seq, 'lease_id', t.lease_id,
+    'target_claim', t.target_claim, 'target_actor', t.target_actor)
 FROM analysis_exports x JOIN evidence_events e ON e.family = x.family AND e.seq <= x.event_cutoff
 JOIN event_targets t ON t.event_seq = e.seq;
 

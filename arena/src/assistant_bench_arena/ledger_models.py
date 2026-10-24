@@ -1,7 +1,5 @@
 """Private ledger facts and control-plane inputs, independent of browser views."""
 
-import hashlib
-import json
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -17,6 +15,7 @@ from pydantic import (
 )
 
 from assistant_bench_arena.models import Choice, Defects
+from assistant_bench_arena.serialization import digest
 
 
 type SqlValue = StrictStr | StrictInt | StrictFloat | None
@@ -346,11 +345,22 @@ class AttributionTarget(Record):
 
 
 class AttributionPlan(Record):
+    id: Identifier
     family: Identifier
     revision: NonNegativeInt
     actor_id: Identifier
     owner_id: Identifier
     targets: tuple[AttributionTarget, ...]
+
+
+class AttributionClaim(Record):
+    id: str
+    canonical_actor: str
+    kind: Literal['ordinary', 'repeat']
+    comparison_key: str
+    version: NonNegativeInt
+    selected_receipt: NonNegativeInt | None
+    recorded_at: Milliseconds | None
 
 
 class Moderation(Record):
@@ -488,15 +498,3 @@ class Cursor(Record):
     export_id: Identifier
     section: ExportSection
     key: str
-
-
-def canonical(value: BaseModel | JsonValue) -> str:
-    """Stable JSON for stored facts and semantic command identity."""
-    data = value.model_dump(mode='json') if isinstance(value, BaseModel) else value
-    return json.dumps(
-        data, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False
-    )
-
-
-def digest(value: BaseModel | JsonValue) -> str:
-    return hashlib.sha256(canonical(value).encode()).hexdigest()
