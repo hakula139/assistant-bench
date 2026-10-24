@@ -131,6 +131,8 @@ class Actor(Record):
     owner_namespace: Identifier | None = None
     """Explicit registration of the importing owner's source namespace."""
 
+    rate_subject: Identifier | None = None
+
 
 class Session(Record):
     id: Identifier
@@ -172,6 +174,56 @@ class Network(Record):
     """Purpose-separated tags for each applicable UTC quota window."""
 
 
+class Admission(Record):
+    operation: Literal['new', 'renew']
+    context_digest: Identifier
+    """Verified bootstrap context or the original signed renewal credential."""
+
+    proof_digest: Identifier
+    """Digest of the successfully verified challenge, with no proof plaintext."""
+
+    original_credential: Identifier | None = None
+    actor_id: Identifier
+    credential_id: Identifier
+    rate_subject: Identifier
+    expires_at: Milliseconds
+    challenge_until: Milliseconds
+    network: Network = Network()
+
+    @model_validator(mode='after')
+    def renewal(self) -> Self:
+        if (self.operation == 'renew') != (self.original_credential is not None):
+            raise ValueError('Renewal requires the original credential identity.')
+
+        return self
+
+
+class AdmissionResult(Record):
+    command_id: str
+    request_hash: str
+    operation: Literal['new', 'renew']
+    context_digest: str
+    proof_digest: str
+    original_credential: str | None
+    actor_id: str
+    credential_id: str
+    rate_subject: str
+    issued_at: Milliseconds
+    expires_at: Milliseconds
+    challenge_until: Milliseconds
+
+
+class Credential(Record):
+    id: str
+    actor_id: str
+    rate_subject: str
+    issued_at: Milliseconds
+    expires_at: Milliseconds
+    challenge_until: Milliseconds
+    revoked_at: Milliseconds | None
+    renewal_command: str | None
+
+
 class Issue(Record):
     lease_id: Identifier
     session_id: Identifier
@@ -192,7 +244,7 @@ class Accept(Record):
     choice: Choice
     defects: Defects = Defects()
     network: Network = Network()
-    attribution: tuple[Attribution, ...] = ()
+    attribution: Annotated[tuple[Attribution, ...], Field(max_length=2)] = ()
 
 
 class Event(Record):
@@ -304,11 +356,14 @@ class ImportRow(Record):
 class Export(Record):
     id: str
     family: str
+    schema_version: Literal[1]
+    namespace: str
     created_at: Milliseconds
     event_cutoff: NonNegativeInt
     receipt_cutoff: NonNegativeInt
     import_cutoff: NonNegativeInt
     family_revision: NonNegativeInt
+    analysis_sequence: NonNegativeInt
     evaluation_id: str
     publication_id: str
     point_id: str

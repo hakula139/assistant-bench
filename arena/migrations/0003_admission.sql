@@ -12,6 +12,55 @@ CREATE TABLE quota_windows (
 
 CREATE INDEX quota_expiry ON quota_windows(expires_at);
 
+CREATE TABLE credentials (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL REFERENCES actors(id),
+    rate_subject TEXT NOT NULL,
+    issued_at INTEGER NOT NULL CHECK (issued_at >= 0),
+    expires_at INTEGER NOT NULL CHECK (expires_at > issued_at),
+    challenge_until INTEGER NOT NULL CHECK (challenge_until >= issued_at AND challenge_until <= expires_at),
+    revoked_at INTEGER CHECK (revoked_at >= issued_at),
+    renewal_command TEXT UNIQUE,
+    CHECK (renewal_command IS NULL OR revoked_at IS NOT NULL)
+) STRICT;
+
+CREATE INDEX credential_expiry ON credentials(expires_at);
+
+CREATE TABLE admission_results (
+    command_id TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('new', 'renew')),
+    context_digest TEXT NOT NULL,
+    proof_digest TEXT NOT NULL UNIQUE,
+    original_credential TEXT,
+    actor_id TEXT NOT NULL REFERENCES actors(id),
+    credential_id TEXT NOT NULL UNIQUE REFERENCES credentials(id),
+    rate_subject TEXT NOT NULL,
+    issued_at INTEGER NOT NULL CHECK (issued_at >= 0),
+    expires_at INTEGER NOT NULL CHECK (expires_at > issued_at),
+    challenge_until INTEGER NOT NULL CHECK (challenge_until >= issued_at AND challenge_until <= expires_at),
+    CHECK ((operation = 'renew') = (original_credential IS NOT NULL))
+) STRICT;
+
+CREATE INDEX admission_expiry ON admission_results(expires_at);
+
+CREATE TRIGGER admission_no_update BEFORE UPDATE ON admission_results
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER admission_no_replace BEFORE INSERT ON admission_results
+WHEN EXISTS (SELECT 1 FROM admission_results WHERE command_id = NEW.command_id
+    OR proof_digest = NEW.proof_digest OR credential_id = NEW.credential_id)
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+
+CREATE TRIGGER credentials_no_replace BEFORE INSERT ON credentials
+WHEN EXISTS (SELECT 1 FROM credentials WHERE id = NEW.id OR renewal_command = NEW.renewal_command)
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+CREATE TRIGGER credentials_guard BEFORE UPDATE ON credentials
+WHEN NEW.id != OLD.id OR NEW.actor_id != OLD.actor_id OR NEW.rate_subject != OLD.rate_subject
+    OR NEW.issued_at != OLD.issued_at OR NEW.expires_at != OLD.expires_at
+    OR NEW.challenge_until != OLD.challenge_until OR OLD.revoked_at IS NOT NULL
+    OR NEW.revoked_at IS NULL
+BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+
 CREATE TABLE network_attribution (
     receipt_seq INTEGER NOT NULL REFERENCES vote_receipts(seq),
     key_version TEXT NOT NULL,
@@ -82,6 +131,8 @@ BEGIN
                                 WHERE family = NEW.family AND actor_id = NEW.actor_id
                             ), NEW.actor_id)
                             UNION SELECT NEW.actor_id
+                            UNION SELECT COALESCE((SELECT canonical_actor FROM actor_resolution
+                                WHERE family = NEW.family AND actor_id = NEW.actor_id), NEW.actor_id)
                         )
                         WHEN 'deployment' THEN q.subject = (SELECT namespace FROM deployment WHERE id = 1)
                         ELSE q.subject = (SELECT json_extract(n.value, '$.tag') FROM json_each(NEW.network) n
@@ -105,6 +156,52 @@ BEGIN
     DO UPDATE SET consumed = consumed + 1;
 END;
 
+CREATE VIEW admit_credential AS
+SELECT NULL AS command_id, NULL AS request_hash, NULL AS operation,
+    NULL AS context_digest, NULL AS proof_digest, NULL AS original_credential,
+    NULL AS actor_id, NULL AS credential_id, NULL AS rate_subject, NULL AS now_ms,
+    NULL AS expires_at, NULL AS challenge_until, NULL AS network WHERE 0;
+
+CREATE TRIGGER admit_credential_insert INSTEAD OF INSERT ON admit_credential
+BEGIN
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM evidence_events WHERE command_id = NEW.command_id)
+        OR EXISTS (SELECT 1 FROM pair_leases WHERE command_id = NEW.command_id)
+        THEN RAISE(ABORT, 'conflict') END;
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM admission_results WHERE command_id = NEW.command_id)
+        THEN RAISE(ABORT, 'command_exists') END;
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM admission_results WHERE proof_digest = NEW.proof_digest)
+        THEN RAISE(ABORT, 'proof_consumed') END;
+    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) != 'public'
+        OR NEW.expires_at <= NEW.now_ms OR NEW.expires_at > NEW.now_ms + 2592000000
+        OR NEW.challenge_until < NEW.now_ms OR NEW.challenge_until > NEW.now_ms + 86400000
+        OR NEW.challenge_until > NEW.expires_at
+        THEN RAISE(ABORT, 'credential_context') END;
+    SELECT CASE WHEN NEW.operation NOT IN ('new', 'renew')
+        OR (NEW.operation = 'renew') != (NEW.original_credential IS NOT NULL)
+        OR (NEW.operation = 'renew' AND NOT EXISTS (
+            SELECT 1 FROM credentials WHERE id = NEW.original_credential AND actor_id = NEW.actor_id
+                AND revoked_at IS NULL AND expires_at > NEW.now_ms))
+        OR (NEW.operation = 'new' AND EXISTS (SELECT 1 FROM actors WHERE id = NEW.actor_id))
+        THEN RAISE(ABORT, 'credential_context') END;
+
+    INSERT INTO actors(id, created_at, rate_subject)
+    SELECT NEW.actor_id, NEW.now_ms, NEW.rate_subject WHERE NEW.operation = 'new';
+    INSERT INTO spend_quotas(operation, actor_id, family, now_ms, network)
+    VALUES (CASE NEW.operation WHEN 'new' THEN 'admit' ELSE 'renew' END,
+        NEW.actor_id, '', NEW.now_ms, NEW.network);
+    UPDATE credentials SET revoked_at = NEW.now_ms, renewal_command = NEW.command_id
+    WHERE id = NEW.original_credential AND NEW.operation = 'renew';
+    INSERT INTO credentials(id, actor_id, rate_subject, issued_at, expires_at, challenge_until)
+    SELECT NEW.credential_id, NEW.actor_id, rate_subject, NEW.now_ms, NEW.expires_at, NEW.challenge_until
+    FROM actors WHERE id = NEW.actor_id;
+    INSERT INTO admission_results(command_id, request_hash, operation, context_digest,
+        proof_digest, original_credential, actor_id, credential_id, rate_subject, issued_at, expires_at, challenge_until)
+    SELECT NEW.command_id, NEW.request_hash, NEW.operation, NEW.context_digest,
+        NEW.proof_digest, NEW.original_credential, NEW.actor_id, NEW.credential_id,
+        rate_subject, NEW.now_ms, NEW.expires_at, NEW.challenge_until
+    FROM actors WHERE id = NEW.actor_id;
+END;
+
 CREATE VIEW issue_pair AS
 SELECT NULL AS command_id, NULL AS request_hash, NULL AS actor_id, NULL AS lease_id,
     NULL AS session_id, NULL AS session_version, NULL AS claim_id, NULL AS claim_version,
@@ -113,6 +210,9 @@ SELECT NULL AS command_id, NULL AS request_hash, NULL AS actor_id, NULL AS lease
 
 CREATE TRIGGER issue_pair_insert INSTEAD OF INSERT ON issue_pair
 BEGIN
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM evidence_events WHERE command_id = NEW.command_id)
+        OR EXISTS (SELECT 1 FROM admission_results WHERE command_id = NEW.command_id)
+        THEN RAISE(ABORT, 'conflict') END;
     SELECT CASE WHEN EXISTS (SELECT 1 FROM pair_leases WHERE command_id = NEW.command_id)
         THEN RAISE(ABORT, 'command_exists') END;
 
@@ -208,6 +308,9 @@ SELECT NULL AS command_id, NULL AS request_hash, NULL AS actor_id, NULL AS lease
 
 CREATE TRIGGER accept_vote_insert INSTEAD OF INSERT ON accept_vote
 BEGIN
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM pair_leases WHERE command_id = NEW.command_id)
+        OR EXISTS (SELECT 1 FROM admission_results WHERE command_id = NEW.command_id)
+        THEN RAISE(ABORT, 'conflict') END;
     SELECT CASE WHEN EXISTS (SELECT 1 FROM evidence_events WHERE command_id = NEW.command_id)
         THEN RAISE(ABORT, 'command_exists') END;
 
@@ -232,6 +335,17 @@ BEGIN
         WHERE l.id = NEW.lease_id AND defect.value NOT IN (
             SELECT value FROM json_each(e.body, '$.manifest.defects'))
     ) THEN RAISE(ABORT, 'defects_invalid') END;
+
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(NEW.attribution) a
+        WHERE (SELECT attribution_ms FROM deployment WHERE id = 1) = 0
+            OR json_extract(a.value, '$.expires_at') != NEW.now_ms + (SELECT attribution_ms FROM deployment WHERE id = 1))
+        THEN RAISE(ABORT, 'attribution_expiry') END;
+    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) = 'public' AND (
+        (SELECT count(*) FROM json_each(NEW.attribution)) != 2
+        OR (SELECT count(*) FROM json_each(NEW.attribution) WHERE json_extract(value, '$.kind') = 'exact') != 1
+        OR (SELECT count(*) FROM json_each(NEW.attribution) WHERE json_extract(value, '$.kind') = 'prefix') != 1
+        OR (SELECT count(DISTINCT json_extract(value, '$.version')) FROM json_each(NEW.attribution)) != 1)
+        THEN RAISE(ABORT, 'attribution_context') END;
 
     INSERT INTO spend_quotas(operation, actor_id, family, now_ms, network)
     SELECT 'accept', NEW.actor_id, family, NEW.now_ms, NEW.network FROM pair_leases WHERE id = NEW.lease_id;
@@ -275,7 +389,8 @@ BEGIN
         json_extract(a.value, '$.tag'), NEW.now_ms, json_extract(a.value, '$.expires_at')
     FROM json_each(NEW.attribution) a JOIN evidence_events e ON e.command_id = NEW.command_id;
 
-    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
+        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE family = (SELECT family FROM pair_leases WHERE id = NEW.lease_id);
 END;
 
@@ -285,6 +400,9 @@ SELECT NULL AS command_id, NULL AS request_hash, NULL AS actor_id, NULL AS sessi
 
 CREATE TRIGGER withdraw_latest_insert INSTEAD OF INSERT ON withdraw_latest
 BEGIN
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM pair_leases WHERE command_id = NEW.command_id)
+        OR EXISTS (SELECT 1 FROM admission_results WHERE command_id = NEW.command_id)
+        THEN RAISE(ABORT, 'conflict') END;
     SELECT CASE WHEN EXISTS (SELECT 1 FROM evidence_events WHERE command_id = NEW.command_id)
         THEN RAISE(ABORT, 'command_exists') END;
     SELECT CASE WHEN NOT EXISTS (
@@ -315,6 +433,7 @@ BEGIN
     WHERE session_id = NEW.session_id OR current_lease IN (SELECT id FROM pair_leases WHERE status = 'revoked' AND repeat_of = NEW.receipt_seq);
     DELETE FROM session_cases WHERE session_id = NEW.session_id AND receipt_seq = NEW.receipt_seq;
     INSERT INTO refresh_coverage(claim_id) SELECT claim_id FROM vote_receipts WHERE seq = NEW.receipt_seq;
-    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
+        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE family = (SELECT family FROM sessions WHERE id = NEW.session_id);
 END;

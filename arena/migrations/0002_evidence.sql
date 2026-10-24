@@ -1,7 +1,8 @@
 CREATE TABLE actors (
     id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL CHECK (created_at >= 0),
-    owner_namespace TEXT UNIQUE
+    owner_namespace TEXT UNIQUE,
+    rate_subject TEXT UNIQUE
 ) STRICT;
 
 CREATE TABLE sessions (
@@ -27,6 +28,7 @@ CREATE TABLE actor_resolution (
 ) STRICT;
 
 CREATE INDEX actor_resolution_canonical ON actor_resolution(family, canonical_actor);
+CREATE INDEX session_current_lease ON session_state(current_lease);
 
 CREATE TRIGGER sessions_initialize AFTER INSERT ON sessions
 BEGIN
@@ -70,6 +72,7 @@ CREATE UNIQUE INDEX claims_current ON claims(family, canonical_actor, kind, comp
 WHERE merged_into IS NULL;
 
 CREATE INDEX claims_selection ON claims(selected_receipt);
+CREATE INDEX claims_current_lease ON claims(current_lease);
 
 CREATE TABLE pair_leases (
     id TEXT PRIMARY KEY,
@@ -101,6 +104,8 @@ CREATE TABLE pair_leases (
 CREATE UNIQUE INDEX leases_actor_pending ON pair_leases(actor_id, family) WHERE status = 'pending';
 CREATE UNIQUE INDEX leases_claim_pending ON pair_leases(claim_id) WHERE status = 'pending';
 CREATE INDEX leases_repeat ON pair_leases(repeat_of) WHERE status = 'pending';
+CREATE INDEX leases_family_status ON pair_leases(family, status);
+CREATE INDEX leases_expiry ON pair_leases(expires_at, id);
 
 CREATE TABLE vote_receipts (
     seq INTEGER PRIMARY KEY REFERENCES evidence_events(seq),
@@ -156,6 +161,7 @@ CREATE TABLE event_targets (
     expected_version INTEGER CHECK (expected_version >= 0),
     transition TEXT NOT NULL,
     reference_seq INTEGER REFERENCES evidence_events(seq),
+    lease_id TEXT,
     PRIMARY KEY (event_seq, ordinal)
 ) STRICT;
 
@@ -250,7 +256,7 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER actors_no_delete BEFORE DELETE ON actors
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER actors_no_replace BEFORE INSERT ON actors
-WHEN EXISTS (SELECT 1 FROM actors WHERE id = NEW.id OR owner_namespace = NEW.owner_namespace)
+WHEN EXISTS (SELECT 1 FROM actors WHERE id = NEW.id OR owner_namespace = NEW.owner_namespace OR rate_subject = NEW.rate_subject)
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE TRIGGER sessions_no_update BEFORE UPDATE ON sessions

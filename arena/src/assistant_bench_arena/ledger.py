@@ -8,8 +8,11 @@ from pydantic import BaseModel, JsonValue
 from assistant_bench_arena.ledger_models import (
     Accept,
     Actor,
+    Admission,
+    AdmissionResult,
     Case,
     Context,
+    Credential,
     Cursor,
     Evaluation,
     Event,
@@ -40,15 +43,19 @@ from assistant_bench_arena.ledger_models import (
 
 
 type Rejection = Literal[
+    'attribution_context',
     'attribution_stale',
+    'attribution_expiry',
     'candidate_stale',
     'claim_stale',
     'command_exists',
     'conflict',
+    'credential_context',
     'defects_invalid',
     'family_missing',
     'family_stale',
     'immutable',
+    'invalid_release',
     'lease_expiry',
     'lease_stale',
     'moderation_stale',
@@ -58,6 +65,7 @@ type Rejection = Literal[
     'pending_limit',
     'private_material',
     'publication_unsealed',
+    'proof_consumed',
     'quota_exhausted',
     'quota_policy',
     'redacted',
@@ -115,40 +123,50 @@ class Ledger:
             raise CommandRejected('conflict')
 
     async def initialize(
-        self, namespace: str, mode: Mode, quotas: tuple[Quota, ...]
+        self,
+        namespace: str,
+        mode: Mode,
+        quotas: tuple[Quota, ...],
+        *,
+        attribution_ms: int | None = None,
     ) -> None:
         """Initialize an empty database before any serving command is exposed."""
+        if mode == 'public' and (attribution_ms is None or attribution_ms <= 0):
+            raise ValueError(
+                'A public profile requires an explicit attribution lifetime.'
+            )
+
+        lifetime = attribution_ms or 0
+        quota_body = canonical(
+            [
+                quota.model_dump(mode='json')
+                for quota in sorted(
+                    quotas,
+                    key=lambda value: (value.operation, value.scope, value.window_ms),
+                )
+            ]
+        )
         await self._fact(
-            Statement(sql='SELECT namespace, mode FROM deployment WHERE id = 1'),
             Statement(
                 sql="""
-                    INSERT INTO deployment(id, namespace, mode, schema_version)
-                    VALUES (1, ?, ?, 1)
-                    """,
-                params=(namespace, mode),
+                    SELECT namespace, mode, quota_body, attribution_ms
+                    FROM deployment WHERE id = 1
+                    """
             ),
-            {'namespace': namespace, 'mode': mode},
+            Statement(
+                sql="""
+                    INSERT INTO deployment(id, namespace, mode, quota_body,
+                        attribution_ms, schema_version) VALUES (1, ?, ?, ?, ?, 1)
+                    """,
+                params=(namespace, mode, quota_body, lifetime),
+            ),
+            {
+                'namespace': namespace,
+                'mode': mode,
+                'quota_body': quota_body,
+                'attribution_ms': lifetime,
+            },
         )
-
-        for quota in quotas:
-            params = (quota.operation, quota.scope, quota.window_ms)
-            await self._fact(
-                Statement(
-                    sql="""
-                        SELECT allowance FROM quota_policies WHERE operation = ?
-                        AND scope = ? AND window_ms = ?
-                        """,
-                    params=params,
-                ),
-                Statement(
-                    sql="""
-                        INSERT INTO quota_policies(operation, scope, window_ms,
-                        allowance) VALUES (?, ?, ?, ?)
-                        """,
-                    params=(*params, quota.limit),
-                ),
-                {'allowance': quota.limit},
-            )
 
     async def stage_policy(self, policy_id: str, policy: dict[str, JsonValue]) -> None:
         body = canonical(policy)
@@ -388,13 +406,119 @@ class Ledger:
             Statement(sql='SELECT * FROM actors WHERE id = ?', params=(actor.id,)),
             Statement(
                 sql="""
-                    INSERT INTO actors(id, created_at, owner_namespace) VALUES
-                    (?, ?, ?)
+                    INSERT INTO actors(id, created_at, owner_namespace, rate_subject)
+                    VALUES (?, ?, ?, ?)
                     """,
-                params=(actor.id, actor.created_at, actor.owner_namespace),
+                params=(
+                    actor.id,
+                    actor.created_at,
+                    actor.owner_namespace,
+                    actor.rate_subject,
+                ),
             ),
             expected,
         )
+
+    async def credential(self, credential_id: str, now: int) -> Credential | None:
+        rows = await self._rows(
+            """
+            SELECT * FROM credentials WHERE id = ? AND revoked_at IS NULL
+                AND expires_at > ?
+            """,
+            credential_id,
+            now,
+        )
+        return Credential.model_validate(rows[0]) if rows else None
+
+    async def admit(self, context: Context, admission: Admission) -> AdmissionResult:
+        """Consume one verified proof and preserve the first signed-cookie result."""
+        if context.principal != (
+            admission.context_digest
+            if admission.operation == 'new'
+            else admission.actor_id
+        ):
+            raise CommandRejected('credential_context')
+
+        request_hash = digest(
+            {
+                'operation': admission.operation,
+                'principal': context.principal,
+                'context_digest': admission.context_digest,
+                'proof_digest': admission.proof_digest,
+                'original_credential': admission.original_credential,
+            }
+        )
+        result = await self._admission_result(context, request_hash)
+
+        if result is not None:
+            return result
+
+        try:
+            await self._execute(
+                """
+                INSERT INTO admit_credential(command_id, request_hash, operation,
+                    context_digest, proof_digest, original_credential, actor_id,
+                    credential_id, rate_subject, now_ms, expires_at, challenge_until,
+                    network) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                context.command_id,
+                request_hash,
+                admission.operation,
+                admission.context_digest,
+                admission.proof_digest,
+                admission.original_credential,
+                admission.actor_id,
+                admission.credential_id,
+                admission.rate_subject,
+                context.now,
+                admission.expires_at,
+                admission.challenge_until,
+                canonical(admission.network.model_dump(mode='json')['tags']),
+            )
+        except CommandRejected as error:
+            if error.reason != 'command_exists':
+                raise
+
+        result = await self._admission_result(context, request_hash)
+
+        if result is None:
+            raise RuntimeError('Admission completed without its credential result.')
+
+        return result
+
+    async def _admission_result(
+        self, context: Context, request_hash: str
+    ) -> AdmissionResult | None:
+        rows = await self._rows(
+            'SELECT * FROM admission_results WHERE command_id = ?', context.command_id
+        )
+
+        if not rows:
+            return None
+
+        result = AdmissionResult.model_validate(rows[0])
+
+        if result.request_hash != request_hash:
+            raise CommandRejected('conflict')
+
+        if await self.credential(result.credential_id, context.now) is None:
+            raise CommandRejected('credential_context')
+
+        if result.original_credential is not None:
+            original = await self._rows(
+                """
+                SELECT id FROM credentials WHERE id = ? AND actor_id = ?
+                    AND renewal_command = ? AND revoked_at IS NOT NULL
+                """,
+                result.original_credential,
+                context.principal,
+                context.command_id,
+            )
+
+            if not original:
+                raise CommandRejected('credential_context')
+
+        return result
 
     async def start_session(self, session: Session) -> None:
         await self._fact(

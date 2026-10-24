@@ -4,6 +4,8 @@ CREATE TABLE deployment (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     namespace TEXT NOT NULL UNIQUE,
     mode TEXT NOT NULL CHECK (mode IN ('local', 'public')),
+    quota_body TEXT NOT NULL CHECK (json_valid(quota_body) AND json_type(quota_body) = 'array'),
+    attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 0 AND 7776000000),
     schema_version INTEGER NOT NULL CHECK (schema_version = 1)
 ) STRICT;
 
@@ -19,6 +21,14 @@ CREATE TABLE policies (
     id TEXT PRIMARY KEY,
     body TEXT NOT NULL CHECK (json_valid(body))
 ) STRICT;
+
+CREATE TRIGGER deployment_initialize AFTER INSERT ON deployment
+BEGIN
+    INSERT INTO quota_policies(operation, scope, window_ms, allowance)
+    SELECT json_extract(value, '$.operation'), json_extract(value, '$.scope'),
+        json_extract(value, '$.window_ms'), json_extract(value, '$.limit')
+    FROM json_each(NEW.quota_body);
+END;
 
 CREATE TABLE evaluations (
     id TEXT PRIMARY KEY,
@@ -111,7 +121,8 @@ CREATE TABLE family_state (
     publication_id TEXT NOT NULL REFERENCES publications (id),
     point_id TEXT NOT NULL REFERENCES point_snapshots (id),
     policy_id TEXT NOT NULL REFERENCES policies (id),
-    last_evidence_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_evidence_seq >= 0)
+    last_evidence_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_evidence_seq >= 0),
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0)
 ) STRICT;
 
 CREATE VIEW seal_evaluation AS
@@ -310,3 +321,11 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER quota_policies_no_replace BEFORE INSERT ON quota_policies
 WHEN EXISTS (SELECT 1 FROM quota_policies WHERE operation = NEW.operation AND scope = NEW.scope AND window_ms = NEW.window_ms)
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
+
+CREATE TRIGGER quota_policies_configuration BEFORE INSERT ON quota_policies
+WHEN NOT EXISTS (SELECT 1 FROM deployment d, json_each(d.quota_body) p
+    WHERE json_extract(p.value, '$.operation') = NEW.operation
+        AND json_extract(p.value, '$.scope') = NEW.scope
+        AND json_extract(p.value, '$.window_ms') = NEW.window_ms
+        AND json_extract(p.value, '$.limit') = NEW.allowance)
+BEGIN SELECT RAISE(ABORT, 'quota_policy'); END;
