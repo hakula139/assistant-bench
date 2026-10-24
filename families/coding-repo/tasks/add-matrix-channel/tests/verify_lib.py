@@ -4,18 +4,27 @@ Every subprocess has a timeout, and a verifier's timeouts sum to less than its
 task's `[verifier] timeout_sec`, since a verifier timeout errors the trial.
 """
 
+import argparse
 import ast
+import functools
+import importlib.abc
+import importlib.machinery
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
+from collections.abc import Callable, Sequence
+from typing import Any
 
 
 APP = pathlib.Path(os.environ.get('BENCH_APP_DIR', '/app'))
 TESTS = pathlib.Path(__file__).resolve().parent
 TIMEOUT_SEC = 60
+# The `add_argument` keys that a broken option with an ignored value keeps.
+_KEPT_KEYS = ('default', 'dest', 'help', 'metavar', 'nargs', 'required')
 
 _failures: list[str] = []
 
@@ -40,7 +49,9 @@ def copy_workspace(hidden: tuple[str, ...] = ()) -> pathlib.Path:
     return dst
 
 
-def run_unittest(ws: pathlib.Path, pattern: str = 'test*.py') -> tuple[bool, str]:
+def run_unittest(
+    ws: pathlib.Path, pattern: str = 'test*.py', env: dict[str, str] | None = None
+) -> tuple[bool, str]:
     """Run unittest discovery under `ws/tests`, failing when no test ran."""
     proc = subprocess.run(
         [
@@ -59,22 +70,97 @@ def run_unittest(ws: pathlib.Path, pattern: str = 'test*.py') -> tuple[bool, str
         capture_output=True,
         text=True,
         timeout=TIMEOUT_SEC,
-        env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'},
+        env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **(env or {})},
     )
     out = proc.stdout + proc.stderr
     return proc.returncode == 0 and 'Ran 0 tests' not in out, out
 
 
 def fails_on(variant: str, pattern: str) -> tuple[bool, str]:
-    """Run the workspace's tests with `tests/broken/<variant>/` copied over it.
+    """Run the workspace's tests with the defect of `tests/broken/<variant>/`.
 
-    The result is true when at least one test ran and the tests failed, which is
-    what tests that catch the variant's defect do.
+    That directory's `sitecustomize.py` breaks one part of the workspace's own
+    code as Python starts, in the test run and in every Python process it starts
+    with the same environment. The result is true when at least one test ran and
+    the tests failed, which is what tests that catch the defect do.
     """
-    ws = copy_workspace()
-    shutil.copytree(TESTS / 'broken' / variant, ws, dirs_exist_ok=True)
-    ok, out = run_unittest(ws, pattern)
+    pythonpath = os.pathsep.join([str(TESTS / 'broken' / variant), str(TESTS)])
+    ok, out = run_unittest(copy_workspace(), pattern, {'PYTHONPATH': pythonpath})
     return not ok and 'Ran 0 tests' not in out, out
+
+
+def after_import(name: str, patch: Callable[[types.ModuleType], None]) -> None:
+    """Call `patch` with module `name` as soon as the module has run."""
+    sys.meta_path.insert(0, _PatchingFinder(name, patch))
+
+
+class _PatchingFinder(importlib.abc.MetaPathFinder):
+    def __init__(self, name: str, patch: Callable[[types.ModuleType], None]) -> None:
+        self.name = name
+        self.patch = patch
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: types.ModuleType | None = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        if fullname != self.name:
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec is None or spec.loader is None:
+            return spec
+        run = spec.loader.exec_module
+
+        def exec_module(module: types.ModuleType) -> None:
+            run(module)
+            self.patch(module)
+
+        spec.loader.exec_module = exec_module
+        return spec
+
+
+def replace_function(owner: object, name: str, replacement: types.FunctionType) -> None:
+    """Make `owner.<name>` behave as `replacement`, including through other names.
+
+    A plain function takes the replacement's code in place, so every module that
+    imported it under another name calls the replacement too.
+    """
+    original = getattr(owner, name, None)
+    if isinstance(original, types.FunctionType) and original.__closure__ is None:
+        original.__code__ = replacement.__code__
+        original.__defaults__ = replacement.__defaults__
+        original.__kwdefaults__ = replacement.__kwdefaults__
+    else:
+        setattr(owner, name, replacement)
+
+
+def break_option(option: str, *, drop: bool) -> None:
+    """Break `option` in every argparse parser, dropping it or ignoring its value."""
+    add_argument = argparse._ActionsContainer.add_argument
+
+    def patched(
+        self: argparse._ActionsContainer, *names: str, **kwargs: Any
+    ) -> argparse.Action | None:
+        if option not in names:
+            return add_argument(self, *names, **kwargs)
+        if drop:
+            return None
+        kept = {key: kwargs[key] for key in _KEPT_KEYS if key in kwargs}
+        return add_argument(self, *names, action=_IgnoredValue, **kept)
+
+    argparse._ActionsContainer.add_argument = patched
+
+
+class _IgnoredValue(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        setattr(namespace, self.dest, self.default)
 
 
 def parse(path: pathlib.Path) -> ast.Module | None:
@@ -108,8 +194,22 @@ def count_tests(path: pathlib.Path) -> int:
 
 
 def git(*args: str) -> str:
+    """Run git on the workspace's history under a configuration of the bench's own.
+
+    The workspace's `.git/config` and hooks could run commands of the agent's,
+    through keys such as `core.fsmonitor`, so git reads a copy without them.
+    """
     return subprocess.run(
-        ['git', '-c', 'safe.directory=*', '-C', str(APP), *args],
+        [
+            'git',
+            '-c',
+            'safe.directory=*',
+            '-c',
+            'core.fsmonitor=false',
+            f'--git-dir={_git_dir()}',
+            f'--work-tree={APP}',
+            *args,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -117,16 +217,35 @@ def git(*args: str) -> str:
     ).stdout
 
 
+@functools.cache
+def _git_dir() -> pathlib.Path:
+    git_dir = pathlib.Path(tempfile.mkdtemp()) / 'git'
+    shutil.copytree(
+        APP / '.git',
+        git_dir,
+        symlinks=True,
+        ignore=lambda directory, names: (
+            {'config', 'hooks'} if directory == str(APP / '.git') else set()
+        ),
+    )
+    (git_dir / 'config').write_text(
+        '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n'
+    )
+    return git_dir
+
+
 def _check_shadowing() -> None:
     """Fail on a top-level module or package named like a standard-library one.
 
     `python3 -m unittest` puts the working directory first on `sys.path`, so a
-    workspace's own `unittest` package would replace the runner.
+    workspace's own `unittest` package would replace the runner. A directory
+    without `__init__.py`, such as a virtual environment's `venv/`, is only a
+    namespace portion, which loses to the standard library.
     """
     shadowing = sorted(
         path.name
         for path in APP.iterdir()
-        if (path.is_dir() or path.suffix == '.py')
+        if (path.suffix == '.py' or (path / '__init__.py').is_file())
         and path.stem in sys.stdlib_module_names
     )
     check(

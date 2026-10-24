@@ -77,9 +77,8 @@ INPUTS = {
 def describe(fn, line):
     try:
         return {'ok': repr(fn(line))}
-    except (
-        Exception
-    ) as error:  # every outcome is recorded, including unexpected exception types
+    # Every outcome is recorded, including unexpected exception types.
+    except Exception as error:
         return {
             'error': type(error).__name__,
             'message': str(error),

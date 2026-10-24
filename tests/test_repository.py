@@ -73,6 +73,17 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     jobs.check_tasks(family, tasks)
 
 
+@pytest.mark.parametrize(
+    'shared', ['environment/Dockerfile', 'tests/test.sh', 'tests/verify_lib.py']
+)
+def test_coding_tasks_share_their_common_files(shared: str) -> None:
+    tasks = sorted((REPO_ROOT / 'families' / 'coding-repo' / 'tasks').iterdir())
+
+    contents = {(task / shared).read_bytes() for task in tasks}
+
+    assert len(contents) == 1, f'`{shared}` differs across the coding tasks'
+
+
 def family_systems(config: dict[str, Any]) -> set[str]:
     """Return every system that a family's config names."""
     systems = {str(system) for system in config.get('systems', [])}

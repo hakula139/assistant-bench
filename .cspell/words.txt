@@ -22,6 +22,7 @@ esbuild
 exog
 expit
 fdopen
+fsmonitor
 hakula
 hanzi
 httpx
@@ -34,6 +35,7 @@ katex
 kimi
 kwarg
 kwargs
+kwdefaults
 kwonlyargs
 lastrowid
 libstdc
