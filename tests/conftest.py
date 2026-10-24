@@ -82,12 +82,12 @@ def fits(monkeypatch: pytest.MonkeyPatch) -> Refits:
     """Record each refit of the scheduler's board."""
     refits = Refits()
 
-    def rate(matchups: ranking.Matchups, root: str) -> ranking.Ratings:
+    def rate_point(matchups: ranking.Matchups, root: str) -> ranking.PointRatings:
         refits.comparisons.append(len(matchups.score))
         refits.roots.append(root)
-        return ranking.rate(matchups, root)
+        return ranking.rate_point(matchups, root)
 
-    monkeypatch.setattr(scheduler, 'rate', rate)
+    monkeypatch.setattr(scheduler, 'rate_point', rate_point)
     return refits
 
 

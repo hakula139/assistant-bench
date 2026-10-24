@@ -2,10 +2,10 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from datetime import timedelta
 from itertools import permutations
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from scipy import special
 
 from assistant_bench.arena import scheduler
 from assistant_bench.arena.resolution import MatchedVote, reconcile
@@ -13,7 +13,13 @@ from assistant_bench.arena.scheduler import Board, Draw, Pool, draw, pair_weight
 from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
-from assistant_bench.scoring.ranking import ANCHOR, ELO_PER_LOGIT, Comparison, Ratings
+from assistant_bench.scoring import ranking
+from assistant_bench.scoring.ranking import (
+    ANCHOR,
+    ELO_PER_LOGIT,
+    Comparison,
+    PointRatings,
+)
 from support import AT, Refits, make_output, make_vote, passing_outputs
 
 
@@ -182,6 +188,36 @@ class TestBoard:
 
 
 class TestDraw:
+    def test_draws_adaptively_without_report_inference(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pool = make_pool()
+        votes: list[Vote] = []
+        for left, right in permutations(SYSTEMS, 2):
+            votes += votes_between(
+                pool,
+                left,
+                right,
+                ['a'] * scheduler.SEED_VOTES_PER_SIDE,
+                start=len(votes) + 1,
+            )
+        bootstrap = Mock(side_effect=AssertionError('Report inference was invoked.'))
+        monkeypatch.setattr(ranking, 'bootstrap', bootstrap)
+
+        picked = draw(
+            pool,
+            matched(pool, votes),
+            {'c0'},
+            AT,
+            np.random.default_rng(0),
+            Board(SYSTEMS),
+        )
+
+        assert picked is not None
+        assert picked.case != 'c0'
+        assert picked.a.system != picked.b.system
+        bootstrap.assert_not_called()
+
     def test_seeds_every_ordered_pair_fewest_votes_first(self) -> None:
         pool = make_pool()
         rng = np.random.default_rng(0)
@@ -315,44 +351,43 @@ class TestDraw:
 
 
 class TestPairWeights:
-    @staticmethod
-    def ratings(score: list[float], lower: list[float], upper: list[float]) -> Ratings:
-        return Ratings(
-            systems=('a', 'b', 'c', 'd'),
-            score=np.array(score),
-            lower=np.array(lower),
-            upper=np.array(upper),
-            draws=np.empty((0, 4)),
-            position=0.0,
-        )
-
-    def test_favors_close_pairs_with_few_votes_among_those_that_overlap(
+    @pytest.mark.parametrize(
+        ('score', 'counts', 'expected'),
+        [
+            pytest.param(
+                [1000, 1000, 1100, 1300],
+                {('c', 'b'): 3},
+                {
+                    ('a', 'b'): (0, 0),
+                    ('a', 'c'): (100, 0),
+                    ('b', 'c'): (100, 3),
+                    ('c', 'd'): (200, 0),
+                },
+                id='unequal-gaps-and-vote-counts',
+            ),
+            pytest.param(
+                [1000, 9000, 1000, 1000],
+                {('a', 'b'): 2, ('b', 'a'): 3},
+                {('a', 'b'): (8000, 5), ('b', 'a'): (8000, 5), ('a', 'c'): (0, 0)},
+                id='large-representable-gap',
+            ),
+        ],
+    )
+    def test_weighs_every_pair_by_information_and_total_votes(
         self,
+        score: list[float],
+        counts: dict[tuple[str, str], int],
+        expected: dict[tuple[str, str], tuple[float, int]],
     ) -> None:
-        ratings = self.ratings(
-            score=[1000, 1000, 1100, 1300],
-            lower=[950, 950, 1000, 1250],
-            upper=[1050, 1050, 1200, 1350],
-        )
-        pairs = [('a', 'b'), ('a', 'c'), ('b', 'c'), ('c', 'd')]
-
-        weights = pair_weights(ratings, pairs, Counter({('c', 'b'): 3}))
-
-        p = special.expit(100 / ELO_PER_LOGIT)
-        assert weights == pytest.approx(
-            {('a', 'b'): 0.25, ('a', 'c'): p * (1 - p), ('b', 'c'): p * (1 - p) / 4}
+        ratings = PointRatings(
+            systems=('a', 'b', 'c', 'd'), score=np.array(score), position=0.0
         )
 
-    def test_weighs_every_pair_once_all_separate(self) -> None:
-        ratings = self.ratings(
-            score=[1000, 1200, 1400, 1600],
-            lower=[990, 1190, 1390, 1590],
-            upper=[1010, 1210, 1410, 1610],
-        )
+        weights = pair_weights(ratings, list(expected), Counter(counts))
 
-        weights = pair_weights(ratings, [('a', 'b'), ('a', 'c')], Counter())
-
-        p, q = (special.expit(gap / ELO_PER_LOGIT) for gap in (200, 400))
-        assert weights == pytest.approx(
-            {('a', 'b'): p * (1 - p), ('a', 'c'): q * (1 - q)}
-        )
+        expected_weights = {}
+        for pair, (gap, votes) in expected.items():
+            odds = np.exp(-gap / ELO_PER_LOGIT)
+            expected_weights[pair] = odds / (1 + odds) ** 2 / (votes + 1)
+        assert all(np.isfinite(weight) and weight > 0 for weight in weights.values())
+        assert weights == pytest.approx(expected_weights, rel=1e-12, abs=0)
