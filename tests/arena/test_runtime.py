@@ -106,7 +106,7 @@ class TestLoadTarget:
     ) -> None:
         content = _MANIFEST.replace(
             'd1_databases = [',
-            'compatibility_date = "2000-01-01"\n'
+            'workers_dev = false\n'
             'd1_databases = [{ binding = "OTHER", database_id = "other" }, ',
         )
         path = tmp_path / 'wrangler.toml'
@@ -117,6 +117,39 @@ class TestLoadTarget:
         assert target.database_id == 'synthetic-preview'
         assert target.worker_name == 'synthetic-arena'
         assert target.compatibility_date == '2026-10-24'
+
+    @pytest.mark.parametrize(
+        ('override', 'account', 'date'),
+        [
+            ('account_id = "selected-account"', 'selected-account', '2026-10-24'),
+            (
+                'compatibility_date = "2000-01-01"',
+                'synthetic-account',
+                '2000-01-01',
+            ),
+            (
+                dedent("""
+                    account_id = "selected-account"
+                    compatibility_date = "2000-01-01"
+                """),
+                'selected-account',
+                '2000-01-01',
+            ),
+        ],
+        ids=['account', 'date', 'both'],
+    )
+    def test_resolves_each_native_environment_override_independently(
+        self, tmp_path: Path, override: str, account: str, date: str
+    ) -> None:
+        path = tmp_path / 'wrangler.toml'
+        path.write_text(
+            _MANIFEST.replace('[env.staging]', f'[env.staging]\n{override}')
+        )
+
+        target = load_target('staging', manifest_path=path)
+
+        assert target.account_id == account
+        assert target.compatibility_date == date
 
     @pytest.mark.parametrize(
         ('original', 'replacement'),

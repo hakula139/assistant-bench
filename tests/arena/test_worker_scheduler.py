@@ -14,7 +14,7 @@ from assistant_bench_arena.releases import (
     point_snapshot,
     settlements,
 )
-from assistant_bench_arena.scheduler import CandidatePool, pair_log_weight
+from assistant_bench_arena.scheduler import CandidatePool, pair_log_weights
 from assistant_bench_arena.serialization import comparison_identity, digest
 from assistant_bench_arena.snapshots import OutputContentApproval
 from ledger_fixtures import case_key, make_release, output_key
@@ -244,7 +244,12 @@ class TestCandidatePool:
             assert picked.b_output == output_key(0, 'large')
 
         @pytest.mark.parametrize('gap', [10_000.0, 1e308])
-        def test_can_draw_after_large_finite_score_separation(self, gap: float) -> None:
+        @pytest.mark.parametrize(
+            'scale', [1.0, 100.0, math.ulp(0.0)], ids=['one', 'hundred', 'smallest']
+        )
+        def test_can_draw_after_large_finite_score_separation(
+            self, gap: float, scale: float
+        ) -> None:
             release = make_release(cases=1)
             points = point_snapshot(
                 release.evaluation.id,
@@ -261,17 +266,47 @@ class TestCandidatePool:
 
             pool = CandidatePool.build(release, (), (), ())
 
-            picked = pool.draw(
-                points,
-                coverage,
-                release.policy.method.points_per_logit,
-                random.Random(0),
-            )
+            picked = pool.draw(points, coverage, scale, random.Random(0))
 
             assert picked is not None
             assert {picked.a_output, picked.b_output} == {
                 output_key(0, 'large'),
                 output_key(0, 'small'),
+            }
+
+        @pytest.mark.parametrize(
+            'scale', [1.0, 100.0, math.ulp(0.0)], ids=['one', 'hundred', 'smallest']
+        )
+        def test_selects_the_closest_huge_same_sign_scores_after_seeding(
+            self, scale: float
+        ) -> None:
+            names = ('large', 'medium', 'small')
+            release = make_release(cases=1, systems=names)
+            points = point_snapshot(
+                release.evaluation.id,
+                release.evaluation.policy_id,
+                {
+                    name: Point(score=score, component='connected')
+                    for name, score in zip(
+                        names,
+                        (1e308, math.nextafter(1e308, math.inf), -1e308),
+                        strict=True,
+                    )
+                },
+            )
+            coverage = tuple(
+                Coverage(a_system=a, b_system=b, count=2)
+                for a, b in permutations(names, 2)
+            )
+            systems = {output.key: output.system_id for output in release.outputs}
+            pool = CandidatePool.build(release, (), (), ())
+
+            picked = pool.draw(points, coverage, scale, random.Random(0))
+
+            assert picked is not None
+            assert {systems[picked.a_output], systems[picked.b_output]} == {
+                'large',
+                'medium',
             }
 
         @pytest.mark.parametrize(
@@ -463,7 +498,7 @@ class TestCandidatePool:
             assert picked.case_key == case_key(cases - 1)
 
 
-class TestPairLogWeight:
+class TestPairLogWeights:
     @pytest.mark.parametrize(
         ('left', 'right', 'expected'),
         [
@@ -493,16 +528,56 @@ class TestPairLogWeight:
     def test_combines_comparable_score_information_with_both_orientation_counts(
         self, left: Point, right: Point, expected: float
     ) -> None:
-        release = make_release(cases=1)
+        release = make_release(cases=1, systems=('large', 'small', 'peer'))
         points = point_snapshot(
             release.evaluation.id,
             release.evaluation.policy_id,
-            {'large': left, 'small': right},
+            {'large': left, 'small': right, 'peer': left},
         )
         counts = {('large', 'small'): 2, ('small', 'large'): 6}
 
-        forward = pair_log_weight(points, ('large', 'small'), counts, 100.0)
-        backward = pair_log_weight(points, ('small', 'large'), counts, 100.0)
+        forward, baseline = pair_log_weights(
+            points, [('large', 'small'), ('large', 'peer')], counts, 100.0
+        )
+        backward, _ = pair_log_weights(
+            points, [('small', 'large'), ('peer', 'large')], counts, 100.0
+        )
 
         assert math.exp(forward) == pytest.approx(expected / 9)
+        assert math.exp(baseline) == pytest.approx(0.25)
         assert backward == pytest.approx(forward)
+
+    @pytest.mark.parametrize(
+        'scale', [1.0, 100.0, math.ulp(0.0)], ids=['one', 'hundred', 'smallest']
+    )
+    def test_preserves_tied_minimum_gaps_and_raw_coverage_at_extreme_scales(
+        self, scale: float
+    ) -> None:
+        release = make_release(cases=1, systems=('large', 'medium', 'small'))
+        points = point_snapshot(
+            release.evaluation.id,
+            release.evaluation.policy_id,
+            {
+                name: Point(score=score, component='connected')
+                for name, score in (
+                    ('large', -1e308),
+                    ('medium', 0.0),
+                    ('small', 1e308),
+                )
+            },
+        )
+        pairs = [('large', 'medium'), ('medium', 'small'), ('large', 'small')]
+        counts = {
+            ('large', 'medium'): 2,
+            ('medium', 'large'): 2,
+            ('medium', 'small'): 9,
+            ('small', 'medium'): 9,
+            ('large', 'small'): 2,
+            ('small', 'large'): 2,
+        }
+
+        weights = [
+            math.exp(value) for value in pair_log_weights(points, pairs, counts, scale)
+        ]
+
+        assert weights == pytest.approx([1 / 5, 1 / 19, 0.0])
