@@ -126,8 +126,11 @@ jobs:
       - name: Set up Nix
         uses: ./.github/actions/setup-nix
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: uv sync --locked
+
+      - name: Install Node dependencies
+        run: pnpm install
 
       - name: Lint
         run: uv run ruff check
