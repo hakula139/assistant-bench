@@ -1,4 +1,5 @@
-from datetime import timedelta
+import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from assistant_bench.arena.service import (
     UnlistedDefects,
     load_families,
 )
-from assistant_bench.arena.store import Defects, Side, VoteStore
+from assistant_bench.arena.store import Ballot, Defects, Side, Vote, VoteStore
 from assistant_bench.families import Gate
 from assistant_bench.outputs import read_outputs, write_outputs
 from support import (
@@ -104,6 +105,52 @@ class TestLoadFamilies:
 
 
 class TestArena:
+    def test_reads_each_transition_from_one_fresh_vote_snapshot(
+        self,
+        families_dir: Path,
+        clock: Clock,
+        store: VoteStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        arena = make_arena(families_dir, clock, store)
+        read_votes = store.votes
+        reads: list[str] = []
+
+        def snapshot(family: str) -> list[Vote]:
+            reads.append(family)
+            return read_votes(family)
+
+        monkeypatch.setattr(store, 'votes', snapshot)
+
+        first = arena.start('f')
+
+        assert first.pair is not None
+        assert (first.votes, first.remaining, reads) == (0, len(ARENA_CASES), ['f'])
+        reads.clear()
+
+        resumed = arena.resume(first.id)
+
+        assert resumed == first
+        assert reads == ['f']
+        reads.clear()
+
+        second = arena.vote(first.pair.token, 'a', Defects(), None)
+
+        assert second.pair is not None
+        assert second.pair.instruction != first.pair.instruction
+        assert (second.votes, second.remaining, reads) == (
+            1,
+            len(ARENA_CASES) - 1,
+            ['f'],
+        )
+        reads.clear()
+
+        undone = arena.undo(first.id)
+
+        assert undone.pair is not None
+        assert (undone.pair.a, undone.pair.b) == (first.pair.a, first.pair.b)
+        assert (undone.votes, undone.remaining, reads) == (0, len(ARENA_CASES), ['f'])
+
     class TestStart:
         def test_shows_a_pair_that_names_no_system(
             self, families_dir: Path, clock: Clock, store: VoteStore
@@ -329,16 +376,58 @@ class TestArena:
             (vote,) = store.votes('f')
             assert vote.defects == Defects(a=frozenset({'scope'}))
 
-        def test_retires_the_pair_it_records(
-            self, families_dir: Path, clock: Clock, store: VoteStore
+        def test_keeps_the_pair_and_documents_until_its_vote_is_recorded(
+            self,
+            families_dir: Path,
+            clock: Clock,
+            store: VoteStore,
+            monkeypatch: pytest.MonkeyPatch,
         ) -> None:
-            arena = make_arena(families_dir, clock, store)
+            arena = make_arena(
+                families_dir,
+                clock,
+                store,
+                texts={'large': '<p>L</p>', 'small': '<p>S</p>'},
+                render='html',
+            )
             view = arena.start('f')
             assert view.pair is not None
-            arena.vote(view.pair.token, 'a', Defects(), None)
+            contents = {
+                document: arena.document(document) for document in documents(view.pair)
+            }
+            defects = Defects(a=frozenset({'tone'}))
+
+            def locked(ballot: Ballot, at: datetime) -> Vote:
+                raise sqlite3.OperationalError('database is locked')
+
+            with monkeypatch.context() as patch:
+                patch.setattr(store, 'record', locked)
+
+                with pytest.raises(
+                    sqlite3.OperationalError, match='database is locked'
+                ):
+                    arena.vote(view.pair.token, 'b', defects, 'Stiff.')
+
+            assert store.votes('f') == []
+            assert arena.resume(view.id) == view
+            assert {
+                document: arena.document(document) for document in contents
+            } == contents
+
+            second = arena.vote(view.pair.token, 'b', defects, 'Stiff.')
+
+            (vote,) = store.votes('f')
+            assert (vote.choice, vote.defects, vote.note) == ('b', defects, 'Stiff.')
+            assert second.votes == 1
+            assert second.pair is not None
+            assert second.pair.token != view.pair.token
 
             with pytest.raises(UnknownItem):
-                arena.vote(view.pair.token, 'a', Defects(), None)
+                arena.vote(view.pair.token, 'b', defects, 'Stiff.')
+
+            for document in contents:
+                with pytest.raises(UnknownItem):
+                    arena.document(document)
 
         def test_keeps_a_session_open_until_no_case_remains(
             self, families_dir: Path, clock: Clock, store: VoteStore

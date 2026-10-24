@@ -31,6 +31,7 @@ from assistant_bench.outputs import Output, write_outputs
 from support import (
     finish_job,
     make_output,
+    make_system,
     write_case_family,
     write_task_family,
     write_trial,
@@ -381,6 +382,28 @@ class TestCheck:
         assert [agent.name for agent in job.agents] == ['oracle', 'nop']
         assert job.n_attempts == jobs.CHECK_ATTEMPTS
         assert [task.path.name for task in job.tasks if task.path] == list(tasks)
+
+    def test_refuses_a_task_without_an_author_before_running_harbor(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('large',))
+        path = families_dir / 'f' / 'tasks' / 'echo' / 'task.toml'
+        path.write_text(path.read_text().replace('author = "large"\n', ''))
+        monkeypatch.setattr(
+            cli, '_load_systems', lambda: {'large': make_system(name='large')}
+        )
+
+        result = invoke('check', 'f')
+
+        assert result.exit_code == 1
+        assert (
+            '`tasks/echo/task.toml`: set `[metadata] author` to a system name.'
+            in result.output
+        )
+        assert submitted == []
 
     def test_fails_when_an_earlier_task_family_fails_and_a_later_one_passes(
         self,
@@ -1043,6 +1066,99 @@ class TestRun:
 
 
 class TestCollect:
+    def test_reports_an_unknown_task_author_without_a_traceback(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_task_family(families_dir, 'echo', systems=('large',))
+        path = families_dir / 'f' / 'tasks' / 'echo' / 'task.toml'
+        path.write_text(
+            path.read_text().replace('author = "large"', 'author = "unknown"')
+        )
+        monkeypatch.setattr(
+            cli, '_load_systems', lambda: {'large': make_system(name='large')}
+        )
+        monkeypatch.setattr(jobs, 'collect', lambda family, systems: [])
+
+        result = invoke('collect', 'f')
+
+        assert result.exit_code == 1
+        assert (
+            '`tasks/echo/task.toml`: author `unknown` is not defined in `systems.toml`.'
+        ) in result.stderr
+        assert 'Traceback' not in result.output
+
+    def test_reports_each_vendor_pass_rate_with_authors_outside_the_family(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_task_family(
+            families_dir,
+            'own-a',
+            'own-b',
+            'other-a',
+            'other-b',
+            systems=('large', 'small'),
+        )
+        systems = {
+            'large': make_system(name='large', vendor='acme'),
+            'small': make_system(name='small', vendor='other'),
+            'writer': make_system(name='writer', vendor='other'),
+        }
+        for name in ('other-a', 'other-b'):
+            path = families_dir / 'f' / 'tasks' / name / 'task.toml'
+            path.write_text(
+                path.read_text().replace('author = "large"', 'author = "writer"')
+            )
+        outputs = [
+            make_output(
+                case=case,
+                system=system,
+                reward=float(case.startswith('own') == (system == 'large')),
+            )
+            for case in ('own-a', 'own-b', 'other-a', 'other-b')
+            for system in ('large', 'small')
+        ]
+        monkeypatch.setattr(cli, '_load_systems', lambda: systems)
+        monkeypatch.setattr(jobs, 'collect', lambda family, systems: outputs)
+
+        result = invoke('collect', 'f')
+        assert result.exit_code == 0, result.output
+
+        assert (
+            'System `large`: pass rate on own-vendor tasks 2/2 (100.0%), '
+            'other-vendor tasks 0/2 (0.0%).\n'
+        ) in result.output
+        assert (
+            'System `small`: pass rate on own-vendor tasks 2/2 (100.0%), '
+            'other-vendor tasks 0/2 (0.0%).\n'
+        ) in result.output
+
+    @pytest.mark.parametrize('reward', [0.0, None], ids=['failed', 'ungraded'])
+    def test_names_missing_vendor_groups_and_counts_failures(
+        self,
+        families_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        reward: float | None,
+    ) -> None:
+        write_task_family(families_dir, 'one', systems=('large',))
+        monkeypatch.setattr(
+            cli, '_load_systems', lambda: {'large': make_system(name='large')}
+        )
+        monkeypatch.setattr(
+            jobs,
+            'collect',
+            lambda family, systems: [
+                make_output(case='one', system='large', reward=reward)
+            ],
+        )
+
+        result = invoke('collect', 'f')
+        assert result.exit_code == 0, result.output
+
+        assert (
+            'System `large`: pass rate on own-vendor tasks 0/1 (0.0%), '
+            'other-vendor tasks no trials.\n'
+        ) in result.output
+
     @pytest.mark.parametrize(
         ('name', 'outputs', 'summary'),
         [
