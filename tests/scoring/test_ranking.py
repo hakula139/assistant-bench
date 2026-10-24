@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -160,19 +161,46 @@ class TestFit:
         assert np.isfinite(result.strength).all()
         assert 6 < result.strength[0] - result.strength[1] < 8
 
-    def test_raises_when_the_loss_cannot_be_minimized(self) -> None:
+    @pytest.mark.parametrize(
+        'covariate',
+        [
+            pytest.param([0.0] * 9, id='zero'),
+            pytest.param([1.0] * 9, id='position'),
+            pytest.param([1e16] * 9, id='scale-dependent-rank-tolerance'),
+            pytest.param([1.0, -1.0] * 4 + [1.0], id='system-contrast'),
+            pytest.param([1.0, -1.0] * 4 + [7.0], id='zero-weight-variation'),
+        ],
+    )
+    def test_omits_a_covariate_confounded_with_the_weighted_base_design(
+        self, covariate: list[float]
+    ) -> None:
+        comparisons = [
+            Comparison('large', 'small', 0.75, 'a'),
+            Comparison('small', 'large', 0.25, 'a'),
+        ] * 4 + [Comparison('large', 'small', 0.5, 'ignored', weight=0)]
+        matchups = Matchups.build(comparisons)
+        base = fit(matchups)
+
+        result = fit(matchups, np.array(covariate))
+
+        assert result.covariate is None
+        assert result.strength == pytest.approx(base.strength)
+        assert result.position == pytest.approx(base.position)
+
+    def test_raises_when_the_loss_cannot_be_minimized(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         matchups = Matchups.build(
             [
                 Comparison('large', 'small', 1.0, 'a'),
                 Comparison('small', 'large', 1.0, 'a'),
             ]
         )
+        failure = SimpleNamespace(success=False, message='iteration limit')
+        monkeypatch.setattr(optimize, 'minimize', lambda *args, **kwargs: failure)
 
-        with (
-            np.errstate(invalid='ignore'),
-            pytest.raises(RuntimeError, match='did not converge'),
-        ):
-            fit(matchups, np.array([np.nan, 1.0]))
+        with pytest.raises(RuntimeError, match='did not converge: iteration limit'):
+            fit(matchups)
 
 
 class TestBootstrap:
