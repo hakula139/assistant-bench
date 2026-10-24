@@ -23,6 +23,8 @@ Python Check and Node Check upload their coverage under the `python` and `web` f
 
 Only the deploy jobs below read secrets, and each reads them in its deploy step alone. List each new check job in CI Result's `needs`.
 
+Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke. Revisit the budget when the workload changes so a stalled job releases its runner and concurrency group promptly.
+
 ## Deploy
 
 The site deploys to Cloudflare Workers static assets, which `web/wrangler.toml` configures. Two jobs in the CI workflow publish the `site-dist` artifact that Build Site uploads, so each push builds the site once, and a separate workflow removes previews:
