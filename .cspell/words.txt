@@ -86,6 +86,7 @@ trixie
 trustme
 typer
 unbilled
+undici
 undos
 unpushed
 unranked
