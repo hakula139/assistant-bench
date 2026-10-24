@@ -80,6 +80,7 @@ FROM import_plans p, json_each(p.body, '$.dispositions') s;
 
 CREATE VIEW seal_import AS SELECT NULL AS plan_id, NULL AS now_ms WHERE 0;
 CREATE TRIGGER seal_import_insert INSTEAD OF INSERT ON seal_import
+WHEN (SELECT sealed_at FROM import_plans WHERE id = NEW.plan_id) IS NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM import_plans p
         JOIN import_sources s ON s.id = p.source_id

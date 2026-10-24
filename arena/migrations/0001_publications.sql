@@ -134,6 +134,7 @@ CREATE VIEW seal_evaluation AS
 SELECT NULL AS evaluation_id, NULL AS now_ms WHERE 0;
 
 CREATE TRIGGER seal_evaluation_insert INSTEAD OF INSERT ON seal_evaluation
+WHEN (SELECT sealed_at FROM evaluations WHERE id = NEW.evaluation_id) IS NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM evaluations e
@@ -166,6 +167,7 @@ CREATE VIEW seal_publication AS
 SELECT NULL AS publication_id, NULL AS now_ms WHERE 0;
 
 CREATE TRIGGER seal_publication_insert INSTEAD OF INSERT ON seal_publication
+WHEN (SELECT sealed_at FROM publications WHERE id = NEW.publication_id) IS NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM publications p JOIN evaluations e ON e.id = p.evaluation_id

@@ -129,6 +129,7 @@ END;
 CREATE VIEW seal_moderation AS SELECT NULL AS batch_id, NULL AS now_ms WHERE 0;
 
 CREATE TRIGGER seal_moderation_insert INSTEAD OF INSERT ON seal_moderation
+WHEN (SELECT sealed_at FROM moderation_batches WHERE id = NEW.batch_id) IS NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM moderation_batches b WHERE b.id = NEW.batch_id AND b.sealed_at IS NULL
@@ -301,6 +302,7 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE VIEW seal_attribution AS SELECT NULL AS plan_id, NULL AS now_ms WHERE 0;
 CREATE TRIGGER seal_attribution_insert INSTEAD OF INSERT ON seal_attribution
+WHEN (SELECT sealed_at FROM attribution_plans WHERE id = NEW.plan_id) IS NULL
 BEGIN
     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM attribution_plans p WHERE p.id = NEW.plan_id
         AND p.sealed_at IS NULL AND p.target_count = (SELECT count(*) FROM attribution_targets WHERE plan_id = p.id))
