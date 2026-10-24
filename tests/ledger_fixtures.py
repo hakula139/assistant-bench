@@ -1,7 +1,6 @@
 from assistant_bench_arena.ledger_models import (
     Case,
     Evaluation,
-    Mode,
     Output,
     Point,
     Publication,
@@ -109,7 +108,6 @@ def output_key(index: int, name: str) -> str:
 
 def make_release(
     *,
-    mode: Mode = 'local',
     policy: AnalysisPolicy = POLICY,
     family: str = 'writing',
     systems: tuple[str, ...] = ('large', 'small'),
@@ -203,33 +201,29 @@ def make_release(
         for index in range(cases)
         for name in systems
     )
-    approval = (
-        PublicApproval(
-            family=family,
-            cases=tuple(
-                CaseApproval(
-                    case_key=case_key(index),
-                    source='synthetic',
-                    attestation='Synthetic fixture content.',
-                    instruction_digest=digest(case_document(index).instruction),
-                    presentation_digest=digest(case_document(index)),
-                )
-                for index in range(cases)
-            ),
-            outputs=tuple(
-                OutputApproval(
-                    output_key=output_key(index, name),
-                    content_digest=digest(output_content(index, name)),
-                    render_digest=digest(
-                        {'render': 'text', 'content': output_content(index, name)}
-                    ),
-                )
-                for index in range(cases)
-                for name in systems
-            ),
-        )
-        if mode == 'public'
-        else None
+    approval = PublicApproval(
+        family=family,
+        cases=tuple(
+            CaseApproval(
+                case_key=case_key(index),
+                source='synthetic',
+                attestation='Synthetic fixture content.',
+                instruction_digest=digest(case_document(index).instruction),
+                presentation_digest=digest(case_document(index)),
+            )
+            for index in range(cases)
+        ),
+        outputs=tuple(
+            OutputApproval(
+                output_key=output_key(index, name),
+                content_digest=digest(output_content(index, name)),
+                render_digest=digest(
+                    {'render': 'text', 'content': output_content(index, name)}
+                ),
+            )
+            for index in range(cases)
+            for name in systems
+        ),
     )
     publication = Publication(
         id=publication_identity(evaluation.id, presentation, approval, rendered),
@@ -240,7 +234,6 @@ def make_release(
     )
 
     return Release(
-        mode=mode,
         policy=policy,
         evaluation=evaluation,
         cases=case_rows,
