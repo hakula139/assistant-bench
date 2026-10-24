@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from importlib import metadata
+from pathlib import Path
 from typing import Any, ClassVar, Self, override
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2, Terminus2Options
@@ -12,9 +13,10 @@ from harbor.llms.chat import Chat
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
-from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
+from openai.types.completion_usage import CompletionUsage
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 from tenacity import retry_if_not_exception_type
 
 from assistant_bench.catalog import load_export
@@ -26,6 +28,11 @@ from assistant_bench.harnesses.responses import (
     ResponsesChat,
     ResponsesLLM,
     attach_items,
+)
+
+
+_RESPONSE_METADATA = TypeAdapter(
+    dict[str, Any], config=ConfigDict(hide_input_in_errors=True)
 )
 
 
@@ -59,22 +66,48 @@ class _ConfiguredLiteLLM(LiteLLM):
         return self._output_limit
 
     @override
-    def _extract_usage_info(self, response: Any) -> UsageInfo | None:
-        usage = (
-            super()._extract_usage_info(response)
-            if response.usage is not None
-            else None
+    def _build_base_kwargs(self, logging_path: Path | None = None) -> dict[str, Any]:
+        kwargs = super()._build_base_kwargs(logging_path)
+        logger_fn = kwargs['logger_fn']
+
+        def record_usage(details: dict[str, Any]) -> None:
+            try:
+                self._record_usage(details)
+            finally:
+                if logger_fn is not None:
+                    logger_fn(details)
+
+        kwargs['logger_fn'] = record_usage
+        return kwargs
+
+    def _record_usage(self, details: dict[str, Any]) -> None:
+        if details.get('log_event_type') != 'post_api_call':
+            return
+        try:
+            response = _RESPONSE_METADATA.validate_json(details['original_response'])
+        except ValidationError:
+            return
+        if response.get('object') != 'chat.completion':
+            return
+
+        result: dict[str, Any] = {}
+        self.results.append(result)
+        if response.get('usage') is None:
+            return
+        try:
+            usage = CompletionUsage.model_validate(response['usage'])
+        except ValidationError:
+            raise ValueError('The provider returned invalid token usage.') from None
+
+        result.update(
+            input_tokens=usage.prompt_tokens,
+            cache_tokens=(
+                usage.prompt_tokens_details.cached_tokens or 0
+                if usage.prompt_tokens_details is not None
+                else 0
+            ),
+            output_tokens=usage.completion_tokens,
         )
-        self.results.append(
-            {
-                'input_tokens': usage.prompt_tokens,
-                'cache_tokens': usage.cache_tokens,
-                'output_tokens': usage.completion_tokens,
-            }
-            if usage is not None
-            else {}
-        )
-        return usage
 
 
 class Terminus(Terminus2):
