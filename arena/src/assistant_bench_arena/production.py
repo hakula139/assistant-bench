@@ -8,7 +8,16 @@ from pyodide.ffi import JsNull
 from workers import Request, Response, WorkerEntrypoint
 
 from assistant_bench_arena.admission import InvalidToken
-from assistant_bench_arena.api import RequestRejected, serve_http, validate_request
+from assistant_bench_arena.api import (
+    RequestRejected,
+    header,
+    serve_http,
+    validate_request,
+)
+from assistant_bench_arena.api_models import ErrorView
+from assistant_bench_arena.authentication import ApiError
+from assistant_bench_arena.bindings import RateLimited
+from assistant_bench_arena.http import INGRESS, Ingress
 from assistant_bench_arena.management_domain import execute, parse_request
 from assistant_bench_arena.management_models import RpcError, RpcFailure, RpcSuccess
 from assistant_bench_arena.owner import AppBindings, owner
@@ -25,13 +34,28 @@ class Default(OwnerEntrypoint):
     async def scheduled(self, controller: object, env: object, ctx: object) -> None:
         try:
             await self.owner.auth.ensure_ready()
-            await self.owner.ledger.maintenance.expire(time.time_ns() // 1_000_000)
+            now = time.time_ns() // 1_000_000
+            await self.owner.ledger.maintenance.expire(now)
+            lag = await self.owner.ledger.maintenance.attribution_lag(now)
         except Exception:
             raise RuntimeError('Scheduled voting maintenance failed.') from None
 
+        if lag > 0:
+            raise RuntimeError('Scheduled voting cleanup has expired associations.')
+
     async def fetch(self, request: Request) -> NativeResponse:
+        token = None
+
         try:
             native = request.js_object
+            now = time.time_ns() // 1_000_000
+            network = await self.owner.auth.preflight(
+                header(native, 'CF-Connecting-IP') or '', now
+            )
+            token = INGRESS.set(Ingress(now, network, header(native, 'Cookie') or ''))
+
+            if header(native, 'CF-Worker') is not None:
+                raise RequestRejected
 
             if native.method not in {'GET', 'POST'}:
                 raise RequestRejected
@@ -74,6 +98,18 @@ class Default(OwnerEntrypoint):
                 response = NativeResponse.new(
                     None if isinstance(stream, JsNull) else stream, asset.js_object
                 )
+        except ApiError as error:
+            response = Response(
+                ErrorView(error=error.code).model_dump_json(),
+                status=error.status,
+                headers={'Content-Type': 'application/json'},
+            ).js_object
+        except RateLimited:
+            response = Response(
+                '{"error":"rate_limited"}',
+                status=429,
+                headers={'Content-Type': 'application/json'},
+            ).js_object
         except RequestRejected:
             response = Response(
                 '{"error":"invalid_request"}',
@@ -86,6 +122,9 @@ class Default(OwnerEntrypoint):
                 status=503,
                 headers={'Content-Type': 'application/json'},
             ).js_object
+        finally:
+            if token is not None:
+                INGRESS.reset(token)
 
         response.headers.set('Cache-Control', 'no-store')
         response.headers.set('Referrer-Policy', 'no-referrer')

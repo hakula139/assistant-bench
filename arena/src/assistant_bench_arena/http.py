@@ -1,6 +1,5 @@
 """Same-origin browser operations with safe errors and receipt-first recovery."""
 
-import time
 from contextvars import ContextVar
 from dataclasses import dataclass
 from textwrap import dedent
@@ -55,22 +54,19 @@ class Ingress:
     cookies: str
 
 
+INGRESS: ContextVar[Ingress] = ContextVar('arena_ingress')
+
+
 class BrowserApi:
     def __init__(self, authentication: Authentication, voting: Voting) -> None:
         self.authentication = authentication
         self.voting = voting
-        self.ingress: ContextVar[Ingress] = ContextVar('arena_ingress')
 
     async def middleware(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         try:
-            token = self.ingress.set(await self.prepare(request))
-
-            try:
-                return await call_next(request)
-            finally:
-                self.ingress.reset(token)
+            return await call_next(request)
         except ApiError as error:
             return JSONResponse(
                 ErrorView(error=error.code).model_dump(), status_code=error.status
@@ -93,24 +89,15 @@ class BrowserApi:
         except Exception:
             return JSONResponse({'error': 'unavailable'}, status_code=503)
 
-    async def prepare(self, request: Request) -> Ingress:
-        now = time.time_ns() // 1_000_000
-        if 'CF-Worker' in request.headers:
-            raise ApiError(400, 'invalid_request')
-
-        address = request.headers.get('CF-Connecting-IP', '')
-        network = await self.authentication.preflight(address, now)
-        return Ingress(now, network, request.headers.get('Cookie', ''))
-
     async def status(self) -> StatusView:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
         return await self.authentication.status(ingress.cookies, ingress.now)
 
     async def families(self) -> list[FamilyView]:
         return list(self.voting.catalog.values())
 
     async def admission_document(self, request: Request) -> Response:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
         family = request.query_params.get('family')
 
         if family is not None and family not in self.voting.catalog:
@@ -161,7 +148,7 @@ class BrowserApi:
         return response
 
     async def admission(self, command: AdmissionRequest) -> Response:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
         result = await self.authentication.admit(
             ingress.cookies,
             command.command_id,
@@ -174,7 +161,7 @@ class BrowserApi:
         )
 
     async def admission_replay(self, command: AdmissionReplay) -> Response:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
         result = await self.authentication.admit(
             ingress.cookies,
             command.command_id,
@@ -209,7 +196,7 @@ class BrowserApi:
         )
 
     async def vote(self, command: VoteRequest) -> VoteAcknowledgment:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
 
         try:
             pair = self.voting.pairs.decode(
@@ -281,7 +268,7 @@ class BrowserApi:
         )
 
     async def _owner(self, *, grant: bool = True) -> tuple[Ingress, Credential]:
-        ingress = self.ingress.get()
+        ingress = INGRESS.get()
         return ingress, await self.authentication.owner(
             ingress.cookies, ingress.now, grant=grant
         )
