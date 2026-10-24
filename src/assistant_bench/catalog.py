@@ -23,6 +23,7 @@ from assistant_bench.paths import REPO_ROOT
 
 
 EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
+GENERATION_PROTOCOL = 1
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
 
@@ -47,6 +48,8 @@ class CatalogModel(BaseModel):
 
     name: str
     vendor: str | None = Field(default=None, min_length=1)
+    max_output_tokens: int = Field(alias='maxTokens', gt=0)
+    context_window: int = Field(alias='contextWindow', gt=0)
     channel_id: dict[str, str] = Field(alias='channelId')
     channel_cost: dict[str, ChannelCost] = Field(alias='channelCost', default={})
     thinking: Thinking | None = None
@@ -113,6 +116,8 @@ class SystemConfig(BaseModel):
     route: str | None = None
     vendor: str | None = Field(default=None, min_length=1)
     price: Price | None = None
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    context_window: int | None = Field(default=None, gt=0)
     effort: str | None = None
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
@@ -128,8 +133,13 @@ class SystemConfig(BaseModel):
             raise ValueError('`price` applies only to a `route`')
         if self.model is not None and self.vendor is not None:
             raise ValueError('`vendor` applies only to a `route`')
+        limits = (self.max_output_tokens, self.context_window)
+        if self.model is not None and any(value is not None for value in limits):
+            raise ValueError('capacity settings apply only to a `route`')
         if self.route is not None and self.display_name is None:
             raise ValueError('a `route` needs a `display_name`')
+        if self.route is not None and any(value is None for value in limits):
+            raise ValueError('a `route` needs `max_output_tokens` and `context_window`')
         return self
 
 
@@ -137,7 +147,7 @@ _CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems
 
 
 class System(BaseModel):
-    """A system resolved to the route, effort, prompt, and price of every call."""
+    """The resolved generation contract and public labels for a system."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -145,6 +155,12 @@ class System(BaseModel):
     """Table name used by data and URLs, excluded from the fingerprint."""
 
     route: str
+    max_output_tokens: int = Field(gt=0)
+    """Configured completion allowance, including reasoning tokens."""
+
+    context_window: int = Field(gt=0)
+    """Configured context capacity for the agent's native context management."""
+
     price: Price | None
     effort: str | None
     prompt: str | None
@@ -154,14 +170,23 @@ class System(BaseModel):
 
     vendor: str | None = None
 
+    @model_validator(mode='after')
+    def _check_capacity(self) -> Self:
+        if self.max_output_tokens >= self.context_window:
+            raise ValueError('`max_output_tokens` must be less than `context_window`')
+        return self
+
     @property
     def fingerprint(self) -> str:
         """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
+            'protocol': GENERATION_PROTOCOL,
             'route': self.route,
             'effort': self.effort,
             'harness': self.harness,
+            'max_output_tokens': self.max_output_tokens,
+            'context_window': self.context_window,
             'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
         }
 
@@ -226,9 +251,13 @@ def resolve_system(
     prompt = _prompt(name, config.prompt, export)
     if config.route is not None:
         assert config.display_name is not None
+        assert config.max_output_tokens is not None
+        assert config.context_window is not None
         return System(
             name=name,
             route=config.route,
+            max_output_tokens=config.max_output_tokens,
+            context_window=config.context_window,
             vendor=config.vendor,
             price=config.price,
             effort=config.effort,
@@ -259,6 +288,8 @@ def resolve_system(
     return System(
         name=name,
         route=route,
+        max_output_tokens=entry.max_output_tokens,
+        context_window=entry.context_window,
         vendor=entry.vendor,
         price=_price(entry.channel_cost.get(channel)),
         effort=_resolve_effort(name, config.effort, entry.thinking),
@@ -281,6 +312,8 @@ def pin(system: System) -> SystemConfig:
         )
     return SystemConfig(
         route=system.route,
+        max_output_tokens=system.max_output_tokens,
+        context_window=system.context_window,
         vendor=system.vendor,
         price=system.price,
         effort=system.effort,

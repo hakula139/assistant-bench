@@ -15,7 +15,5 @@ reference = "gemini-3.8-flash"
 render = "diff"
 samples = 1
 harness = "terminus-2"
-max_turns = 40
-max_output_tokens = 32000
 categories = ["bug-fix", "feature", "refactor"]
 defects = ["scope", "conventions", "complexity", "testing", "clarity"]

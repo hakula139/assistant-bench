@@ -1,18 +1,20 @@
 # Systems
 
-A system is one configuration under test: a model route, an effort, a harness, and an optional system prompt. [`systems.toml`](../../systems.toml) declares each system as a table, whose keys are covered in [Authoring](../guide/authoring.md#systems).
+A system is one generation configuration under test: a model route, completion and context allowances, an effort, a harness, and an optional system prompt. [`systems.toml`](../../systems.toml) declares each system as a table, whose keys are covered in [Authoring](../guide/authoring.md#systems).
 
 ## Resolution
 
-A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its vendor, its route from its single channel, its prices, the default [display name](../guide/authoring.md#systems), and its effort rules: the system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A catalog model without exactly one channel fails to resolve, so such a system sets its `route`, `vendor`, and `price` directly. Both a channel priced at zero and a route without a `price` report as unpriced.
+A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its vendor, single route, prices, configured completion and context allowances, default [display name](../guide/authoring.md#systems), and effort rules. The system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A bare route supplies its own capacities and display name. Both a channel priced at zero and a route without a `price` report as unpriced.
+
+The catalog's `maxTokens` is the configured completion allowance, including reasoning. It is not proof of the endpoint's maximum capacity. The bench uses that allowance directly and leaves effort at the resolved setting, since higher effort does not establish better writing. Terminus uses the configured context window minus the completion allowance as its input limit, reserving completion space through Harbor's native context management.
 
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 
 ## Fingerprints
 
-A system's fingerprint hashes its resolved route, effort, harness, and the SHA-256 of its prompt text. Because the table name and the display name are excluded, renaming either preserves the fingerprint, whereas modifying what the system sends changes it. A task family runs each system under its own `harness`, so one table carries one fingerprint on the case families, under `generate`, and another on a task family, while every fingerprint the case families record stays as it was.
+A system's fingerprint hashes its resolved route, capacities, effort, harness, generation protocol, and the SHA-256 of its prompt text. The table name and public labels are excluded. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
 
-Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool.
+Votes and scores pool only within one fingerprint. Altering a system's generation settings requires a new table name, preserving the old name's frozen results. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 
 On every PR and push to `main`, the [fingerprint check](../conventions/ci.md#checks) resolves each table at the base and head, each against its own nixos-config export, and fails when a table keeps its name but not its fingerprint, which stops a dependency bump from changing a system under its old name.
 
@@ -22,7 +24,7 @@ Closed reports freeze each public label and output fingerprint in `Report.system
 
 ## Harnesses
 
-`System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder returns the agent's kwargs from a system and the family's settings, and the job sends the system's route after its `model_prefix` as the model name.
+`System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route after its `model_prefix` as the model name.
 
 | Harness      | Agent                                         | Model name       | Environment                                      |
 | ------------ | --------------------------------------------- | ---------------- | ------------------------------------------------ |
@@ -53,4 +55,4 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 
 ## Concurrency
 
-Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time, while a case family's job runs at most eight trials at once and a task family's job four, since each task trial can run an agent container and a verifier container. Each request is bounded by the family's `max_output_tokens`, a rendered case's trial by a 900-second agent timeout, and a task's trial by its `[agent] timeout_sec` and the family's `max_turns`, and a failed trial is retried once.
+Systems sharing a route share one Harbor `concurrency_group`, which caps that route at four trials at a time. A case family's job runs at most eight trials at once and a task family's job four, since each task trial can hold an agent and a verifier container. A rendered case has a 900-second operational timeout, and authored tasks set `[agent] timeout_sec`. Terminus uses its native completion loop without a family turn cutoff. Harbor retries a failed trial once.

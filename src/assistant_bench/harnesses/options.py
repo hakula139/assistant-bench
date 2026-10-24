@@ -3,26 +3,24 @@
 from typing import Any
 
 from assistant_bench.catalog import System
-from assistant_bench.families import Settings
 
 
-def generate(system: System, settings: Settings) -> dict[str, Any]:
-    assert settings.max_output_tokens is not None
+def generate(system: System) -> dict[str, Any]:
     return _labels(system) | {
         'effort': system.effort,
         'system_prompt': system.prompt,
-        'max_output_tokens': settings.max_output_tokens,
+        'max_output_tokens': system.max_output_tokens,
     }
 
 
-def terminus(system: System, settings: Settings) -> dict[str, Any]:
-    assert settings.max_turns is not None
-    assert settings.max_output_tokens is not None
+def terminus(system: System) -> dict[str, Any]:
     values = _labels(system) | {
-        'max_turns': settings.max_turns,
-        'llm_call_kwargs': {'max_completion_tokens': settings.max_output_tokens},
+        'llm_call_kwargs': {'max_completion_tokens': system.max_output_tokens},
+        'model_info': {
+            'max_input_tokens': system.context_window - system.max_output_tokens,
+            'max_output_tokens': system.max_output_tokens,
+        },
         'record_terminal_session': False,
-        'suppress_max_turns_warning': True,
     }
 
     if system.effort is not None:

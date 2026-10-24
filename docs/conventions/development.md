@@ -39,7 +39,8 @@ Commands stay minimal, and settings live in config files:
 | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
 | Systems under test                                                            | `systems.toml`                                                                                                        |
-| A family's scorer, systems, samples, and output bound                         | `families/<family>/family.toml`                                                                                       |
+| A family's scorer, systems, and samples                                       | `families/<family>/family.toml`                                                                                       |
+| Model completion and context allowances                                       | The shared model catalog, or a bare route's `systems.toml` table                                                      |
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
 | Repeat share, seed votes, and the refit interval                              | `arena/scheduler.py`                                                                                                  |
 | The arena's loopback ports and render policy                                  | `arena/api.py`                                                                                                        |

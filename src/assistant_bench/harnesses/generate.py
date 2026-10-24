@@ -27,8 +27,8 @@ class GenerateOptions(Labels):
 class Generate(BaseAgent):
     """Agent that answers with one chat-completions request, writing `output.txt`.
 
-    The model name is the endpoint's model ID. HTTP errors raise, so the job's retry
-    policy reruns the trial, while a reply cut off by the token limit is a valid output.
+    HTTP errors raise for Harbor's retry policy. Incomplete replies remain recorded
+    attempts and fail the completion gate.
     """
 
     options_model = GenerateOptions

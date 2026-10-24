@@ -109,4 +109,4 @@ A regrade is a new trial in the new job that names its source trial, so collecti
 
 Reused trials stay in their original job, so collection reads every job directory of the family. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns.
 
-Within a slot it prefers a successful trial whose recorded agent configuration, environment, and verifier-disable setting match the current job, then the oldest, so changed inputs replace what an earlier job produced while a rerun of the same inputs keeps the outputs its votes refer to, and an errored trial drops out once a rerun replaces it.
+Collection requires the current agent configuration, environment, and verifier-disable setting, including the originating solution's generation inputs. It excludes unlisted systems and stale configurations. Within a current slot it prefers a successful trial and then the oldest, so an equivalent rerun keeps the original output and an errored trial drops out when a successful rerun replaces it.

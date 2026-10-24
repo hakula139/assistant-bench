@@ -222,14 +222,14 @@ def drifted_systems(
     )
 
 
-def _agent_config(family: Family, system: System) -> trial_config.AgentConfig:
+def _agent_config(system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
         model_name=f'{harness.model_prefix}{system.route}',
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
-        kwargs=harness.options(system, family.settings),
+        kwargs=harness.options(system),
     )
 
 
@@ -244,7 +244,7 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     job whose harnesses are all single-call runs in the host environment, which
     starts no container, and any other job runs in Harbor's Docker environment.
     """
-    agents = [_agent_config(family, system) for system in systems]
+    agents = [_agent_config(system) for system in systems]
     sources = [source for source, _ in _sources(family)]
     tasks_source = family.source == 'tasks'
     return _job(
@@ -554,10 +554,11 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     keeps only trials of its current tasks at a version Harbor would reuse, so a
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
-    preferring a successful trial whose recorded agent configuration, environment,
-    and verifier-disable setting match the current job, and otherwise the oldest.
-    Costs come from the current catalog price, so a system missing from `systems`
-    or without a price reports as unpriced.
+    keeping only trials whose recorded generation, environment, and verifier
+    settings match the current job. A successful trial replaces an errored one,
+    while equivalent successful trials keep their original order.
+    Costs come from the current catalog price. A system without a price reports
+    as unpriced.
 
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor
@@ -572,26 +573,25 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     check_harness(family)
     expected = _inputs(family, list(systems.values()))
     candidates = [
-        (
-            candidate,
-            (
-                candidate.trial.lock.agent,
-                candidate.trial.lock.environment,
-                candidate.trial.lock.verifier.disable,
-            )
-            == expected.get(candidate.system),
-        )
+        candidate
         for candidate in _read_trials(
             family, _sources(family), _current_versions(family)
         )
+        if (
+            candidate.trial.lock.agent,
+            candidate.trial.lock.environment,
+            candidate.trial.lock.verifier.disable,
+        )
+        == expected.get(candidate.system)
+        and candidate.origin.lock.agent == candidate.trial.lock.agent
+        and candidate.origin.lock.environment == candidate.trial.lock.environment
     ]
 
     candidates.sort(
         key=lambda candidate: (
-            candidate[0].error is not None,
-            not candidate[1],
-            candidate[0].job,
-            candidate[0].name,
+            candidate.error is not None,
+            candidate.job,
+            candidate.name,
         )
     )
 
@@ -600,7 +600,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     )
 
     solutions: set[tuple[str, str]] = set()
-    for candidate, _ in candidates:
+    for candidate in candidates:
         if (candidate.job, candidate.name) in solutions:
             continue
         solutions.add((candidate.job, candidate.name))
@@ -626,16 +626,15 @@ def _inputs(
 ) -> dict[str, tuple[trial_config.AgentConfig, trial_config.EnvironmentConfig, bool]]:
     """Return the current agent, environment, and verifier-disable inputs.
 
-    A task family that lists no systems may lack the settings its harness needs,
-    so it sends none.
+    Only systems currently listed by the family can contribute outputs.
     """
-    if family.source == 'tasks' and not family.settings.systems:
-        return {}
-    resolved = family_systems(family, systems)
+    resolved = family_systems(
+        family, [system for system in systems if system.name in family.settings.systems]
+    )
     environment = _environment(resolved)
     return {
         system.name: (
-            _agent_config(family, system),
+            _agent_config(system),
             environment,
             family.source != 'tasks',
         )
