@@ -186,10 +186,13 @@ class LedgerReads:
             ),
         )
 
+    async def publication_metadata(self, identity: str) -> Publication:
+        return await self._one('publications', identity, Publication)
+
     async def publication(
         self, identity: str
     ) -> tuple[Publication, tuple[RenderedOutput, ...]]:
-        publication = await self._one('publications', identity, Publication)
+        publication = await self.publication_metadata(identity)
         rendered = await self._records(
             'rendered_outputs', 'publication_id', identity, 'output_key', RenderedOutput
         )

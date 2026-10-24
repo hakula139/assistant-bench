@@ -33,7 +33,7 @@ class OwnedSession(Record):
     """Ordinary selected coverage members accepted in this session."""
 
     undo_acknowledgment: str | None
-    """Latest unwithdrawn receipt, including independently moderated choices."""
+    """Latest receipt without a withdrawal, including moderated choices."""
 
 
 class ClaimState(Record):
