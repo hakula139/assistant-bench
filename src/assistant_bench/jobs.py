@@ -41,6 +41,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.responses import ResponseCompletionError
 from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
@@ -470,12 +471,17 @@ def _job(
     n_concurrent: int,
     verify: bool,
 ) -> JobConfig:
+    retry = RetryConfig(max_retries=1)
+    retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
+        ResponseCompletionError.__name__
+    }
+
     return JobConfig(
         jobs_dir=jobs_dir,
         n_attempts=n_attempts,
         n_concurrent_trials=n_concurrent,
         quiet=True,
-        retry=RetryConfig(max_retries=1),
+        retry=retry,
         environment=environment,
         verifier=trial_config.VerifierConfig(disable=not verify),
         agents=agents,

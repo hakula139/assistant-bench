@@ -14,12 +14,14 @@ from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
+from tenacity import retry_if_not_exception_type
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.responses import (
+    ResponseCompletionError,
     ResponsesChat,
     ResponsesLLM,
     attach_items,
@@ -133,6 +135,11 @@ class Terminus(Terminus2):
             use_responses_api=use_responses_api,
             **constructor_kwargs,
         )
+
+    _query_llm = Terminus2._query_llm.retry_with(
+        retry=Terminus2._query_llm.retry.retry
+        & retry_if_not_exception_type(ResponseCompletionError)
+    )
 
     @override
     async def _run_agent_loop(

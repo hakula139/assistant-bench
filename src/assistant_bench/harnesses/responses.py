@@ -80,13 +80,13 @@ class ResponseResult:
             'completed',
             'incomplete',
         ):
-            raise APIError(
+            raise ResponseCompletionError(
                 'The Responses API did not return a finished response.',
                 request=request,
                 body=None,
             )
         if any(item.type == 'function_call' for item in response.output):
-            raise APIError(
+            raise ResponseCompletionError(
                 'The Responses API returned an unexpected function call.',
                 request=request,
                 body=None,
@@ -96,11 +96,15 @@ class ResponseResult:
                 error = ResponseLengthExceededError(self)
                 raise error
             if self.details['finish_reason'] != 'stop':
-                raise APIError(
+                raise ResponseCompletionError(
                     'The Responses API did not return a complete answer.',
                     request=request,
                     body=None,
                 )
+
+
+class ResponseCompletionError(APIError):
+    """An accepted request whose semantic result must not trigger regeneration."""
 
 
 class ResponseLengthExceededError(OutputLengthExceededError):
