@@ -1572,6 +1572,7 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
+                        mode='public',
                         quotas=(
                             Quota(
                                 operation='issue',
@@ -1596,7 +1597,7 @@ class TestLedger:
 
                     for index in range(5):
                         family = f'family-{index}'
-                        release = await publish(ledger, family=family)
+                        release = await publish(ledger, family=family, mode='public')
                         await ledger.activate(
                             Context(
                                 command_id=f'activate:{family}',
