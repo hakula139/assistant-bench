@@ -550,7 +550,7 @@ class _Candidate:
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
-    A case family keeps only trials of each case's installed task. A task family
+    A case family requires the current source and render contract. A task family
     keeps only trials of its current tasks at a version Harbor would reuse, so a
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
@@ -571,11 +571,12 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         task is invalid, or the harness is one `check_harness` refuses.
     """
     check_harness(family)
+    cases = {case.id: case for case in load_cases(family)}
     expected = _inputs(family, list(systems.values()))
     candidates = [
         candidate
         for candidate in _read_trials(
-            family, _sources(family), _current_versions(family)
+            family, _sources(family), _current_versions(family, cases)
         )
         if (
             candidate.trial.lock.agent,
@@ -610,7 +611,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
 
     outputs = sorted(
         (
-            _output(family, candidate, systems)
+            _output(family, candidate, systems, cases[candidate.case].instruction)
             for group in groups.values()
             for candidate in group[: family.settings.samples]
         ),
@@ -652,8 +653,9 @@ def read_trials(
     ValueError
         The directory is not a job directory, or a trial record is unreadable.
     """
+    cases = {case.id: case for case in load_cases(family)}
     return [
-        _output(family, candidate, systems)
+        _output(family, candidate, systems, cases[candidate.case].instruction)
         for candidate in _read_trials(family, [_source(job_dir)])
     ]
 
@@ -682,14 +684,20 @@ def _read_trials(
     return records
 
 
-def _current_versions(family: Family) -> dict[str, str]:
-    """Return the version of each current task, keyed by the case ID."""
+def _current_versions(family: Family, cases: dict[str, Case]) -> dict[str, str]:
+    """Return expected current task versions without changing rendered tasks."""
     match family.source:
         case 'cases':
-            directory = tasks_dir(family)
-            tasks = list(directory.iterdir()) if directory.is_dir() else []
+            versions: dict[str, str] = {}
+            for case in cases.values():
+                package = render_task_config(
+                    f'{family.name}/{case.id}', case.instruction
+                ).task
+                assert package is not None and package.version is not None
+                versions[case.id] = package.version
+            return versions
         case 'tasks':
-            tasks = [case_task(family, case.id) for case in load_cases(family)]
+            tasks = [case_task(family, case) for case in cases]
         case _:
             assert_never(family.source)
 
@@ -753,6 +761,7 @@ def _output(
     family: Family,
     candidate: _Candidate,
     systems: dict[str, System],
+    instruction: str,
 ) -> Output:
     """Materialize the originating solution with its selected trial's verdict."""
     trial, origin, case = candidate.trial, candidate.origin, candidate.case
@@ -776,7 +785,12 @@ def _output(
         text=text,
         reward=reward,
         gate_failures=_gate_failures(
-            family, case, text, finish_reason, reward, errored=exception is not None
+            family,
+            instruction,
+            text,
+            finish_reason,
+            reward,
+            errored=exception is not None,
         ),
         finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
@@ -821,7 +835,7 @@ def _text(
 
 def _gate_failures(
     family: Family,
-    case: str,
+    instruction: str,
     text: str | None,
     finish_reason: str | None,
     reward: float | None,
@@ -834,19 +848,13 @@ def _gate_failures(
     since Harbor still runs the verifier.
     """
     match family.settings:
-        case VotesSettings(gates=gates):
+        case VotesSettings():
             if family.source == 'tasks':
                 if reward is None:
                     return None
                 return [Gate.TESTS] if reward < 1 else []
             if errored:
                 return None
-
-            instruction = (
-                (case_task(family, case) / 'instruction.md').read_text()
-                if gates.script
-                else ''
-            )
 
             return failed_gates(family.settings, text or '', finish_reason, instruction)
         case TaskTestsSettings():

@@ -9,8 +9,8 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5", "gpt-6.1-sol"]
-reference = "gpt-6.1-sol"
+systems = ["opus-5.5-max", "gpt-6.1-sol-max"]
+reference = "gpt-6.1-sol-max"
 samples = 1
 categories = ["message"]
 ```
