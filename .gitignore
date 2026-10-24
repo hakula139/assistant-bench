@@ -1,17 +1,15 @@
 # Build output
-/.coverage
-/coverage.xml
-/web/.astro/
-/web/coverage/
-/web/dist/
-__pycache__/
+.coverage
+coverage/
+coverage.xml
+dist/
 *.egg-info/
 
 # Dependencies
-/.venv/
-/arena/.venv-workers/
-/arena/python_modules/
+.venv/
+.venv-workers/
 node_modules/
+python_modules/
 
 # Environment
 .dev.vars
@@ -22,24 +20,28 @@ node_modules/
 !.env.example
 
 # Nix
-/.direnv/
+.direnv/
 /.pre-commit-config.yaml
 result
-/result-*
+result-*
+!result/
+!result-*/
 
 # Tool caches
+.astro/
 .mypy_cache/
 .pnpm-store/
 .pytest_cache/
 .ruff_cache/
 .wrangler/
+__pycache__/
 
 # OS files
 .DS_Store
 
 # Editor / assistant local settings
-/.agents/plans
-/.claude/agent-memory-local
-/.claude/plans
-/.claude/settings.local.json
-/.claude/worktrees
+**/.agents/plans
+**/.claude/agent-memory-local
+**/.claude/plans
+**/.claude/settings.local.json
+**/.claude/worktrees
