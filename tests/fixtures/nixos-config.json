@@ -5,6 +5,7 @@
     "models": {
       "acme-large": {
         "name": "Acme Large",
+        "vendor": "acme",
         "channelId": {
           "acme": "acme/large"
         },
@@ -24,6 +25,7 @@
       },
       "acme-small": {
         "name": "Acme Small",
+        "vendor": "acme",
         "channelId": {
           "acme": "acme/small"
         },
@@ -43,6 +45,7 @@
       },
       "local-model": {
         "name": "Local Model",
+        "vendor": "other",
         "channelId": {
           "local": "local/model"
         },
@@ -57,6 +60,7 @@
       },
       "acme-routed": {
         "name": "Acme Routed",
+        "vendor": "acme",
         "channelId": {
           "acme": "acme/routed",
           "router": "router/acme/routed"
@@ -65,6 +69,7 @@
       },
       "acme-unrouted": {
         "name": "Acme Unrouted",
+        "vendor": "acme",
         "channelId": {},
         "channelCost": {}
       }

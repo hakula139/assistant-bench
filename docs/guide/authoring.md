@@ -57,7 +57,7 @@ Each line of `cases.jsonl` is one case:
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Harbor runs the task's scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so the image must include bash. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
-A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes.
+A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, the `systems.toml` name of the system that wrote the task, which may be outside the family's participants.
 
 `bench check` checks each task's `task.toml` for what a run needs:
 
@@ -102,6 +102,7 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | -------------- | ------------------------------------------------------------------------------------------------------------- |
 | `model`        | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
 | `route`        | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
+| `vendor`       | For a `route`, its model vendor. Required when a task family lists the system or names it as an author        |
 | `price`        | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
 | `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
 | `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
@@ -114,7 +115,7 @@ Because changing a system's route, effort, or prompt changes its [fingerprint](.
 When the catalog moves a model key to a new snapshot, keep the old name on its old resolution:
 
 1. Run `uv run bench fingerprints <base>`, which names each system whose fingerprint changed and prints the `route` table that `<base>` resolved it to from that revision's catalog. A system with a `prompt` cannot be pinned this way, so the command prints only a notice for it.
-2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `effort`, `price`, and `display_name` and sets no `model`. The pinned `price` matters because collection prices each output from the current system table, so a pin without it leaves the frozen outputs unpriced and out of the cost tie-break.
+2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `vendor`, `effort`, `price`, and `display_name` and sets no `model`. The pinned `price` matters because collection prices each output from the current system table, so a pin without it leaves the frozen outputs unpriced and out of the cost tie-break.
 3. Add the new snapshot in a table whose key ends in the snapshot, as `deepseek-v4.1-flash-1017` does, and set a `display_name` that tells it apart from the pinned table.
 4. Replace the old name with the new one in each family's `systems` list, including `reference` where it named the old one. `bench close` anchors the board at the new snapshot once it ranks, through its votes or the results its gates and tests settle, and until then anchors it at the most-voted system and records that system as the round's `anchor`.
 5. For a system with a `prompt`, drop its table and keep the old name only in closed reports, since its fingerprint cannot be pinned.

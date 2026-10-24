@@ -147,15 +147,22 @@ def check_harness(family: Family) -> None:
 
 
 def check_systems(family: Family, systems: list[System]) -> None:
-    """Check the family's harness, and that it can send each system's prompt.
+    """Check the family's harness, prompts, and task-system vendor metadata.
 
     Raises
     ------
     ValueError
-        The harness is one `check_harness` refuses, or a system has a prompt
-        that it cannot send.
+        The harness is one `check_harness` refuses, a system has a prompt that
+        it cannot send, or a task system has no vendor metadata.
     """
     check_harness(family)
+    if family.source == 'tasks':
+        unowned = [system.name for system in systems if system.vendor is None]
+        if unowned:
+            raise ValueError(
+                f'Family `{family.name}`: set vendor metadata for {code(unowned)} '
+                'in the model catalog or their `route` tables in `systems.toml`.'
+            )
     harness = family.settings.harness
     if harness is None or HARNESSES[harness].sends_prompt:
         return
@@ -308,6 +315,35 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
         raise ValueError(
             f'Family `{family.name}` has tasks to fix:\n' + '\n'.join(problems)
         )
+
+
+def author_vendors(
+    family: Family, tasks: list[Path], systems: dict[str, System]
+) -> dict[str, str]:
+    """Return each task author's vendor, refusing missing or unknown authors."""
+    authors = {}
+    problems = []
+    for task in tasks:
+        location = f'`{task_location(family, task)}/task.toml`'
+        author = _task_config(task).metadata.get('author')
+        if not isinstance(author, str) or not author:
+            problems.append(f'{location}: set `[metadata] author` to a system name.')
+        elif author not in systems:
+            problems.append(
+                f'{location}: author `{author}` is not defined in `systems.toml`.'
+            )
+        elif (vendor := systems[author].vendor) is None:
+            problems.append(
+                f'{location}: author `{author}` needs vendor metadata in the '
+                'model catalog or its `route` table in `systems.toml`.'
+            )
+        else:
+            authors[task.name] = vendor
+    if problems:
+        raise ValueError(
+            f'Family `{family.name}` has authors to fix:\n' + '\n'.join(problems)
+        )
+    return authors
 
 
 def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:

@@ -45,6 +45,7 @@ class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
     name: str
+    vendor: str | None = Field(default=None, min_length=1)
     channel_id: dict[str, str] = Field(alias='channelId')
     channel_cost: dict[str, ChannelCost] = Field(alias='channelCost', default={})
     thinking: Thinking | None = None
@@ -115,6 +116,7 @@ class SystemConfig(BaseModel):
 
     model: str | None = None
     route: str | None = None
+    vendor: str | None = Field(default=None, min_length=1)
     price: Price | None = None
     effort: str | None = None
     prompt: str | None = None
@@ -126,6 +128,8 @@ class SystemConfig(BaseModel):
             raise ValueError('set exactly one of `model` and `route`')
         if self.model is not None and self.price is not None:
             raise ValueError('`price` applies only to a `route`')
+        if self.model is not None and self.vendor is not None:
+            raise ValueError('`vendor` applies only to a `route`')
         if self.route is not None and self.display_name is None:
             raise ValueError('a `route` needs a `display_name`')
         return self
@@ -150,6 +154,7 @@ class System(BaseModel):
     prompt: str | None
     harness: str = 'generate'
     display_name: str
+    vendor: str | None = None
 
     @property
     def fingerprint(self) -> str:
@@ -221,6 +226,7 @@ def resolve_system(
         return System(
             name=name,
             route=config.route,
+            vendor=config.vendor,
             price=config.price,
             effort=config.effort,
             prompt=prompt,
@@ -250,6 +256,7 @@ def resolve_system(
     return System(
         name=name,
         route=route,
+        vendor=entry.vendor,
         price=_price(entry.channel_cost.get(channel)),
         effort=_resolve_effort(name, config.effort, entry.thinking),
         prompt=prompt,
@@ -271,6 +278,7 @@ def pin(system: System) -> SystemConfig:
         )
     return SystemConfig(
         route=system.route,
+        vendor=system.vendor,
         price=system.price,
         effort=system.effort,
         display_name=system.display_name,
