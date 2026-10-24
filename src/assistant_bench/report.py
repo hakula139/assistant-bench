@@ -630,7 +630,8 @@ def _tests_results(outputs: list[Output]) -> TestsResults:
                 fingerprint=fingerprints[system],
                 trials=len(trials),
                 errored=len(trials) - len(finished),
-                pass_rate=sum(output.reward or 0.0 for output in trials) / len(trials),
+                pass_rate=sum(output.reward or 0.0 for output in finished)
+                / len(trials),
                 mean_cost_usd=_mean(output.cost_usd for output in finished),
                 p50_latency_sec=_median(output.latency_sec for output in finished),
             )
