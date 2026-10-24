@@ -94,6 +94,23 @@ class Transport(Protocol):
 
 _PAGE_ROWS = 250
 _PAGE_BYTES = 1_048_576
+_EXPORT_VIEWS: dict[ExportSection, str] = {
+    'evaluation': 'export_evaluation',
+    'publication': 'export_publication',
+    'points': 'export_points',
+    'policy': 'export_policy',
+    'cases': 'export_cases',
+    'systems': 'export_systems',
+    'outputs': 'export_outputs',
+    'numerics': 'export_numerics',
+    'receipts': 'export_receipts',
+    'events': 'export_events',
+    'targets': 'export_targets',
+    'actors': 'export_actors',
+    'sessions': 'export_sessions',
+    'import_sources': 'export_import_sources',
+    'import_rows': 'export_import_rows',
+}
 
 
 class Ledger:
@@ -972,14 +989,14 @@ class Ledger:
 
             after = parsed.key
 
+        view = _EXPORT_VIEWS[section]
         sizes = await self._rows(
-            """
-            SELECT row_key, length(CAST(body AS BLOB)) AS bytes FROM export_rows
-            WHERE export_id = ? AND section = ? AND row_key > ?
+            f"""
+            SELECT row_key, length(CAST(body AS BLOB)) AS bytes FROM {view}
+            WHERE export_id = ? AND row_key > ?
             ORDER BY row_key LIMIT ?
             """,
             export_id,
-            section,
             after,
             limit,
         )
@@ -1006,12 +1023,11 @@ class Ledger:
             raise ValueError('An export row exceeds the 1 MiB page boundary.')
 
         encoded = await self._rows(
-            """
-            SELECT body FROM export_rows WHERE export_id = ? AND section = ?
+            f"""
+            SELECT body FROM {view} WHERE export_id = ?
                 AND row_key > ? AND row_key <= ? ORDER BY row_key LIMIT ?
             """,
             export_id,
-            section,
             after,
             last,
             limit,

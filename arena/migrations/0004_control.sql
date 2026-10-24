@@ -387,31 +387,39 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER import_sources_no_delete BEFORE DELETE ON import_sources
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
-CREATE VIEW export_rows AS
+CREATE VIEW export_evaluation(export_id, section, row_key, body) AS
 SELECT x.id AS export_id, 'evaluation' AS section, e.id AS row_key, e.body
-FROM analysis_exports x JOIN evaluations e ON e.id = x.evaluation_id
-UNION ALL
+FROM analysis_exports x JOIN evaluations e ON e.id = x.evaluation_id;
+
+CREATE VIEW export_publication(export_id, section, row_key, body) AS
 SELECT x.id, 'publication', p.id, p.body
-FROM analysis_exports x JOIN publications p ON p.id = x.publication_id
-UNION ALL
+FROM analysis_exports x JOIN publications p ON p.id = x.publication_id;
+
+CREATE VIEW export_points(export_id, section, row_key, body) AS
 SELECT x.id, 'points', p.id, p.body
-FROM analysis_exports x JOIN point_snapshots p ON p.id = x.point_id
-UNION ALL
+FROM analysis_exports x JOIN point_snapshots p ON p.id = x.point_id;
+
+CREATE VIEW export_policy(export_id, section, row_key, body) AS
 SELECT x.id, 'policy', p.id, p.body
-FROM analysis_exports x JOIN policies p ON p.id = x.policy_id
-UNION ALL
+FROM analysis_exports x JOIN policies p ON p.id = x.policy_id;
+
+CREATE VIEW export_cases(export_id, section, row_key, body) AS
 SELECT x.id, 'cases', c.case_key, c.body
-FROM analysis_exports x JOIN evaluation_cases c ON c.evaluation_id = x.evaluation_id
-UNION ALL
+FROM analysis_exports x JOIN evaluation_cases c ON c.evaluation_id = x.evaluation_id;
+
+CREATE VIEW export_systems(export_id, section, row_key, body) AS
 SELECT x.id, 'systems', s.system_id, s.body
-FROM analysis_exports x JOIN evaluation_systems s ON s.evaluation_id = x.evaluation_id
-UNION ALL
+FROM analysis_exports x JOIN evaluation_systems s ON s.evaluation_id = x.evaluation_id;
+
+CREATE VIEW export_outputs(export_id, section, row_key, body) AS
 SELECT x.id, 'outputs', o.output_key, o.body
-FROM analysis_exports x JOIN evaluation_outputs o ON o.evaluation_id = x.evaluation_id
-UNION ALL
+FROM analysis_exports x JOIN evaluation_outputs o ON o.evaluation_id = x.evaluation_id;
+
+CREATE VIEW export_numerics(export_id, section, row_key, body) AS
 SELECT x.id, 'numerics', json_array(n.section, n.row_key), n.body
-FROM analysis_exports x JOIN evaluation_numerics n ON n.evaluation_id = x.evaluation_id
-UNION ALL
+FROM analysis_exports x JOIN evaluation_numerics n ON n.evaluation_id = x.evaluation_id;
+
+CREATE VIEW export_receipts(export_id, section, row_key, body) AS
 SELECT x.id, 'receipts', printf('%020d', r.seq), json_object(
     'seq', r.seq, 'acknowledgment', r.acknowledgment, 'lease_id', r.lease_id,
     'actor_id', r.actor_id, 'session_id', r.session_id, 'family', r.family,
@@ -422,41 +430,47 @@ SELECT x.id, 'receipts', printf('%020d', r.seq), json_object(
     'b_fingerprint', r.b_fingerprint, 'choice', r.choice, 'defects', json(r.defects),
     'duration_ms', r.duration_ms, 'repeat_of', r.repeat_of,
     'accepted_at', r.accepted_at, 'import_source', r.import_source, 'original_id', r.original_id)
-FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff
-UNION ALL
+FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff;
+
+CREATE VIEW export_events(export_id, section, row_key, body) AS
 SELECT x.id, 'events', printf('%020d', e.seq), json_object(
     'seq', e.seq, 'command_id', e.command_id, 'kind', e.kind, 'family', e.family,
     'principal', e.principal, 'request_hash', e.request_hash,
     'created_at', e.created_at, 'data', json(e.data))
-FROM analysis_exports x JOIN evidence_events e ON e.family = x.family AND e.seq <= x.event_cutoff
-UNION ALL
+FROM analysis_exports x JOIN evidence_events e ON e.family = x.family AND e.seq <= x.event_cutoff;
+
+CREATE VIEW export_targets(export_id, section, row_key, body) AS
 SELECT x.id, 'targets', printf('%020d/%020d', t.event_seq, t.ordinal), json_object(
     'event_seq', t.event_seq, 'ordinal', t.ordinal, 'receipt_seq', t.receipt_seq,
     'claim_id', t.claim_id, 'expected_version', t.expected_version,
     'transition', t.transition, 'reference_seq', t.reference_seq, 'lease_id', t.lease_id)
 FROM analysis_exports x JOIN evidence_events e ON e.family = x.family AND e.seq <= x.event_cutoff
-JOIN event_targets t ON t.event_seq = e.seq
-UNION ALL
+JOIN event_targets t ON t.event_seq = e.seq;
+
+CREATE VIEW export_actors(export_id, section, row_key, body) AS
 SELECT x.id, 'actors', a.id, json_object('id', a.id, 'created_at', a.created_at, 'owner_namespace', a.owner_namespace)
 FROM analysis_exports x JOIN actors a ON a.id IN (
     SELECT actor_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff
     UNION SELECT json_extract(data, '$.actor_id') FROM evidence_events
         WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute'
     UNION SELECT json_extract(data, '$.canonical_actor') FROM evidence_events
-        WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute')
-UNION ALL
+        WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute');
+
+CREATE VIEW export_sessions(export_id, section, row_key, body) AS
 SELECT x.id, 'sessions', s.id, json_object('id', s.id, 'actor_id', s.actor_id,
     'family', s.family, 'created_at', s.created_at, 'import_source', s.import_source)
 FROM analysis_exports x JOIN sessions s ON s.id IN (
-    SELECT session_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff)
-UNION ALL
+    SELECT session_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff);
+
+CREATE VIEW export_import_sources(export_id, section, row_key, body) AS
 SELECT x.id, 'import_sources', i.id, json_object('id', i.id, 'owner_id', i.owner_id,
     'source_schema', i.source_schema, 'file_digest', i.file_digest)
 FROM analysis_exports x JOIN import_sources i ON i.id IN (
     SELECT import_source FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff
     UNION SELECT s.import_source FROM sessions s JOIN vote_receipts r ON r.session_id = s.id
-        WHERE r.family = x.family AND r.seq <= x.receipt_cutoff)
-UNION ALL
+        WHERE r.family = x.family AND r.seq <= x.receipt_cutoff);
+
+CREATE VIEW export_import_rows(export_id, section, row_key, body) AS
 SELECT x.id, 'import_rows', json_array(i.source_id, i.row_kind, i.original_id), json_object(
     'source_id', i.source_id, 'row_kind', i.row_kind, 'original_id', i.original_id,
     'target_id', i.target_id, 'row_hash', i.row_hash, 'linkage', i.linkage)
