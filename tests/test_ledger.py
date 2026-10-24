@@ -39,6 +39,7 @@ from assistant_bench_arena.ledger_models import (
 from assistant_bench_arena.releases import Release, evaluation_identity, settlements
 from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements, parse_schema
 from assistant_bench_arena.serialization import digest
+from assistant_bench_arena.snapshots import OutputContentApproval
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import (
@@ -591,17 +592,24 @@ class TestLedger:
                     content_digest = (
                         digest(None) if failure == 'absent' else original.content_digest
                     )
+                    key = digest(
+                        {
+                            'source_digest': original.metadata.source_digest,
+                            'content_digest': content_digest,
+                        }
+                    )
                     changed = original.model_copy(
                         update={
-                            'key': digest(
-                                {
-                                    'source_digest': original.metadata.source_digest,
-                                    'content_digest': content_digest,
-                                }
-                            ),
+                            'key': key,
                             'content_digest': content_digest,
                             'metadata': original.metadata.model_copy(
-                                update={'errored': failure == 'errored'}
+                                update={
+                                    'errored': failure == 'errored',
+                                    'approval': OutputContentApproval(
+                                        output_key=key,
+                                        content_digest=content_digest,
+                                    ),
+                                }
                             ),
                         }
                     )
