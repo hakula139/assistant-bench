@@ -10,16 +10,18 @@ Learn how to vote on pairs by keyboard, read outputs as Markdown, and keep HTML 
 
 Each pair shows the case's prompt above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Under the prompt, What to check lists the points to judge by, which the model never saw. Nothing is selected until you choose:
 
-| Key        | Action                                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `a` / `b`  | A or B is better                                                                                                                     |
-| `t`        | Tie                                                                                                                                  |
-| `x`        | Both bad                                                                                                                             |
-| `1` to `5` | Toggle an issue on output A, in the order the family's Issues popover lists them                                                     |
-| `6` to `0` | Toggle the same issues on output B                                                                                                   |
-| `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field                               |
-| `Enter`    | Submit the vote and load the next pair. `Enter` submits even while a control in the pair has focus, and `Space` presses that control |
-| `u`        | Undo the last vote and show its pair again                                                                                           |
+| Key        | Action                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `a` / `b`  | A or B is better                                                                                       |
+| `t`        | Tie                                                                                                    |
+| `x`        | Both bad                                                                                               |
+| `1` to `5` | Toggle an issue on output A, in the order the family's Issues popover lists them                       |
+| `6` to `0` | Toggle the same issues on output B                                                                     |
+| `n`        | Write a note, where `Enter` starts a new line, `⌘↵` or `Ctrl+↵` submits, and `Escape` leaves the field |
+| `Enter`    | Submit from the pair background, or activate the focused control                                       |
+| `u`        | Undo the last vote and show its pair again                                                             |
+
+Letter and digit shortcuts work while the voting panel has focus. Each new pair focuses the panel, and leaving the note with `Escape` returns focus there. Header controls and open popovers keep their own keyboard behavior.
 
 An issue counts against the output you tag, whatever your verdict. Each family lists its own issues, such as wrong facts or a wrong tone on writing and off-scope changes or weak tests on code, and each output's Issues button shows what each issue means and toggles the same issues, which is how a phone tags them. A family that lists none shows no Issues button. The note stays in the vote store, where no report reads it. Outputs appear exactly as written, and the Markdown toggle beside the note renders both panes as Markdown, with raw HTML shown as text and images left unloaded.
 
