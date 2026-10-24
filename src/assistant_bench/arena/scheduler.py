@@ -15,8 +15,8 @@ from assistant_bench.scoring.ranking import (
     ELO_PER_LOGIT,
     Comparison,
     Matchups,
-    Ratings,
-    rate,
+    PointRatings,
+    rate_point,
 )
 
 
@@ -95,15 +95,15 @@ class Draw:
 class Board:
     """A family's ratings for the adaptive draw, which reuses them between refits.
 
-    A refit runs the full bootstrap, so the board refits only when `REFIT_VOTES`
-    votes have been cast or undone since the last fit, when it lacks a system the
-    draw weighs, or after `reset`. Each fit roots at the most-voted system, and
+    The board refits when `REFIT_VOTES` votes have been cast or undone since the
+    last point fit, when it lacks a system the draw weighs, or after `reset`.
+    Each fit roots at the most-voted system, and
     `order`, the family's `systems` list, breaks a tie.
     """
 
     def __init__(self, order: Sequence[str]) -> None:
         self._order = tuple(order)
-        self._ratings: Ratings | None = None
+        self._ratings: PointRatings | None = None
         self._fitted: frozenset[int] = frozenset()
 
     def reset(self) -> None:
@@ -115,7 +115,7 @@ class Board:
         votes: list[MatchedVote],
         settled: list[Comparison],
         systems: Collection[str],
-    ) -> Ratings:
+    ) -> PointRatings:
         """Return ratings that cover `systems`, refitting them when stale."""
         current = frozenset(m.vote.id for m in votes)
         if (
@@ -124,7 +124,7 @@ class Board:
             or not set(systems) <= set(self._ratings.systems)
         ):
             matchups = Matchups.build([m.vote.comparison() for m in votes] + settled)
-            self._ratings = rate(matchups, matchups.root(self._order))
+            self._ratings = rate_point(matchups, matchups.root(self._order))
             self._fitted = current
         return self._ratings
 
@@ -172,32 +172,23 @@ def draw(
 
 
 def pair_weights(
-    ratings: Ratings,
+    ratings: PointRatings,
     pairs: list[tuple[str, str]],
     counts: Counter[tuple[str, str]],
 ) -> dict[tuple[str, str], float]:
-    """Weight each pair of systems by p(1 - p) / (n + 1), among those that overlap.
+    """Weight each pair of systems by p(1 - p) / (n + 1).
 
     `p` is the fitted preference within the pair and `n` its votes in either
-    order, so the weight favors pairs that are close and have few votes. Pairs
-    whose intervals separate get no weight, unless every pair separates, in which
-    case all of them are weighed.
+    order, so the weight favors pairs that are close and have few votes.
     """
     index = {system: i for i, system in enumerate(ratings.systems)}
-    overlapping = [
-        (x, y)
-        for x, y in pairs
-        if ratings.lower[index[x]] <= ratings.upper[index[y]]
-        and ratings.lower[index[y]] <= ratings.upper[index[x]]
-    ]
-    weighed = overlapping or pairs
     gap = np.array(
-        [ratings.score[index[x]] - ratings.score[index[y]] for x, y in weighed]
+        [ratings.score[index[x]] - ratings.score[index[y]] for x, y in pairs]
     )
-    p = special.expit(gap / ELO_PER_LOGIT)
-    n = np.array([counts[(x, y)] + counts[(y, x)] for x, y in weighed])
-    weights = p * (1 - p) / (n + 1)
-    return {pair: float(weight) for pair, weight in zip(weighed, weights, strict=True)}
+    logit = gap / ELO_PER_LOGIT
+    n = np.array([counts[(x, y)] + counts[(y, x)] for x, y in pairs])
+    weights = special.expit(logit) * special.expit(-logit) / (n + 1)
+    return {pair: float(weight) for pair, weight in zip(pairs, weights, strict=True)}
 
 
 def _due_repeats(votes: list[MatchedVote], used: set[str], now: datetime) -> list[Draw]:
@@ -228,7 +219,7 @@ def _seed_pair(
 def _adaptive_pair(
     open_cases: dict[tuple[str, str], list[str]],
     counts: Counter[tuple[str, str]],
-    ratings: Ratings,
+    ratings: PointRatings,
     rng: np.random.Generator,
 ) -> tuple[str, str]:
     """Draw a pair by `pair_weights`, putting the order shown less often left."""

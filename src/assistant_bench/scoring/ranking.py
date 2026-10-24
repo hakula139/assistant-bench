@@ -130,7 +130,16 @@ class Fit:
 
 
 @dataclass(frozen=True)
-class Ratings:
+class PointRatings:
+    """Fitted scores on the Elo-like scale, plus the left side's advantage."""
+
+    systems: tuple[str, ...]
+    score: Floats
+    position: float
+
+
+@dataclass(frozen=True)
+class Ratings(PointRatings):
     """Scores on the Elo-like scale with their bootstrap intervals.
 
     `draws` holds each resample's scores, one row per resample, with NaN where
@@ -138,12 +147,9 @@ class Ratings:
     unbounded, so a bound that falls on one is infinite.
     """
 
-    systems: tuple[str, ...]
-    score: Floats
     lower: Floats
     upper: Floats
     draws: Floats
-    position: float
 
     def anchored(self, system: str) -> Ratings:
         """Move the scale so `system` sits at `ANCHOR`, shifting every score alike."""
@@ -240,6 +246,11 @@ def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floa
     return strengths
 
 
+def rate_point(matchups: Matchups, root: str) -> PointRatings:
+    """Place the root system's point score at `ANCHOR`."""
+    return _point_ratings(matchups.systems, fit(matchups), root)
+
+
 def rate(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Ratings:
     """Place the root system's score at `ANCHOR` with percentile intervals.
 
@@ -248,18 +259,18 @@ def rate(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Ratings:
     and keeps a detached system's displacement out of the others' draws.
     """
     point = fit(matchups)
+    ratings = _point_ratings(matchups.systems, point, root)
     shift = point.strength[matchups.systems.index(root)]
-    score = ANCHOR + ELO_PER_LOGIT * (point.strength - shift)
     draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, root, resamples) - shift)
-    draws += np.nanmean(score - draws, axis=1, keepdims=True)
+    draws += np.nanmean(ratings.score - draws, axis=1, keepdims=True)
     lower, upper = _interval(draws)
     return Ratings(
-        systems=matchups.systems,
-        score=score,
+        systems=ratings.systems,
+        score=ratings.score,
         lower=lower,
         upper=upper,
         draws=draws,
-        position=ELO_PER_LOGIT * point.position,
+        position=ratings.position,
     )
 
 
@@ -306,6 +317,15 @@ def rank_agreement(first: Floats, second: Floats) -> float | None:
         return None
     statistic = float(stats.kendalltau(first, second).statistic)
     return None if np.isnan(statistic) else statistic
+
+
+def _point_ratings(systems: tuple[str, ...], point: Fit, root: str) -> PointRatings:
+    shift = point.strength[systems.index(root)]
+    return PointRatings(
+        systems=systems,
+        score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),
+        position=ELO_PER_LOGIT * point.position,
+    )
 
 
 def _interval(draws: Floats) -> tuple[Floats, Floats]:
