@@ -3,10 +3,10 @@
   "scripts": {
     "build": "pnpm --filter web build",
     "format": "prettier --check .",
-    "lint": "markdownlint-cli2 \"**/*.md\" && pnpm --filter web lint",
+    "lint": "markdownlint-cli2 \"**/*.md\" && pnpm -r lint",
     "spellcheck": "git ls-files | cspell --no-progress --file-list stdin",
     "test": "pnpm --filter web test",
-    "typecheck": "pnpm --filter web typecheck"
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "cspell": "^10.4.0",
