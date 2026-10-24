@@ -29,6 +29,7 @@ type Rejection = Literal[
     'network_context',
     'pending_exists',
     'pending_limit',
+    'point_downgrade',
     'private_material',
     'publication_unsealed',
     'proof_consumed',

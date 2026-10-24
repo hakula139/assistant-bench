@@ -19,6 +19,23 @@ BEGIN
             AND p.id = NEW.publication_id AND p.sealed_at IS NOT NULL AND s.id = NEW.point_id
     ) THEN RAISE(ABORT, 'publication_unsealed') END;
 
+    SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM family_state f
+        JOIN point_snapshots current ON current.id = f.point_id
+        JOIN point_snapshots proposed ON proposed.id = NEW.point_id
+        WHERE f.family = NEW.family AND f.evaluation_id = NEW.evaluation_id
+            AND f.policy_id = proposed.policy_id AND current.source_export_id IS NOT NULL
+            AND (proposed.source_export_id IS NULL OR NOT EXISTS (
+                SELECT 1 FROM analysis_exports newer JOIN analysis_exports older
+                    ON older.id = current.source_export_id
+                WHERE newer.id = proposed.source_export_id
+                    AND newer.event_cutoff >= older.event_cutoff
+                    AND newer.receipt_cutoff >= older.receipt_cutoff
+                    AND newer.import_cutoff >= older.import_cutoff
+                    AND newer.import_source_cutoff >= older.import_source_cutoff
+                    AND newer.analysis_sequence >= older.analysis_sequence)))
+    ) THEN RAISE(ABORT, 'point_downgrade') END;
+
     INSERT INTO evidence_events(command_id, kind, family, principal, request_hash, created_at, data)
     VALUES (NEW.command_id, 'activate', NEW.family, NEW.principal, NEW.request_hash, NEW.now_ms,
         json_object('evaluation_id', NEW.evaluation_id, 'publication_id', NEW.publication_id,
