@@ -59,11 +59,12 @@ interface VotesBoardProps {
   labels: BoardLabels;
 }
 
-const ALL = 'all';
+const ALL = 'aggregate';
+const categoryOption = (category: string) => `category:${category}`;
 
 function leaderboardRows(
   results: VotesResults,
-  category: string,
+  category: string | null,
   names: SystemNames,
 ): LeaderboardRow[] {
   const row = (fit: Refit, standing: Standing | undefined): LeaderboardRow => ({
@@ -75,7 +76,7 @@ function leaderboardRows(
     votes: fit.votes,
     preliminary: fit.preliminary,
   });
-  if (category === ALL) {
+  if (category === null) {
     return results.standings.map((standing) => row(standing, standing));
   }
   const standings = new Map(results.standings.map((standing) => [standing.system, standing]));
@@ -158,13 +159,13 @@ function RoundSummary({
 export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
-  const [category, setCategory] = useSearchParam('category', ALL);
+  const [category, setCategory] = useSearchParam('category', null);
 
   const { round: activeRound, results } = rounds.find((item) => item.round === roundName) ?? latest;
   const categories = results.categories.map((board) => board.category);
-  const activeCategory = categories.includes(category) ? category : ALL;
+  const activeCategory = category !== null && categories.includes(category) ? category : null;
   const unranked =
-    activeCategory === ALL
+    activeCategory === null
       ? results.unranked
       : (results.categories.find((board) => board.category === activeCategory)?.unranked ?? []);
 
@@ -214,11 +215,13 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
         {categories.length > 0 && (
           <Filter
             label="Category"
-            value={activeCategory}
-            onChange={setCategory}
+            value={activeCategory === null ? ALL : categoryOption(activeCategory)}
+            onChange={(value) => {
+              setCategory(value === ALL ? null : value.slice('category:'.length));
+            }}
             options={[
               { value: ALL, label: 'All categories' },
-              ...categories.map((name) => ({ value: name, label: name })),
+              ...categories.map((name) => ({ value: categoryOption(name), label: name })),
             ]}
           />
         )}
@@ -229,7 +232,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
       <div className="flex flex-col gap-4">
         <Leaderboard
           rows={rows}
-          ranked={activeCategory === ALL}
+          ranked={activeCategory === null}
           anchorSystem={results.anchor}
           anchorTerm={anchorTerm}
           href={href}
@@ -299,7 +302,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
                 <figcaption className="text-sm text-muted-foreground">
                   Mean cost per {labels.unit}
                   {unpriced.length > 0 && `, leaving out the unpriced ${unpriced.join(', ')}`}
-                  {activeCategory !== ALL && ', over all categories'}
+                  {activeCategory !== null && ', over all categories'}
                 </figcaption>
                 <ParetoScatter
                   points={costPoints}
@@ -311,7 +314,7 @@ export function VotesBoard({ base, rounds, names, labels }: VotesBoardProps) {
             {latencyPoints.length > 0 && (
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
-                  Median latency{activeCategory !== ALL && ', over all categories'}
+                  Median latency{activeCategory !== null && ', over all categories'}
                 </figcaption>
                 <ParetoScatter points={latencyPoints} label="p50 latency" format={formatSeconds} />
               </figure>

@@ -43,6 +43,23 @@ describe('forestDomain', () => {
 
     expect(domain).toEqual(expected);
   });
+
+  test.each<[string, Estimate[]]>([
+    ['an all-tie round', [estimate(1000, 1000, 1000), estimate(1000, 1000, 1000)]],
+    ['one bounded standing', [estimate(1234, 1234, 1234)]],
+  ])('keeps a finite display span around %s without widening its intervals', (_, estimates) => {
+    const original = structuredClone(estimates);
+
+    const domain = forestDomain(estimates);
+    const ticks = forestTicks(domain);
+
+    expect(domain.every(Number.isFinite)).toBe(true);
+    expect(domain[0]).toBeLessThan(estimates[0].score);
+    expect(domain[1]).toBeGreaterThan(estimates[0].score);
+    expect(ticks.every(Number.isFinite)).toBe(true);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(estimates).toEqual(original);
+  });
 });
 
 describe('sharedDomain', () => {

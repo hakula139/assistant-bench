@@ -25,7 +25,7 @@ const TICKS = 5;
 /**
  * Returns the x domain of one board's forest plot, shared by every row: every interval's upper
  * end, and every lower end down to `AXIS_SPAN_BELOW_TOP` below the top score, rounded outward to
- * round ticks.
+ * round ticks. A collapsed interval uses the empty plot's display span centered on its score.
  */
 export function forestDomain(estimates: Estimate[]): [number, number] {
   if (estimates.length === 0) {
@@ -37,6 +37,10 @@ export function forestDomain(estimates: Estimate[]): [number, number] {
     top - AXIS_SPAN_BELOW_TOP,
   );
   const high = Math.max(...estimates.map((estimate) => estimate.interval.upper));
+  if (low === high) {
+    const halfSpan = (EMPTY_DOMAIN[1] - EMPTY_DOMAIN[0]) / 2;
+    return [low - halfSpan, high + halfSpan];
+  }
   const [start, stop] = nice(low, high, TICKS);
   return [start, stop];
 }
