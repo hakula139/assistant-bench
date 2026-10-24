@@ -284,18 +284,13 @@ class Lease(Record):
     receipt_seq: NonNegativeInt | None
 
 
-class Receipt(Record):
+class ObservationFacts(Record):
     seq: NonNegativeInt
     acknowledgment: str
-    lease_id: str
     actor_id: str
     session_id: str
     family: str
-    evaluation_id: str
-    publication_id: str
-    point_id: str
     claim_id: str
-    claim_version: NonNegativeInt
     case_key: str
     a_output: str
     b_output: str
@@ -305,17 +300,57 @@ class Receipt(Record):
     b_fingerprint: str
     choice: Choice
     defects: Defects
-    duration_ms: NonNegativeInt
     repeat_of: NonNegativeInt | None
-    accepted_at: Milliseconds
-    import_source: str | None = None
-    original_id: str | None = None
+    recorded_at: Milliseconds
+    """Server acceptance time for served votes or the original legacy timestamp."""
+
+
+class Receipt(ObservationFacts):
+    origin: Literal['served'] = 'served'
+    lease_id: str
+    evaluation_id: str
+    publication_id: str
+    point_id: str
+    claim_version: NonNegativeInt
+    duration_ms: NonNegativeInt
+
+
+class LegacyReceipt(ObservationFacts):
+    origin: Literal['legacy'] = 'legacy'
+    import_source: str
+    original_id: str
+    import_row_seq: NonNegativeInt
+    proof_evaluation_id: str
+    """Sealed inventory that proved the binding, separate from served provenance."""
+
+    legacy_duration_sec: Annotated[float, Field(ge=0)]
+
+
+type Observation = Annotated[Receipt | LegacyReceipt, Field(discriminator='origin')]
 
 
 class Target(Record):
     receipt_seq: Annotated[int, Field(strict=True, gt=0)]
     claim_version: NonNegativeInt
     exclusion_seq: NonNegativeInt | None = None
+
+
+class AttributionTarget(Record):
+    claim_id: Identifier
+    version: NonNegativeInt
+    canonical_actor: Identifier
+    kind: Literal['ordinary', 'repeat']
+    comparison_key: str
+    selected_receipt: NonNegativeInt | None
+    winner_id: Identifier
+
+
+class AttributionPlan(Record):
+    family: Identifier
+    revision: NonNegativeInt
+    actor_id: Identifier
+    owner_id: Identifier
+    targets: tuple[AttributionTarget, ...]
 
 
 class Moderation(Record):
@@ -328,19 +363,54 @@ class Moderation(Record):
     targets: Annotated[tuple[Target, ...], Field(min_length=1)]
 
 
+class LegacySession(Record):
+    id: Identifier
+    family: Identifier
+    started_at: str
+
+
+class LegacyVote(Record):
+    id: Annotated[int, Field(strict=True, gt=0)]
+    session: Identifier
+    case_id: Identifier
+    a_system: Identifier
+    a_fingerprint: Identifier | None
+    a_job: Identifier
+    a_trial: Identifier
+    b_system: Identifier
+    b_fingerprint: Identifier | None
+    b_job: Identifier
+    b_trial: Identifier
+    choice: Choice
+    a_defects: str
+    b_defects: str
+    duration_sec: Annotated[float, Field(ge=0)]
+    repeat_of: Annotated[int, Field(strict=True, gt=0)] | None
+    recorded_at: str
+
+
+class LegacyWithdrawal(Record):
+    vote: Annotated[int, Field(strict=True, gt=0)]
+    undone_at: str
+
+
 class ImportSource(Record):
     id: Identifier
+    family: Identifier
     owner_id: Identifier
     source_schema: Identifier
     file_digest: Identifier
+    sessions: NonNegativeInt
+    receipts: NonNegativeInt
+    withdrawals: NonNegativeInt
 
 
 class ImportRow(Record):
-    kind: Literal['session', 'receipt', 'withdrawal', 'repeat', 'annotation']
+    kind: Literal['session', 'receipt', 'withdrawal']
     original_id: Identifier
     source_hash: Identifier
-    raw: dict[str, JsonValue]
-    """Unmodified provenance retained until an exact output identity is proved."""
+    raw: LegacySession | LegacyVote | LegacyWithdrawal
+    """The v2 source fields, with notes in the separate erasable channel."""
 
     linkage: Literal['unresolved', 'incompatible', 'linked'] = 'unresolved'
     target_id: Identifier | None = None
@@ -349,6 +419,24 @@ class ImportRow(Record):
     def linked(self) -> Self:
         if (self.linkage == 'linked') != (self.target_id is not None):
             raise ValueError('Only a linked source row names a target identity.')
+
+        expected = {
+            'session': LegacySession,
+            'receipt': LegacyVote,
+            'withdrawal': LegacyWithdrawal,
+        }[self.kind]
+
+        if not isinstance(self.raw, expected):
+            raise ValueError('An import row must match its declared source table.')
+
+        original = (
+            self.raw.vote if isinstance(self.raw, LegacyWithdrawal) else self.raw.id
+        )
+
+        if self.original_id != str(original) or self.source_hash != digest(self.raw):
+            raise ValueError(
+                'An import row must retain its original identity and hash.'
+            )
 
         return self
 
@@ -362,6 +450,7 @@ class Export(Record):
     event_cutoff: NonNegativeInt
     receipt_cutoff: NonNegativeInt
     import_cutoff: NonNegativeInt
+    import_source_cutoff: NonNegativeInt
     family_revision: NonNegativeInt
     analysis_sequence: NonNegativeInt
     evaluation_id: str

@@ -110,15 +110,16 @@ CREATE INDEX leases_expiry ON pair_leases(expires_at, id);
 CREATE TABLE vote_receipts (
     seq INTEGER PRIMARY KEY REFERENCES evidence_events(seq),
     acknowledgment TEXT NOT NULL UNIQUE,
-    lease_id TEXT NOT NULL UNIQUE,
+    origin TEXT NOT NULL CHECK (origin IN ('served', 'legacy')),
+    lease_id TEXT UNIQUE,
     actor_id TEXT NOT NULL REFERENCES actors(id),
     session_id TEXT NOT NULL REFERENCES sessions(id),
     family TEXT NOT NULL,
-    evaluation_id TEXT NOT NULL REFERENCES evaluations(id),
-    publication_id TEXT NOT NULL REFERENCES publications(id),
-    point_id TEXT NOT NULL REFERENCES point_snapshots(id),
+    evaluation_id TEXT REFERENCES evaluations(id),
+    publication_id TEXT REFERENCES publications(id),
+    point_id TEXT REFERENCES point_snapshots(id),
     claim_id TEXT NOT NULL REFERENCES claims(id),
-    claim_version INTEGER NOT NULL CHECK (claim_version >= 0),
+    claim_version INTEGER CHECK (claim_version >= 0),
     case_key TEXT NOT NULL,
     a_output TEXT NOT NULL,
     b_output TEXT NOT NULL,
@@ -128,11 +129,24 @@ CREATE TABLE vote_receipts (
     b_fingerprint TEXT NOT NULL,
     choice TEXT NOT NULL CHECK (choice IN ('a', 'b', 'tie', 'both_bad')),
     defects TEXT NOT NULL CHECK (json_valid(defects)),
-    duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+    duration_ms INTEGER CHECK (duration_ms >= 0),
     repeat_of INTEGER REFERENCES vote_receipts(seq),
-    accepted_at INTEGER NOT NULL CHECK (accepted_at >= 0),
+    recorded_at INTEGER NOT NULL CHECK (recorded_at >= 0),
     import_source TEXT REFERENCES import_sources(id),
-    original_id TEXT
+    original_id TEXT,
+    import_row_seq INTEGER UNIQUE REFERENCES import_rows(seq),
+    proof_evaluation_id TEXT REFERENCES evaluations(id),
+    legacy_duration_sec REAL CHECK (legacy_duration_sec >= 0),
+    CHECK (CASE origin WHEN 'served' THEN
+        lease_id IS NOT NULL AND evaluation_id IS NOT NULL AND publication_id IS NOT NULL
+            AND point_id IS NOT NULL AND claim_version IS NOT NULL AND duration_ms IS NOT NULL
+            AND import_source IS NULL AND original_id IS NULL AND import_row_seq IS NULL
+            AND proof_evaluation_id IS NULL AND legacy_duration_sec IS NULL
+        ELSE lease_id IS NULL AND evaluation_id IS NULL AND publication_id IS NULL
+            AND point_id IS NULL AND claim_version IS NULL AND duration_ms IS NULL
+            AND import_source IS NOT NULL AND original_id IS NOT NULL AND import_row_seq IS NOT NULL
+            AND proof_evaluation_id IS NOT NULL AND legacy_duration_sec IS NOT NULL END),
+    UNIQUE (import_source, original_id)
 ) STRICT;
 
 CREATE INDEX receipts_session ON vote_receipts(session_id, seq DESC);
@@ -162,6 +176,8 @@ CREATE TABLE event_targets (
     transition TEXT NOT NULL,
     reference_seq INTEGER REFERENCES evidence_events(seq),
     lease_id TEXT,
+    target_claim TEXT REFERENCES claims(id),
+    target_actor TEXT REFERENCES actors(id),
     PRIMARY KEY (event_seq, ordinal)
 ) STRICT;
 
@@ -248,7 +264,9 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER vote_receipts_no_delete BEFORE DELETE ON vote_receipts
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER vote_receipts_no_replace BEFORE INSERT ON vote_receipts
-WHEN EXISTS (SELECT 1 FROM vote_receipts WHERE seq = NEW.seq OR acknowledgment = NEW.acknowledgment OR lease_id = NEW.lease_id)
+WHEN EXISTS (SELECT 1 FROM vote_receipts WHERE seq = NEW.seq OR acknowledgment = NEW.acknowledgment
+    OR lease_id = NEW.lease_id OR import_row_seq = NEW.import_row_seq
+    OR (import_source = NEW.import_source AND original_id = NEW.original_id))
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE TRIGGER actors_no_update BEFORE UPDATE ON actors

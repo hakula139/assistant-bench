@@ -56,6 +56,7 @@ type Rejection = Literal[
     'family_stale',
     'immutable',
     'invalid_release',
+    'import_invalid',
     'lease_expiry',
     'lease_stale',
     'moderation_stale',
@@ -773,7 +774,19 @@ class Ledger:
         if not rows:
             raise RuntimeError('An acceptance event has no receipt.')
 
-        return _decode(Receipt, rows[0], 'defects')
+        served = {
+            key: value
+            for key, value in rows[0].items()
+            if key
+            not in {
+                'import_source',
+                'original_id',
+                'import_row_seq',
+                'proof_evaluation_id',
+                'legacy_duration_sec',
+            }
+        }
+        return _decode(Receipt, served, 'defects')
 
     async def withdraw(
         self, context: Context, session_id: str, session_version: int, receipt_seq: int
@@ -1059,21 +1072,28 @@ class Ledger:
         await self._fact(
             Statement(
                 sql="""
-                    SELECT id, owner_id, source_schema, file_digest FROM
+                    SELECT id, family, owner_id, source_schema, file_digest,
+                        session_count AS sessions, receipt_count AS receipts,
+                        withdrawal_count AS withdrawals FROM
                     import_sources WHERE id = ?
                     """,
                 params=(source.id,),
             ),
             Statement(
                 sql="""
-                    INSERT INTO import_sources(id, owner_id, source_schema,
-                    file_digest) VALUES (?, ?, ?, ?)
+                    INSERT INTO import_sources(id, family, owner_id, source_schema,
+                        file_digest, session_count, receipt_count, withdrawal_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 params=(
                     source.id,
+                    source.family,
                     source.owner_id,
                     source.source_schema,
                     source.file_digest,
+                    source.sessions,
+                    source.receipts,
+                    source.withdrawals,
                 ),
             ),
             source.model_dump(mode='json'),

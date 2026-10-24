@@ -312,6 +312,7 @@ CREATE TABLE analysis_exports (
     event_cutoff INTEGER NOT NULL CHECK (event_cutoff >= 0),
     receipt_cutoff INTEGER NOT NULL CHECK (receipt_cutoff >= 0),
     import_cutoff INTEGER NOT NULL CHECK (import_cutoff >= 0),
+    import_source_cutoff INTEGER NOT NULL CHECK (import_source_cutoff >= 0),
     family_revision INTEGER NOT NULL CHECK (family_revision >= 0),
     analysis_sequence INTEGER NOT NULL CHECK (analysis_sequence >= 0),
     evaluation_id TEXT NOT NULL REFERENCES evaluations(id),
@@ -326,28 +327,34 @@ CREATE TRIGGER freeze_export_insert INSTEAD OF INSERT ON freeze_export
 BEGIN
     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM family_state WHERE family = NEW.family)
         THEN RAISE(ABORT, 'family_missing') END;
-    INSERT INTO analysis_exports(id, family, schema_version, namespace, created_at, event_cutoff, receipt_cutoff, import_cutoff,
+    INSERT INTO analysis_exports(id, family, schema_version, namespace, created_at, event_cutoff, receipt_cutoff, import_cutoff, import_source_cutoff,
         family_revision, analysis_sequence, evaluation_id, publication_id, point_id, policy_id, policy)
     SELECT NEW.id, f.family, 1, (SELECT namespace FROM deployment WHERE id = 1),
         NEW.now_ms, COALESCE((SELECT max(seq) FROM evidence_events), 0),
         COALESCE((SELECT max(seq) FROM vote_receipts), 0),
-        COALESCE((SELECT max(seq) FROM import_rows), 0), f.revision, f.last_evidence_seq,
+        COALESCE((SELECT max(seq) FROM import_rows), 0),
+        COALESCE((SELECT max(seq) FROM import_sources), 0), f.revision, f.last_evidence_seq,
         f.evaluation_id, f.publication_id, f.point_id, f.policy_id, p.body
     FROM family_state f JOIN policies p ON p.id = f.policy_id WHERE f.family = NEW.family;
 END;
 
 CREATE TABLE import_sources (
-    id TEXT PRIMARY KEY,
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    family TEXT NOT NULL,
     owner_id TEXT NOT NULL REFERENCES actors(id),
     source_schema TEXT NOT NULL,
     file_digest TEXT NOT NULL,
+    session_count INTEGER NOT NULL CHECK (session_count >= 0),
+    receipt_count INTEGER NOT NULL CHECK (receipt_count >= 0),
+    withdrawal_count INTEGER NOT NULL CHECK (withdrawal_count >= 0),
     completed_at INTEGER CHECK (completed_at >= 0)
 ) STRICT;
 
 CREATE TABLE import_rows (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id TEXT NOT NULL REFERENCES import_sources(id),
-    row_kind TEXT NOT NULL CHECK (row_kind IN ('session', 'receipt', 'withdrawal', 'repeat', 'annotation')),
+    row_kind TEXT NOT NULL CHECK (row_kind IN ('session', 'receipt', 'withdrawal')),
     original_id TEXT NOT NULL,
     target_id TEXT,
     row_hash TEXT NOT NULL,
@@ -360,6 +367,17 @@ CREATE TABLE import_rows (
 CREATE TRIGGER import_rows_local BEFORE INSERT ON import_rows
 WHEN (SELECT mode FROM deployment WHERE id = 1) != 'local'
 BEGIN SELECT RAISE(ABORT, 'private_material'); END;
+
+CREATE TRIGGER import_rows_shape BEFORE INSERT ON import_rows
+WHEN EXISTS (SELECT 1 FROM json_tree(NEW.raw) WHERE key IN ('note', 'notes', 'annotation', 'annotations'))
+    OR (NEW.row_kind = 'session' AND json_extract(NEW.raw, '$.family') != (SELECT family FROM import_sources WHERE id = NEW.source_id))
+    OR (NEW.row_kind = 'receipt' AND NOT EXISTS (SELECT 1 FROM import_rows s
+        WHERE s.source_id = NEW.source_id AND s.row_kind = 'session'
+            AND s.original_id = json_extract(NEW.raw, '$.session')))
+    OR (NEW.row_kind = 'withdrawal' AND NOT EXISTS (SELECT 1 FROM import_rows r
+        WHERE r.source_id = NEW.source_id AND r.row_kind = 'receipt'
+            AND CAST(r.original_id AS INTEGER) = json_extract(NEW.raw, '$.vote')))
+BEGIN SELECT RAISE(ABORT, 'import_invalid'); END;
 
 CREATE TRIGGER analysis_exports_no_update BEFORE UPDATE ON analysis_exports
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
@@ -378,11 +396,13 @@ WHEN EXISTS (SELECT 1 FROM import_rows WHERE seq = NEW.seq OR (source_id = NEW.s
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE TRIGGER import_sources_no_replace BEFORE INSERT ON import_sources
-WHEN EXISTS (SELECT 1 FROM import_sources WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM import_sources WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER import_sources_guard BEFORE UPDATE ON import_sources
 WHEN OLD.id != NEW.id OR OLD.owner_id != NEW.owner_id OR OLD.source_schema != NEW.source_schema
-    OR OLD.file_digest != NEW.file_digest OR OLD.completed_at IS NOT NULL
+    OR OLD.seq != NEW.seq OR OLD.family != NEW.family OR OLD.file_digest != NEW.file_digest
+    OR OLD.session_count != NEW.session_count OR OLD.receipt_count != NEW.receipt_count
+    OR OLD.withdrawal_count != NEW.withdrawal_count OR OLD.completed_at IS NOT NULL
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER import_sources_no_delete BEFORE DELETE ON import_sources
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
@@ -421,7 +441,7 @@ FROM analysis_exports x JOIN evaluation_numerics n ON n.evaluation_id = x.evalua
 
 CREATE VIEW export_receipts(export_id, section, row_key, body) AS
 SELECT x.id, 'receipts', printf('%020d', r.seq), json_object(
-    'seq', r.seq, 'acknowledgment', r.acknowledgment, 'lease_id', r.lease_id,
+    'seq', r.seq, 'acknowledgment', r.acknowledgment, 'origin', r.origin, 'lease_id', r.lease_id,
     'actor_id', r.actor_id, 'session_id', r.session_id, 'family', r.family,
     'evaluation_id', r.evaluation_id, 'publication_id', r.publication_id,
     'point_id', r.point_id, 'claim_id', r.claim_id, 'claim_version', r.claim_version,
@@ -429,7 +449,9 @@ SELECT x.id, 'receipts', printf('%020d', r.seq), json_object(
     'a_system', r.a_system, 'b_system', r.b_system, 'a_fingerprint', r.a_fingerprint,
     'b_fingerprint', r.b_fingerprint, 'choice', r.choice, 'defects', json(r.defects),
     'duration_ms', r.duration_ms, 'repeat_of', r.repeat_of,
-    'accepted_at', r.accepted_at, 'import_source', r.import_source, 'original_id', r.original_id)
+    'recorded_at', r.recorded_at, 'import_source', r.import_source, 'original_id', r.original_id,
+    'import_row_seq', r.import_row_seq, 'proof_evaluation_id', r.proof_evaluation_id,
+    'legacy_duration_sec', r.legacy_duration_sec)
 FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff;
 
 CREATE VIEW export_events(export_id, section, row_key, body) AS
@@ -463,19 +485,15 @@ FROM analysis_exports x JOIN sessions s ON s.id IN (
     SELECT session_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff);
 
 CREATE VIEW export_import_sources(export_id, section, row_key, body) AS
-SELECT x.id, 'import_sources', i.id, json_object('id', i.id, 'owner_id', i.owner_id,
-    'source_schema', i.source_schema, 'file_digest', i.file_digest)
-FROM analysis_exports x JOIN import_sources i ON i.id IN (
-    SELECT import_source FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff
-    UNION SELECT s.import_source FROM sessions s JOIN vote_receipts r ON r.session_id = s.id
-        WHERE r.family = x.family AND r.seq <= x.receipt_cutoff);
+SELECT x.id, 'import_sources', i.id, json_object('id', i.id, 'family', i.family,
+    'owner_id', i.owner_id, 'source_schema', i.source_schema, 'file_digest', i.file_digest,
+    'sessions', i.session_count, 'receipts', i.receipt_count, 'withdrawals', i.withdrawal_count)
+FROM analysis_exports x JOIN import_sources i ON i.family = x.family AND i.seq <= x.import_source_cutoff;
 
 CREATE VIEW export_import_rows(export_id, section, row_key, body) AS
 SELECT x.id, 'import_rows', json_array(i.source_id, i.row_kind, i.original_id), json_object(
     'source_id', i.source_id, 'row_kind', i.row_kind, 'original_id', i.original_id,
-    'target_id', i.target_id, 'row_hash', i.row_hash, 'linkage', i.linkage)
-FROM analysis_exports x JOIN import_rows i ON i.seq <= x.import_cutoff AND i.linkage = 'linked' AND (
-    i.row_kind = 'session' AND i.target_id IN (
-        SELECT session_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff)
-    OR i.row_kind IN ('receipt', 'repeat') AND i.target_id IN (
-        SELECT acknowledgment FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff));
+    'seq', i.seq, 'target_id', i.target_id, 'row_hash', i.row_hash, 'linkage', i.linkage,
+    'repeat_of', json_extract(i.raw, '$.repeat_of'))
+FROM analysis_exports x JOIN import_sources s ON s.family = x.family AND s.seq <= x.import_source_cutoff
+JOIN import_rows i ON i.source_id = s.id AND i.seq <= x.import_cutoff;

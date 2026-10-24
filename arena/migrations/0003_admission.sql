@@ -122,7 +122,7 @@ BEGIN
             AND COALESCE((SELECT sum(q.consumed) FROM quota_windows q
                 WHERE q.operation = p.operation AND q.scope = p.scope
                     AND q.window_ms = p.window_ms
-                    AND q.window_start = NEW.now_ms / p.window_ms * p.window_ms
+                    AND q.window_start = CAST(NEW.now_ms / p.window_ms AS INTEGER) * p.window_ms
                     AND CASE p.scope
                         WHEN 'actor' THEN q.subject IN (
                             SELECT actor_id FROM actor_resolution
@@ -149,8 +149,8 @@ BEGIN
                 WHERE json_extract(n.value, '$.scope') = p.scope
                     AND json_extract(n.value, '$.window_ms') = p.window_ms)
         END,
-        p.window_ms, NEW.now_ms / p.window_ms * p.window_ms, 1,
-        (NEW.now_ms / p.window_ms + 1) * p.window_ms + 172800000
+        p.window_ms, CAST(NEW.now_ms / p.window_ms AS INTEGER) * p.window_ms, 1,
+        (CAST(NEW.now_ms / p.window_ms AS INTEGER) + 1) * p.window_ms + 172800000
     FROM quota_policies p WHERE p.operation = NEW.operation
     ON CONFLICT(operation, scope, subject, window_ms, window_start)
     DO UPDATE SET consumed = consumed + 1;
@@ -238,7 +238,7 @@ BEGIN
     SELECT CASE WHEN NEW.repeat_of IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM vote_receipts r JOIN eligible_claims e ON e.receipt_seq = r.seq
         WHERE r.seq = NEW.repeat_of AND r.actor_id = NEW.actor_id
-            AND r.repeat_of IS NULL AND NEW.now_ms >= r.accepted_at + 86400000
+            AND r.repeat_of IS NULL AND NEW.now_ms >= r.recorded_at + 86400000
             AND NEW.a_output = r.b_output AND NEW.b_output = r.a_output
     ) THEN RAISE(ABORT, 'repeat_ineligible') END;
 
@@ -354,11 +354,11 @@ BEGIN
     SELECT NEW.command_id, 'accept', family, NEW.actor_id, NEW.request_hash, NEW.now_ms, '{}'
     FROM pair_leases WHERE id = NEW.lease_id;
 
-    INSERT INTO vote_receipts(seq, acknowledgment, lease_id, actor_id, session_id, family,
+    INSERT INTO vote_receipts(seq, acknowledgment, origin, lease_id, actor_id, session_id, family,
         evaluation_id, publication_id, point_id, claim_id, claim_version, case_key,
         a_output, b_output, a_system, b_system, a_fingerprint, b_fingerprint,
-        choice, defects, duration_ms, repeat_of, accepted_at)
-    SELECT e.seq, NEW.acknowledgment, l.id, l.actor_id, l.session_id, l.family,
+        choice, defects, duration_ms, repeat_of, recorded_at)
+    SELECT e.seq, NEW.acknowledgment, 'served', l.id, l.actor_id, l.session_id, l.family,
         l.evaluation_id, l.publication_id, l.point_id, l.claim_id, l.claim_version, l.case_key,
         l.a_output, l.b_output, l.a_system, l.b_system, l.a_fingerprint, l.b_fingerprint,
         NEW.choice, NEW.defects, NEW.now_ms - l.issued_at, l.repeat_of, NEW.now_ms
