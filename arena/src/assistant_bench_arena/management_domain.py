@@ -9,6 +9,7 @@ from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
     Case,
     Context,
+    DeploymentStatus,
     Evaluation,
     ExportSection,
     Identifier,
@@ -36,6 +37,11 @@ PRINCIPAL = 'management'
 
 class Status(Record):
     operation: Literal['status'] = 'status'
+
+
+class ManagementStatus(DeploymentStatus):
+    expiry_lag_ms: NonNegativeInt
+    """Milliseconds past the oldest pending network-association expiry."""
 
 
 class FamilyStatus(Record):
@@ -191,7 +197,13 @@ async def execute(ledger: Ledger, request: Request, now: int) -> JsonValue:
 
     match request:
         case Status():
-            result = await ledger.status()
+            deployment = await ledger.status()
+
+            if deployment is not None:
+                result = ManagementStatus(
+                    **deployment.model_dump(),
+                    expiry_lag_ms=await ledger.maintenance.attribution_lag(now),
+                )
         case FamilyStatus():
             result = await ledger.investigation.status(request.family)
         case StagePolicy():

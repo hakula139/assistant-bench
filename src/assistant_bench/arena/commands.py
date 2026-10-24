@@ -1,6 +1,7 @@
 """Reviewed artifact publication and private native arena management."""
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,7 +32,6 @@ from assistant_bench_arena.investigation import (
 )
 from assistant_bench_arena.ledger_models import (
     MODERATION_CHUNK_SIZE,
-    DeploymentStatus,
     Event,
     Export,
     Moderation,
@@ -45,7 +45,7 @@ from assistant_bench_arena.transport import CommandRejected
 app = typer.Typer(no_args_is_help=True)
 _TARGET = TypeAdapter[TargetName](TargetName.__value__)
 _EXPORT = TypeAdapter(Export)
-_STATUS = TypeAdapter(DeploymentStatus | None)
+_STATUS = TypeAdapter(command.ManagementStatus | None)
 _FAMILY = TypeAdapter(FamilyStatus | None)
 _INVESTIGATION = TypeAdapter(InvestigationPage)
 _EVENT = TypeAdapter(Event)
@@ -203,12 +203,23 @@ def status(
 
 async def _status(target: str, family: str) -> None:
     async with _connection(target) as management:
+        deployment = await management.domain(command.Status(), _STATUS)
         current = await management.domain(command.FamilyStatus(family=family), _FAMILY)
 
     if current is None:
         raise ValueError(f'Family `{family}` is not active.')
 
-    typer.echo(current.model_dump_json(indent=2))
+    typer.echo(
+        json.dumps(
+            {
+                'deployment': deployment.model_dump(mode='json')
+                if deployment
+                else None,
+                'family': current.model_dump(mode='json'),
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command()
