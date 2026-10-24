@@ -85,21 +85,48 @@ def main() -> None:
 
 
 @app.command()
-def check(families: FamilyNames = None) -> None:
+def check(
+    families: FamilyNames = None,
+    task_names: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--task',
+            help='Check only this task in one named task family. Repeat for several.',
+        ),
+    ] = None,
+) -> None:
     """Validate every family, or the named ones.
 
     For a task family, also run each task's reference solution and a do-nothing
     agent in Docker, several times each, so the solution must pass the task's
     tests and the unsolved task must fail them.
     """
+    if task_names and (not families or len(families) != 1):
+        raise typer.BadParameter('Select exactly one task family with `--task`.')
+
     task_families = []
     for family in map(_load_family, families or family_names()):
         _family_systems(family)
         if family.source == 'cases':
+            if task_names:
+                raise typer.BadParameter(
+                    f'Family `{family.name}` has cases. Select a task family with '
+                    '`--task`.'
+                )
             cases = len(_render_tasks(family))
             typer.echo(f'Family `{family.name}`: {cases} valid cases.')
             continue
-        task_families.append((family, _task_dirs(family)))
+        tasks = _task_dirs(family)
+        if task_names:
+            known = [task.name for task in tasks]
+            unknown = [name for name in dict.fromkeys(task_names) if name not in known]
+            if unknown:
+                raise typer.BadParameter(
+                    f'Family `{family.name}` has no task named {code(unknown)}. '
+                    f'Choose among {code(known)}.'
+                )
+            tasks = [task for task in tasks if task.name in task_names]
+        task_families.append((family, tasks))
 
     failed = False
     for family, tasks in task_families:
@@ -108,9 +135,10 @@ def check(families: FamilyNames = None) -> None:
         for problem in problems:
             typer.echo(f'Family `{family.name}`: {problem}.', err=True)
         if not problems:
+            checked = 'selected task' if task_names else 'task'
             typer.echo(
                 f'Family `{family.name}`: every reference solution passed its tests, '
-                'and the do-nothing agent failed every task.'
+                f'and the do-nothing agent failed every {checked}.'
             )
         failed = failed or bool(problems)
     if failed:
