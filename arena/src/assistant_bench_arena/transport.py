@@ -21,7 +21,6 @@ type Rejection = Literal[
     'family_stale',
     'immutable',
     'invalid_release',
-    'import_invalid',
     'lease_expiry',
     'lease_stale',
     'moderation_stale',

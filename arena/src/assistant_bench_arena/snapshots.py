@@ -81,8 +81,6 @@ class SnapshotProvenance(Record):
     captured_at: AwareDatetime
     event_cutoff: Annotated[int, Field(strict=True, ge=0)]
     receipt_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    import_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    import_source_cutoff: Annotated[int, Field(strict=True, ge=0)]
     family_revision: Annotated[int, Field(strict=True, ge=0)]
     analysis_sequence: Annotated[int, Field(strict=True, ge=0)]
     evaluation_id: Annotated[str, Field(min_length=1)]

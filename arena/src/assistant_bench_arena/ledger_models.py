@@ -9,11 +9,11 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     StrictStr,
+    field_validator,
     model_validator,
 )
 
 from assistant_bench_arena.models import Choice, Defects, Record
-from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
     CaseMetadata,
@@ -30,20 +30,13 @@ type Identifier = Annotated[str, Field(min_length=1, max_length=256)]
 type Milliseconds = NonNegativeInt
 type Mode = Literal['local', 'public']
 type EventKind = Literal[
-    'activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute', 'import'
+    'activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute'
 ]
 
 
 class Statement(Record):
     sql: str
     params: tuple[SqlValue, ...] = ()
-
-
-class DeploymentStatus(Record):
-    namespace: str
-    mode: Mode
-    local_key_id: str | None
-    schema_version: Literal[1]
 
 
 class Case(Record):
@@ -147,7 +140,7 @@ class Actor(Record):
     id: Identifier
     created_at: Milliseconds
     owner_namespace: Identifier | None = None
-    """Explicit registration of the importing owner's source namespace."""
+    """Explicitly registered owner identity for reviewed attribution."""
 
     rate_subject: Identifier | None = None
 
@@ -157,8 +150,6 @@ class Session(Record):
     actor_id: Identifier
     family: Identifier
     created_at: Milliseconds
-    import_source: Identifier | None = None
-    original_id: Identifier | None = None
 
 
 class Context(Record):
@@ -184,6 +175,18 @@ class BootstrapConfiguration(Record):
 
     local_key_id: Identifier | None
 
+    @field_validator('quotas')
+    @classmethod
+    def ordered_quotas(cls, quotas: tuple[Quota, ...]) -> tuple[Quota, ...]:
+        return tuple(
+            sorted(quotas, key=lambda row: (row.operation, row.scope, row.window_ms))
+        )
+
+    @field_validator('attribution_ms')
+    @classmethod
+    def optional_attribution(cls, value: int | None) -> int | None:
+        return value or None
+
     @model_validator(mode='after')
     def profile(self) -> Self:
         if self.mode == 'public' and not self.attribution_ms:
@@ -204,6 +207,10 @@ class BootstrapConfiguration(Record):
             raise ValueError('Quota policies must have distinct operation windows.')
 
         return self
+
+
+class DeploymentStatus(BootstrapConfiguration):
+    schema_id: Literal['arena-v1']
 
 
 class Attribution(Record):
@@ -322,7 +329,6 @@ class EventTarget(Record):
     lease_id: str | None
     target_claim: str | None
     target_actor: str | None
-    source_row: NonNegativeInt | None
 
 
 class Lease(Record):
@@ -359,7 +365,7 @@ class Lease(Record):
     receipt_seq: NonNegativeInt | None
 
 
-class ObservationFacts(Record):
+class Receipt(Record):
     seq: NonNegativeInt
     acknowledgment: str
 
@@ -367,6 +373,13 @@ class ObservationFacts(Record):
     session_id: str
     family: str
     claim_id: str
+    lease_id: str
+
+    evaluation_id: str
+    publication_id: str
+    point_id: str
+    claim_version: NonNegativeInt
+    """Revision before acceptance advances the claim's selection."""
 
     case_key: str
     a_output: str
@@ -382,34 +395,9 @@ class ObservationFacts(Record):
     """Original ordinary receipt sequence. Repeats carry zero fitting mass."""
 
     recorded_at: Milliseconds
-    """Server acceptance time for served votes or the original legacy timestamp."""
-
-
-class Receipt(ObservationFacts):
-    origin: Literal['served'] = 'served'
-    lease_id: str
-    evaluation_id: str
-    publication_id: str
-    point_id: str
-
-    claim_version: NonNegativeInt
-    """Served revision before acceptance advances the claim's selection."""
+    """Server acceptance time."""
 
     duration_ms: NonNegativeInt
-
-
-class LegacyReceipt(ObservationFacts):
-    origin: Literal['legacy'] = 'legacy'
-    import_source: str
-    original_id: str
-    import_row_seq: NonNegativeInt
-    proof_evaluation_id: str
-    """Sealed inventory that proved the binding, separate from served provenance."""
-
-    legacy_duration_sec: Annotated[float, Field(ge=0)]
-
-
-type Observation = Annotated[Receipt | LegacyReceipt, Field(discriminator='origin')]
 
 
 class Target(Record):
@@ -419,19 +407,7 @@ class Target(Record):
 
 
 class ReceiptAnnotation(Record):
-    kind: Literal['receipt']
     receipt_seq: Annotated[int, Field(strict=True, gt=0)]
-
-
-class ImportAnnotation(Record):
-    kind: Literal['import']
-    source_id: Identifier
-    original_id: Identifier
-
-
-type AnnotationTarget = Annotated[
-    ReceiptAnnotation | ImportAnnotation, Field(discriminator='kind')
-]
 
 
 class AttributionTarget(Record):
@@ -473,173 +449,6 @@ class Moderation(Record):
     targets: Annotated[tuple[Target, ...], Field(min_length=1)]
 
 
-class LegacySession(Record):
-    id: Identifier
-    family: Identifier
-    started_at: str
-
-
-class LegacyVote(Record):
-    id: StrictInt
-    session: Identifier
-    case_id: Identifier
-    a_system: Identifier
-    a_fingerprint: Identifier | None
-    a_job: Identifier
-    a_trial: Identifier
-    b_system: Identifier
-    b_fingerprint: Identifier | None
-    b_job: Identifier
-    b_trial: Identifier
-    choice: Choice
-    a_defects: str
-    b_defects: str
-    duration_sec: float
-    repeat_of: StrictInt | None
-    recorded_at: str
-
-
-class LegacyWithdrawal(Record):
-    vote: StrictInt
-    undone_at: str
-
-
-class ImportSummary(Record):
-    source_id: str
-    row_kind: Literal['session', 'receipt', 'withdrawal']
-    original_id: str
-    seq: NonNegativeInt
-    row_hash: str
-    initial_disposition: Literal['unresolved', 'incompatible']
-    repeat_of: StrictInt | None
-
-
-class ImportSource(Record):
-    id: Identifier
-    family: Identifier
-    owner_id: Identifier
-    source_schema: Identifier
-    file_digest: Identifier
-    sessions: NonNegativeInt
-    receipts: NonNegativeInt
-    withdrawals: NonNegativeInt
-
-
-class ImportRow(Record):
-    kind: Literal['session', 'receipt', 'withdrawal']
-    original_id: Identifier
-    source_hash: Identifier
-    raw: LegacySession | LegacyVote | LegacyWithdrawal
-    """The v2 source fields, with notes in the separate erasable channel."""
-
-    initial_disposition: Literal['unresolved', 'incompatible'] = 'unresolved'
-
-    @model_validator(mode='after')
-    def source_row(self) -> Self:
-        expected = {
-            'session': LegacySession,
-            'receipt': LegacyVote,
-            'withdrawal': LegacyWithdrawal,
-        }[self.kind]
-
-        if type(self.raw) is not expected:
-            raise ValueError('An import row must match its declared source table.')
-
-        original = (
-            self.raw.vote if isinstance(self.raw, LegacyWithdrawal) else self.raw.id
-        )
-
-        if self.original_id != str(original) or self.source_hash != digest(self.raw):
-            raise ValueError(
-                'An import row must retain its original identity and hash.'
-            )
-
-        return self
-
-
-class ImportSession(Record):
-    original_id: Identifier
-    session_id: Identifier
-    created_at: Milliseconds
-
-
-class ImportObservation(Record):
-    raw_seq: Annotated[int, Field(strict=True, gt=0)]
-    raw_hash: Identifier
-    command_id: Identifier
-    acknowledgment: Identifier
-    claim_id: Identifier
-    proof_evaluation_id: Identifier
-    case_key: Identifier
-    a_output: Identifier
-    b_output: Identifier
-    a_source_digest: Identifier
-    b_source_digest: Identifier
-    recorded_at: Milliseconds
-
-
-class ImportSelection(Record):
-    claim_id: Identifier
-    expected_version: NonNegativeInt
-    expected_receipt: NonNegativeInt | None
-    selected_acknowledgment: Identifier | None
-    """An explicit winner, including preservation of an existing served choice."""
-
-
-class ImportDisposition(Record):
-    raw_seq: Annotated[int, Field(strict=True, gt=0)]
-    state: Literal['linked', 'unresolved', 'incompatible']
-    reason: Annotated[
-        str, Field(min_length=1, max_length=64, pattern='^[a-z][a-z0-9_]*$')
-    ]
-
-
-class ImportPlan(Record):
-    id: Identifier
-    source_id: Identifier
-    revision: NonNegativeInt
-    initial: bool
-    sessions: tuple[ImportSession, ...]
-    observations: Annotated[tuple[ImportObservation, ...], Field(max_length=250)]
-    selections: Annotated[tuple[ImportSelection, ...], Field(max_length=250)]
-    dispositions: tuple[ImportDisposition, ...]
-
-    @model_validator(mode='after')
-    def unique_rows(self) -> Self:
-        for rows, keys in (
-            (self.sessions, [row.original_id for row in self.sessions]),
-            (self.observations, [row.raw_seq for row in self.observations]),
-            (self.selections, [row.claim_id for row in self.selections]),
-            (self.dispositions, [row.raw_seq for row in self.dispositions]),
-        ):
-            if len(rows) != len(set(keys)):
-                raise ValueError('An import plan must name each source identity once.')
-
-        linked = {row.raw_seq for row in self.dispositions if row.state == 'linked'}
-
-        if {row.claim_id for row in self.selections} != {
-            row.claim_id for row in self.observations
-        }:
-            raise ValueError('An import plan must review exactly its affected claims.')
-
-        if len({row.command_id for row in self.observations}) != len(self.observations):
-            raise ValueError(
-                'Imported observations require distinct command identities.'
-            )
-
-        if len({row.acknowledgment for row in self.observations}) != len(
-            self.observations
-        ):
-            raise ValueError('Imported observations require distinct acknowledgments.')
-
-        if linked != {row.raw_seq for row in self.observations}:
-            raise ValueError(
-                'Every linked disposition requires one proved observation.'
-            )
-
-        return self
-
-
 type ExportSection = Literal[
     'evaluation',
     'publication',
@@ -654,8 +463,6 @@ type ExportSection = Literal[
     'targets',
     'actors',
     'sessions',
-    'import_sources',
-    'import_rows',
 ]
 
 
@@ -670,13 +477,7 @@ class Export(Record):
     """Inclusive global event sequence captured for this family's history."""
 
     receipt_cutoff: NonNegativeInt
-    """Inclusive global receipt sequence, including normalized legacy evidence."""
-
-    import_cutoff: NonNegativeInt
-    """Inclusive raw-import row sequence, including unresolved source rows."""
-
-    import_source_cutoff: NonNegativeInt
-    """Inclusive imported-source registration sequence."""
+    """Inclusive global receipt sequence captured for this family's votes."""
 
     family_revision: NonNegativeInt
     """Captured control revision, including presentation and point changes."""

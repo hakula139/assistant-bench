@@ -7,9 +7,7 @@ from pydantic import BaseModel, NonNegativeInt
 from assistant_bench_arena.ledger_models import (
     Attribution,
     Identifier,
-    ImportRow,
-    ImportSource,
-    Observation,
+    Receipt,
     SqlValue,
     Statement,
 )
@@ -29,7 +27,6 @@ class ReceiptFilter(Record):
     actor_id: Identifier | None = None
     session_id: Identifier | None = None
     evaluation_id: Identifier | None = None
-    """Served evaluation or the legacy observation's proof evaluation."""
 
     recorded_from: NonNegativeInt | None = None
     recorded_before: NonNegativeInt | None = None
@@ -38,7 +35,7 @@ class ReceiptFilter(Record):
 
 
 class InvestigatedReceipt(Record):
-    observation: Observation
+    observation: Receipt
     canonical_actor: str
     claim_version: NonNegativeInt
     selected: bool
@@ -55,34 +52,11 @@ class InvestigationPage(Record):
     after: NonNegativeInt | None
 
 
-class StoredImportSource(Record):
-    source: ImportSource
-    completed_at: NonNegativeInt | None
-
-    sessions: NonNegativeInt
-    receipts: NonNegativeInt
-    withdrawals: NonNegativeInt
-    """Rows already preserved, independently of the declared snapshot totals."""
-
-
-class StoredImportRow(Record):
-    seq: NonNegativeInt
-    source_id: str
-    row: ImportRow
-
-
-class ImportRowPage(Record):
-    rows: tuple[StoredImportRow, ...]
-    after: NonNegativeInt | None
-
-
 class SamplingSource(Record):
     export_id: str
     analysis_sequence: NonNegativeInt
     event_cutoff: NonNegativeInt
     receipt_cutoff: NonNegativeInt
-    import_cutoff: NonNegativeInt
-    import_source_cutoff: NonNegativeInt
 
 
 class FamilyStatus(Record):
@@ -116,9 +90,7 @@ class LedgerInvestigation:
                             json_object('export_id', x.id,
                                 'analysis_sequence', x.analysis_sequence,
                                 'event_cutoff', x.event_cutoff,
-                                'receipt_cutoff', x.receipt_cutoff,
-                                'import_cutoff', x.import_cutoff,
-                                'import_source_cutoff', x.import_source_cutoff) END,
+                                'receipt_cutoff', x.receipt_cutoff) END,
                         'event_cutoff', coalesce((SELECT max(seq) FROM evidence_events
                             WHERE family = f.family), 0),
                         'receipt_cutoff', coalesce((SELECT max(seq) FROM vote_receipts
@@ -184,54 +156,6 @@ class LedgerInvestigation:
 
         return tuple(decoded), through if len(rows) > len(decoded) else None
 
-    async def import_source(self, source_id: str) -> StoredImportSource | None:
-        rows = await self.transport.query(
-            Statement(
-                sql="""
-                    SELECT json_object('source', json_object('id', s.id,
-                        'family', s.family, 'owner_id', s.owner_id,
-                        'source_schema', s.source_schema, 'file_digest', s.file_digest,
-                        'sessions', s.session_count, 'receipts', s.receipt_count,
-                        'withdrawals', s.withdrawal_count),
-                        'completed_at', s.completed_at,
-                        'sessions', (SELECT count(*) FROM import_rows r
-                            WHERE r.source_id = s.id AND r.row_kind = 'session'),
-                        'receipts', (SELECT count(*) FROM import_rows r
-                            WHERE r.source_id = s.id AND r.row_kind = 'receipt'),
-                        'withdrawals', (SELECT count(*) FROM import_rows r
-                            WHERE r.source_id = s.id AND r.row_kind = 'withdrawal'))
-                        AS body FROM import_sources s WHERE s.id = ?
-                    """,
-                params=(source_id,),
-            )
-        )
-
-        if not rows:
-            return None
-
-        body = rows[0]['body']
-
-        if not isinstance(body, str):
-            raise TypeError('An import source must contain a JSON body.')
-
-        return StoredImportSource.model_validate_json(body)
-
-    async def import_rows(self, source_id: str, after: int = 0) -> ImportRowPage:
-        """Read at most 75 preserved rows and 1 MiB, excluding private notes."""
-        rows, cursor = await self._page(
-            """
-            SELECT seq, json_object('seq', seq, 'source_id', source_id,
-                'row', json_object('kind', row_kind, 'original_id', original_id,
-                    'source_hash', row_hash, 'raw', json(raw),
-                    'initial_disposition', initial_disposition)) AS body
-            FROM import_rows WHERE source_id = ? AND seq > ? ORDER BY seq
-            """,
-            (source_id, after),
-            StoredImportRow,
-        )
-
-        return ImportRowPage(rows=rows, after=cursor)
-
     async def receipts(
         self, filters: ReceiptFilter, now: int, after: int = 0
     ) -> InvestigationPage:
@@ -242,7 +166,7 @@ class LedgerInvestigation:
         for column, value in (
             ('r.actor_id', filters.actor_id),
             ('r.session_id', filters.session_id),
-            ('coalesce(r.evaluation_id, r.proof_evaluation_id)', filters.evaluation_id),
+            ('r.evaluation_id', filters.evaluation_id),
         ):
             if value is not None:
                 predicates.append(f'{column} = ?')

@@ -46,11 +46,12 @@ arena/src/assistant_bench_arena/
 ├── ledger.py              # Atomic commands and authenticated command recovery
 ├── ledger_models.py       # Private evidence, control inputs, and export contracts
 ├── maintenance.py         # Bounded expiry of private and unaccepted state
-├── migrations.py          # Native migration journal inspection before initialization
 ├── models.py              # Shared record policy and blinded browser views
 ├── read_models.py         # Private scheduling projections
 ├── reads.py               # Bounded inventory, scheduling, and rendered content reads
 ├── releases.py            # Shared release identities and persisted-fact validation
+├── schema.py              # Current profile inspection and atomic initialization marker
+├── schema.sql             # Current schema, created with its profile in one native batch
 ├── serialization.py       # Canonical JSON and content identities
 ├── snapshots.py           # Numerical policy and approved presentation contracts
 └── transport.py           # Prepared statements and exact database rejection mapping
