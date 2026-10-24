@@ -2,7 +2,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from datetime import timedelta
 from itertools import permutations
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -13,7 +12,6 @@ from assistant_bench.arena.scheduler import Board, Draw, Pool, draw, pair_weight
 from assistant_bench.arena.store import Choice, Side, Vote
 from assistant_bench.families import Gate
 from assistant_bench.outputs import Output
-from assistant_bench.scoring import ranking
 from assistant_bench.scoring.ranking import (
     ANCHOR,
     ELO_PER_LOGIT,
@@ -188,9 +186,7 @@ class TestBoard:
 
 
 class TestDraw:
-    def test_draws_adaptively_without_report_inference(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_draws_adaptively_with_one_point_fit(self, fits: Refits) -> None:
         pool = make_pool()
         votes: list[Vote] = []
         for left, right in permutations(SYSTEMS, 2):
@@ -201,9 +197,6 @@ class TestDraw:
                 ['a'] * scheduler.SEED_VOTES_PER_SIDE,
                 start=len(votes) + 1,
             )
-        bootstrap = Mock(side_effect=AssertionError('Report inference was invoked.'))
-        monkeypatch.setattr(ranking, 'bootstrap', bootstrap)
-
         picked = draw(
             pool,
             matched(pool, votes),
@@ -216,7 +209,7 @@ class TestDraw:
         assert picked is not None
         assert picked.case != 'c0'
         assert picked.a.system != picked.b.system
-        bootstrap.assert_not_called()
+        assert fits.comparisons == [len(votes)]
 
     def test_seeds_every_ordered_pair_fewest_votes_first(self) -> None:
         pool = make_pool()

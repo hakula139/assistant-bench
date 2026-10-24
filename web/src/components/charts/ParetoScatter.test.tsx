@@ -15,8 +15,6 @@ const point = (system: string, x: number, score: number): ScatterPoint => ({
   name: `Name ${system}`,
   x,
   score,
-  lower: score - 10,
-  upper: score + 10,
 });
 
 describe('paretoFrontier', () => {
@@ -44,9 +42,9 @@ describe('paretoFrontier', () => {
 });
 
 describe('placeLabels', () => {
-  test("moves a label off another point's interval whisker", () => {
+  test('moves a label off another point', () => {
     const leader = point('leader', 100, 100);
-    const below = { ...point('below', 60, 105), lower: 80, upper: 130 };
+    const below = point('below', 60, 89);
 
     const placements = placeLabels(
       [leader],

@@ -11,7 +11,6 @@ import { FIXTURE_NAMES } from '@/test/fixture';
 
 const standing = (system: string, passRate: number) => ({
   system,
-  fingerprint: null,
   trials: 4,
   errored: 0,
   pass_rate: passRate,
@@ -23,6 +22,13 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
 
 const round: TestsRound = {
   round: '2026-10-21',
+  closed_at: '2026-10-21T18:00:00Z',
+  systems: Object.fromEntries(
+    ['acme-small', 'acme-pro'].map((system) => [
+      system,
+      { display_name: FIXTURE_NAMES[system], fingerprint: null },
+    ]),
+  ),
   results: {
     scorer: 'tests',
     standings: [standing('acme-small', 0.25), standing('acme-pro', 0.75)],
@@ -33,7 +39,7 @@ describe('TestsBoard', () => {
   afterEach(cleanup);
 
   test("lists the round's systems by pass rate, best first", () => {
-    const html = renderToString(<TestsBoard round={round} names={FIXTURE_NAMES} />);
+    const html = renderToString(<TestsBoard round={round} />);
 
     expect(text(html)).toMatch(/Round 2026-10-21 .* Acme Pro 75% 4 0 – – Acme Small 25% 4 0 – – $/);
   });
@@ -44,7 +50,7 @@ describe('TestsBoard', () => {
     ['Cost / trial', terms.testsCostLatency],
     ['p50 latency', terms.testsCostLatency],
   ])("opens the %s column's definition from its header", async (header, term) => {
-    renderInDom(<TestsBoard round={round} names={FIXTURE_NAMES} />);
+    renderInDom(<TestsBoard round={round} />);
 
     await userEvent.setup().click(screen.getByRole('button', { name: header }));
 

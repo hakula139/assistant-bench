@@ -9,17 +9,26 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { formatCount, formatPercent, formatScore, formatSeconds, MISSING } from '@/lib/format';
 import {
-  formatCount,
-  formatInterval,
-  formatPercent,
-  formatScore,
-  formatSeconds,
-  MISSING,
-} from '@/lib/format';
-import { defectTerms, fallbackAnchor, fingerprintTerm, terms } from '@/lib/glossary';
-import type { Defect, Distribution, HeadToHead, Standing } from '@/lib/report';
-import { systemName, type SystemNames } from '@/lib/systems';
+  defectTerms,
+  fallbackAnchor,
+  fingerprintTerm,
+  preliminaryTerm,
+  terms,
+} from '@/lib/glossary';
+import { roundMethod } from '@/lib/method';
+import { isPreliminary } from '@/lib/ranking';
+import type {
+  Defect,
+  Distribution,
+  HeadToHead,
+  PublicSystem,
+  Standing,
+  VotesMethod,
+  VotesRules,
+} from '@/lib/report';
+import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 
 /**
  * The system page's Votes figure as one island, so the decisive count's hint is the element a tap
@@ -73,14 +82,21 @@ export function HeadToHeadTable({
   );
 }
 
-export function CategoryTable({ categories }: { categories: ForestPlotRow[] }) {
+export function CategoryTable({
+  categories,
+  rules,
+}: {
+  categories: ForestPlotRow[];
+  rules: VotesRules;
+}) {
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Category</TableHead>
           <TableHead numeric>Score</TableHead>
-          <TableHead numeric>95% interval</TableHead>
+          <TableHead numeric>Votes</TableHead>
+          <TableHead>Coverage</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -88,7 +104,8 @@ export function CategoryTable({ categories }: { categories: ForestPlotRow[] }) {
           <TableRow key={label}>
             <TableCell>{label}</TableCell>
             <TableCell numeric>{formatScore(refit.score)}</TableCell>
-            <TableCell numeric>{formatInterval(refit.interval)}</TableCell>
+            <TableCell numeric>{refit.votes}</TableCell>
+            <TableCell>{isPreliminary(refit, rules) ? 'preliminary' : ''}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -136,6 +153,8 @@ export function DistributionTable({
 
 /** Counts each defect the standing's family lists, in the family's order, as the report keys them. */
 export function DefectsTable({ standing }: { standing: Standing }) {
+  const tagged = Object.entries(standing.defects) as [Defect, number][];
+
   return (
     <Table className="max-w-xl">
       <TableHeader>
@@ -146,20 +165,17 @@ export function DefectsTable({ standing }: { standing: Standing }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {(Object.keys(standing.defects) as Defect[]).map((defect) => {
-          const count = standing.defects[defect] ?? 0;
-          return (
-            <TableRow key={defect}>
-              <TableCell>
-                <Hint term={defectTerms[defect]} />
-              </TableCell>
-              <TableCell numeric>{count}</TableCell>
-              <TableCell numeric>
-                {formatPercent(standing.votes === 0 ? null : count / standing.votes)}
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {tagged.map(([defect, count]) => (
+          <TableRow key={defect}>
+            <TableCell>
+              <Hint term={defectTerms[defect]} />
+            </TableCell>
+            <TableCell numeric>{count}</TableCell>
+            <TableCell numeric>
+              {formatPercent(standing.votes === 0 ? null : count / standing.votes)}
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );
@@ -168,10 +184,16 @@ export function DefectsTable({ standing }: { standing: Standing }) {
 /** Lists the system's standing in each round it appeared in, given oldest first. */
 export function RoundsTable({
   appearances,
-  names,
 }: {
-  appearances: { round: string; reference: string; anchor: string; standing: Standing }[];
-  names: SystemNames;
+  appearances: {
+    round: string;
+    reference: string;
+    anchor: string;
+    systems: Record<string, PublicSystem>;
+    method: VotesMethod;
+    rules: VotesRules;
+    standing: Standing;
+  }[];
 }) {
   return (
     <Table className="max-w-xl text-xs sm:text-sm">
@@ -179,33 +201,61 @@ export function RoundsTable({
         <TableRow>
           <TableHead>Round</TableHead>
           <TableHead numeric>Score</TableHead>
-          <TableHead numeric>95% interval</TableHead>
           <TableHead numeric>Votes</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {appearances.toReversed().map(({ round, reference, anchor, standing: past }) => (
-          <TableRow key={round}>
-            <TableCell>
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                {past.fingerprint === null ? (
-                  round
-                ) : (
-                  <Hint term={fingerprintTerm(past.fingerprint)}>{round}</Hint>
-                )}
-                {anchor !== reference && (
-                  <StatusMark
-                    status="anchor"
-                    term={fallbackAnchor(systemName(names, anchor), systemName(names, reference))}
-                  />
-                )}
-              </span>
-            </TableCell>
-            <TableCell numeric>{formatScore(past.score)}</TableCell>
-            <TableCell numeric>{formatInterval(past.interval)}</TableCell>
-            <TableCell numeric>{past.votes}</TableCell>
-          </TableRow>
-        ))}
+        {appearances
+          .toReversed()
+          .map(({ round, reference, anchor, systems, method, rules, standing: past }) => {
+            const names = reportNames(systems);
+            const identity = systems[past.system];
+
+            return (
+              <TableRow key={round}>
+                <TableCell>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {identity.fingerprint === null ? (
+                      <span title={identity.display_name}>{round}</span>
+                    ) : (
+                      <Hint
+                        term={{
+                          ...fingerprintTerm(identity.fingerprint),
+                          term: identity.display_name,
+                        }}
+                      >
+                        {round}
+                      </Hint>
+                    )}
+                    {anchor !== reference && (
+                      <StatusMark
+                        status="anchor"
+                        term={fallbackAnchor(
+                          systemName(names, anchor),
+                          systemName(names, reference),
+                          method,
+                        )}
+                      />
+                    )}
+                    {isPreliminary(past, rules) && (
+                      <StatusMark status="preliminary" term={preliminaryTerm(rules)} />
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell numeric>
+                  <Hint
+                    term={{
+                      term: 'Round settings',
+                      definition: `${identity.display_name}. Reference: ${systemName(names, reference)}. Anchor: ${systemName(names, anchor)}. ${roundMethod(method, rules)}`,
+                    }}
+                  >
+                    {formatScore(past.score)}
+                  </Hint>
+                </TableCell>
+                <TableCell numeric>{past.votes}</TableCell>
+              </TableRow>
+            );
+          })}
       </TableBody>
     </Table>
   );

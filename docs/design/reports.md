@@ -1,30 +1,34 @@
 # Reports
 
-A report is the published record of one closed round of a family: aggregates under public system names, which the site renders and nothing else reads. `report.py` defines its pydantic schema and writes it.
+A report publishes one closed round's aggregates under public system IDs. `report.py` defines the strict Pydantic schema, mirrored by the site's Zod schema.
 
 ## Closing a Round
 
-`uv run bench close <family>` collects the family's trials and aggregates everything it has so far, then writes `reports/<family>/<round>.json`, where the round is the UTC date of closing, so closing again on the same day replaces that day's file. Only `bench close` writes under `reports/`, and each report is committed through an ordinary PR. A board pools every round, so each report is a snapshot of the cumulative board at its date.
+`uv run bench close <family>` collects trials and closes the cumulative evaluation into `reports/<family>/<round>.json`. The round is the UTC closing date, so closing again that day replaces its file. Only this command writes reports, which are committed through ordinary PRs.
 
-Closing fails, naming the problem, when the family has no outputs on its current cases, when a family scored by votes has neither votes nor settled comparisons on its current outputs, or when a system's current outputs carry several fingerprints. A round resolved entirely by settled comparisons can close with zero votes and sessions.
+Closing requires current outputs and, for voted families, either eligible human choices or settled comparisons. A fully settled round can close with zero votes and sessions. Several fingerprints under one system ID, malformed prior reports or unverifiable retired identities fail closure with an explanation.
 
-## Schema
+## Frozen Identity
 
-`Report` holds the family, the round, the closing time, and `results`, a union discriminated by `scorer` with one variant per scorer:
+`Report` holds `family`, `round`, `closed_at`, `systems` and `results`. `systems` maps exactly every ID referenced by the results to its public `display_name` and output `fingerprint`. An unknown fingerprint stays null. Standing rows reference this shared identity map. A historical round's labels and fingerprints never depend on today's catalog.
 
-| Variant        | Holds                                                                                                                                                                                                                                                                                                                                                                               |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VotesResults` | Standings with scores, intervals, rank spread, vote counts, both-bad and gate-failure rates, cost, latency, token and latency percentiles, and defect tallies, the family's reference and the round's anchor, plus the counted and dropped votes, the unranked systems, head-to-head records, category boards, the diagnostics, and the decision that [Ranking](ranking.md) defines |
-| `TestsResults` | Per system, the trials, the errored trials, the pass rate with an errored trial counting as a failure, the mean cost, and the p50 latency                                                                                                                                                                                                                                           |
+Current systems get labels from the resolved public catalog and fingerprints from actual outputs. A retired ID can reuse its latest prior report identity only when both fingerprints are known and match. Close a valid round before removing a runnable system. Different known fingerprints under the same ID fail continuity checks, while display names may change between rounds.
 
-Each defect the family lists counts against the output the owner tagged with it, once per vote, whichever side won, and the tallies follow the family's `defects` order. Both scorers count only the outputs on the family's current cases, and costs and latencies cover the outputs among them that finished without an error, while the gate-failure rate covers the outputs with a verdict, which on a task family includes a solution whose agent errored but whose tests still ran. A system without a counted vote still ranks through its settled results, with no both-bad rate, and `decision` is null while a system tied with the top one is preliminary. `anchor` is the reference when the round ranks it, and otherwise the most-voted system that stands at 1,000. Rounds with different anchors are offset by an unknown constant, so compare scores only within one round.
+## Results
 
-A new scorer adds one variant here, an arm in `close`, and a board on the site, as [Architecture](architecture.md#families-and-scorers) describes.
+| Variant        | Published values                                                                                                                                                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VotesResults` | Point standings and ranks, frozen method and rules, unavailable population inference, raw and effective human counts, output rates, cost and latency, distributions, defect tags, head-to-head records, categories and diagnostics |
+| `TestsResults` | Trials, errored trials, descriptive pass rates, mean cost and p50 latency                                                                                                                                                          |
 
-## What Is Published
+Voted intervals, best and worst ranks, separability and leader decisions are required null fields. Preliminary markers are derived from each round's raw decisive counts and recorded rule. [Ranking](ranking.md) defines the fit and uncertainty target.
 
-A report never holds a case ID, an instruction, an output, a route, a request ID, or a session, so private cases can enter a board without leaving the data directory. Categories, system names, and fingerprints, which hash a system's configuration, are its only identifiers.
+Both scorers use current-case outputs. Cost and latency cover completed outputs without errors. Gate-failure rates cover outputs with a verdict, including errored task agents whose tests ran. Defect tags count once per choice on the tagged output. Errored trials count as failures in tests-scored pass rates.
 
-## The Fixture
+## Publication Boundaries
 
-`tests/fixtures/report.json` is a report closed from about 300 simulated votes on eight generic systems over ten sessions, which the site's tests parse and render in place of real reports, as they do the early fixture. It has swapped repeats, settled gate failures, votes dropped on a retired case, two unranked systems that meet only each other, and a preliminary system ranked only through settled results, with no both-bad rate. `tests/fixtures/report-early.json` closes the first session alone, when every system is still preliminary and `decision` is null. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) covers the tests that keep each fixture and the schema current. Prettier leaves `reports/` and the fixtures as the writer formats them, so a rewritten file never needs reformatting.
+Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, public system IDs, labels and configuration fingerprints. New scorers add a results variant, a closing arm and site views, as [Architecture](architecture.md#families-and-scorers) describes.
+
+## Synthetic Fixtures
+
+`tests/fixtures/report.json` and `report-early.json` are synthetic rounds shared by Python and site tests. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes regeneration and schema comparison. Prettier leaves generated reports and fixtures as their writer formats them.

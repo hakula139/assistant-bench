@@ -11,14 +11,14 @@ afterEach(cleanup);
 describe('Hint', () => {
   test('opens a dialog described by the definition, with its last words kept on one line', async () => {
     const user = userEvent.setup();
-    render(<Hint term={terms.separatedPairs} />);
+    render(<Hint term={terms.decisive} />);
 
-    await user.click(screen.getByRole('button', { name: 'Separated pairs' }));
+    await user.click(screen.getByRole('button', { name: 'Decisive' }));
 
     const dialog = screen.getByRole('dialog', {
-      name: 'Separated pairs',
-      description: terms.separatedPairs.definition,
+      name: 'Decisive',
+      description: terms.decisive.definition,
     });
-    expect(dialog.querySelector('.text-nowrap')?.textContent).toBe('not overlap.');
+    expect(dialog.querySelector('.text-nowrap')?.textContent).toBe('bad votes.');
   });
 });

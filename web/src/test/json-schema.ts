@@ -4,7 +4,7 @@ const SCALARS = new Set(['boolean', 'integer', 'null', 'number', 'string']);
 
 /**
  * Flattens a JSON Schema into what each path admits: its types, constants and enums, and each
- * object's properties, required keys, extra keys, and the names those keys may take. `$ref`,
+ * object's properties, required keys, extra keys, and the names and string bounds of those keys. `$ref`,
  * unions, and type arrays resolve, so pydantic's and Zod's spellings of one schema compare equal,
  * while titles, descriptions, formats, and numeric bounds are ignored. Each union option that a
  * constant property tags, as `scorer` tags a report's results, gets its own paths, such as
@@ -36,18 +36,26 @@ export function schemaShape(root: Schema): Record<string, string[]> {
     return tags.length > 0 ? `<${tags.toSorted().join(',')}>` : '';
   };
 
-  const walk = (schema: Schema, path: string): void => {
+  const walk = (schema: Schema, path: string, propertyName = false): void => {
     const node = resolve(schema);
+    if (propertyName) {
+      for (const constraint of ['minLength', 'maxLength', 'pattern']) {
+        if (constraint in node) {
+          add(path, `${constraint} ${JSON.stringify(node[constraint])}`);
+        }
+      }
+    }
+
     const union = (node.anyOf ?? node.oneOf) as Schema[] | undefined;
     if (union) {
       for (const option of union.map(resolve)) {
-        walk(option, `${path}${tag(option)}`);
+        walk(option, `${path}${tag(option)}`, propertyName);
       }
       return;
     }
     if (Array.isArray(node.type)) {
       for (const type of node.type as string[]) {
-        walk({ ...node, type }, path);
+        walk({ ...node, type }, path, propertyName);
       }
       return;
     }
@@ -78,7 +86,7 @@ export function schemaShape(root: Schema): Record<string, string[]> {
         walk(extra as Schema, `${path}{}`);
       }
       if (typeof node.propertyNames === 'object') {
-        walk(node.propertyNames as Schema, `${path}{key}`);
+        walk({ type: 'string', ...(node.propertyNames as Schema) }, `${path}{key}`, true);
       }
     } else {
       add(path, `any ${JSON.stringify(node)}`);

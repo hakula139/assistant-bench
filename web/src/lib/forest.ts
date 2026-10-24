@@ -1,47 +1,44 @@
 import { nice, ticks, tickStep } from 'd3-array';
 
-import { ANCHOR_SCORE } from '@/lib/ranking';
-import type { Interval, Standing } from '@/lib/report';
+import { isPreliminary } from '@/lib/ranking';
+import type { Standing, VotesRules } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
-/** A score with its 95% interval, as a forest plot draws it. */
 export interface Estimate {
   score: number;
-  interval: Interval;
 }
 
-/**
- * How far below the top score an axis may start. At 600 points the top system would win about
- * 97% of the votes between the two, so a system further down is out of contention and sits at the
- * axis's start.
- */
+/** Maximum visible gap below the top point, in score points. */
 export const AXIS_SPAN_BELOW_TOP = 600;
 
-/** The axis of a family with no closed round: its anchor at 1,000 and room on either side. */
+/** Presentation space for a family with no measured scores. */
 export const EMPTY_DOMAIN: [number, number] = [600, 1400];
 
 const TICKS = 5;
 
 /**
- * Returns the x domain of one board's forest plot, shared by every row: every interval's upper
- * end, and every lower end down to `AXIS_SPAN_BELOW_TOP` below the top score, rounded outward to
- * round ticks. A collapsed interval uses the empty plot's display span centered on its score.
+ * Clips the low end at the visual span below the top point. Equal points use the empty plot's
+ * display span centered on their score.
  */
 export function forestDomain(estimates: Estimate[]): [number, number] {
   if (estimates.length === 0) {
     return EMPTY_DOMAIN;
   }
+
   const top = Math.max(...estimates.map((estimate) => estimate.score));
   const low = Math.max(
-    Math.min(...estimates.map((estimate) => estimate.interval.lower)),
+    Math.min(...estimates.map((estimate) => estimate.score)),
     top - AXIS_SPAN_BELOW_TOP,
   );
-  const high = Math.max(...estimates.map((estimate) => estimate.interval.upper));
+  const high = top;
+
   if (low === high) {
     const halfSpan = (EMPTY_DOMAIN[1] - EMPTY_DOMAIN[0]) / 2;
     return [low - halfSpan, high + halfSpan];
   }
+
   const [start, stop] = nice(low, high, TICKS);
+
   return [start, stop];
 }
 
@@ -55,6 +52,7 @@ export function sharedDomain(boards: Estimate[][]): [number, number] {
   if (domains.length === 0) {
     return EMPTY_DOMAIN;
   }
+
   return [
     Math.min(...domains.map(([start]) => start)),
     Math.max(...domains.map(([, stop]) => stop)),
@@ -78,12 +76,13 @@ export function forestTicks([start, stop]: [number, number]): number[] {
  * Returns the ticks a narrow forest plot labels: both ends, and the anchor when it sits far enough
  * from both that the labels cannot overlap.
  */
-export function sparseTicks(domain: [number, number]): number[] {
+export function sparseTicks(domain: [number, number], anchorScore?: number): number[] {
   const all = forestTicks(domain);
   const [start, stop] = domain;
-  const share = (ANCHOR_SCORE - start) / (stop - start);
-  const anchor = all.includes(ANCHOR_SCORE) && share >= 0.25 && share <= 0.75;
-  return [all[0], ...(anchor ? [ANCHOR_SCORE] : []), all[all.length - 1]];
+  const share = anchorScore === undefined ? 0 : (anchorScore - start) / (stop - start);
+  const anchor =
+    anchorScore !== undefined && all.includes(anchorScore) && share >= 0.25 && share <= 0.75;
+  return [all[0], ...(anchor ? [anchorScore] : []), all[all.length - 1]];
 }
 
 /**
@@ -93,31 +92,28 @@ export function sparseTicks(domain: [number, number]): number[] {
 const INTERVAL_WIDTH = 40;
 
 /** Returns the ticks a forest plot labels on an axis `width` CSS pixels wide. */
-export function labelledTicks(domain: [number, number], width: number): number[] {
+export function labelledTicks(
+  domain: [number, number],
+  width: number,
+  anchorScore?: number,
+): number[] {
   const all = forestTicks(domain);
-  return width >= (all.length - 1) * INTERVAL_WIDTH ? all : sparseTicks(domain);
+  return width >= (all.length - 1) * INTERVAL_WIDTH ? all : sparseTicks(domain, anchorScore);
 }
 
 /** Where an estimate falls on an axis, with what the axis start cuts off. */
 export interface Clipped {
   /** The score, or the axis start when the score lies below it. */
   score: number;
-  lower: number;
-  upper: number;
   /** Whether the score itself lies below the axis start. */
   offScale: boolean;
-  /** Whether the interval runs past the axis start. */
-  cutLow: boolean;
 }
 
 /** Clips an estimate to an axis from `forestDomain`, which never cuts the top end. */
-export function clip({ score, interval }: Estimate, [start]: [number, number]): Clipped {
+export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
   return {
     score: Math.max(score, start),
-    lower: Math.max(interval.lower, start),
-    upper: Math.max(interval.upper, start),
     offScale: score < start,
-    cutLow: interval.lower < start,
   };
 }
 
@@ -144,22 +140,19 @@ export function unmeasuredRows(systems: string[], anchor: string, names: SystemN
   }));
 }
 
-/**
- * Rows for a closed round: its standings from the highest score down, each linked to its system
- * page at `href`, then its unranked systems, then the family's systems the round has no votes on.
- */
+/** Closed-round rows use only the report's standings and unranked systems. */
 export function roundRows(
   href: (system: string) => string,
-  systems: string[],
   { standings, unranked }: { standings: Standing[]; unranked: string[] },
   names: SystemNames,
+  rules: VotesRules,
 ): ForestRow[] {
-  const placed = new Set([...standings.map((standing) => standing.system), ...unranked]);
   const unplaced = (system: string, reason: Unplaced) => ({
     system,
     name: systemName(names, system),
     unplaced: reason,
   });
+
   return [
     ...standings
       .toSorted((a, b) => b.score - a.score)
@@ -168,20 +161,16 @@ export function roundRows(
         name: systemName(names, standing.system),
         href: href(standing.system),
         estimate: standing,
-        preliminary: standing.preliminary,
+        preliminary: isPreliminary(standing, rules),
       })),
     ...unranked.toSorted(byName(names)).map((system) => unplaced(system, 'unranked')),
-    ...systems
-      .filter((system) => !placed.has(system))
-      .toSorted(byName(names))
-      .map((system) => unplaced(system, 'no-votes')),
   ];
 }
 
 /** A mark a forest plot draws, which its legend names. */
-export type LegendMark = 'score' | 'preliminary' | 'cut' | 'anchor' | 'unbounded';
+export type LegendMark = 'score' | 'preliminary' | 'cut' | 'anchor';
 
-const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'anchor', 'unbounded'];
+const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'anchor'];
 
 /**
  * Returns the marks a forest plot of `rows` on `domain` draws, in legend order, where
@@ -193,17 +182,19 @@ export function legendMarks(
   anchorLine: boolean,
 ): LegendMark[] {
   const drawn = new Set<LegendMark>(anchorLine ? ['anchor'] : []);
+
   for (const row of rows) {
     if ('estimate' in row) {
-      drawn.add(row.preliminary ? 'preliminary' : 'score');
       const clipped = clip(row.estimate, domain);
-      if (clipped.cutLow || clipped.offScale) {
+
+      if (clipped.offScale) {
         drawn.add('cut');
+      } else {
+        drawn.add(row.preliminary ? 'preliminary' : 'score');
       }
-    } else if (row.unplaced !== 'anchor') {
-      drawn.add('unbounded');
     }
   }
+
   return LEGEND_ORDER.filter((mark) => drawn.has(mark));
 }
 

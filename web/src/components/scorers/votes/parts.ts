@@ -1,8 +1,8 @@
 /** The votes section's parts, by key, which the page's table of contents lists. */
 export const votesParts = {
   gates: 'Gates',
-  scores: 'Scores and intervals',
+  scores: 'Point scores',
   leaderboard: 'Reading the leaderboard',
-  leader: 'How the leader is chosen',
+  uncertainty: 'Uncertainty',
   summary: 'Round summary',
 };

@@ -1,7 +1,11 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
-import { formatCount, formatCountOf, formatScore } from '@/lib/format';
+import { formatCount, formatCountOf } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
-import { ANCHOR_SCORE } from '@/lib/ranking';
+import type { VotesMethod, VotesRules } from '@/lib/report';
+
+export function roundMethod(method: VotesMethod, rules: VotesRules): string {
+  return `Bradley-Terry v${method.version}, L2 penalty ${method.l2_penalty}, ${method.points_per_logit} points per logit, anchor ${method.anchor_score}. Human votes have unit weight, including repeats. Settled output pairs share each case's weight. Preliminary coverage requires ${rules.preliminary_decisive_votes} raw decisive votes. The repeat-consistency floor is ${rules.rater_agreement_floor}.`;
+}
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
@@ -52,6 +56,7 @@ export function gateRule({ language, gates }: VotesConfig): string {
     language && `not in ${languages[language]}`,
     gates.script === 'hans' ? 'written with Traditional characters' : undefined,
   ].filter((problem) => problem !== undefined);
+
   return `An output loses its pairs without a vote if it is ${anyOf.format(problems)}.`;
 }
 
@@ -158,6 +163,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
         ...step,
         hint: votes && rule(votes),
       });
+
       return [
         ruled(run),
         ruled(gate),
@@ -173,7 +179,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
           detail: 'ranked from votes',
           hint:
             votes &&
-            `Elo-like scores from a Bradley-Terry fit, with 95% intervals. The board's anchor, its reference or the most-voted system, is fixed at ${formatScore(ANCHOR_SCORE)}.`,
+            'Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Uncertainty for new cases and voters is unavailable until the method is calibrated.',
         },
       ];
     }

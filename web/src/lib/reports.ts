@@ -8,11 +8,15 @@ import { resolveSystemNames, type SystemNames } from '@/lib/systems';
 
 export interface VotesRound {
   round: string;
+  closed_at: string;
+  systems: Report['systems'];
   results: VotesResults;
 }
 
 export interface TestsRound {
   round: string;
+  closed_at: string;
+  systems: Report['systems'];
   results: TestsResults;
 }
 
@@ -28,7 +32,7 @@ export interface Family {
    * first round closes.
    */
   rounds: Report[];
-  /** Every system's display name, which pages show wherever the reports name a system. */
+  /** Current catalog labels for families without a closed round. */
   systemNames: SystemNames;
 }
 
@@ -44,6 +48,7 @@ export function boardSlug(name: string, aspect: Aspect): string {
       `family ${name}: a public family ID starts with its aspect, as in ${aspect}-<name>`,
     );
   }
+
   return name.slice(prefix.length);
 }
 
@@ -83,7 +88,9 @@ export function publicFamilies(
     }
     owners.set(title, name);
   }
+
   const rounds = Map.groupBy(reports, (report) => report.family);
+
   return configs
     .filter(({ config }) => config.public)
     .map(({ name, config }) => {
@@ -111,6 +118,7 @@ export async function getFamilies(): Promise<Family[]> {
     getCollection('systems'),
     getCollection('models'),
   ]);
+
   return publicFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
@@ -141,15 +149,15 @@ export function latest(family: Family): Report | undefined {
 
 /** Returns the rounds of a family scored by votes, oldest first. */
 export function votesRounds(family: Family): VotesRound[] {
-  return family.rounds.flatMap(({ round, results }) =>
-    results.scorer === 'votes' ? [{ round, results }] : [],
+  return family.rounds.flatMap(({ round, closed_at, systems, results }) =>
+    results.scorer === 'votes' ? [{ round, closed_at, systems, results }] : [],
   );
 }
 
 /** Returns the rounds of a family scored by task tests, oldest first. */
 export function testsRounds(family: Family): TestsRound[] {
-  return family.rounds.flatMap(({ round, results }) =>
-    results.scorer === 'tests' ? [{ round, results }] : [],
+  return family.rounds.flatMap(({ round, closed_at, systems, results }) =>
+    results.scorer === 'tests' ? [{ round, closed_at, systems, results }] : [],
   );
 }
 

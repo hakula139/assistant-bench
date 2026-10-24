@@ -1,4 +1,4 @@
-"""Bradley-Terry ratings from votes, with case-clustered bootstrap intervals."""
+"""Penalized Bradley-Terry point ratings from weighted comparisons."""
 
 import math
 from collections.abc import Sequence
@@ -18,9 +18,6 @@ ELO_PER_LOGIT = 400 / math.log(10)
 ANCHOR = 1000.0
 # Keeps the strength of a system that wins every vote finite.
 L2_PENALTY = 0.01
-RESAMPLES = 1000
-CONFIDENCE = 0.95
-SEED = 0
 
 
 class Comparison(NamedTuple):
@@ -40,7 +37,7 @@ class Comparison(NamedTuple):
 
 @dataclass(frozen=True)
 class Matchups:
-    """Votes as parallel arrays of system and case indices.
+    """Comparisons as parallel arrays of system indices.
 
     `sided` holds 1 for a row that the left-side intercept applies to, else 0.
     """
@@ -51,16 +48,15 @@ class Matchups:
     score: Floats
     weight: Floats
     sided: Floats
-    cluster: Indices
 
     @classmethod
     def build(cls, comparisons: Sequence[Comparison]) -> Matchups:
-        """Index the systems in name order and the cases in order of appearance."""
+        """Index the systems in name order."""
         systems = tuple(
             sorted({c.left for c in comparisons} | {c.right for c in comparisons})
         )
         index = {system: i for i, system in enumerate(systems)}
-        cases: dict[str, int] = {}
+
         return cls(
             systems=systems,
             left=np.array([index[c.left] for c in comparisons], dtype=np.intp),
@@ -68,10 +64,6 @@ class Matchups:
             score=np.array([c.score for c in comparisons], dtype=np.float64),
             weight=np.array([c.weight for c in comparisons], dtype=np.float64),
             sided=np.array([c.sided for c in comparisons], dtype=np.float64),
-            cluster=np.array(
-                [cases.setdefault(c.case, len(cases)) for c in comparisons],
-                dtype=np.intp,
-            ),
         )
 
     def component(self, system: str) -> Matchups:
@@ -85,7 +77,7 @@ class Matchups:
         )
         rows = kept[self.left]
         index = np.cumsum(kept) - 1
-        _, cluster = np.unique(self.cluster[rows], return_inverse=True)
+
         return Matchups(
             systems=tuple(
                 s for s, keep in zip(self.systems, kept, strict=True) if keep
@@ -95,21 +87,19 @@ class Matchups:
             score=self.score[rows],
             weight=self.weight[rows],
             sided=self.sided[rows],
-            cluster=cluster.astype(np.intp),
         )
 
     def root(self, order: Sequence[str]) -> str:
         """Return the system to root a fit at, the one in the most votes.
 
-        The most-voted system has the most precise estimate and is the least
-        likely to detach in a resample. Only sided rows count as votes. A tie
-        follows `order`, then the name.
+        Only sided rows count as votes. A tie follows `order`, then the name.
         """
         sided = self.sided > 0
         rows = np.concatenate([self.left[sided], self.right[sided]])
         counts = np.bincount(rows, minlength=len(self.systems))
         votes = dict(zip(self.systems, counts, strict=True))
         position = {system: i for i, system in enumerate(order)}
+
         return min(
             self.systems,
             key=lambda system: (
@@ -137,44 +127,10 @@ class PointRatings:
     score: Floats
     position: float
 
-
-@dataclass(frozen=True)
-class Ratings(PointRatings):
-    """Scores on the Elo-like scale with their bootstrap intervals.
-
-    `draws` holds each resample's scores, one row per resample, with NaN where
-    the resample leaves a system unconnected to the root. Such a draw counts as
-    unbounded, so a bound that falls on one is infinite.
-    """
-
-    lower: Floats
-    upper: Floats
-    draws: Floats
-
-    def anchored(self, system: str) -> Ratings:
-        """Move the scale so `system` sits at `ANCHOR`, shifting every score alike."""
+    def anchored(self, system: str) -> PointRatings:
+        """Shift every score so `system` sits at `ANCHOR`."""
         shift = ANCHOR - self.score[self.systems.index(system)]
-        return replace(
-            self,
-            score=self.score + shift,
-            lower=self.lower + shift,
-            upper=self.upper + shift,
-            draws=self.draws + shift,
-        )
-
-    def bounded(self) -> Ratings:
-        """Keep the systems whose interval is finite."""
-        kept = np.isfinite(self.lower) & np.isfinite(self.upper)
-        return Ratings(
-            systems=tuple(
-                s for s, keep in zip(self.systems, kept, strict=True) if keep
-            ),
-            score=self.score[kept],
-            lower=self.lower[kept],
-            upper=self.upper[kept],
-            draws=self.draws[:, kept],
-            position=self.position,
-        )
+        return replace(self, score=self.score + shift)
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
@@ -183,10 +139,11 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     `covariate` adds a per-vote feature, such as a length difference, when it is
     identifiable apart from system and position effects on positive-weight rows.
     """
-    columns = [] if covariate is None else [covariate]
+    columns: list[Floats] = [] if covariate is None else [covariate]
     x = _design(
         matchups.left, matchups.right, matchups.sided, len(matchups.systems), columns
     )
+
     # With a thread per core, scipy's OpenBLAS burns several cores during each tiny
     # L-BFGS-B fit, which on a loaded host slows the fit itself.
     with threadpool_limits(limits=1, user_api='blas'):
@@ -197,53 +154,8 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
             ):
                 x = x[:, :-1]
         theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
+
     return _fit(theta, len(matchups.systems))
-
-
-def bootstrap(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Floats:
-    """Refit on cases drawn with replacement, returning one row of strengths each.
-
-    Votes on one case are correlated, so each draw takes all of a case's votes.
-    The votes of each ordered pair and sidedness collapse into one weighted row,
-    which keeps a refit cheap. A system that a resample's drawn rows leave
-    unconnected to `root` gets NaN there, since the penalty would place it at its
-    own component's center.
-    """
-    k = len(matchups.systems)
-    root_index = matchups.systems.index(root)
-    keys = np.stack([matchups.left, matchups.right, matchups.sided], axis=1)
-    pairs, pair_of_vote = np.unique(keys, axis=0, return_inverse=True)
-    left, right = pairs[:, 0].astype(np.intp), pairs[:, 1].astype(np.intp)
-    x = _design(left, right, pairs[:, 2], k, [])
-
-    rng = np.random.default_rng(SEED)
-    n_cases = int(matchups.cluster.max()) + 1
-    draws = rng.multinomial(n_cases, np.full(n_cases, 1 / n_cases), size=resamples)
-    cells = (matchups.cluster, pair_of_vote)
-    case_weights = np.zeros((n_cases, len(pairs)))
-    np.add.at(case_weights, cells, matchups.weight)
-    case_wins = np.zeros((n_cases, len(pairs)))
-    np.add.at(case_wins, cells, matchups.weight * matchups.score)
-    strengths = np.empty((resamples, k))
-    with threadpool_limits(limits=1, user_api='blas'):
-        pair_weights = draws @ case_weights
-        pair_wins = draws @ case_wins
-        start = _minimize(
-            x,
-            pair_wins.sum(axis=0) / pair_weights.sum(axis=0),
-            pair_weights.sum(axis=0),
-            k,
-        )
-        for r in range(resamples):
-            weights = pair_weights[r]
-            drawn = weights > 0
-            score = np.divide(
-                pair_wins[r], weights, out=np.full(len(pairs), 0.5), where=drawn
-            )
-            strengths[r] = _fit(_minimize(x, score, weights, k, start), k).strength
-            connected = _connected(left[drawn], right[drawn], k, root_index)
-            strengths[r, ~connected] = np.nan
-    return strengths
 
 
 def rate_point(matchups: Matchups, root: str) -> PointRatings:
@@ -251,70 +163,11 @@ def rate_point(matchups: Matchups, root: str) -> PointRatings:
     return _point_ratings(matchups.systems, fit(matchups), root)
 
 
-def rate(matchups: Matchups, root: str, resamples: int = RESAMPLES) -> Ratings:
-    """Place the root system's score at `ANCHOR` with percentile intervals.
-
-    Each resample's scores shift so that the systems it connects keep the mean of
-    their point scores, which gives the root an interval like every other system
-    and keeps a detached system's displacement out of the others' draws.
-    """
-    point = fit(matchups)
-    ratings = _point_ratings(matchups.systems, point, root)
-    shift = point.strength[matchups.systems.index(root)]
-    draws = ANCHOR + ELO_PER_LOGIT * (bootstrap(matchups, root, resamples) - shift)
-    draws += np.nanmean(ratings.score - draws, axis=1, keepdims=True)
-    lower, upper = _interval(draws)
-    return Ratings(
-        systems=ratings.systems,
-        score=ratings.score,
-        lower=lower,
-        upper=upper,
-        draws=draws,
-        position=ratings.position,
-    )
-
-
-def ties(ratings: Ratings, candidates: Sequence[int]) -> list[int]:
-    """Return the candidates tied with the top-scoring one, itself included.
-
-    A candidate ties when the interval of its score's difference from the top's,
-    paired within each resample, contains 0, as an unbounded interval does.
-    """
-    top = max(candidates, key=lambda i: ratings.score[i])
-    lower, upper = _interval(ratings.draws[:, candidates] - ratings.draws[:, [top]])
-    return [
-        i
-        for i, low, high in zip(candidates, lower, upper, strict=True)
-        if low <= 0 <= high
-    ]
-
-
-def rank_spread(lower: Floats, upper: Floats) -> tuple[Indices, Indices]:
-    """Return each system's best and worst rank.
-
-    The best rank counts the systems whose lower bound exceeds this system's upper
-    bound, and the worst rank counts the others whose upper bound exceeds this
-    system's lower bound.
-    """
-    others = ~np.eye(len(lower), dtype=bool)
-    best = 1 + (lower[None, :] > upper[:, None]).sum(axis=1)
-    worst = 1 + ((upper[None, :] > lower[:, None]) & others).sum(axis=1)
-    return best, worst
-
-
-def separability(lower: Floats, upper: Floats) -> float | None:
-    """Return the share of system pairs whose intervals do not overlap."""
-    i, j = np.triu_indices(len(lower), k=1)
-    if not len(i):
-        return None
-    apart = (upper[i] < lower[j]) | (upper[j] < lower[i])
-    return float(apart.mean())
-
-
 def rank_agreement(first: Floats, second: Floats) -> float | None:
     """Return Kendall's τ between two score vectors, undefined below two systems."""
     if len(first) < 2:
         return None
+
     statistic = float(stats.kendalltau(first, second).statistic)
     return None if np.isnan(statistic) else statistic
 
@@ -328,26 +181,9 @@ def _point_ratings(systems: tuple[str, ...], point: Fit, root: str) -> PointRati
     )
 
 
-def _interval(draws: Floats) -> tuple[Floats, Floats]:
-    """Return the percentile bounds, rounded outward to the nearest resample.
-
-    Rounding to a resample keeps an unbounded draw from entering interpolation,
-    so a bound that reaches one is infinite.
-    """
-    tail = (1 - CONFIDENCE) / 2 * 100
-    lower = np.percentile(
-        np.nan_to_num(draws, nan=-np.inf), tail, axis=0, method='lower'
-    )
-    upper = np.percentile(
-        np.nan_to_num(draws, nan=np.inf), 100 - tail, axis=0, method='higher'
-    )
-    return lower, upper
-
-
 def _connected(
     left: Indices, right: Indices, k: int, system: int
 ) -> npt.NDArray[np.bool_]:
-    """Mark the systems that the rows connect to `system`."""
     graph = sparse.coo_array((np.ones(len(left)), (left, right)), shape=(k, k))
     _, labels = sparse.csgraph.connected_components(graph, directed=False)
     connected: npt.NDArray[np.bool_] = labels == labels[system]
@@ -364,12 +200,11 @@ def _design(
     x[:, k] = sided
     for offset, column in enumerate(columns, start=k + 1):
         x[:, offset] = column
+
     return x
 
 
-def _minimize(
-    x: Floats, score: Floats, weights: Floats, k: int, start: Floats | None = None
-) -> Floats:
+def _minimize(x: Floats, score: Floats, weights: Floats, k: int) -> Floats:
     penalty = np.zeros(x.shape[1])
     penalty[:k] = L2_PENALTY
 
@@ -381,12 +216,13 @@ def _minimize(
 
     result = optimize.minimize(
         loss,
-        np.zeros(x.shape[1]) if start is None else start,
+        np.zeros(x.shape[1]),
         jac=True,
         method='L-BFGS-B',
     )
     if not result.success:
         raise RuntimeError(f'the Bradley-Terry fit did not converge: {result.message}')
+
     theta: Floats = result.x
     return theta
 

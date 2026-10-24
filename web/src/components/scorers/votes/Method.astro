@@ -4,37 +4,18 @@ import { votesParts } from '@/components/scorers/votes/parts';
 import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
 import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
 import { MethodStrip } from '@/components/site/Method';
-import { list, note, Part, Stat, statList } from '@/components/site/PageParts';
-import { KeptTail } from '@/components/site/Term';
+import { note, Part } from '@/components/site/PageParts';
 import { AXIS_SPAN_BELOW_TOP, EMPTY_DOMAIN, type ForestRow } from '@/lib/forest';
 import { formatCount } from '@/lib/format';
-import { gates, terms } from '@/lib/glossary';
-import { RESAMPLES } from '@/lib/ranking';
+import { gates, inferenceNote, terms } from '@/lib/glossary';
 
 const id = (part: keyof typeof votesParts) => partId('votes', part);
-
-const example = (score: number, lower: number, upper: number) => ({
-  score,
-  interval: { lower, upper },
-});
-
 const rows: ForestRow[] = [
-  { system: 'measured', name: 'Measured', estimate: example(1040, 990, 1090), preliminary: false },
-  {
-    system: 'preliminary',
-    name: 'Preliminary',
-    estimate: example(930, 780, 1110),
-    preliminary: true,
-  },
-  {
-    system: 'far-behind',
-    name: 'Far behind',
-    estimate: example(380, 250, 520),
-    preliminary: false,
-  },
+  { system: 'measured', name: 'Measured', estimate: { score: 1040 }, preliminary: false },
+  { system: 'preliminary', name: 'Preliminary', estimate: { score: 930 }, preliminary: true },
+  { system: 'far-behind', name: 'Far behind', estimate: { score: 380 }, preliminary: false },
   { system: 'no-votes', name: 'No votes yet', unplaced: 'no-votes' },
 ];
-
 const columns: GlossaryEntry[] = [
   terms.rank,
   { ...terms.anchor, status: 'anchor' },
@@ -45,46 +26,43 @@ const columns: GlossaryEntry[] = [
   terms.gateFailures,
   terms.costLatency,
 ];
-
-const diagnostics = [
-  terms.raterAgreement,
-  terms.separatedPairs,
-  terms.splitHalf,
-  terms.leftOut,
-  terms.lengthBias,
-];
+const diagnostics = [terms.raterAgreement, terms.splitHalf, terms.leftOut, terms.lengthBias];
 ---
 
 <MethodStrip scorer="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
 <p>
-  With sides counterbalanced, one rater picks the better output of each pair, a tie, or both bad.
+  With sides counterbalanced, the rater picks the better output of each pair, a tie, or both bad.
 </p>
 
 <Part id={id('gates')} title={votesParts.gates}>
   <p>
-    A failing output loses its pairs and two identical outputs tie, so such pairs are settled
-    without a vote.
+    A failing output loses its pairs and two identical outputs tie, so these pairs settle without a
+    vote.
   </p>
   <Glossary heading="Gate" entries={Object.values(gates)} />
 </Part>
 
 <Part id={id('scores')} title={votesParts.scores}>
   <p>
-    <KeptTail text="A Bradley-Terry model turns the votes, and the pairs settled without a vote, into Elo-like scores, counting ties and both-bad votes as half a win. Compare scores only within one round of one family, since each round sets its own anchor." />
+    A penalized Bradley-Terry model fits Elo-like point scores to human votes and settled pairs.
+    Ties and both-bad votes count half a win. Human choices have unit weight, including reconciled
+    repeats. Each settled output pairing receives its share of that case's sample pairs.
   </p>
-  <dl class={statList}>
-    <Stat label="A 100-point gap" detail="of the votes between them">
-      wins about 64%
-    </Stat>
-    <Stat label="95% intervals" detail="resampling whole cases">
-      {formatCount(RESAMPLES)} bootstraps
-    </Stat>
-  </dl>
+  <p>
+    Compare scores within one round of one family. Each closed board records its point method,
+    anchor, weighting policy and coverage rules under Round settings. Categories refit their own
+    comparisons while retaining that round's settings.
+  </p>
 </Part>
 
 <Part id={id('leaderboard')} title={votesParts.leaderboard}>
   <figure class="flex flex-col gap-4 rounded-lg border p-4">
-    <Forest client:visible caption="Four example rows" domain={EMPTY_DOMAIN} rows={rows} />
+    <Forest
+      client:visible
+      caption="Four example point-score rows"
+      domain={EMPTY_DOMAIN}
+      rows={rows}
+    />
     <figcaption class="flex flex-col gap-2">
       <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
       <p class={note}>
@@ -94,29 +72,18 @@ const diagnostics = [
   </figure>
   <Glossary heading="Column" entries={columns} />
   <p>
-    <KeptTail
-      text={
-        'A dash marks a missing value. A category view refits that category\'s votes alone, so intervals widen and Rank disappears, while the columns labeled "all categories" stay family-wide.'
-      }
-    />
+    A dash marks a missing value. A category view refits that category's comparisons, while columns
+    labeled "all categories" retain family-wide values. Preliminary marks use the round's recorded
+    raw decisive-vote threshold and describe coverage.
   </p>
 </Part>
 
-<Part id={id('leader')} title={votesParts.leader}>
-  <ol class:list={['list-decimal', list]}>
-    <li>
-      A ranked system ties for the top when the 95% interval of its paired score difference from the
-      top system contains 0 or is unbounded, so pairing can separate overlapping intervals.
-    </li>
-    <li>
-      While any system tied for the top, the top one included, is preliminary, the round names no
-      leader.
-    </li>
-    <li>
-      Otherwise a lone top system leads, and a tie goes to the lower cost per output, then the lower
-      median latency, then the higher score, with a known value beating a missing one.
-    </li>
-  </ol>
+<Part id={id('uncertainty')} title={votesParts.uncertainty}>
+  <p>{inferenceNote}</p>
+  <p>
+    Point ranks describe the fitted order. They supply no confidence interval, population separation
+    claim or leader decision. More votes alone do not validate a population uncertainty method.
+  </p>
 </Part>
 
 <Part id={id('summary')} title={votesParts.summary}>

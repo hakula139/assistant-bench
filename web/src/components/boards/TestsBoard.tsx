@@ -10,17 +10,18 @@ import {
 import { formatCost, formatPercent, formatSeconds } from '@/lib/format';
 import { terms } from '@/lib/glossary';
 import type { TestsRound } from '@/lib/reports';
-import { systemName, type SystemNames } from '@/lib/systems';
+import { reportNames, systemName } from '@/lib/systems';
 
 interface TestsBoardProps {
   /** The latest closed round. */
   round: TestsRound;
-  names: SystemNames;
 }
 
 /** A family's pass rates on its task tests in the latest round, with each column's meaning on tap. */
-export function TestsBoard({ round: { round, results }, names }: TestsBoardProps) {
+export function TestsBoard({ round: { round, systems, results } }: TestsBoardProps) {
+  const names = reportNames(systems);
   const standings = results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate);
+
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">Round {round}</p>

@@ -2,15 +2,21 @@
   "$defs": {
     "CategoryBoard": {
       "additionalProperties": false,
-      "description": "A refit on one category's comparisons, anchored like the full board.\n\n`unranked` lists the systems with outputs in the category that have no score\nthere, for the same reasons as on the board.",
+      "description": "A category point fit in the overall anchor's connected component.",
       "properties": {
         "category": {
           "title": "Category",
           "type": "string"
         },
         "votes": {
+          "minimum": 0,
           "title": "Votes",
           "type": "integer"
+        },
+        "effective_votes": {
+          "minimum": 0,
+          "title": "Effective Votes",
+          "type": "number"
         },
         "standings": {
           "items": {
@@ -30,6 +36,7 @@
       "required": [
         "category",
         "votes",
+        "effective_votes",
         "standings",
         "unranked"
       ],
@@ -48,15 +55,23 @@
           "type": "number"
         },
         "interval": {
-          "$ref": "#/$defs/Interval"
+          "title": "Interval",
+          "type": "null"
         },
         "votes": {
+          "minimum": 0,
           "title": "Votes",
           "type": "integer"
         },
-        "preliminary": {
-          "title": "Preliminary",
-          "type": "boolean"
+        "effective_votes": {
+          "minimum": 0,
+          "title": "Effective Votes",
+          "type": "number"
+        },
+        "decisive_votes": {
+          "minimum": 0,
+          "title": "Decisive Votes",
+          "type": "integer"
         }
       },
       "required": [
@@ -64,39 +79,10 @@
         "score",
         "interval",
         "votes",
-        "preliminary"
+        "effective_votes",
+        "decisive_votes"
       ],
       "title": "CategoryStanding",
-      "type": "object"
-    },
-    "Decision": {
-      "additionalProperties": false,
-      "description": "The leader among the systems tied with the top-scoring one, and what chose it.\n\n`separated` means no other ranked system ties with the top-scoring one, and\n`tie_break` is then `score`. Otherwise `cost` or `latency` broke the tie by\nthe lower mean cost or p50 latency, where a known value beats a missing one,\nand `score` remains the last resort.",
-      "properties": {
-        "leader": {
-          "title": "Leader",
-          "type": "string"
-        },
-        "separated": {
-          "title": "Separated",
-          "type": "boolean"
-        },
-        "tie_break": {
-          "enum": [
-            "score",
-            "cost",
-            "latency"
-          ],
-          "title": "Tie Break",
-          "type": "string"
-        }
-      },
-      "required": [
-        "leader",
-        "separated",
-        "tie_break"
-      ],
-      "title": "Decision",
       "type": "object"
     },
     "Defect": {
@@ -140,7 +126,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Votes between two systems, where ties and both-bad votes count half.",
+      "description": "Human choices between two systems, with half credit for either tie.",
       "properties": {
         "system": {
           "title": "System",
@@ -151,8 +137,14 @@
           "type": "string"
         },
         "votes": {
+          "minimum": 0,
           "title": "Votes",
           "type": "integer"
+        },
+        "effective_votes": {
+          "minimum": 0,
+          "title": "Effective Votes",
+          "type": "number"
         },
         "wins": {
           "title": "Wins",
@@ -179,6 +171,7 @@
         "system",
         "opponent",
         "votes",
+        "effective_votes",
         "wins",
         "losses",
         "ties",
@@ -188,29 +181,37 @@
       "title": "HeadToHead",
       "type": "object"
     },
-    "Interval": {
+    "PublicSystem": {
       "additionalProperties": false,
-      "description": "A bootstrap interval at `ranking.CONFIDENCE` on the score scale.",
       "properties": {
-        "lower": {
-          "title": "Lower",
-          "type": "number"
+        "display_name": {
+          "description": "Public label frozen for this round, including retired systems.",
+          "title": "Display Name",
+          "type": "string"
         },
-        "upper": {
-          "title": "Upper",
-          "type": "number"
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Configuration provenance, unknown when null.",
+          "title": "Fingerprint"
         }
       },
       "required": [
-        "lower",
-        "upper"
+        "display_name",
+        "fingerprint"
       ],
-      "title": "Interval",
+      "title": "PublicSystem",
       "type": "object"
     },
     "RaterAgreement": {
       "additionalProperties": false,
-      "description": "How often a side-swapped repeat matched the original vote.",
+      "description": "Descriptive agreement of side-swapped repeats with their originals.",
       "properties": {
         "repeats": {
           "title": "Repeats",
@@ -257,53 +258,69 @@
         }
       ]
     },
+    "SettledWeights": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "sample-pair-share",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "SettledWeights",
+      "type": "object"
+    },
     "Standing": {
       "additionalProperties": false,
-      "description": "One system's row on a board scored by votes.\n\n`rank` orders the scores, while `best_rank` and `worst_rank` span the ranks\nits interval allows. `preliminary` marks fewer than `PRELIMINARY_DECISIVE_VOTES`\ndecisive votes. `outputs` counts the outputs that finished without an\nerror, while `gate_failure_rate` covers every output with a verdict,\nincluding a task's solution whose agent errored but whose tests still ran.\n`defects` counts the votes that tagged this system's output with each of\nthe family's defects, in the family's order, whichever side won.",
       "properties": {
         "system": {
           "title": "System",
           "type": "string"
         },
-        "fingerprint": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Fingerprint"
-        },
         "score": {
+          "description": "Point estimate on the round's recorded score scale.",
           "title": "Score",
           "type": "number"
         },
         "interval": {
-          "$ref": "#/$defs/Interval"
+          "title": "Interval",
+          "type": "null"
         },
         "rank": {
+          "description": "Competition rank of the point score.",
           "title": "Rank",
           "type": "integer"
         },
         "best_rank": {
           "title": "Best Rank",
-          "type": "integer"
+          "type": "null"
         },
         "worst_rank": {
           "title": "Worst Rank",
-          "type": "integer"
-        },
-        "preliminary": {
-          "title": "Preliminary",
-          "type": "boolean"
+          "type": "null"
         },
         "votes": {
+          "minimum": 0,
           "title": "Votes",
           "type": "integer"
         },
+        "effective_votes": {
+          "description": "Eligible human row weight, excluding settled comparisons.",
+          "minimum": 0,
+          "title": "Effective Votes",
+          "type": "number"
+        },
         "decisive_votes": {
+          "minimum": 0,
           "title": "Decisive Votes",
           "type": "integer"
         },
@@ -319,6 +336,7 @@
           "title": "Both Bad Rate"
         },
         "outputs": {
+          "description": "Outputs that finished without an error.",
           "title": "Outputs",
           "type": "integer"
         },
@@ -331,6 +349,7 @@
               "type": "null"
             }
           ],
+          "description": "Failure share among outputs with a verdict, including errored agents.",
           "title": "Gate Failure Rate"
         },
         "mean_cost_usd": {
@@ -379,6 +398,7 @@
           "additionalProperties": {
             "type": "integer"
           },
+          "description": "Raw tagged-vote counts in the family's defect order.",
           "propertyNames": {
             "$ref": "#/$defs/Defect"
           },
@@ -388,14 +408,13 @@
       },
       "required": [
         "system",
-        "fingerprint",
         "score",
         "interval",
         "rank",
         "best_rank",
         "worst_rank",
-        "preliminary",
         "votes",
+        "effective_votes",
         "decisive_votes",
         "both_bad_rate",
         "outputs",
@@ -441,17 +460,6 @@
           "title": "System",
           "type": "string"
         },
-        "fingerprint": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Fingerprint"
-        },
         "trials": {
           "title": "Trials",
           "type": "integer"
@@ -489,7 +497,6 @@
       },
       "required": [
         "system",
-        "fingerprint",
         "trials",
         "errored",
         "pass_rate",
@@ -499,32 +506,154 @@
       "title": "TestsStanding",
       "type": "object"
     },
+    "UnavailableInference": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "unavailable",
+          "title": "Status",
+          "type": "string"
+        },
+        "target": {
+          "const": "new-cases-and-voters",
+          "title": "Target",
+          "type": "string"
+        },
+        "reason": {
+          "const": "population-method-not-validated",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "target",
+        "reason"
+      ],
+      "title": "UnavailableInference",
+      "type": "object"
+    },
+    "UnitHumanWeights": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "unit",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "repeat_handling": {
+          "const": "included",
+          "title": "Repeat Handling",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "repeat_handling"
+      ],
+      "title": "UnitHumanWeights",
+      "type": "object"
+    },
+    "VotesMethod": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "bradley-terry",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "l2_penalty": {
+          "description": "Penalty on system logits, excluding the sided intercept.",
+          "exclusiveMinimum": 0,
+          "title": "L2 Penalty",
+          "type": "number"
+        },
+        "points_per_logit": {
+          "exclusiveMinimum": 0,
+          "title": "Points Per Logit",
+          "type": "number"
+        },
+        "anchor_score": {
+          "title": "Anchor Score",
+          "type": "number"
+        },
+        "human_weights": {
+          "$ref": "#/$defs/UnitHumanWeights"
+        },
+        "settled_weights": {
+          "$ref": "#/$defs/SettledWeights"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "l2_penalty",
+        "points_per_logit",
+        "anchor_score",
+        "human_weights",
+        "settled_weights"
+      ],
+      "title": "VotesMethod",
+      "type": "object"
+    },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "A board fit to the family's votes and the results its outputs settle.\n\n`votes` counts the votes that compare current outputs needing a vote, while\n`dropped_votes` counts the rest: votes on retired cases, on outputs that left\nor now fail a gate, and on pairs that the outputs now settle. `sessions`\ncounts the sessions that hold a counted vote. `reference` is the system the\nfamily names to anchor the board, while `anchor` is the system the round\nactually fixed at `ranking.ANCHOR`, which is the most-voted system when the\nreference does not rank. `unranked` lists the listed or voted systems with\ncurrent outputs that no comparison connects to the anchor, or that so many\nresamples leave unconnected that their interval is unbounded. `position` is\nthe left pane's advantage, and `length` the score change per standard\ndeviation of the relative length difference, both in score points, where\n`length` is absent when no connected vote varies that difference.\n`split_half_tau` compares the orders fit to odd and even sessions, and\n`decision` is absent while a system tied with the top one is preliminary.",
+      "description": "Point estimates and descriptive diagnostics on eligible comparisons.",
       "properties": {
         "scorer": {
           "const": "votes",
           "title": "Scorer",
           "type": "string"
         },
+        "method": {
+          "$ref": "#/$defs/VotesMethod"
+        },
+        "rules": {
+          "$ref": "#/$defs/VotesRules"
+        },
+        "inference": {
+          "$ref": "#/$defs/UnavailableInference"
+        },
         "reference": {
+          "description": "Configured reference, whether or not comparisons connect it.",
           "title": "Reference",
           "type": "string"
         },
         "anchor": {
+          "description": "Ranked system fixed at the recorded anchor score.",
           "title": "Anchor",
           "type": "string"
         },
         "votes": {
+          "description": "Eligible human choices across every component.",
+          "minimum": 0,
           "title": "Votes",
           "type": "integer"
         },
+        "effective_votes": {
+          "description": "Eligible human row weight across every component, excluding settlements.",
+          "minimum": 0,
+          "title": "Effective Votes",
+          "type": "number"
+        },
         "dropped_votes": {
+          "description": "Recorded choices excluded by current cases, outputs or gates.",
           "title": "Dropped Votes",
           "type": "integer"
         },
         "sessions": {
+          "description": "Sessions containing at least one eligible human choice.",
           "title": "Sessions",
           "type": "integer"
         },
@@ -536,6 +665,7 @@
           "type": "array"
         },
         "unranked": {
+          "description": "Entrants with current outputs outside the selected comparison component.",
           "items": {
             "type": "string"
           },
@@ -557,8 +687,16 @@
           "type": "array"
         },
         "position": {
-          "title": "Position",
-          "type": "number"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Left-pane advantage in score points, null without ranked human rows.",
+          "title": "Position"
         },
         "length": {
           "anyOf": [
@@ -569,18 +707,12 @@
               "type": "null"
             }
           ],
+          "description": "Score points per length-difference standard deviation, if identifiable.",
           "title": "Length"
         },
         "separability": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Separability"
+          "title": "Separability",
+          "type": "null"
         },
         "split_half_tau": {
           "anyOf": [
@@ -591,27 +723,26 @@
               "type": "null"
             }
           ],
+          "description": "Order agreement between alternating eligible sessions, when measurable.",
           "title": "Split Half Tau"
         },
         "rater_agreement": {
           "$ref": "#/$defs/RaterAgreement"
         },
         "decision": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Decision"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "title": "Decision",
+          "type": "null"
         }
       },
       "required": [
         "scorer",
+        "method",
+        "rules",
+        "inference",
         "reference",
         "anchor",
         "votes",
+        "effective_votes",
         "dropped_votes",
         "sessions",
         "standings",
@@ -626,6 +757,35 @@
         "decision"
       ],
       "title": "VotesResults",
+      "type": "object"
+    },
+    "VotesRules": {
+      "additionalProperties": false,
+      "properties": {
+        "preliminary_decisive_votes": {
+          "description": "Coverage threshold, independent of population inference availability.",
+          "exclusiveMinimum": 0,
+          "title": "Preliminary Decisive Votes",
+          "type": "integer"
+        },
+        "preliminary_decisive_vote_unit": {
+          "const": "raw-votes",
+          "title": "Preliminary Decisive Vote Unit",
+          "type": "string"
+        },
+        "rater_agreement_floor": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Rater Agreement Floor",
+          "type": "number"
+        }
+      },
+      "required": [
+        "preliminary_decisive_votes",
+        "preliminary_decisive_vote_unit",
+        "rater_agreement_floor"
+      ],
+      "title": "VotesRules",
       "type": "object"
     }
   },
@@ -645,6 +805,16 @@
       "title": "Closed At",
       "type": "string"
     },
+    "systems": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PublicSystem"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Systems",
+      "type": "object"
+    },
     "results": {
       "$ref": "#/$defs/Results"
     }
@@ -653,6 +823,7 @@
     "family",
     "round",
     "closed_at",
+    "systems",
     "results"
   ],
   "title": "Report",

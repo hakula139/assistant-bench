@@ -25,8 +25,10 @@ import {
 import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
-import { formatInterval, formatRank, formatScore } from '@/lib/format';
+import { formatScore } from '@/lib/format';
+import { inferenceNote, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
+import { isPreliminary } from '@/lib/ranking';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
@@ -37,7 +39,7 @@ import {
   type BoardLink,
   type Family,
 } from '@/lib/reports';
-import { systemName } from '@/lib/systems';
+import { reportNames, systemName } from '@/lib/systems';
 
 export const getStaticPaths = (async () =>
   systemPaths(await getFamilies())) satisfies GetStaticPaths;
@@ -52,15 +54,15 @@ interface Props {
 const { family, system, boards } = Astro.props;
 const rounds = votesRounds(family);
 const { usage } = boardLabels(configOf(family, 'votes'));
-const names = family.systemNames;
-const name = (item: string) => systemName(names, item);
-const appearances = rounds.flatMap(({ round, results }) => {
+const appearances = rounds.flatMap(({ round, systems, results }) => {
   const standing = results.standings.find((item) => item.system === system);
   return standing
-    ? [{ round, reference: results.reference, anchor: results.anchor, results, standing }]
+    ? [{ round, systems, reference: results.reference, anchor: results.anchor, results, standing }]
     : [];
 });
-const { round, results, standing } = appearances[appearances.length - 1];
+const { round, systems, results, standing } = appearances[appearances.length - 1];
+const names = reportNames(systems);
+const name = (item: string) => systemName(names, item);
 const standings = results.standings;
 
 const headToHead = results.head_to_head
@@ -89,10 +91,13 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   });
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
-const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
+const roundRows = appearances.map(({ round, systems, reference, anchor, results, standing }) => ({
   round,
+  systems,
   reference,
   anchor,
+  method: results.method,
+  rules: results.rules,
   standing,
 }));
 ---
@@ -115,20 +120,21 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
       </Breadcrumb>
     </Fragment>
     <Fragment slot="status">
-      {standing.preliminary && <StatusMark client:visible status="preliminary" />}
+      {isPreliminary(standing, results.rules) && (
+        <StatusMark client:visible status="preliminary" term={preliminaryTerm(results.rules)} />
+      )}
     </Fragment>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <dl class={statList}>
-      <Stat label="Score" detail={`(${formatInterval(standing.interval)})`}>
-        {formatScore(standing.score)}
-      </Stat>
-      <Stat label="Rank">{formatRank(standing.best_rank, standing.worst_rank)}</Stat>
+      <Stat label="Score">{formatScore(standing.score)}</Stat>
+      <Stat label="Rank">{standing.rank}</Stat>
       <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
       <Stat label="Round">{round}</Stat>
     </dl>
   </PageHeader>
 
   <div class={stack}>
+    <p class={note}>{inferenceNote}</p>
     {headToHead.length > 0 && (
       <Section title="Head to head">
         <p class={note}>
@@ -154,10 +160,12 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
           rows={categoryRows}
           labels={categoryRows.map((row) => row.label)}
           domain={categoryDomain}
-          label="Category scores with 95% intervals"
+          anchorScore={results.method.anchor_score}
+          rules={results.rules}
+          label="Category point scores"
         />
         <TableTwin>
-          <CategoryTable categories={categoryRows} />
+          <CategoryTable categories={categoryRows} rules={results.rules} />
         </TableTwin>
       </Section>
     )}
@@ -185,7 +193,7 @@ const roundRows = appearances.map(({ round, reference, anchor, standing }) => ({
     )}
 
     <Section title="Rounds">
-      <RoundsTable client:visible appearances={roundRows} names={names} />
+      <RoundsTable client:visible appearances={roundRows} />
     </Section>
   </div>
 </Base>

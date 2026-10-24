@@ -1,24 +1,30 @@
 # Arena
 
-The arena shows the owner blind pairs of outputs from a family scored by votes and records each vote. `arena/` holds the vote store (`store.py`), the pair scheduler (`scheduler.py`), the sessions and blinded pairs (`service.py`), and the JSON API with the render origin (`api.py`).
+The arena shows blind pairs of outputs from a family scored by votes and records each choice. The [module map](architecture.md#module-map) identifies its implementation boundaries.
 
 ## Blinding
 
 The vote page receives an opaque pair token, the case's checklist and the instruction its trials ran, read from the rendered task, and the two outputs, while the server keeps the mapping from each token to its systems, fingerprints, and trials. Nothing the page receives identifies a system: no name, fingerprint, timing, token count, or error text, and every unknown session, pair, or output answers with the same `not found`. Votes record their duration from the server's clock, from serving the pair to receiving the vote.
 
-A task family with `render = "diff"` sends each solution as the diff of its `/app` against the task's own repository, which collection computes without `.git` and the caches of Python's tools, so no commit message, author, date, or record of the agent's own test runs reaches the page. Every system on the family runs under the same agent, which leaves no files or trailers of its own, and the page receives no trajectory, command, turn count, test output, or reward. Paths are sorted and the context is fixed, so two diffs differ only where the solutions do. A model that names itself in a comment or a file it writes still shows through, as it can in prose.
+A task family with `render = "diff"` sends each solution as the diff of its `/app` against the task's repository. Collection excludes `.git` and Python tool caches. Every system runs under the same agent, and the page receives no commit metadata, trajectory, command, turn count, test output or reward. Paths are sorted and context is fixed.
+
+A model can still identify itself in a comment or file it writes, as it can in prose.
 
 ## Sessions and Pairs
 
-A session belongs to one family and ends once no case remains, since it shows each case at most once. Its `remaining` counts the cases it has yet to vote on, including the open pair's. The vote page keeps each family's session ID in `localStorage` and asks the arena to resume it, so the store decides its votes and which cases remain, and a session the arena no longer has gives way to a new one.
+A session belongs to one family, shows each eligible case at most once and ends when none remain. Eligibility requires passing, different outputs from two systems. `remaining` counts eligible cases still awaiting a choice, including the open pair's.
+
+The vote page keeps each family's session ID in `localStorage` and asks the arena to resume it. The store determines recorded choices and remaining cases. An unknown session gives way to a new one.
 
 Tabs that resume the same session share its open pair, so a vote or undo in one retires the pair the others show, and each follows the session's current pair.
 
 Each draw picks two systems from the family's `systems` list and one of the family's current cases that both have outputs for, then draws one sample of each at random, so every sample collects votes over time. The scheduler chooses pairs in this order:
 
-1. **Repeats:** once a vote is a day old, it may return with its sides swapped, at 10% odds per draw, until it has been repeated once. Agreement on repeats is the rater-consistency figure in [Ranking](ranking.md#diagnostics).
+1. **Repeats:** once a vote is a day old, it may return with its sides swapped, at 10% odds per draw, until it has been repeated once. Agreement on repeats is the rater-consistency figure in [Ranking](ranking.md#counts-and-diagnostics).
 2. **Seed:** every ordered pair of systems first collects 2 votes, so each pair reaches 4 with both sides counterbalanced, taking the pair with the fewest votes first.
-3. **Adaptive:** after the seed, the scheduler fits the family's point scores, rooted at the most-voted system as in [Ranking](ranking.md#scores-and-intervals). It weighs every eligible pair by p(1 − p) / (n + 1), where p is the fitted preference and n the pair's votes, which favors close pairs with few votes. The order shown less often goes on the left. The scheduler refits when a session starts, once 5 votes have been cast or undone since the last fit, and when the board lacks a system the draw weighs. Draws in between reuse that fit. Report closure computes the bootstrap separately.
+3. **Adaptive:** after the seed, the scheduler fits the family's point scores, rooted at the most-voted system as in [Ranking](ranking.md#point-scores). It weighs eligible pairs by p(1 − p) / (n + 1), where p is the fitted preference and n the pair's votes, favoring close pairs with few votes. The order shown less often goes on the left.
+
+The scheduler refits at session start, after 5 choices have been cast or undone, and when the board lacks a system the draw weighs. Other draws reuse the fit. These points guide acquisition and supply no population confidence claim.
 
 Only outputs that passed every gate reach the owner, and two samples with identical text are never paired, since the outputs already decide those results. `arena/resolution.py` derives them afresh from the current outputs whenever the scheduler or `bench close` fits the board, so a later collection that changes a [gate verdict](families/writing.md#gate-verdicts) changes the results with it, and the vote store holds the owner's votes alone.
 
@@ -32,7 +38,9 @@ Undo withdraws the latest vote either way, and when its pair cannot return, the 
 
 ## Vote Store
 
-`votes.sqlite` in the data directory holds three append-only tables, whose triggers abort any update, delete, or insert over an existing row: `sessions`, `votes` with one row per vote, and `undos`, where an undo names the vote it withdraws. Each vote records its session, case, both sides' system, fingerprint, job, and trial, the choice (`a`, `b`, `tie`, or `both_bad`), the defects tagged on each side and the note, the duration, `repeat_of`, and the time. Foreign keys are enforced, so an undo names a recorded vote. Reading the votes leaves out every undone one. The file's `user_version` holds the schema version, and the store refuses to open a file of another version.
+`votes.sqlite` in the data directory holds append-only `sessions`, `votes` and `undos` tables. Triggers reject updates, deletes and replacement inserts. Foreign keys ensure an undo names a recorded choice, and reads exclude withdrawn choices.
+
+Votes record the session, case, both output identities, choice, defect tags, note, duration, repeat link and time. The file's `user_version` holds the schema version, and the store refuses to open another version.
 
 ## Vote API
 

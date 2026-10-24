@@ -1,5 +1,7 @@
 import { z } from 'astro/zod';
 
+import type { PublicSystem } from '@/lib/report';
+
 /**
  * The fields of a `systems.toml` table the site reads. The bench's catalog validates the whole
  * file, including that every resolved display name is unique.
@@ -14,8 +16,14 @@ export const catalogModelSchema = z.object({ name: z.string() });
 
 export type SystemConfig = z.infer<typeof systemConfigSchema>;
 
-/** Display names keyed by `systems.toml` table name. */
+/** Public display names keyed by system ID. */
 export type SystemNames = Record<string, string>;
+
+export function reportNames(systems: Record<string, PublicSystem>): SystemNames {
+  return Object.fromEntries(
+    Object.entries(systems).map(([id, system]) => [id, system.display_name]),
+  );
+}
 
 /**
  * Resolves each system's display name as the pydantic model does: its own `display_name`, or else
@@ -36,10 +44,9 @@ export function resolveSystemNames(
   );
 }
 
-/** Returns a system's display name, failing the build for a system `systems.toml` lacks. */
 export function systemName(names: SystemNames, system: string): string {
   if (!Object.hasOwn(names, system)) {
-    throw new Error(`system ${system} has no systems.toml table`);
+    throw new Error(`system ${system} has no public display metadata`);
   }
   return names[system];
 }

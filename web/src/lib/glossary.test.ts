@@ -1,38 +1,27 @@
 import { describe, expect, test } from 'vitest';
 
-import { leaderNote } from '@/lib/glossary';
+import { agreementTerm, anchorTerm, fallbackAnchor, preliminaryTerm } from '@/lib/glossary';
+import { reportSchema } from '@/lib/report';
+import { readFixture } from '@/test/fixture';
 
-describe('leaderNote', () => {
-  test.each([
-    [
-      'why a round has no leader',
-      null,
-      {
-        term: 'No leader yet',
-        definition: 'None until every system tied for the top has 40 votes with a winner.',
-      },
-    ],
-    [
-      'nothing for a leader no system ties',
-      { leader: 'acme-pro', separated: true, tie_break: 'score' as const },
-      null,
-    ],
-    [
-      'the latency tie break that chose a tied leader',
-      { leader: 'acme-pro', separated: false, tie_break: 'latency' as const },
-      { term: 'Tied', definition: 'Tied with the top score, and chosen by the lower latency.' },
-    ],
-    [
-      'the cost tie break that chose a tied leader',
-      { leader: 'acme-pro', separated: false, tie_break: 'cost' as const },
-      { term: 'Tied', definition: 'Tied with the top score, and chosen by the lower cost.' },
-    ],
-    [
-      'the score tie break that chose a tied leader',
-      { leader: 'acme-pro', separated: false, tie_break: 'score' as const },
-      { term: 'Tied', definition: 'Tied with the top score, and chosen by the higher score.' },
-    ],
-  ])('gives %s', (_, decision, note) => {
-    expect(leaderNote(decision)).toEqual(note);
+describe('recorded ranking terms', () => {
+  test("uses each round's anchor and coverage rules in explanatory copy", async () => {
+    const report = reportSchema.parse(await readFixture());
+    if (report.results.scorer !== 'votes') {
+      throw new Error('Expected votes fixture');
+    }
+    const method = { ...report.results.method, anchor_score: 1234 };
+    const rules = {
+      ...report.results.rules,
+      preliminary_decisive_votes: 12,
+      rater_agreement_floor: 0.5,
+    };
+
+    expect(anchorTerm(method).definition).toContain('1,234');
+    expect(preliminaryTerm(rules).definition).toContain('12 raw votes');
+    expect(agreementTerm(rules).definition).toContain('50%');
+    expect(
+      fallbackAnchor('Historical Anchor', 'Historical Reference', method).definition,
+    ).toContain('Historical Anchor, fixed at 1,234 in place of the reference Historical Reference');
   });
 });

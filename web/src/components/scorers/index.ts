@@ -43,8 +43,8 @@ export const scorerViews = {
     Method: VotesMethod,
     parts: votesParts,
     marks: (family) => {
-      const { rows, domain } = panelForest(family);
-      return drawnMarks(rows, domain);
+      const { rows, domain, anchorScore } = panelForest(family);
+      return drawnMarks(rows, domain, anchorScore);
     },
     roundDetail: (family) => {
       const round = votesRounds(family).at(-1);

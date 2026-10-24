@@ -104,7 +104,7 @@ def check(
     if task_names and (not families or len(families) != 1):
         raise typer.BadParameter('Select exactly one task family with `--task`.')
 
-    task_families = []
+    task_families: list[tuple[Family, list[Path]]] = []
     for family in map(_load_family, families or family_names()):
         _family_systems(family)
         if family.source == 'cases':
@@ -162,7 +162,7 @@ def run(
     A run without a family sends every family that lists systems. Each trial sends
     paid requests to the endpoint configured in .env.
     """
-    prepared = []
+    prepared: list[tuple[Family, list[System], list[Path]]] = []
     for family, systems in _run_targets(families, names):
         if not systems:
             _fail(
@@ -192,6 +192,7 @@ def collect(families: FamilyNames = None) -> None:
     if not names:
         typer.echo('No family has jobs yet. Run `uv run bench run` first.')
         return
+
     for name in names:
         _collect(_load_family(name))
 
@@ -251,7 +252,17 @@ def close(
     with closing(_vote_store()) as store:
         _collect(selected)
         try:
-            closed = report.close(selected, store, datetime.now(UTC))
+            closed_at = datetime.now(UTC)
+            systems = _load_systems()
+            closed = report.close(
+                selected,
+                store,
+                closed_at,
+                system_names={
+                    name: system.display_name for name, system in systems.items()
+                },
+                previous_reports=report.read_reports(family, closed_at),
+            )
         except ValueError as error:
             _fail(str(error))
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
@@ -304,7 +315,6 @@ def fingerprints(
 
 
 def _fail(message: str) -> NoReturn:
-    """Report a problem with the checkout or the data directory, and exit."""
     typer.echo(message, err=True)
     raise typer.Exit(1)
 
@@ -354,6 +364,7 @@ def _task_dirs(family: Family) -> list[Path]:
             jobs.author_vendors(family, tasks, _load_systems())
     except ValueError as error:
         _fail(str(error))
+
     changed = _changed_tasks(family, tasks)
     if changed:
         detail = '\n'.join(
@@ -409,7 +420,7 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
 
 
 def _family_systems(family: Family) -> list[System]:
-    listed = []
+    listed: list[System] = []
     if family.settings.systems:
         known = _load_systems()
         unknown = [name for name in family.settings.systems if name not in known]
@@ -421,6 +432,7 @@ def _family_systems(family: Family) -> list[System]:
                 f'`families/{family.name}/family.toml`.'
             )
         listed = [known[name] for name in family.settings.systems]
+
     try:
         jobs.check_systems(family, listed)
     except ValueError as error:
@@ -451,7 +463,7 @@ def _run_targets(
 ) -> list[tuple[Family, list[System]]]:
     """Return each family to run with the systems to send it."""
     if families is not None:
-        targets = []
+        targets: list[tuple[Family, list[System]]] = []
         for name in families:
             family = _load_family(name)
             listed = _family_systems(family)
@@ -465,6 +477,7 @@ def _run_targets(
         for family in map(_load_family, family_names())
         if family.settings.systems
     ]
+
     if names is None:
         return [(family, _family_systems(family)) for family in every]
 
@@ -477,6 +490,7 @@ def _run_targets(
             f'against `{SYSTEMS_FILE}`.',
             param_hint='--system',
         )
+
     targets = []
     for family in every:
         if not set(family.settings.systems) & set(wanted):
@@ -511,6 +525,7 @@ def _collect(family: Family) -> None:
         outputs = jobs.collect(family, systems)
     except ValueError as invalid:
         _fail(str(invalid))
+
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(
         f'Family `{family.name}`: {len(outputs)} outputs, '
@@ -518,6 +533,7 @@ def _collect(family: Family) -> None:
     )
     for error, count in errors.most_common():
         typer.echo(f'  {error}: {count}')
+
     gated = [output for output in outputs if output.gate_failures]
     if gated:
         typer.echo(f'{len(gated)} failed a gate.')
@@ -526,15 +542,19 @@ def _collect(family: Family) -> None:
         )
         for gate, count in failures.most_common():
             typer.echo(f'  {gate}: {count}')
+
     rewards = [output.reward for output in outputs if output.reward is not None]
     if rewards:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}.')
+
     graded = {output.case for output in outputs if output.reward is not None}
     solved = {output.case for output in outputs if (output.reward or 0) >= 1}
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
+
     if family.source == 'tasks' and family.settings.systems:
         _author_rates(family, outputs, systems)
+
     versions = sorted(
         {output.harness_version for output in outputs if output.harness_version}
     )
@@ -550,9 +570,10 @@ def _author_rates(
         vendors = jobs.author_vendors(family, tasks, systems)
     except ValueError as error:
         _fail(str(error))
+
     for system in _family_systems(family):
         name = system.name
-        rates = []
+        rates: list[str] = []
         for own, label in ((True, 'own-vendor'), (False, 'other-vendor')):
             trials = [
                 output
@@ -567,6 +588,7 @@ def _author_rates(
                 else 'no trials'
             )
             rates.append(f'{label} tasks {rate}')
+
         typer.echo(f'System `{name}`: pass rate on {", ".join(rates)}.')
 
 
@@ -580,6 +602,7 @@ def _run(job: JobConfig) -> Path:
             failure += f' Browse its trials with `harbor view {jobs.job_path(job)}`.'
         typer.echo(failure, err=True)
         raise typer.Exit(error.returncode) from error
+
     typer.echo(f'Job written to `{path}`.')
     return path
 

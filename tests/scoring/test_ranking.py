@@ -14,14 +14,9 @@ from assistant_bench.scoring.ranking import (
     ELO_PER_LOGIT,
     Comparison,
     Matchups,
-    Ratings,
-    bootstrap,
     fit,
     rank_agreement,
-    rank_spread,
-    rate,
-    separability,
-    ties,
+    rate_point,
 )
 
 
@@ -46,7 +41,7 @@ def simulate(
 
 class TestMatchups:
     class TestBuild:
-        def test_indexes_systems_by_name_and_cases_by_appearance(self) -> None:
+        def test_indexes_systems_by_name(self) -> None:
             matchups = Matchups.build(
                 [
                     Comparison('small', 'large', 1.0, 'b'),
@@ -59,7 +54,6 @@ class TestMatchups:
             assert matchups.left.tolist() == [2, 0, 1]
             assert matchups.right.tolist() == [0, 1, 2]
             assert matchups.score.tolist() == [1.0, 0.5, 0.0]
-            assert matchups.cluster.tolist() == [0, 1, 0]
 
     class TestComponent:
         def test_keeps_the_systems_and_rows_connected_to_a_system(self) -> None:
@@ -78,7 +72,6 @@ class TestMatchups:
             assert connected.right.tolist() == [1, 0]
             assert connected.score.tolist() == [1.0, 0.5]
             assert connected.sided.tolist() == [1.0, 0.0]
-            assert connected.cluster.tolist() == [0, 1]
 
     class TestRoot:
         @pytest.mark.parametrize(
@@ -203,69 +196,20 @@ class TestFit:
             fit(matchups)
 
 
-class TestBootstrap:
-    def test_resamples_whole_cases(self) -> None:
-        comparisons = [
-            Comparison('large', 'small', score, 'only')
-            for score in (1.0, 1.0, 0.0, 0.5, 1.0, 0.0)
-        ]
-
-        strengths = bootstrap(Matchups.build(comparisons), 'large', resamples=20)
-
-        assert strengths.shape == (20, 2)
-        assert np.ptp(strengths, axis=0) == pytest.approx([0, 0], abs=1e-6)
-
-    def test_marks_a_system_a_resample_leaves_unconnected(self) -> None:
-        comparisons = [
-            Comparison('large', 'small', 1.0, 'shared'),
-            Comparison('small', 'large', 0.0, 'shared'),
-            Comparison('new', 'large', 1.0, 'own'),
-        ]
-
-        strengths = bootstrap(Matchups.build(comparisons), 'small', resamples=50)
-
-        large, new, small = np.isnan(strengths).T
-        assert not small.any()
-        assert 0 < large.sum() < new.sum() < 50
-        assert not (large & ~new).any()
-
-
-class TestRate:
-    def test_anchors_the_reference_and_brackets_each_score(self) -> None:
+class TestRatePoint:
+    def test_anchors_the_reference_and_preserves_score_gaps(self) -> None:
         matchups = Matchups.build(simulate(600))
 
-        ratings = rate(matchups, 'medium', resamples=200)
+        ratings = rate_point(matchups, 'medium')
+        shifted = ratings.anchored('large')
 
         assert ratings.systems == ('large', 'medium', 'small')
         assert ratings.score[1] == pytest.approx(ANCHOR)
         assert ratings.score[0] > ANCHOR > ratings.score[2]
-        assert (ratings.lower < ratings.score).all()
-        assert (ratings.score < ratings.upper).all()
         assert ratings.position == pytest.approx(0.25 * ELO_PER_LOGIT, abs=40)
-
-    def test_writes_the_same_intervals_for_the_same_votes(self) -> None:
-        matchups = Matchups.build(simulate(200))
-
-        first, second = (rate(matchups, 'large', resamples=50) for _ in range(2))
-
-        assert first.lower.tolist() == second.lower.tolist()
-        assert first.upper.tolist() == second.upper.tolist()
-
-    def test_leaves_a_record_on_few_cases_unbounded(self) -> None:
-        challenger = [
-            Comparison('new', opponent, 1.0, f'challenger-{i % 2}')
-            for i, opponent in enumerate(['large', 'medium', 'small'] * 3)
-        ][:8]
-
-        alone = rate(Matchups.build(simulate(600)), 'medium')
-        ratings = rate(Matchups.build(simulate(600) + challenger), 'medium')
-
-        new = ratings.systems.index('new')
-        assert (ratings.lower[new], ratings.upper[new]) == (-np.inf, np.inf)
-        bounded = ratings.bounded()
-        assert bounded.systems == alone.systems
-        assert bounded.lower == pytest.approx(alone.lower, abs=50)
-        assert bounded.upper == pytest.approx(alone.upper, abs=50)
+        assert shifted.score[0] == pytest.approx(ANCHOR)
+        assert np.diff(shifted.score) == pytest.approx(np.diff(ratings.score))
+        assert shifted.position == ratings.position
 
     def test_fits_on_one_blas_thread_and_restores_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
@@ -292,66 +236,12 @@ class TestRate:
         monkeypatch.setattr(optimize, 'minimize', recording)
 
         with limit_threads(limits=2, user_api='blas'):
-            rate(Matchups.build(simulate(60)), 'large', resamples=3)
+            rate_point(Matchups.build(simulate(60)), 'large')
             after = thread_limit
 
-        assert threads and all(limit == 1 for limit in threads)
+        assert threads == [1]
         assert after == 2
         assert thread_limit == 8
-
-
-class TestTies:
-    def test_keeps_the_candidates_whose_paired_difference_spans_zero(self) -> None:
-        steps = np.linspace(-1, 1, 201)
-        draws = np.stack(
-            [1100 + 0 * steps, 1060 + 100 * steps, 1000 + 0 * steps, 1300 + 0 * steps],
-            axis=1,
-        )
-        ratings = Ratings(
-            systems=('top', 'close', 'far', 'excluded'),
-            score=np.array([1100.0, 1060.0, 1000.0, 1300.0]),
-            lower=draws.min(axis=0),
-            upper=draws.max(axis=0),
-            draws=draws,
-            position=0.0,
-        )
-
-        assert ties(ratings, [0, 1, 2]) == [0, 1]
-
-    def test_counts_an_unbounded_difference_as_a_tie(self) -> None:
-        draws = np.array([[1100.0, 900.0]] * 10 + [[1100.0, np.nan]] * 2)
-        ratings = Ratings(
-            systems=('top', 'detached'),
-            score=np.array([1100.0, 900.0]),
-            lower=np.array([1100.0, -np.inf]),
-            upper=np.array([1100.0, np.inf]),
-            draws=draws,
-            position=0.0,
-        )
-
-        assert ties(ratings, [0, 1]) == [0, 1]
-
-
-class TestRankSpread:
-    def test_spans_the_ranks_each_interval_allows(self) -> None:
-        lower = np.array([1100.0, 1000.0, 980.0, 800.0])
-        upper = np.array([1200.0, 1110.0, 1050.0, 900.0])
-
-        best, worst = rank_spread(lower, upper)
-
-        assert best.tolist() == [1, 1, 2, 4]
-        assert worst.tolist() == [2, 3, 3, 4]
-
-
-class TestSeparability:
-    def test_counts_the_pairs_whose_intervals_do_not_overlap(self) -> None:
-        lower = np.array([1100.0, 1000.0, 800.0])
-        upper = np.array([1200.0, 1110.0, 900.0])
-
-        assert separability(lower, upper) == pytest.approx(2 / 3)
-
-    def test_is_undefined_for_one_system(self) -> None:
-        assert separability(np.array([1.0]), np.array([2.0])) is None
 
 
 class TestRankAgreement:

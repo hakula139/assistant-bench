@@ -12,18 +12,18 @@ import {
 import type { CategoryBoard } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
-const refit = (
-  system: string,
-  score: number,
-  lower: number,
-  upper: number,
-  preliminary = false,
-) => ({
+const rules = {
+  preliminary_decisive_votes: 40,
+  preliminary_decisive_vote_unit: 'raw-votes' as const,
+  rater_agreement_floor: 0.7,
+};
+const refit = (system: string, score: number, decisive = 40) => ({
   system,
   score,
-  interval: { lower, upper },
-  votes: 20,
-  preliminary,
+  interval: null,
+  votes: 40,
+  effective_votes: 40,
+  decisive_votes: decisive,
 });
 
 const frame = { width: 600, measure: (text: string) => text.length * 7 };
@@ -31,41 +31,36 @@ const frame = { width: 600, measure: (text: string) => text.length * 7 };
 function draw(rows: ForestPlotRow[], domain: [number, number]): Element {
   const labels = rows.map((row) => row.label);
   return Plot.plot({
-    ...forestPlotOptions({ rows, labels, domain }, frame),
+    ...forestPlotOptions({ rows, labels, domain, rules, anchorScore: 1000 }, frame),
     width: frame.width,
     height: forestPlotHeight(labels),
   });
 }
 
-/** The y positions of the interval rules, dashed or solid. */
-function rules(svg: Element, dashed: boolean): number[] {
-  return [...svg.querySelectorAll('g[aria-description="95% interval"]')]
-    .filter((group) => group.hasAttribute('stroke-dasharray') === dashed)
-    .flatMap((group) => [...group.querySelectorAll('line')])
-    .map((line) => Number(line.getAttribute('y1')));
-}
-
 describe('forestPlotOptions', () => {
-  test('dashes only the preliminary interval', () => {
+  test('draws preliminary coverage as a hollow point without interval marks', () => {
     const svg = draw(
       [
-        { label: 'settled', refit: refit('settled', 1000, 950, 1050) },
-        { label: 'preliminary', refit: refit('preliminary', 900, 800, 1000, true) },
+        { label: 'settled', refit: refit('settled', 1000) },
+        { label: 'preliminary', refit: refit('preliminary', 900, 20) },
       ],
       [600, 1100],
     );
 
-    const [solid] = rules(svg, false);
-    const [dashed] = rules(svg, true);
+    const points = [...svg.querySelectorAll('g[aria-label="dot"] circle')];
 
-    expect(dashed).toBeGreaterThan(solid);
+    expect(points.map((point) => point.getAttribute('fill'))).toEqual([
+      'var(--chart-series)',
+      'var(--background)',
+    ]);
+    expect(svg.querySelector('[aria-description="95% interval"]')).toBeNull();
   });
 
   test('prints the score of a system below the axis start beside its arrowhead', () => {
     const svg = draw(
       [
-        { label: 'top', refit: refit('top', 1000, 950, 1050) },
-        { label: 'far', refit: refit('far', 233, 81, 321) },
+        { label: 'top', refit: refit('top', 1000) },
+        { label: 'far', refit: refit('far', 233) },
       ],
       [400, 1100],
     );
@@ -89,16 +84,23 @@ describe('CategoryForests', () => {
     const board = (category: string, standings: CategoryBoard['standings']): CategoryBoard => ({
       category,
       votes: 40,
+      effective_votes: 40,
       standings,
       unranked: [],
     });
     const categories = [
-      board('strong', [refit('a', 1400, 1300, 1500), refit('b', 1000, 950, 1050)]),
-      board('weak', [refit('a', 1000, 950, 1050), refit('b', 750, 700, 800)]),
+      board('strong', [refit('a', 1400), refit('b', 1000)]),
+      board('weak', [refit('a', 1000), refit('b', 750)]),
     ];
 
     const { container } = render(
-      <CategoryForests categories={categories} systems={['a', 'b']} names={{ a: 'A', b: 'B' }} />,
+      <CategoryForests
+        categories={categories}
+        systems={['a', 'b']}
+        names={{ a: 'A', b: 'B' }}
+        rules={rules}
+        anchorScore={1000}
+      />,
     );
     await vi.waitFor(() => {
       expect(container.querySelectorAll('svg')).toHaveLength(2);

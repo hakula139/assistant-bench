@@ -577,7 +577,7 @@ class Clock:
 
 @dataclass
 class Refits:
-    """The comparisons behind each refit of the scheduler's board, and its root."""
+    """Comparison counts and roots captured on each scheduler refit."""
 
     comparisons: list[int] = field(default_factory=list)
     roots: list[str] = field(default_factory=list)
@@ -616,6 +616,10 @@ SYNTHETIC_SYSTEMS = {
     'acme-mini': -0.4,
 }
 SYNTHETIC_STRAYS = {'acme-edge': 0.3, 'acme-nano': -0.2, 'acme-tiny': -1.0}
+SYNTHETIC_NAMES = {
+    system: system.replace('-', ' ').title()
+    for system in SYNTHETIC_SYSTEMS | SYNTHETIC_STRAYS
+}
 SYNTHETIC_START = datetime(2026, 10, 1, 9, tzinfo=UTC)
 SYNTHETIC_CLOSE = datetime(2026, 10, 21, 18, tzinfo=UTC)
 SYNTHETIC_EARLY_CLOSE = datetime(2026, 10, 1, 18, tzinfo=UTC)
