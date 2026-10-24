@@ -5,6 +5,7 @@ BFGS
 blas
 Cachix
 cafile
+capsys
 cedict
 chatcmpl
 covariate
