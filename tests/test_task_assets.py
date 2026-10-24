@@ -31,6 +31,46 @@ def snapshot(root: Path) -> dict[Path, bytes]:
 
 
 class TestSync:
+    @pytest.mark.parametrize('target', ['matching', 'stale', 'broken'])
+    def test_replaces_generated_links_without_writing_their_targets(
+        self, tmp_path: Path, target: str
+    ) -> None:
+        repository = tmp_path / 'repo'
+        coding, tasks = asset_tree(repository)
+        task_assets.sync(repository)
+        expected = (coding / 'shared' / ASSETS[-1]).read_bytes()
+        outside = tmp_path / 'outside'
+        outside.mkdir()
+        external = outside / 'artifact.py'
+        if target != 'broken':
+            external.write_bytes(expected if target == 'matching' else b'external\n')
+
+        leaf = tasks[0] / ASSETS[-1]
+        leaf.unlink()
+        leaf.symlink_to(external)
+        before = snapshot(tmp_path)
+        external_before = snapshot(outside)
+        stamp = external.stat().st_mtime_ns if external.exists() else None
+
+        stale = task_assets.sync(repository, check=True)
+
+        assert stale == [leaf]
+        assert leaf.is_symlink()
+        assert leaf.readlink() == external
+        assert snapshot(tmp_path) == before
+
+        updated = task_assets.sync(repository)
+
+        assert updated == [leaf]
+        assert leaf.is_file() and not leaf.is_symlink()
+        assert leaf.read_bytes() == expected
+        assert snapshot(outside) == external_before
+        if stamp is not None:
+            assert external.stat().st_mtime_ns == stamp
+            assert not leaf.samefile(external)
+
+        assert task_assets.sync(repository) == []
+
     def test_check_reports_missing_and_stale_files_without_writing(
         self, tmp_path: Path
     ) -> None:
@@ -109,7 +149,7 @@ class TestMain:
 
         status = 'Stale' if check else 'Updated'
         assert set(capsys.readouterr().out.splitlines()) == {
-            f'{status}: {(task / relative).relative_to(tmp_path)}'
+            f'{status} artifact `{(task / relative).relative_to(tmp_path)}`.'
             for task in tasks
             for relative in ASSETS
         }
