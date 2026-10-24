@@ -87,11 +87,13 @@ class _ConfiguredLiteLLM(LiteLLM):
             response = _RESPONSE_METADATA.validate_json(details['original_response'])
         except ValidationError:
             return
-        if response.get('object') != 'chat.completion':
+        if response.get('error') is not None and 'choices' not in response:
             return
 
         result: dict[str, Any] = {}
         self.results.append(result)
+        if response.get('object') != 'chat.completion':
+            return
         if response.get('usage') is None:
             return
         try:
