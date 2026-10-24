@@ -2,7 +2,7 @@
 
 ## Dev Shell
 
-The Nix flake provides two shells: the default shell holds uv, Node.js, pnpm, and the pre-commit hooks, while `.#python` holds only uv, which the Python CI jobs use:
+Both Nix shells provide uv, Node.js, and pnpm. The default shell also installs the pre-commit hooks, while Python CI jobs use `.#python`:
 
 ```bash
 nix develop                                 # Dev shell with uv, Node.js, and the hooks
