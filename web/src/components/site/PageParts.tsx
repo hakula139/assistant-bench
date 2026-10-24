@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-/** The classes of the column that the header, every page, and the footer share. */
 export const container =
   'mx-auto w-full max-w-6xl px-(--gutter) [--gutter:--spacing(4)] sm:[--gutter:--spacing(6)]';
 
@@ -16,27 +15,20 @@ export const bleed = '-mx-(--gutter) px-(--gutter)';
 /** The widest a line of running text grows, so wide screens use their width without long lines. */
 export const measure = 'max-w-measure';
 
-/** The gap between a page's blocks, and between a board's sections. */
 export const stack = 'flex flex-col gap-10';
 
-/** The classes of a page's `<h1>`, except the home page's hero. */
 export const pageTitle = 'text-title leading-tight font-semibold text-balance';
 
 const heading = 'scroll-mt-6 font-semibold text-balance target:text-link';
 
-/** The classes of a section's heading, which turns the link color while a link targets it. */
 export const sectionTitle = `${heading} text-lg`;
 
-/** The classes of the heading over a group of sections, such as an aspect's families. */
 export const groupTitle = `${heading} text-2xl`;
 
-/** The classes of the paragraph that introduces a page, under its title. */
 export const intro = `${measure} text-lg text-muted-foreground`;
 
-/** The classes of a numbered or bulleted list in running text. */
 export const list = 'flex flex-col gap-2 pl-6 marker:text-muted-foreground';
 
-/** The classes of a muted note that explains the figure or table beside it. */
 export const note = `${measure} text-sm text-muted-foreground`;
 
 /**

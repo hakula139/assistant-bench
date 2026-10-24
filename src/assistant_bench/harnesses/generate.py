@@ -67,7 +67,9 @@ class Generate(BaseAgent):
     ) -> None:
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
+
         nixos_config_rev = load_export(self._get_env).rev
+
         extra_body = (
             {'reasoning_effort': self.options.effort} if self.options.effort else None
         )
@@ -100,6 +102,7 @@ class Generate(BaseAgent):
             reasoning_tokens = (
                 completion_details and completion_details.reasoning_tokens
             )
+
         context.metadata = {
             'reasoning_tokens': reasoning_tokens,
             'latency_sec': round(latency_sec, 3),

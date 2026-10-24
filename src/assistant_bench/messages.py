@@ -11,7 +11,6 @@ def code(values: Iterable[object]) -> str:
 
 
 def sentence(text: str) -> str:
-    """Return the text ending in a period."""
     return text if text.endswith('.') else f'{text}.'
 
 
