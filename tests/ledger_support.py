@@ -286,8 +286,7 @@ class D1Runtime:
                     const input = createInterface({{input: process.stdin}});
 
                     for await (const line of input) {{
-                        using pending = platform.env.MANAGEMENT.execute(line);
-                        const result = await pending;
+                        const result = await platform.env.MANAGEMENT.execute(line);
                         process.stdout.write(result + '\\n');
                     }}
                 }} finally {{
@@ -379,4 +378,8 @@ class D1Runtime:
                 process.stdin.close()
                 await process.stdin.wait_closed()
                 output, _ = await asyncio.wait_for(process.communicate(), 30)
-                assert process.returncode == 0 and not output
+                errors.flush()
+                assert process.returncode == 0 and not output, (
+                    output,
+                    Path(errors.name).read_text(),
+                )
