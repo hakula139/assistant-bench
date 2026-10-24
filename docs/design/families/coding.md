@@ -1,6 +1,6 @@
 # Coding
 
-`coding-repo` measures software work an assistant does inside a repository on a developer's behalf: reading a small unfamiliar project, following its conventions, changing several files, running its tests, and stopping when the request is met. It is a task family scored by votes, so each task's hidden tests decide whether a solution passes, and the owner's blind votes compare the solutions that do, as a reviewer reads a pull request. It stays off the site (`public = false`) until it has about 30 tasks and a closed round.
+`coding-repo` measures repository work by AI agents: reading a small unfamiliar project, following its conventions, changing several files, running its tests, and stopping when the request is met. Each task's hidden tests decide whether a solution passes, and blind votes compare the solutions that do, as a reviewer reads a pull request. It stays off the site (`public = false`) until it has about 30 tasks and a closed round.
 
 ## Systems and Samples
 
@@ -44,11 +44,11 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
 The solution's own code runs inside the verifier's unittest process, beside the hidden tests, so it can still patch the runner or the checks it shares that process with.
 
-`fix-pagination` hashes every file in its `tests/` and rejects added ones, which prevents a patch through a test module. A task still cannot rule out a patch in the solution's own modules. A tampered pass settles a failing solution's pairs without a vote, so the owner never sees it.
+`fix-pagination` hashes every file in its `tests/` and rejects added ones, which prevents a patch through a test module. A task still cannot rule out a patch in the solution's own modules. A tampered pass settles a failing solution's pairs without a vote, so voters never see it.
 
 ## Scoring
 
-The family's only gate is `tests`, which a solution fails when its reward is below 1. Each pair of systems on a task is settled without a vote when the tests separate them, ties when both fail, and goes to the owner when both pass with different diffs, as [Arena](../arena.md#sessions-and-pairs) describes. The board's failed-tests column is each system's share of graded solutions that failed, and its score blends the settled results with the owner's votes, leaning on the tests until most pairs of passing solutions have a vote.
+The family's only gate is `tests`, which a solution fails when its reward is below 1. Tests settle a pair when they separate the systems, and two failures tie. Different passing solutions are eligible for blind voting, as [Arena](../arena.md#sessions-and-pairs) describes. The board's failed-tests column is each system's share of graded solutions that failed, and its score blends the settled results with recorded votes.
 
 ## Voting
 

@@ -1,6 +1,6 @@
 # Writing
 
-`writing-zh` and `writing-en` measure how each system writes everyday prose in Chinese and in English when it receives the instruction alone, without a system prompt, from technical documents and messages to blog posts, essays, reviews, and fiction. Both are case families ranked by the owner's blind pairwise votes, and they share the categories, sourcing, and gates below, differing only in language and gate bounds.
+`writing-zh` and `writing-en` measure how each system writes everyday prose in Chinese and in English when it receives the instruction alone, without a system prompt, from technical documents and messages to blog posts, essays, reviews, and fiction. Both are case families ranked through blind pairwise voting. They share the categories, sourcing, and gates below, differing in language and gate bounds.
 
 ## Systems and Samples
 
@@ -27,7 +27,7 @@ Cases that explain a concept fix the reader and the length, and most leave the c
 
 A review case supplies a synopsis of its invented work, including the scene a close reading treats. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
 
-A case's `checklist` names what the owner should check beyond general quality, such as reporting what was not verified.
+A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
 
 ## Case Sourcing
 
@@ -63,7 +63,7 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 
 | Value      | Meaning                                                                                                               |
 | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| `[]`       | The output passed every gate and may be shown to the owner                                                            |
+| `[]`       | The output passed every gate and is eligible for blind voting                                                         |
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | No verdict: a case trial errored, a task was ungraded, or the family's scorer has no gates                            |
 
