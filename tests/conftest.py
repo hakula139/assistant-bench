@@ -2,7 +2,9 @@ import os
 import ssl
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 import trustme
 
@@ -46,6 +48,22 @@ def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]
             )
 
     return handle
+
+
+@pytest.fixture(autouse=True)
+def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = httpx.AsyncClient.send
+
+    async def checked_send(
+        client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
+    ) -> httpx.Response:
+        if request.url.host not in {'127.0.0.1', '::1'}:
+            pytest.fail(
+                f'A model test attempted a non-loopback request: {request.url.host}'
+            )
+        return await send(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
 
 
 @pytest.fixture(autouse=True)

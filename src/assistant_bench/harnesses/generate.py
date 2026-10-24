@@ -1,34 +1,37 @@
-"""Harbor agent that answers a task with one chat-completions call from the host."""
+"""Harbor agent that answers a task with one model request from the host."""
 
 import time
 from collections.abc import Mapping
-from importlib import metadata
-from typing import Any, override
+from typing import Any, assert_never, override
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from assistant_bench.catalog import load_export
+from assistant_bench.catalog import Api, load_export
+from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.responses import ResponseResult
 
 
 OUTPUT_FILE = 'output.txt'
 
 
 class GenerateOptions(Labels):
+    api: Api = 'openai-chat-completions'
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int
 
 
 class Generate(BaseAgent):
-    """Agent that answers with one chat-completions request, writing `output.txt`.
+    """Answer with one stateless request, writing `output.txt`.
 
-    The model name is the endpoint's model ID. HTTP errors raise, so the job's retry
-    policy reruns the trial, while a reply cut off by the token limit is a valid output.
+    HTTP errors raise for Harbor's retry policy. Incomplete replies remain recorded
+    attempts and fail the completion gate.
     """
 
     options_model = GenerateOptions
@@ -40,7 +43,7 @@ class Generate(BaseAgent):
 
     @override
     def version(self) -> str:
-        return metadata.version('assistant-bench')
+        return generation_version('generate')
 
     @classmethod
     @override
@@ -64,25 +67,44 @@ class Generate(BaseAgent):
         context: AgentContext,
     ) -> None:
         assert isinstance(self.options, GenerateOptions)
-        assert self.model_name is not None
-
         nixos_config_rev = load_export(self._get_env).rev
-
-        extra_body = (
-            {'reasoning_effort': self.options.effort} if self.options.effort else None
-        )
         endpoint = Endpoint.read(self._get_env)
 
         async with endpoint.client() as client:
             started = time.monotonic()
-            raw = await client.chat.completions.with_raw_response.create(
-                model=self.model_name,
-                messages=self._messages(instruction),
-                max_completion_tokens=self.options.max_output_tokens,
-                extra_body=extra_body,
-            )
-            latency_sec = time.monotonic() - started
+            try:
+                match self.options.api:
+                    case 'openai-chat-completions':
+                        context.metadata = await self._chat(
+                            client, instruction, context
+                        )
+                    case 'openai-responses':
+                        context.metadata = await self._responses(
+                            client, instruction, context
+                        )
+                    case _:
+                        assert_never(self.options.api)
+            finally:
+                context.metadata = (context.metadata or {}) | {
+                    'latency_sec': round(time.monotonic() - started, 3),
+                    'nixos_config_rev': nixos_config_rev,
+                }
 
+    async def _chat(
+        self, client: AsyncOpenAI, instruction: str, context: AgentContext
+    ) -> dict[str, Any]:
+        assert isinstance(self.options, GenerateOptions)
+        assert self.model_name is not None
+        extra_body = (
+            {'reasoning_effort': self.options.effort} if self.options.effort else None
+        )
+
+        raw = await client.chat.completions.with_raw_response.create(
+            model=self.model_name,
+            messages=self._messages(instruction),
+            max_completion_tokens=self.options.max_output_tokens,
+            extra_body=extra_body,
+        )
         completion = raw.parse()
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
@@ -101,14 +123,48 @@ class Generate(BaseAgent):
                 completion_details and completion_details.reasoning_tokens
             )
 
-        context.metadata = {
+        return {
             'reasoning_tokens': reasoning_tokens,
-            'latency_sec': round(latency_sec, 3),
-            'finish_reason': choice.finish_reason,
+            'finish_reason': 'refusal'
+            if choice.message.refusal
+            else choice.finish_reason,
+            'refusal': choice.message.refusal,
             'response_model': completion.model,
             'request_id': raw.headers.get('x-request-id'),
-            'nixos_config_rev': nixos_config_rev,
         }
+
+    async def _responses(
+        self, client: AsyncOpenAI, instruction: str, context: AgentContext
+    ) -> dict[str, Any]:
+        assert isinstance(self.options, GenerateOptions)
+        assert self.model_name is not None
+        extra_body = (
+            {'reasoning': {'effort': self.options.effort}}
+            if self.options.effort
+            else None
+        )
+
+        raw = await client.responses.with_raw_response.create(
+            model=self.model_name,
+            input=instruction,
+            instructions=self.options.system_prompt,
+            max_output_tokens=self.options.max_output_tokens,
+            store=False,
+            extra_body=extra_body,
+        )
+        result = ResponseResult(raw.parse(), raw.headers.get('x-request-id'))
+        response = result.response
+        (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
+
+        usage = response.usage
+        if usage is not None:
+            context.n_input_tokens = usage.input_tokens
+            context.n_cache_tokens = usage.input_tokens_details.cached_tokens
+            context.n_output_tokens = usage.output_tokens
+
+        context.metadata = result.details
+        result.check(raw.http_response.request, complete=False)
+        return result.details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:
         assert isinstance(self.options, GenerateOptions)

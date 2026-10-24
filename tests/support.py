@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import numpy as np
@@ -87,8 +87,6 @@ TASK_SETTINGS = TaskTestsSettings(
     display_name='Family',
     samples=1,
     harness='terminus-2',
-    max_turns=8,
-    max_output_tokens=64,
 )
 
 
@@ -103,7 +101,6 @@ def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 1
-            max_output_tokens = 64
             categories = ["message"]
             reference = "{systems[0]}"
             """
@@ -136,8 +133,6 @@ def write_task_family(
         render = "diff"
         defects = {json.dumps(list(defects))}
         harness = "terminus-2"
-        max_turns = 4
-        max_output_tokens = 64
         """
         if systems
         else 'scorer = "tests"\n'
@@ -174,6 +169,8 @@ def make_system(**overrides: Any) -> System:
         'display_name': 'Acme Large',
         'vendor': 'acme',
         'route': 'acme/large',
+        'max_output_tokens': 64,
+        'context_window': 8192,
         'effort': 'medium',
         'prompt': None,
         'price': Price(input=2.0, output=10.0, cache_read=0.2),
@@ -203,6 +200,8 @@ def write_trial(
     workspace: dict[str, str] | None = None,
     source: UUID | None = None,
     agent_execution: TimingInfo | None = None,
+    environment: EnvironmentConfig | None = None,
+    verifier_disabled: bool = False,
 ) -> UUID:
     """Write a trial's result and lock, its job's files, and its task's instruction.
 
@@ -243,6 +242,7 @@ def write_trial(
         config=TrialConfig(
             task=TaskConfig(path=Path('/tasks') / task),
             agent=agent,
+            environment=environment or EnvironmentConfig(),
             source_trial=None
             if source is None
             else SourceTrialConfig(
@@ -265,8 +265,8 @@ def write_trial(
             digest=f'sha256:{"0" * 64}',
         ),
         agent=agent,
-        environment=EnvironmentConfig(),
-        verifier=VerifierLock(),
+        environment=environment or EnvironmentConfig(),
+        verifier=VerifierLock(disable=verifier_disabled),
     )
     (trial_dir / 'result.json').write_text(result.model_dump_json())
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
@@ -347,6 +347,78 @@ def completion(
     }
 
 
+def response(
+    content: str | None = 'Hello there.',
+    *,
+    response_id: str = 'resp-1',
+    status: str = 'completed',
+    incomplete_reason: str | None = None,
+    refusal: str | None = None,
+    usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    parts: list[dict[str, Any]] = []
+    if content is not None:
+        parts.append({'type': 'output_text', 'text': content, 'annotations': []})
+    if refusal is not None:
+        parts.append({'type': 'refusal', 'refusal': refusal})
+    output = (
+        [
+            {
+                'id': 'msg-1',
+                'type': 'message',
+                'role': 'assistant',
+                'status': 'completed' if status == 'completed' else 'incomplete',
+                'content': parts,
+            }
+        ]
+        if parts
+        else []
+    )
+    return {
+        'id': response_id,
+        'object': 'response',
+        'created_at': 0,
+        'model': 'large-2026',
+        'status': status,
+        'error': None,
+        'incomplete_details': {'reason': incomplete_reason}
+        if incomplete_reason is not None
+        else None,
+        'output': output,
+        'parallel_tool_calls': False,
+        'tool_choice': 'auto',
+        'tools': [],
+        'usage': usage
+        or {
+            'input_tokens': 120,
+            'input_tokens_details': {'cached_tokens': 100, 'cache_write_tokens': 0},
+            'output_tokens': 40,
+            'output_tokens_details': {'reasoning_tokens': 25},
+            'total_tokens': 160,
+        },
+    }
+
+
+def reasoned_response(
+    content: str | None,
+    response_id: str,
+    phase: Literal['commentary', 'final_answer'] = 'commentary',
+) -> dict[str, Any]:
+    payload = response(content, response_id=response_id)
+    if payload['output']:
+        payload['output'][0]['phase'] = phase
+    payload['output'].insert(
+        0,
+        {
+            'id': f'rs-{response_id}',
+            'type': 'reasoning',
+            'summary': [],
+            'encrypted_content': f'opaque-{response_id}',
+        },
+    )
+    return payload
+
+
 def terminus_completion(
     keystrokes: str = '', *, task_complete: bool = True
 ) -> dict[str, Any]:
@@ -373,14 +445,16 @@ class Request:
 
 @dataclass
 class StubEndpoint:
-    """A chat-completions server on a loopback address that records requests."""
+    """An OpenAI-compatible server on a loopback address that records requests."""
 
     url: str
     key_file: Path
     ca_file: Path | None = None
     requests: list[Request] = field(default_factory=list)
     status: int = 200
+    response_headers: dict[str, str] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=completion)
+    responses: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def env(self) -> dict[str, str]:
@@ -416,11 +490,14 @@ def serve_stub(
                     body=json.loads(self.rfile.read(length)),
                 )
             )
-            payload = json.dumps(stub.response).encode()
+            reply = stub.responses.pop(0) if stub.responses else stub.response
+            payload = json.dumps(reply).encode()
             self.send_response(stub.status)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
+            for name, value in stub.response_headers.items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -528,7 +605,6 @@ def write_votes_family(
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
             samples = 2
-            max_output_tokens = 64
             categories = {json.dumps(sorted(set(categories.values())))}
             reference = "{systems[0]}"
             render = "{render}"

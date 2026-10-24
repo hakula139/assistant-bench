@@ -9,25 +9,23 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5", "gpt-6.1-sol"]
-reference = "gpt-6.1-sol"
+systems = ["opus-5.5-max", "gpt-6.1-sol-max"]
+reference = "gpt-6.1-sol-max"
 samples = 1
-max_output_tokens = 512
 categories = ["message"]
 ```
 
 Shared fields:
 
-| Field               | Required                                     | Meaning                                                                                                                                                            |
-| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `scorer`            | yes                                          | `votes` for blind pairwise votes, or `tests` for a task family's test rewards                                                                                      |
-| `aspect`            | public families                              | The skill measured. Public families use `web/src/lib/aspects.ts` and an ID starting with that aspect, such as `writing-zh`. Private families may use any aspect ID |
-| `display_name`      | yes                                          | The short name within the aspect, or the whole name without one. The full name, such as `Writing · English`, must be unique                                        |
-| `public`            | no                                           | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                   |
-| `systems`           | no                                           | The `systems.toml` tables to run. Defaults to empty                                                                                                                |
-| `samples`           | yes                                          | Harbor attempts per task and system, at least 1                                                                                                                    |
-| `max_output_tokens` | case families and task families with systems | The completion bound per model call, including reasoning                                                                                                           |
-| `categories`        | no                                           | The allowed case categories, which reports publish                                                                                                                 |
+| Field          | Required        | Meaning                                                                                                                                                            |
+| -------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scorer`       | yes             | `votes` for blind pairwise votes, or `tests` for a task family's test rewards                                                                                      |
+| `aspect`       | public families | The skill measured. Public families use `web/src/lib/aspects.ts` and an ID starting with that aspect, such as `writing-zh`. Private families may use any aspect ID |
+| `display_name` | yes             | The short name within the aspect, or the whole name without one. The full name, such as `Writing · English`, must be unique                                        |
+| `public`       | no              | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                   |
+| `systems`      | no              | The `systems.toml` tables to run. Defaults to empty                                                                                                                |
+| `samples`      | yes             | Harbor attempts per task and system, at least 1                                                                                                                    |
+| `categories`   | no              | The allowed case categories, which reports publish                                                                                                                 |
 
 Vote-only fields:
 
@@ -43,12 +41,11 @@ Case families use `votes`. On task families scored by votes, tests settle the pa
 
 Task families with systems also require:
 
-| Field       | Meaning                                                                                                  |
-| ----------- | -------------------------------------------------------------------------------------------------------- |
-| `harness`   | The agent every system uses. Currently `terminus-2`, since `generate` cannot act in a task's environment |
-| `max_turns` | The same agent turn budget for every system                                                              |
+| Field     | Meaning                                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| `harness` | The agent every system uses. Currently `terminus-2`, since `generate` cannot act in a task's environment |
 
-Case families use `generate` and set no `harness`. Changing `max_output_tokens`, `harness`, or `max_turns` replaces the family's trials. Raising `samples` runs only the extra attempts.
+Case families use `generate` and set no `harness`. Systems supply their completion and context allowances. Changing the harness replaces the family's trials. Raising `samples` runs only the extra attempts.
 
 ## Cases
 
@@ -114,25 +111,27 @@ prompt = "nixos-config:claudeCode"
 display_name = "Claude Opus 5.5 · nixos-config"
 ```
 
-| Key            | Meaning                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------- |
-| `model`        | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
-| `route`        | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
-| `vendor`       | For a `route`, its model vendor. Required when a task family lists the system or names it as an author        |
-| `price`        | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
-| `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
-| `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
-| `display_name` | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
+| Key                 | Meaning                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `model`             | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
+| `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
+| `api`               | `openai-chat-completions` by default, or `openai-responses`. Effort must be supported by the selected API     |
+| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system or names it as an author        |
+| `price`             | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
+| `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`    |
+| `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`          |
+| `effort`            | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
+| `prompt`            | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
+| `display_name`      | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
 
 Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
-Because changing a system's route, effort, or prompt changes its [fingerprint](../design/systems.md#fingerprints), give the changed system a new table name and leave the old one for its frozen results, unless the recipe below cannot pin its `prompt`. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
+Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints). Give the changed system a new table name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 
-When the catalog moves a model key to a new snapshot, keep the old name on its old resolution:
+When changing a model snapshot, effort, capacities, or generation protocol:
 
-1. Run `uv run bench fingerprints <base>`, which names each system whose fingerprint changed and prints the `route` table that `<base>` resolved it to from that revision's catalog. A system with a `prompt` cannot be pinned this way, so the command prints only a notice for it.
-2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its `route`, `vendor`, `effort`, `price`, and `display_name` and sets no `model`. Collection prices outputs from this table, so keep its prices for subsequent collection.
-3. Add the new snapshot in a table whose key ends in the snapshot, as `deepseek-v4.1-flash-1017` does, and set a `display_name` that tells it apart from the pinned table.
-4. Replace the old name with the new one in each family's `systems` list, including `reference` where it named the old one. `bench close` anchors the board at the new snapshot once it ranks, through its votes or the results its gates and tests settle, and until then anchors it at the most-voted system and records that system as the round's `anchor`.
-5. Before removing a runnable table, close a valid report while its public metadata is available. Retired outputs can enter a later report only when their known fingerprint matches that ID's latest prior report. A system with a `prompt` cannot be pinned by this recipe, so retire it after closing.
-6. Run `uv run bench fingerprints <base>` again to confirm that no system keeps a name under another fingerprint.
+1. Run `uv run bench fingerprints <base>` to identify runnable systems whose generation identity changed.
+2. Give each changed configuration a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
+3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
+4. Preserve valid closed reports for retired systems. Remove their runnable tables when nothing else, such as authored-task provenance, references them.
+5. Run `uv run bench fingerprints <base>` again to confirm that no runnable name retains a changed fingerprint.

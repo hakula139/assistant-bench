@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from assistant_bench.catalog import System
-from assistant_bench.families import Settings
 from assistant_bench.harnesses import options
 
 
@@ -18,7 +17,7 @@ class Harness:
     """A Harbor agent and how the bench configures it."""
 
     import_path: str
-    options: Callable[[System, Settings], dict[str, Any]]
+    options: Callable[[System], dict[str, Any]]
     model_prefix: str = ''
     """Prepended to the system route in the job's model name."""
 

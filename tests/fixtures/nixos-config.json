@@ -5,6 +5,8 @@
     "models": {
       "acme-large": {
         "name": "Acme Large",
+        "maxTokens": 64,
+        "contextWindow": 8192,
         "vendor": "acme",
         "channelId": {
           "acme": "acme/large"
@@ -25,6 +27,8 @@
       },
       "acme-small": {
         "name": "Acme Small",
+        "maxTokens": 32,
+        "contextWindow": 2048,
         "vendor": "acme",
         "channelId": {
           "acme": "acme/small"
@@ -45,6 +49,8 @@
       },
       "local-model": {
         "name": "Local Model",
+        "maxTokens": 64,
+        "contextWindow": 8192,
         "vendor": "other",
         "channelId": {
           "local": "local/model"
@@ -60,6 +66,8 @@
       },
       "acme-routed": {
         "name": "Acme Routed",
+        "maxTokens": 64,
+        "contextWindow": 8192,
         "vendor": "acme",
         "channelId": {
           "acme": "acme/routed",
@@ -69,6 +77,8 @@
       },
       "acme-unrouted": {
         "name": "Acme Unrouted",
+        "maxTokens": 64,
+        "contextWindow": 8192,
         "vendor": "acme",
         "channelId": {},
         "channelCost": {}

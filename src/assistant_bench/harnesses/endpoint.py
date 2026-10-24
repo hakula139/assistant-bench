@@ -1,8 +1,9 @@
-"""The OpenAI-compatible endpoint both agents send their model calls to."""
+"""The OpenAI-compatible endpoint both agents send their model requests to."""
 
 import os
 import ssl
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from typing import override
 
 import httpx
 from openai import AsyncOpenAI
@@ -66,7 +67,16 @@ class Endpoint(BaseModel):
         return ssl.create_default_context(cafile=self.ca_file) if self.ca_file else True
 
     def client(self) -> AsyncOpenAI:
-        """Build the chat-completions client, bound to the local address if set."""
+        """Build the native client, bound to the local address if set."""
+        return AsyncOpenAI(
+            base_url=str(self.base_url),
+            api_key=self.api_key(),
+            max_retries=0,
+            http_client=self.http_client(),
+        )
+
+    def http_client(self) -> httpx.AsyncClient:
+        """Authenticate only the configured origin and refuse automatic redirects."""
         verify = self.verify()
         transport = (
             httpx.AsyncHTTPTransport(
@@ -76,13 +86,31 @@ class Endpoint(BaseModel):
             else None
         )
 
-        return AsyncOpenAI(
-            base_url=str(self.base_url),
-            api_key=self.api_key(),
-            default_headers=self.headers,
-            max_retries=0,
-            http_client=httpx.AsyncClient(transport=transport, verify=verify),
+        return httpx.AsyncClient(
+            transport=transport,
+            verify=verify,
+            auth=_EndpointAuth(self),
+            follow_redirects=False,
         )
+
+
+class _EndpointAuth(httpx.Auth):
+    def __init__(self, endpoint: Endpoint) -> None:
+        self._endpoint = endpoint
+        url = httpx.URL(str(endpoint.base_url))
+        self._origin = (url.scheme, url.host, url.port)
+
+    @override
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        url = request.url
+        if (url.scheme, url.host, url.port) != self._origin:
+            raise ValueError('Endpoint credentials cannot authenticate another origin.')
+
+        request.headers.update(self._endpoint.headers or {})
+        request.headers['Authorization'] = f'Bearer {self._endpoint.api_key()}'
+        yield request
 
 
 def preflight(env: Mapping[str, str] | None = None) -> None:

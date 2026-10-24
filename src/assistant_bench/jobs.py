@@ -41,6 +41,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.responses import ResponseCompletionError
 from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.paths import data_dir
@@ -222,14 +223,14 @@ def drifted_systems(
     )
 
 
-def _agent_config(family: Family, system: System) -> trial_config.AgentConfig:
+def _agent_config(system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
         model_name=f'{harness.model_prefix}{system.route}',
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
-        kwargs=harness.options(system, family.settings),
+        kwargs=harness.options(system),
     )
 
 
@@ -244,7 +245,7 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     job whose harnesses are all single-call runs in the host environment, which
     starts no container, and any other job runs in Harbor's Docker environment.
     """
-    agents = [_agent_config(family, system) for system in systems]
+    agents = [_agent_config(system) for system in systems]
     sources = [source for source, _ in _sources(family)]
     tasks_source = family.source == 'tasks'
     return _job(
@@ -470,12 +471,17 @@ def _job(
     n_concurrent: int,
     verify: bool,
 ) -> JobConfig:
+    retry = RetryConfig(max_retries=1)
+    retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
+        ResponseCompletionError.__name__
+    }
+
     return JobConfig(
         jobs_dir=jobs_dir,
         n_attempts=n_attempts,
         n_concurrent_trials=n_concurrent,
         quiet=True,
-        retry=RetryConfig(max_retries=1),
+        retry=retry,
         environment=environment,
         verifier=trial_config.VerifierConfig(disable=not verify),
         agents=agents,
@@ -550,14 +556,15 @@ class _Candidate:
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
-    A case family keeps only trials of each case's installed task. A task family
+    A case family requires the current source and render contract. A task family
     keeps only trials of its current tasks at a version Harbor would reuse, so a
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
-    preferring a successful trial whose recorded agent configuration, environment,
-    and verifier-disable setting match the current job, and otherwise the oldest.
-    Costs come from the current catalog price, so a system missing from `systems`
-    or without a price reports as unpriced.
+    keeping only trials whose recorded generation, environment, and verifier
+    settings match the current job. A successful trial replaces an errored one,
+    while equivalent successful trials keep their original order.
+    Costs come from the current catalog price. A system without a price reports
+    as unpriced.
 
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor
@@ -570,28 +577,28 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         task is invalid, or the harness is one `check_harness` refuses.
     """
     check_harness(family)
+    cases = {case.id: case for case in load_cases(family)}
     expected = _inputs(family, list(systems.values()))
     candidates = [
-        (
-            candidate,
-            (
-                candidate.trial.lock.agent,
-                candidate.trial.lock.environment,
-                candidate.trial.lock.verifier.disable,
-            )
-            == expected.get(candidate.system),
-        )
+        candidate
         for candidate in _read_trials(
-            family, _sources(family), _current_versions(family)
+            family, _sources(family), _current_versions(family, cases)
         )
+        if (
+            candidate.trial.lock.agent,
+            candidate.trial.lock.environment,
+            candidate.trial.lock.verifier.disable,
+        )
+        == expected.get(candidate.system)
+        and candidate.origin.lock.agent == candidate.trial.lock.agent
+        and candidate.origin.lock.environment == candidate.trial.lock.environment
     ]
 
     candidates.sort(
         key=lambda candidate: (
-            candidate[0].error is not None,
-            not candidate[1],
-            candidate[0].job,
-            candidate[0].name,
+            candidate.error is not None,
+            candidate.job,
+            candidate.name,
         )
     )
 
@@ -600,7 +607,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     )
 
     solutions: set[tuple[str, str]] = set()
-    for candidate, _ in candidates:
+    for candidate in candidates:
         if (candidate.job, candidate.name) in solutions:
             continue
         solutions.add((candidate.job, candidate.name))
@@ -610,7 +617,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
 
     outputs = sorted(
         (
-            _output(family, candidate, systems)
+            _output(family, candidate, systems, cases[candidate.case].instruction)
             for group in groups.values()
             for candidate in group[: family.settings.samples]
         ),
@@ -626,16 +633,15 @@ def _inputs(
 ) -> dict[str, tuple[trial_config.AgentConfig, trial_config.EnvironmentConfig, bool]]:
     """Return the current agent, environment, and verifier-disable inputs.
 
-    A task family that lists no systems may lack the settings its harness needs,
-    so it sends none.
+    Only systems currently listed by the family can contribute outputs.
     """
-    if family.source == 'tasks' and not family.settings.systems:
-        return {}
-    resolved = family_systems(family, systems)
+    resolved = family_systems(
+        family, [system for system in systems if system.name in family.settings.systems]
+    )
     environment = _environment(resolved)
     return {
         system.name: (
-            _agent_config(family, system),
+            _agent_config(system),
             environment,
             family.source != 'tasks',
         )
@@ -646,16 +652,18 @@ def _inputs(
 def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
-    """Return one output per finished trial of a job.
+    """Return one output per finished trial whose case is still current.
 
     Raises
     ------
     ValueError
         The directory is not a job directory, or a trial record is unreadable.
     """
+    cases = {case.id: case for case in load_cases(family)}
     return [
-        _output(family, candidate, systems)
+        _output(family, candidate, systems, cases[candidate.case].instruction)
         for candidate in _read_trials(family, [_source(job_dir)])
+        if candidate.case in cases
     ]
 
 
@@ -683,14 +691,20 @@ def _read_trials(
     return records
 
 
-def _current_versions(family: Family) -> dict[str, str]:
-    """Return the version of each current task, keyed by the case ID."""
+def _current_versions(family: Family, cases: dict[str, Case]) -> dict[str, str]:
+    """Return expected current task versions without changing rendered tasks."""
     match family.source:
         case 'cases':
-            directory = tasks_dir(family)
-            tasks = list(directory.iterdir()) if directory.is_dir() else []
+            versions: dict[str, str] = {}
+            for case in cases.values():
+                package = render_task_config(
+                    f'{family.name}/{case.id}', case.instruction
+                ).task
+                assert package is not None and package.version is not None
+                versions[case.id] = package.version
+            return versions
         case 'tasks':
-            tasks = [case_task(family, case.id) for case in load_cases(family)]
+            tasks = [case_task(family, case) for case in cases]
         case _:
             assert_never(family.source)
 
@@ -754,6 +768,7 @@ def _output(
     family: Family,
     candidate: _Candidate,
     systems: dict[str, System],
+    instruction: str,
 ) -> Output:
     """Materialize the originating solution with its selected trial's verdict."""
     trial, origin, case = candidate.trial, candidate.origin, candidate.case
@@ -777,7 +792,12 @@ def _output(
         text=text,
         reward=reward,
         gate_failures=_gate_failures(
-            family, case, text, finish_reason, reward, errored=exception is not None
+            family,
+            instruction,
+            text,
+            finish_reason,
+            reward,
+            errored=exception is not None,
         ),
         finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
@@ -822,7 +842,7 @@ def _text(
 
 def _gate_failures(
     family: Family,
-    case: str,
+    instruction: str,
     text: str | None,
     finish_reason: str | None,
     reward: float | None,
@@ -835,19 +855,13 @@ def _gate_failures(
     since Harbor still runs the verifier.
     """
     match family.settings:
-        case VotesSettings(gates=gates):
+        case VotesSettings():
             if family.source == 'tasks':
                 if reward is None:
                     return None
                 return [Gate.TESTS] if reward < 1 else []
             if errored:
                 return None
-
-            instruction = (
-                (case_task(family, case) / 'instruction.md').read_text()
-                if gates.script
-                else ''
-            )
 
             return failed_gates(family.settings, text or '', finish_reason, instruction)
         case TaskTestsSettings():

@@ -40,9 +40,6 @@ class _Settings(BaseModel):
     harness: str | None = None
     """Agent for every listed task-family system. Cases always use `generate`."""
 
-    max_turns: int | None = Field(default=None, ge=1)
-    max_output_tokens: int | None = Field(default=None, ge=1)
-
     categories: list[str] = []
     """Allowed case categories, published in reports."""
 
@@ -224,10 +221,9 @@ def load_family(name: str) -> Family:
         `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
         public family sets no aspect or names itself without that aspect's
         prefix, or the settings do not fit the source. A case family is scored by
-        `votes`, needs `max_output_tokens`, sets no `harness` or `max_turns`,
-        and renders no diffs. A task family sets no `language` or `gates` and
-        renders diffs when scored by votes, and one that lists systems needs
-        `harness`, `max_turns`, and `max_output_tokens`.
+        `votes`, sets no `harness`, and renders no diffs. A task family sets no
+        `language` or `gates`, renders diffs when scored by votes, and needs a
+        `harness` when it lists systems.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
@@ -278,18 +274,10 @@ def _check_source_settings(family: Family) -> None:
                 f'{prefix}: score a `cases.jsonl` family by `votes`, since only '
                 'a `tasks/` family has tests.'
             )
-        if settings.max_output_tokens is None:
-            raise ValueError(
-                f'{prefix}: a `cases.jsonl` family needs `max_output_tokens`.'
-            )
-
-        agent_keys = [
-            key for key in ('harness', 'max_turns') if key in settings.model_fields_set
-        ]
-        if agent_keys:
+        if settings.harness is not None:
             raise ValueError(
                 f'{prefix}: a `cases.jsonl` family runs every system as `generate`, '
-                f'so remove {code(agent_keys)}.'
+                'so remove `harness`.'
             )
 
         if settings.render == 'diff':
@@ -314,16 +302,10 @@ def _check_source_settings(family: Family) -> None:
                 '`render = "diff"`.'
             )
 
-    if settings.systems:
-        missing = [
-            key
-            for key in ('harness', 'max_turns', 'max_output_tokens')
-            if getattr(settings, key) is None
-        ]
-        if missing:
-            raise ValueError(
-                f'{prefix}: a `tasks/` family that lists systems needs {code(missing)}.'
-            )
+    if settings.systems and settings.harness is None:
+        raise ValueError(
+            f'{prefix}: a `tasks/` family that lists systems needs `harness`.'
+        )
 
 
 def load_cases(family: Family) -> list[Case]:

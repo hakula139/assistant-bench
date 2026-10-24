@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, NoReturn
 
-import tomli_w
 import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
@@ -22,7 +21,6 @@ from assistant_bench.catalog import (
     System,
     load_export,
     load_systems,
-    pin,
 )
 from assistant_bench.families import (
     Case,
@@ -276,36 +274,25 @@ def fingerprints(
 ) -> None:
     """Fail when a system kept its name since BASE but resolves to a new fingerprint.
 
-    The fingerprint hashes a system's route, effort, harness, and prompt. For each
-    changed name, print the systems.toml table that pins its BASE resolution. Nix
-    builds BASE's nixos-config export.
+    Compare runnable family identities, including capacity and revision-owned
+    generation versions. Nix builds BASE's own nixos-config export.
     """
     try:
-        base_systems = revisions.systems_at(base)
+        head_systems = revisions.current_systems(_load_systems())
+        base_systems = revisions.systems_at(base, set(head_systems))
     except subprocess.CalledProcessError as error:
         raise typer.Exit(error.returncode) from error
-    changed = revisions.changed_fingerprints(base_systems, _load_systems())
-    for name in changed:
-        system = base_systems[name]
-        try:
-            config = pin(system)
-        except ValueError:
-            typer.echo(
-                f'System `{name}` changed its fingerprint since `{base}`, and a '
-                '`route` table cannot pin its prompt. Give the changed system a '
-                'new name and keep the old name only in closed reports, as '
-                f'`{SYSTEMS_DOC}` describes.',
-                err=True,
-            )
-            continue
+    except ValueError as error:
+        _fail(str(error))
+    changed = revisions.changed_fingerprints(base_systems, head_systems)
+    for key in changed:
+        name = head_systems[key].name
         typer.echo(
-            f'System `{name}` changed its fingerprint since `{base}`. Give the '
-            'changed system a new name, and keep the old name on its old '
-            f'resolution with the table below, as `{SYSTEMS_DOC}` describes.',
+            f'System `{name}` changed its fingerprint since `{base}` in '
+            f'`{key.split("/")[0]}`. Give the changed system a new name and keep '
+            f'the old name only in closed reports, as `{SYSTEMS_DOC}` describes.',
             err=True,
         )
-        typer.echo(tomli_w.dumps({name: config.model_dump(exclude_none=True)}))
-        typer.echo()
     if changed:
         raise typer.Exit(1)
     typer.echo(f'Every system keeps its fingerprint since `{base}`.')

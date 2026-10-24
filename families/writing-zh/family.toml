@@ -3,18 +3,17 @@ aspect = "writing"
 display_name = "Chinese"
 public = true
 systems = [
-  "opus-5.5",
-  "gpt-6-astra",
-  "gpt-6.1-sol",
-  "gemini-4-argon",
-  "gemini-3.8-flash",
-  "deepseek-v4.1-flash-1017",
-  "kimi-k3",
+  "opus-5.5-max",
+  "gpt-6-astra-max",
+  "gpt-6.1-sol-max",
+  "gemini-4-argon-high",
+  "gemini-3.8-flash-high",
+  "deepseek-v4.1-flash-1017-max",
+  "kimi-k3-max",
 ]
-reference = "gemini-3.8-flash"
+reference = "gemini-3.8-flash-high"
 language = "zh"
 samples = 2
-max_output_tokens = 16000
 categories = ["docs", "essay", "fiction", "message", "reply", "review"]
 defects = ["facts", "punctuation", "tone", "formulaic", "length"]
 

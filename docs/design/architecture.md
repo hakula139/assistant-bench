@@ -20,17 +20,19 @@ src/assistant_bench/
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
-│   ├── endpoint.py                         # The endpoint variables and the chat-completions client
+│   ├── endpoint.py                         # The endpoint variables and native OpenAI client
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
-│   ├── options.py                          # The kwargs each harness builds from a system and settings
+│   ├── options.py                          # The kwargs each harness builds from its resolved system
+│   ├── responses.py                        # Native SDK results and stateless conversation items
 │   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   └── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
+├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
 ├── diffs.py                                # Git-style diffs of a task's workspace against its repository
 └── paths.py                                # Repo and data directory locations, and atomic file writes
@@ -60,12 +62,13 @@ arena/src/assistant_bench_arena/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
-2. `jobs`, `revisions`, and `report`
-3. `arena`
-4. `outputs`, `harnesses`, and `scoring`
-5. `families` and `catalog`
-6. `messages`, `paths`, and `diffs`
-7. `assistant_bench_arena`
+2. `revisions`
+3. `jobs` and `report`
+4. `arena`
+5. `outputs`, `harnesses`, and `scoring`
+6. `families` and `catalog`
+7. `generation`, `messages`, `paths`, and `diffs`
+8. `assistant_bench_arena`
 
 `families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
@@ -99,7 +102,7 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 
 Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config. Adding a system therefore generates only its trials.
 
-Each rendered task's version carries a hash of the bench's own task inputs as build metadata on `jobs.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. Collection keeps only trials of each case's installed task. The hash covers the instruction and every setting `render_task_config` writes, which are the task name and the agent timeout, so changing either changes the affected versions and reruns those cases.
+Each rendered task's version carries a hash of the bench's own task inputs as build metadata on `jobs.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. Collection derives the expected version from current case source and render settings without writing tasks, so an old installed task cannot make stale outputs current. The hash covers the instruction, task name and agent timeout.
 
 The diff also compares each trial's environment, which follows the job's harnesses as [Systems](systems.md#harnesses) describes, so changing it reruns every trial of the jobs it applies to. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
 
@@ -109,4 +112,4 @@ A regrade is a new trial in the new job that names its source trial, so collecti
 
 Reused trials stay in their original job, so collection reads every job directory of the family. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns.
 
-Within a slot it prefers a successful trial whose recorded agent configuration, environment, and verifier-disable setting match the current job, then the oldest, so changed inputs replace what an earlier job produced while a rerun of the same inputs keeps the outputs its votes refer to, and an errored trial drops out once a rerun replaces it.
+Collection requires the current agent configuration, environment, and verifier-disable setting, including the originating solution's generation inputs. It excludes unlisted systems and stale configurations. Within a current slot it prefers a successful trial and then the oldest, so an equivalent rerun keeps the original output and an errored trial drops out when a successful rerun replaces it.

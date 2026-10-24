@@ -1,18 +1,21 @@
 import textwrap
+from importlib import metadata
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from assistant_bench.catalog import (
+    Api,
     NixosConfigExport,
     Price,
+    System,
     SystemConfig,
     load_export,
     load_systems,
-    pin,
     resolve_system,
 )
+from assistant_bench.generation import Generation
 from support import make_system
 
 
@@ -42,6 +45,16 @@ class TestLoadExport:
         with pytest.raises(RuntimeError, match='inside `nix develop`'):
             load_export()
 
+    @pytest.mark.parametrize('field', ['maxTokens', 'contextWindow'])
+    def test_requires_catalog_capacity_metadata(
+        self, export: NixosConfigExport, field: str
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        document['catalog']['models']['acme-large'].pop(field)
+
+        with pytest.raises(ValidationError, match=field):
+            NixosConfigExport.model_validate(document)
+
 
 class TestSystemConfig:
     @pytest.mark.parametrize(
@@ -55,6 +68,19 @@ class TestSystemConfig:
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
             },
             {'model': 'acme-large', 'vendor': 'other'},
+            {'model': 'acme-large', 'max_output_tokens': 64},
+            {'model': 'acme-large', 'context_window': 8192},
+            {'model': 'acme-large', 'api': 'unsupported'},
+            {
+                'route': 'acme/large',
+                'display_name': 'Acme Large',
+                'max_output_tokens': 64,
+            },
+            {
+                'route': 'acme/large',
+                'display_name': 'Acme Large',
+                'context_window': 8192,
+            },
         ],
         ids=[
             'no-source',
@@ -62,6 +88,11 @@ class TestSystemConfig:
             'route-without-display-name',
             'model-with-price',
             'model-with-vendor',
+            'model-with-output-override',
+            'model-with-context-override',
+            'unsupported-api',
+            'route-without-context',
+            'route-without-output-capacity',
         ],
     )
     def test_rejects_an_ambiguous_or_incomplete_table(
@@ -72,12 +103,71 @@ class TestSystemConfig:
 
 
 class TestSystem:
+    @pytest.mark.parametrize(
+        ('limit', 'value'),
+        [
+            pytest.param('max_output_tokens', 0, id='zero-output'),
+            pytest.param('max_output_tokens', -1, id='negative-output'),
+            pytest.param('context_window', 0, id='zero-context'),
+            pytest.param('context_window', -1, id='negative-context'),
+            pytest.param('max_output_tokens', 8192, id='no-prompt-room'),
+            pytest.param('max_output_tokens', 8193, id='output-exceeds-context'),
+        ],
+    )
+    def test_rejects_a_capacity_that_cannot_leave_room_for_a_prompt(
+        self, limit: str, value: int
+    ) -> None:
+        fields = make_system().model_dump() | {limit: value}
+
+        with pytest.raises(ValidationError):
+            System.model_validate(fields)
+
     class TestFingerprint:
+        def test_captured_identity_stays_stable_when_the_runtime_changes(
+            self, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            generate = make_system()
+            terminal = make_system(harness='terminus-2')
+            before = (generate.fingerprint, terminal.fingerprint)
+
+            def version(name: str) -> str:
+                return '999.0.0'
+
+            monkeypatch.setattr(metadata, 'version', version)
+
+            after = (generate.fingerprint, terminal.fingerprint)
+
+            assert after == before
+
+        @pytest.mark.parametrize(
+            ('changed', 'expected'),
+            [
+                pytest.param(
+                    Generation(protocol=2, harbor='0.24.0'), (True, True), id='protocol'
+                ),
+                pytest.param(
+                    Generation(protocol=1, harbor='0.25.0'), (False, True), id='harbor'
+                ),
+            ],
+        )
+        def test_versions_invalidate_only_the_outputs_they_shape(
+            self, changed: Generation, expected: tuple[bool, bool]
+        ) -> None:
+            base = Generation(protocol=1, harbor='0.24.0')
+
+            differences = tuple(
+                make_system(harness=harness, generation=base).fingerprint
+                != make_system(harness=harness, generation=changed).fingerprint
+                for harness in ('generate', 'terminus-2')
+            )
+
+            assert differences == expected
+
         def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
-            assert make_system().fingerprint == '293ca99b5baeacd7'
-            assert make_system(name='x').fingerprint == '293ca99b5baeacd7'
-            assert make_system(display_name='x').fingerprint == '293ca99b5baeacd7'
-            assert make_system(vendor='other').fingerprint == '293ca99b5baeacd7'
+            assert make_system().fingerprint == 'c8899f53b1177f65'
+            assert make_system(name='x').fingerprint == 'c8899f53b1177f65'
+            assert make_system(display_name='x').fingerprint == 'c8899f53b1177f65'
+            assert make_system(vendor='other').fingerprint == 'c8899f53b1177f65'
 
         @pytest.mark.parametrize(
             'change',
@@ -86,11 +176,22 @@ class TestSystem:
                 {'effort': 'high'},
                 {'prompt': 'Be brief.'},
                 {'harness': 'terminus-2'},
+                {'max_output_tokens': 128},
+                {'context_window': 16384},
+                {'api': 'openai-responses'},
             ],
-            ids=['route', 'effort', 'prompt', 'harness'],
+            ids=[
+                'route',
+                'effort',
+                'prompt',
+                'harness',
+                'output-capacity',
+                'context',
+                'api',
+            ],
         )
         def test_changes_with_what_shapes_the_outputs(
-            self, change: dict[str, str]
+            self, change: dict[str, str | int]
         ) -> None:
             assert make_system(**change).fingerprint != make_system().fingerprint
 
@@ -191,16 +292,80 @@ class TestLoadSystems:
 
         assert {name: system.display_name for name, system in systems.items()} == {
             'opus-5.5': 'Claude Opus 5.5',
-            'gpt-6-astra': 'GPT-6 Astra',
-            'gpt-6.1-sol': 'GPT-6.1 Sol',
-            'gemini-4-argon': 'Gemini 4 Argon',
-            'gemini-3.8-flash': 'Gemini 3.8 Flash',
-            'deepseek-v4.1-flash-1017': 'DeepSeek V4.1 Flash 1017',
-            'kimi-k3': 'Kimi K3',
+            'opus-5.5-max': 'Claude Opus 5.5 · Max',
+            'gpt-6-astra-max': 'GPT-6 Astra · Max',
+            'gpt-6.1-sol-max': 'GPT-6.1 Sol · Max',
+            'gemini-4-argon-high': 'Gemini 4 Argon · High',
+            'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
+            'deepseek-v4.1-flash-1017-max': 'DeepSeek V4.1 Flash 1017 · Max',
+            'kimi-k3-max': 'Kimi K3 · Max',
         }
+        assert {
+            name: system.effort
+            for name, system in systems.items()
+            if name != 'opus-5.5'
+        } == {
+            'opus-5.5-max': 'max',
+            'gpt-6-astra-max': 'max',
+            'gpt-6.1-sol-max': 'max',
+            'gemini-4-argon-high': 'high',
+            'gemini-3.8-flash-high': 'high',
+            'deepseek-v4.1-flash-1017-max': 'max',
+            'kimi-k3-max': 'max',
+        }
+        assert {
+            name for name, system in systems.items() if system.api == 'openai-responses'
+        } == {'gpt-6-astra-max', 'gpt-6.1-sol-max'}
 
 
 class TestResolveSystem:
+    @pytest.mark.parametrize(
+        ('api', 'effort', 'required', 'expected'),
+        [
+            ('openai-chat-completions', 'high', True, 'high'),
+            ('openai-chat-completions', 'max', True, 'invalid'),
+            ('openai-responses', 'max', True, 'max'),
+            ('openai-chat-completions', None, True, 'invalid'),
+            ('openai-responses', None, True, 'max'),
+            ('openai-chat-completions', None, False, None),
+        ],
+        ids=[
+            'chat-high',
+            'chat-rejects-max',
+            'responses-max',
+            'chat-default-rejected',
+            'responses-default',
+            'optional-default',
+        ],
+    )
+    def test_validates_effort_for_the_selected_api_without_downgrading_it(
+        self,
+        export: NixosConfigExport,
+        api: Api,
+        effort: str | None,
+        required: bool,
+        expected: str | None,
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        thinking = document['catalog']['models']['acme-large']['thinking']
+        thinking['efforts'] = ['low', 'medium', 'high', 'max']
+        thinking['apiEfforts'] = {'openai-chat-completions': ['low', 'medium', 'high']}
+        thinking['defaultLevel'] = 'max'
+        thinking['requiresEffort'] = required
+        resolved_export = NixosConfigExport.model_validate(document)
+        config = SystemConfig(model='acme-large', api=api, effort=effort)
+
+        if expected == 'invalid':
+            with pytest.raises(
+                ValueError, match='effort `max`.*`openai-chat-completions`'
+            ):
+                resolve_system('large', config, resolved_export)
+        else:
+            system = resolve_system('large', config, resolved_export)
+
+            assert system.api == api
+            assert system.effort == expected
+
     def test_resolves_historical_exports_without_vendor_metadata(
         self, export: NixosConfigExport
     ) -> None:
@@ -228,6 +393,7 @@ class TestResolveSystem:
 
         assert system.route == 'acme/small'
         assert system.effort is None
+        assert (system.max_output_tokens, system.context_window) == (32, 2048)
 
     def test_keeps_an_accepted_effort(self, export: NixosConfigExport) -> None:
         system = resolve_system(
@@ -252,6 +418,9 @@ class TestResolveSystem:
             'x',
             SystemConfig(
                 route='router/acme/x',
+                api='openai-responses',
+                max_output_tokens=32768,
+                context_window=131072,
                 vendor='acme',
                 effort='max',
                 price=price,
@@ -267,6 +436,8 @@ class TestResolveSystem:
             price,
         )
         assert system.vendor == 'acme'
+        assert system.api == 'openai-responses'
+        assert (system.max_output_tokens, system.context_window) == (32768, 131072)
 
     def test_takes_a_display_name_over_the_catalog_name(
         self, export: NixosConfigExport
@@ -306,7 +477,8 @@ class TestResolveSystem:
             ),
             (
                 SystemConfig(model='acme-small', effort='medium'),
-                'System `x`: effort `medium` is not one of `low`, `high`.',
+                'System `x`: effort `medium` is not one of `low`, `high` for '
+                '`openai-chat-completions`.',
             ),
             (
                 SystemConfig(model='local-model', effort='low'),
@@ -349,16 +521,3 @@ class TestResolveSystem:
             resolve_system('x', config, export)
 
         assert str(error.value) == message
-
-
-class TestPin:
-    def test_keeps_vendor_metadata_without_changing_the_request(
-        self, export: NixosConfigExport
-    ) -> None:
-        system = make_system()
-
-        pinned = resolve_system(system.name, pin(system), export)
-
-        assert pinned == system
-        assert pinned.vendor == 'acme'
-        assert pinned.fingerprint == system.fingerprint
