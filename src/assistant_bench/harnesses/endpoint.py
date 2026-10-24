@@ -1,4 +1,4 @@
-"""The OpenAI-compatible endpoint both agents send their model calls to."""
+"""The OpenAI-compatible endpoint both agents send their model requests to."""
 
 import os
 import ssl
@@ -66,7 +66,7 @@ class Endpoint(BaseModel):
         return ssl.create_default_context(cafile=self.ca_file) if self.ca_file else True
 
     def client(self) -> AsyncOpenAI:
-        """Build the chat-completions client, bound to the local address if set."""
+        """Build the native client, bound to the local address if set."""
         verify = self.verify()
         transport = (
             httpx.AsyncHTTPTransport(

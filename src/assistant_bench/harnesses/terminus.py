@@ -2,14 +2,17 @@
 
 from collections.abc import Mapping
 from importlib import metadata
+from pathlib import Path
 from typing import Any, ClassVar, Self, override
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2, Terminus2Options
 from harbor.environments.base import BaseEnvironment
-from harbor.llms.base import BaseLLM, LLMBackend
+from harbor.llms.base import BaseLLM, LLMBackend, LLMResponse
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
+from litellm import Message
+from pydantic import BaseModel
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
@@ -43,6 +46,21 @@ class _ConfiguredLiteLLM(LiteLLM):
     @override
     def get_model_output_limit(self) -> int:
         return self._output_limit
+
+    @override
+    async def _call_responses(
+        self,
+        prompt: str,
+        message_history: list[dict[str, Any] | Message] | None = None,
+        response_format: dict[str, Any] | type[BaseModel] | None = None,
+        logging_path: Path | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        kwargs['store'] = False
+        kwargs['previous_response_id'] = None
+        return await super()._call_responses(
+            prompt, message_history or [], response_format, logging_path, **kwargs
+        )
 
 
 class Terminus(Terminus2):

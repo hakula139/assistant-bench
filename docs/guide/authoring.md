@@ -115,6 +115,7 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | ------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `model`             | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
 | `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
+| `api`               | `openai-chat-completions` by default, or `openai-responses`. Effort must be supported by the selected API     |
 | `vendor`            | For a `route`, its model vendor. Required when a task family lists the system or names it as an author        |
 | `price`             | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
 | `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`    |

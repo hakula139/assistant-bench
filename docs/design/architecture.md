@@ -20,7 +20,7 @@ src/assistant_bench/
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
-│   ├── endpoint.py                         # The endpoint variables and the chat-completions client
+│   ├── endpoint.py                         # The endpoint variables and native OpenAI client
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection

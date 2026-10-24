@@ -1,6 +1,6 @@
 # Systems
 
-A system is one generation configuration under test: a model route, completion and context allowances, an effort, a harness, and an optional system prompt. [`systems.toml`](../../systems.toml) declares each system as a table, whose keys are covered in [Authoring](../guide/authoring.md#systems).
+A system is one generation configuration under test: a model route and API, completion and context allowances, an effort, a harness, and an optional system prompt. [`systems.toml`](../../systems.toml) declares each system as a table, whose keys are covered in [Authoring](../guide/authoring.md#systems).
 
 ## Resolution
 
@@ -8,11 +8,13 @@ A system specifies either a catalog model with `model` or a bare `route`. A cata
 
 The catalog's `maxTokens` is the configured completion allowance, including reasoning. It is not proof of the endpoint's maximum capacity. The writing baseline explicitly selects the strongest supported effort, named by each table's effort suffix. This is a deliberate configuration and does not establish that higher effort improves every answer. Terminus uses the configured context window minus the completion allowance as its input limit, reserving completion space through Harbor's native context management.
 
+`api` selects `openai-chat-completions` by default or `openai-responses` explicitly. The catalog's `thinking.apiEfforts` can restrict the general effort list for an API. An unsupported explicit effort or required default is rejected during resolution. The GPT max variants use Responses, where their configured routes accept max. Requests never substitute an effort or transport after a failure.
+
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 
 ## Fingerprints
 
-A system's fingerprint hashes its resolved route, capacities, effort, harness, generation protocol, and the SHA-256 of its prompt text. The table name and public labels are excluded. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
+A system's fingerprint hashes its resolved route, API, capacities, effort, harness, generation protocol, and the SHA-256 of its prompt text. The table name and public labels are excluded. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
 
 Votes and scores pool only within one fingerprint. Altering a system's generation settings requires a new table name, preserving the old name's frozen results. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 
@@ -37,7 +39,7 @@ Harbor gives every trial of a job the same environment. A job whose harnesses ar
 
 `terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its generation version combines the bench's declared generation protocol with the locked Harbor version, since Harbor supplies its prompt and loop. `generate` uses only the bench's generation protocol. Resolved systems capture those versions, and each native agent reports the same version after checking the installed Harbor matches the lock. A Harbor upgrade changes Terminus fingerprints while unrelated grading or tooling changes preserve the single-call protocol.
 
-The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`.
+The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the native client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The resolved API selects native Responses support or Chat Completions for either harness. Responses calls use `store=False`, retain their native output text and usage, and classify budget exhaustion and refusals as incomplete results. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`.
 
 `bench` loads the first `.env` in the working directory or a parent, then sets `LITELLM_MODE=PRODUCTION`, which Harbor inherits, so LiteLLM never loads a `.env` of its own.
 

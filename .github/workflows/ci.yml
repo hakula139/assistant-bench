@@ -156,10 +156,10 @@ jobs:
           zhon zhon.hanzi zhon.pinyin zhon.zhuyin zhon.cedict
           zhon.cedict.all zhon.cedict.simplified zhon.cedict.traditional threadpoolctl
 
-      - name: Check partial statsmodels type contract
+      - name: Check partial dependency type contracts
         run: >-
           uv run python -m mypy.stubtest --mypy-config-file pyproject.toml
-          --ignore-missing-stub statsmodels.discrete.discrete_model
+          --ignore-missing-stub harbor.llms.lite_llm statsmodels.discrete.discrete_model
 
       - name: Check registered controller contract
         run: uv run python typings/checks/controllers.py
