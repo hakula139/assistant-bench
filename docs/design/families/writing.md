@@ -21,7 +21,13 @@ Every case belongs to one category, which the per-category leaderboards split on
 
 The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
 
-Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content. Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review cases state their point of view, required beats, and length band in the instruction, so the checklist can judge the same things the brief asks for. A review case supplies a synopsis of its invented work, including the scene a close reading treats. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations. A case's `checklist` names what the owner should check beyond general quality, such as reporting what was not verified.
+Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content.
+
+Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review cases state their point of view, required beats, and length band in the instruction, so the checklist can judge the same things the brief asks for.
+
+A review case supplies a synopsis of its invented work, including the scene a close reading treats. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
+
+A case's `checklist` names what the owner should check beyond general quality, such as reporting what was not verified.
 
 ## Case Sourcing
 
@@ -59,6 +65,6 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 | ---------- | --------------------------------------------------------------------------------------------------------------------- |
 | `[]`       | The output passed every gate and may be shown to the owner                                                            |
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
-| `null`     | The trial errored, so it never enters the arena, or the family's scorer has no gates                                  |
+| `null`     | No verdict: a case trial errored, a task was ungraded, or the family's scorer has no gates                            |
 
 The names are the values of `families.Gate`, which sits beside the gate settings so that readers of outputs can import it without the gate code, and they follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and every collection prints the count of outputs that failed a gate and the failures by gate.

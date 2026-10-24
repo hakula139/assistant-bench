@@ -13,7 +13,7 @@ const columns = [terms.failedTests, terms.solutionCostLatency, terms.diffLengthB
   <KeptTail text="The tests settle any pair they separate, so a passing solution beats a failing one without a vote. Two failing solutions tie without a vote, as do two passing solutions with identical diffs. The rater votes only between two passing solutions whose diffs differ, reading each diff without its commit history, as a reviewer reads a pull request." />
 </p>
 <p>
-  <KeptTail text="Each settled pair and each vote counts once in the fit, so the scores lean on the tests until the rater has voted on most pairs of passing solutions." />
+  <KeptTail text="Settled comparisons together count as at most one vote per task and system pair, with fractional weights when systems have several samples. Each human vote counts once, so the scores lean on the tests until the rater has voted on most pairs of passing solutions." />
 </p>
 <p>
   The rest of the board reads as <a href="#votes">Votes</a> describes,{' '}
