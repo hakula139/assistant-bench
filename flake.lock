@@ -58,11 +58,11 @@
     "nixos-config": {
       "flake": false,
       "locked": {
-        "lastModified": 1792640604,
-        "narHash": "sha256-5nFa5hQAqd3+AGIhxCLyEZdnvTQbHP3OYo/20kxBiCs=",
+        "lastModified": 1792841054,
+        "narHash": "sha256-aq0insPh6rCv5kMgW+LhyfFxZVV7QlF25XQ9LA25T3c=",
         "owner": "hakula139",
         "repo": "nixos-config",
-        "rev": "d4f57fdb1f79a4842c2c210934b680984fb4ca08",
+        "rev": "5eef4b8e5d52489cf294e825e6f84ca33b618910",
         "type": "github"
       },
       "original": {

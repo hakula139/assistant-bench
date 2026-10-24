@@ -10,6 +10,7 @@ from assistant_bench.catalog import (
     SystemConfig,
     load_export,
     load_systems,
+    pin,
     resolve_system,
 )
 from support import make_system
@@ -53,12 +54,14 @@ class TestSystemConfig:
                 'model': 'acme-large',
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
             },
+            {'model': 'acme-large', 'vendor': 'other'},
         ],
         ids=[
             'no-source',
             'both-sources',
             'route-without-display-name',
             'model-with-price',
+            'model-with-vendor',
         ],
     )
     def test_rejects_an_ambiguous_or_incomplete_table(
@@ -74,6 +77,7 @@ class TestSystem:
             assert make_system().fingerprint == '293ca99b5baeacd7'
             assert make_system(name='x').fingerprint == '293ca99b5baeacd7'
             assert make_system(display_name='x').fingerprint == '293ca99b5baeacd7'
+            assert make_system(vendor='other').fingerprint == '293ca99b5baeacd7'
 
         @pytest.mark.parametrize(
             'change',
@@ -197,6 +201,19 @@ class TestLoadSystems:
 
 
 class TestResolveSystem:
+    def test_resolves_historical_exports_without_vendor_metadata(
+        self, export: NixosConfigExport
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        for model in document['catalog']['models'].values():
+            model.pop('vendor')
+        historical = NixosConfigExport.model_validate(document)
+
+        system = resolve_system('large', SystemConfig(model='acme-large'), historical)
+
+        assert system.vendor is None
+        assert system.fingerprint == make_system().fingerprint
+
     def test_applies_the_default_effort_a_model_requires(
         self, export: NixosConfigExport
     ) -> None:
@@ -225,6 +242,7 @@ class TestResolveSystem:
         system = resolve_system('local', SystemConfig(model='local-model'), export)
 
         assert system.route == 'local/model'
+        assert system.vendor == 'other'
         assert system.price is None
 
     def test_takes_a_route_and_price_as_given(self, export: NixosConfigExport) -> None:
@@ -233,7 +251,11 @@ class TestResolveSystem:
         system = resolve_system(
             'x',
             SystemConfig(
-                route='router/acme/x', effort='max', price=price, display_name='Acme X'
+                route='router/acme/x',
+                vendor='acme',
+                effort='max',
+                price=price,
+                display_name='Acme X',
             ),
             export,
         )
@@ -244,6 +266,7 @@ class TestResolveSystem:
             'max',
             price,
         )
+        assert system.vendor == 'acme'
 
     def test_takes_a_display_name_over_the_catalog_name(
         self, export: NixosConfigExport
@@ -326,3 +349,16 @@ class TestResolveSystem:
             resolve_system('x', config, export)
 
         assert str(error.value) == message
+
+
+class TestPin:
+    def test_keeps_vendor_metadata_without_changing_the_request(
+        self, export: NixosConfigExport
+    ) -> None:
+        system = make_system()
+
+        pinned = resolve_system(system.name, pin(system), export)
+
+        assert pinned == system
+        assert pinned.vendor == 'acme'
+        assert pinned.fingerprint == system.fingerprint

@@ -158,6 +158,12 @@ def write_task_family(
         shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
         config = target / 'task.toml'
         config.write_text(config.read_text().replace('smoke/echo', f'{name}/{task_id}'))
+        if systems:
+            config.write_text(
+                config.read_text().replace(
+                    '[metadata]', f'[metadata]\nauthor = "{systems[0]}"'
+                )
+            )
 
 
 # ── Systems and Trials ──
@@ -167,6 +173,7 @@ def make_system(**overrides: Any) -> System:
     fields: dict[str, Any] = {
         'name': 'acme-large',
         'display_name': 'Acme Large',
+        'vendor': 'acme',
         'route': 'acme/large',
         'effort': 'medium',
         'prompt': None,

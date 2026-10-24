@@ -350,6 +350,8 @@ def _task_dirs(family: Family) -> list[Path]:
     tasks = [case_task(family, case.id) for case in _load_cases(family)]
     try:
         jobs.check_tasks(family, tasks)
+        if family.settings.systems:
+            jobs.author_vendors(family, tasks, _load_systems())
     except ValueError as error:
         _fail(str(error))
     changed = _changed_tasks(family, tasks)
@@ -504,8 +506,9 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
 
 
 def _collect(family: Family) -> None:
+    systems = _load_systems()
     try:
-        outputs = jobs.collect(family, _load_systems())
+        outputs = jobs.collect(family, systems)
     except ValueError as invalid:
         _fail(str(invalid))
     errors = Counter(output.error for output in outputs if output.error)
@@ -530,11 +533,41 @@ def _collect(family: Family) -> None:
     solved = {output.case for output in outputs if (output.reward or 0) >= 1}
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
+    if family.source == 'tasks' and family.settings.systems:
+        _author_rates(family, outputs, systems)
     versions = sorted(
         {output.harness_version for output in outputs if output.harness_version}
     )
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
+
+
+def _author_rates(
+    family: Family, outputs: list[Output], systems: dict[str, System]
+) -> None:
+    tasks = [case_task(family, case.id) for case in _load_cases(family)]
+    try:
+        vendors = jobs.author_vendors(family, tasks, systems)
+    except ValueError as error:
+        _fail(str(error))
+    for system in _family_systems(family):
+        name = system.name
+        rates = []
+        for own, label in ((True, 'own-vendor'), (False, 'other-vendor')):
+            trials = [
+                output
+                for output in outputs
+                if output.system == name
+                and (vendors[output.case] == system.vendor) == own
+            ]
+            passed = sum((output.reward or 0) >= 1 for output in trials)
+            rate = (
+                f'{passed}/{len(trials)} ({passed / len(trials):.1%})'
+                if trials
+                else 'no trials'
+            )
+            rates.append(f'{label} tasks {rate}')
+        typer.echo(f'System `{name}`: pass rate on {", ".join(rates)}.')
 
 
 def _run(job: JobConfig) -> Path:
