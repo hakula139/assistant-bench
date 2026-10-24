@@ -322,7 +322,6 @@ export function VoteApp() {
     setSavedAt(null);
   };
 
-  // Shows the pair the family's session holds now, which another tab may have moved on.
   const follow = async (family: string) => {
     try {
       show(await enterFamily(family));
@@ -332,7 +331,6 @@ export function VoteApp() {
     }
   };
 
-  // Shows the session that `action` returns, and marks `saved` once a vote is recorded.
   const run = async (action: () => Promise<SessionView>, saved = false) => {
     setBusy(true);
     try {
@@ -423,25 +421,16 @@ export function VoteApp() {
     }));
   };
 
-  // Enter on a focused control outside the pair, such as a header link, keeps its own action. The
-  // pair's popovers render in a portal and keep focus through their closing animation, so they
-  // count as part of the pair.
-  const outside = (target: EventTarget | null) =>
-    target instanceof Element &&
-    target !== document.body &&
-    !pairView.current?.contains(target) &&
-    target.closest('[data-slot=popover-content]') === null;
-
   const onKey = useEffectEvent((event: KeyboardEvent) => {
-    if (event.isComposing || event.repeat) {
+    if (event.defaultPrevented || event.isComposing || event.repeat || busy) {
       return;
     }
     const target = event.target;
     // Plain Enter in the note adds a line, since Safari reports the Enter that commits an IME
     // composition as an ordinary keypress.
-    if (target instanceof HTMLTextAreaElement) {
+    if (target === noteField.current && target instanceof HTMLTextAreaElement) {
       if (event.key === 'Escape') {
-        target.blur();
+        pairView.current?.focus();
       } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         submit();
@@ -449,6 +438,20 @@ export function VoteApp() {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (target === pairView.current || target === document.body) {
+        event.preventDefault();
+        submit();
+      }
+      return;
+    }
+    if (
+      !(target instanceof Element) ||
+      !pairView.current?.contains(target) ||
+      target.closest('input, select, textarea, [contenteditable], [role="textbox"]') !== null
+    ) {
       return;
     }
     const key = event.key.toLowerCase();
@@ -468,8 +471,6 @@ export function VoteApp() {
       toggleDefect(keyed.key, keyed.defect);
     } else if (key === 'n') {
       noteField.current?.focus();
-    } else if (event.key === 'Enter' && !outside(target)) {
-      submit();
     } else {
       return;
     }
@@ -501,29 +502,31 @@ export function VoteApp() {
 
   if (pair === null) {
     return (
-      <Screen title="Session complete">
-        <p className="text-muted-foreground">
-          {formatCountOf(session.votes, 'vote')} recorded on {familyTitle(session.family)}.
-        </p>
-        <Notice notice={notice} />
-        <ErrorAlert error={error} />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void run(() => startSession(session.family.name));
-            }}
-          >
-            Start another session
-          </Button>
-          <Button variant="outline" className="text-foreground" asChild>
-            <a href={window.location.pathname}>Choose another family</a>
-          </Button>
-          <Button variant="outline" onClick={undo} disabled={session.votes === 0 || busy}>
-            Undo last vote
-          </Button>
-        </div>
-      </Screen>
+      <div ref={pairView} tabIndex={-1} role="group" aria-label="Completed session">
+        <Screen title="Session complete">
+          <p className="text-muted-foreground">
+            {formatCountOf(session.votes, 'vote')} recorded on {familyTitle(session.family)}.
+          </p>
+          <Notice notice={notice} />
+          <ErrorAlert error={error} />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void run(() => startSession(session.family.name));
+              }}
+            >
+              Start another session
+            </Button>
+            <Button variant="outline" className="text-foreground" asChild>
+              <a href={window.location.pathname}>Choose another family</a>
+            </Button>
+            <Button variant="outline" onClick={undo} disabled={session.votes === 0 || busy}>
+              Undo last vote
+            </Button>
+          </div>
+        </Screen>
+      </div>
     );
   }
 

@@ -245,19 +245,122 @@ describe('VoteApp', () => {
     expect(api.casts.map((cast) => cast.choice)).toEqual(['b']);
   });
 
-  test('submits on Enter pressed inside an open Issues popover', async () => {
+  test('leaves Enter and Space on an issue checkbox to the checkbox', async () => {
     const api = stubApi();
     const user = await startSession();
     await user.keyboard('a');
     const outputA = screen.getByRole('region', { name: 'Output A' });
     await user.click(within(outputA).getByRole('button', { name: 'Issues' }));
-    await user.click(await screen.findByRole('checkbox', { name: 'Too long' }));
+    const checkbox = await screen.findByRole('checkbox', { name: 'Too long' });
+    await user.click(checkbox);
 
     await user.keyboard('{Enter}');
+
+    expect(api.casts).toEqual([]);
+    expect(screen.getByRole('dialog', { name: 'Issues in output A' })).toBeDefined();
+    expect(checkbox).toHaveProperty('ariaChecked', 'true');
+
+    await user.keyboard(' ');
+
+    expect(checkbox).toHaveProperty('ariaChecked', 'false');
+    expect(api.casts).toEqual([]);
+  });
+
+  test.each(['Issues', 'Prompt', 'Markdown'])(
+    'activates the focused %s control on Enter without casting the selected verdict',
+    async (name) => {
+      const api = stubApi();
+      const user = await startSession();
+      await user.keyboard('a');
+      const control =
+        name === 'Issues'
+          ? within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
+              name,
+            })
+          : screen.getByRole('button', { name });
+      control.focus();
+
+      await user.keyboard('{Enter}');
+
+      expect(api.casts).toEqual([]);
+      expect(screen.getByRole('group', { name: 'Pair 1' })).toBeDefined();
+      if (name === 'Issues') {
+        expect(screen.getByRole('dialog', { name: 'Issues in output A' })).toBeDefined();
+      } else if (name === 'Prompt') {
+        expect(control).toHaveProperty('ariaExpanded', 'false');
+      } else {
+        expect(control).toHaveProperty('ariaPressed', 'true');
+      }
+    },
+  );
+
+  test.each<[string, KeyboardEventInit]>([
+    ['repeated', { repeat: true }],
+    ['composing', { isComposing: true }],
+    ['handled', {}],
+    ['modified', { ctrlKey: true }],
+  ])('ignores %s shortcut events in the comparison', async (scenario, options) => {
+    const api = stubApi({ prior: 1 });
+    await startSession();
+    const pair = screen.getByRole('group', { name: /^Pair / });
+
+    for (const key of ['a', '1', 'n', 'u']) {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        bubbles: true,
+        cancelable: true,
+        ...options,
+      });
+      if (scenario === 'handled') {
+        event.preventDefault();
+      }
+      fireEvent(pair, event);
+    }
+
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'false',
+    );
+    expect(
+      within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
+        name: 'Issues',
+      }),
+    ).toBeDefined();
+    expect(document.activeElement).toBe(pair);
+    expect(api.undos()).toBe(0);
+    expect(api.casts).toEqual([]);
+  });
+
+  test('keeps the submitted ballot unchanged while its request is pending', async () => {
+    const api = stubApi({ prior: 1 });
+    const user = await startSession();
+    const fetch = globalThis.fetch;
+    const pending = Promise.withResolvers<undefined>();
+    vi.stubGlobal('fetch', async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/vote')) {
+        await pending.promise;
+      }
+      return fetch(path, init);
+    });
+    await user.keyboard('a');
+
+    await user.click(screen.getByRole('button', { name: /Submit vote/ }));
+    const pair = screen.getByRole('group', { name: /^Pair / });
+    pair.focus();
+    await user.keyboard('b1nu{Enter}');
+
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(document.activeElement).toBe(pair);
+    expect(api.undos()).toBe(0);
+
+    pending.resolve(undefined);
     await screen.findByText('Output A2');
 
     expect(api.casts).toEqual([
-      { token: 't1', choice: 'a', defects: { a: ['length'], b: [] }, note: null },
+      { token: 't1', choice: 'a', defects: { a: [], b: [] }, note: null },
     ]);
   });
 
@@ -405,6 +508,7 @@ describe('VoteApp', () => {
 
     await user.click(screen.getByRole('button', { name: 'Prompt' }));
     expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'false');
+    screen.getByRole('group', { name: 'Pair 1' }).focus();
 
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
@@ -490,6 +594,7 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Too long' }));
     expect(within(outputA).getByRole('button', { name: 'Issues 2' })).toBeDefined();
     await user.keyboard('{Escape}');
+    screen.getByRole('group', { name: 'Pair 1' }).focus();
 
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
@@ -524,6 +629,7 @@ describe('VoteApp', () => {
       ['Weak tests', '7', 'false'],
     ]);
     await user.keyboard('{Escape}');
+    screen.getByRole('group', { name: 'Pair 1' }).focus();
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
 
@@ -563,8 +669,8 @@ describe('VoteApp', () => {
     expect(api.casts).toEqual([{ token: 't1', choice: 'b', defects: { a: [], b: [] }, note: 'x' }]);
   });
 
-  test('leaves Enter on a focused link or button outside the pair to that control', async () => {
-    const api = stubApi();
+  test('leaves keys on focused header controls to those controls', async () => {
+    const api = stubApi({ prior: 1 });
     const user = await startSession(
       <>
         <a href="#methodology">Methodology</a>
@@ -575,12 +681,23 @@ describe('VoteApp', () => {
 
     await user.keyboard('a');
     screen.getByRole('link', { name: 'Methodology' }).focus();
-    await user.keyboard('{Enter}');
+    await user.keyboard('b1nu{Enter}');
     screen.getByRole('button', { name: 'Theme' }).focus();
-    await user.keyboard('{Enter}');
+    await user.keyboard('b1nu{Enter}');
 
     expect(api.casts).toEqual([]);
+    expect(api.undos()).toBe(0);
     expect(screen.getByText('Output A1')).toBeDefined();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(
+      within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
+        name: 'Issues',
+      }),
+    ).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Theme' }));
   });
 
   test('groups the families by aspect, with those without one last', async () => {
