@@ -106,6 +106,35 @@ class TestReadResults:
             probe_contract.read_results(json.dumps(payload))
 
 
+class TestProbe:
+    def test_reloads_the_public_parser_for_each_input(self, tmp_path: Path) -> None:
+        package = tmp_path / 'records'
+        package.mkdir()
+        (package / '__init__.py').write_text('')
+        shutil.copyfile(PROBE.parent / 'replacing_parsers.py', package / 'parsers.py')
+        script = CODING / 'tasks' / 'refactor-parsers' / 'tests' / 'probe.py'
+
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            check=True,
+            env={
+                'PATH': os.environ['PATH'],
+                'PYTHONPATH': str(tmp_path),
+                'PYTHONDONTWRITEBYTECODE': '1',
+            },
+            text=True,
+            timeout=15,
+        )
+        actual: object = json.loads(result.stdout)
+
+        assert actual == {
+            'parse_user': [{'ok': "'original'"}] + [{'ok': "'changed'"}] * 22,
+            'parse_order': [{'ok': "'order'"}] * 19,
+            'parse_product': [{'ok': "'product'"}] * 16,
+        }
+
+
 class TestIgnoreOption:
     @pytest.mark.parametrize('target', ['--top', '--stopwords'])
     @pytest.mark.parametrize(
