@@ -125,6 +125,7 @@ include = ["src", "tests", "arena/src", "typings"]
 extraPaths = ["src", "tests", "arena/src"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
+reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
 
