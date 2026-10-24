@@ -216,10 +216,12 @@ class Arena:
         if family not in self._families:
             raise UnknownItem(family)
         self._boards[family].reset()
-        return self._view(self._store.start_session(family, self._clock()))
+        session = self._store.start_session(family, self._clock())
+        return self._view(session, tuple(self._store.votes(family)))
 
     def resume(self, session_id: str) -> SessionView:
-        return self._view(self._session(session_id))
+        session = self._session(session_id)
+        return self._view(session, tuple(self._store.votes(session.family)))
 
     def vote(
         self, token: str, choice: Choice, defects: Defects, note: str | None
@@ -236,14 +238,14 @@ class Arena:
         """
         if token not in self._pairs:
             raise UnknownItem(token)
-        session = self._session(self._pairs[token].session)
+        issued = self._pairs[token]
+        session = self._session(issued.session)
         listed = self._families[session.family].defects
         unlisted = sorted((defects.a | defects.b) - set(listed))
         if unlisted:
             raise UnlistedDefects(
                 f'issues the family does not list: {", ".join(unlisted)}'
             )
-        issued = self._retire(token)
         self._store.record(
             Ballot(
                 session=issued.session,
@@ -258,7 +260,8 @@ class Arena:
             ),
             self._clock(),
         )
-        return self._view(session)
+        self._retire(token)
+        return self._view(session, tuple(self._store.votes(session.family)))
 
     def undo(self, session_id: str) -> SessionView:
         """Withdraw the session's latest vote and show its pair again.
@@ -267,17 +270,18 @@ class Arena:
         cannot return, so the session draws a fresh one.
         """
         session = self._session(session_id)
-        votes = self._votes(session)
-        if not votes:
+        votes = tuple(self._store.votes(session.family))
+        session_votes = [vote for vote in votes if vote.session == session.id]
+        if not session_votes:
             raise NothingToUndo(session_id)
-        last = votes[-1]
+        last = session_votes[-1]
         matched = reconcile([last], self._families[session.family].pool.outputs)
         self._store.undo(last.id, self._clock())
         if session.id in self._current:
             self._retire(self._current[session.id])
         for vote, a, b in matched:
             self._serve(session, Draw(vote.case, a, b, repeat_of=vote.repeat_of))
-        return self._view(session)
+        return self._view(session, tuple(vote for vote in votes if vote.id != last.id))
 
     def document(self, token: str) -> str:
         """Return the HTML output behind a pane's URL."""
@@ -291,24 +295,18 @@ class Arena:
             raise UnknownItem(session_id)
         return session
 
-    def _votes(self, session: Session) -> list[Vote]:
-        return [
-            vote
-            for vote in self._store.votes(session.family)
-            if vote.session == session.id
-        ]
-
-    def _view(self, session: Session) -> SessionView:
+    def _view(self, session: Session, votes: tuple[Vote, ...]) -> SessionView:
+        session_votes = [vote for vote in votes if vote.session == session.id]
+        used = {vote.case for vote in session_votes}
         if session.id not in self._current:
-            self._next(session)
-        votes = self._votes(session)
-        used = {vote.case for vote in votes}
+            self._next(session, votes, used)
+
         open_cases = self._families[session.family].pool.votable_cases() - used
         token = self._current.get(session.id)
         return SessionView(
             id=session.id,
             family=self._family_view(session.family),
-            votes=len(votes),
+            votes=len(session_votes),
             remaining=len(open_cases),
             pair=None if token is None else self._pairs[token].view,
         )
@@ -322,9 +320,7 @@ class Arena:
             defects=family.defects,
         )
 
-    def _next(self, session: Session) -> None:
-        votes = self._store.votes(session.family)
-        used = {vote.case for vote in votes if vote.session == session.id}
+    def _next(self, session: Session, votes: tuple[Vote, ...], used: set[str]) -> None:
         pool = self._families[session.family].pool
         matched = reconcile(votes, pool.outputs)
         board = self._boards[session.family]
@@ -371,9 +367,8 @@ class Arena:
             case _:
                 assert_never(family.render)
 
-    def _retire(self, token: str) -> _Issued:
+    def _retire(self, token: str) -> None:
         issued = self._pairs.pop(token)
         del self._current[issued.session]
         for document in issued.documents:
             del self._documents[document]
-        return issued
