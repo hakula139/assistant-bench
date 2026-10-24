@@ -90,9 +90,9 @@ def describe(fn: Callable[[str], object], line: str) -> Outcome:
 
 
 PARSERS: dict[str, Callable[[str], object]] = {
-    'parse_user': parsers.parse_user,
-    'parse_order': parsers.parse_order,
-    'parse_product': parsers.parse_product,
+    'parse_user': lambda line: parsers.parse_user(line),
+    'parse_order': lambda line: parsers.parse_order(line),
+    'parse_product': lambda line: parsers.parse_product(line),
 }
 
 json.dump(
