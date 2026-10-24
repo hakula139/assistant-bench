@@ -481,6 +481,73 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+        @pytest.mark.parametrize('scope', ['actor', 'exact', 'prefix', 'deployment'])
+        def test_expired_lease_keeps_every_issuance_budget_spent(
+            self, d1_runtime: D1Runtime, scope: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(
+                        ledger,
+                        transport,
+                        mode='public',
+                        quotas=tuple(
+                            Quota(
+                                operation='issue',
+                                scope=kind,
+                                window_ms=1_000,
+                                limit=1 if kind == scope else 100,
+                            )
+                            for kind in ('actor', 'exact', 'prefix', 'deployment')
+                        ),
+                    )
+                    network = Network(
+                        tags=(
+                            NetworkTag(scope='exact', window_ms=1_000, tag='exact-tag'),
+                            NetworkTag(
+                                scope='prefix', window_ms=1_000, tag='prefix-tag'
+                            ),
+                        )
+                    )
+                    request = issue().model_copy(
+                        update={'expires_at': 20, 'network': network}
+                    )
+                    first = await ledger.issue(
+                        Context(command_id='draw', principal='actor', now=10), request
+                    )
+
+                    with pytest.raises(CommandRejected, match='^quota_exhausted$'):
+                        await ledger.issue(
+                            Context(command_id='next', principal='actor', now=30),
+                            issue(lease='next', case=1).model_copy(
+                                update={'session_version': 1, 'network': network}
+                            ),
+                        )
+
+                    assert (
+                        await ledger.issue(
+                            Context(command_id='draw', principal='actor', now=31),
+                            request,
+                        )
+                        == first
+                    )
+                    assert await ledger.resume('actor', 'session', 31) is None
+                    assert await transport.rows('SELECT id FROM pair_leases') == [
+                        {'id': first.id}
+                    ]
+                    assert await transport.rows('SELECT id FROM claims') == [
+                        {'id': first.claim_id}
+                    ]
+                    assert {
+                        row['scope']: row['consumed']
+                        for row in await transport.rows(
+                            'SELECT scope, consumed FROM quota_windows '
+                            "WHERE operation = 'issue'"
+                        )
+                    } == dict.fromkeys(('actor', 'exact', 'prefix', 'deployment'), 1)
+
+            asyncio.run(scenario())
+
     class TestAccept:
         def test_conflicting_concurrent_meanings_keep_the_winning_receipt(
             self, d1_runtime: D1Runtime
