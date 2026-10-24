@@ -453,6 +453,163 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestSeal:
+        @pytest.mark.parametrize(
+            ('kind', 'table'),
+            [
+                ('evaluation', 'evaluations'),
+                ('publication', 'publications'),
+                ('moderation', 'moderation_batches'),
+                ('attribution', 'attribution_plans'),
+                ('import', 'import_plans'),
+            ],
+        )
+        def test_applied_fact_seals_replay_without_replacing_the_first_timestamp(
+            self, d1_runtime: D1Runtime, kind: str, table: str
+        ) -> None:
+            async def scenario() -> None:
+                async with (
+                    d1_runtime.client() as (ledger, transport),
+                    d1_runtime.client() as (other, _),
+                ):
+                    release = await prepare(ledger, transport)
+                    fact_id = 'fact'
+                    now = 20
+
+                    if kind in ('evaluation', 'publication'):
+                        release = await publish(ledger, suffix='2', seal=False)
+                        fact_id = release.evaluation.id
+
+                        if kind == 'publication':
+                            await ledger.seal_evaluation(release.evaluation.id, 10)
+                            await ledger.stage_publication(release.publication)
+
+                            for rendered in release.rendered:
+                                await ledger.stage_rendered(
+                                    release.publication.id, rendered
+                                )
+
+                            fact_id = release.publication.id
+                    elif kind == 'moderation':
+                        lease = await ledger.issue(
+                            Context(command_id='draw', principal='actor', now=5),
+                            issue(),
+                        )
+                        receipt = await ledger.accept(
+                            Context(command_id='vote', principal='actor', now=6),
+                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                        )
+                        await ledger.stage_moderation(
+                            Moderation(
+                                id=fact_id,
+                                family='writing',
+                                principal='admin',
+                                action='exclude',
+                                reason='Reviewed synthetic exclusion.',
+                                created_at=10,
+                                targets=(
+                                    Target(receipt_seq=receipt.seq, claim_version=2),
+                                ),
+                            )
+                        )
+                    elif kind == 'attribution':
+                        await ledger.register_actor(
+                            Actor(id='owner', owner_namespace='owner', created_at=2)
+                        )
+                        plan = await ledger.prepare_attribution(
+                            fact_id, 'writing', 'actor', 'owner'
+                        )
+                        await ledger.stage_attribution(plan)
+                    else:
+                        imported = await legacy_plan(ledger, transport, receipts=1)
+                        await ledger.stage_import(imported)
+                        fact_id = imported.id
+                        now = IMPORT_MS
+
+                    seals = {
+                        'evaluation': ledger.seal_evaluation,
+                        'publication': ledger.seal_publication,
+                        'moderation': ledger.seal_moderation,
+                        'attribution': ledger.seal_attribution,
+                        'import': ledger.seal_import,
+                    }
+                    other_seals = {
+                        'evaluation': other.seal_evaluation,
+                        'publication': other.seal_publication,
+                        'moderation': other.seal_moderation,
+                        'attribution': other.seal_attribution,
+                        'import': other.seal_import,
+                    }
+
+                    await seals[kind](fact_id, now)
+
+                    assert await transport.rows(
+                        f'SELECT sealed_at FROM {table} WHERE id = ?', fact_id
+                    ) == [{'sealed_at': now}]
+                    context = Context(command_id='apply', principal='admin', now=now)
+
+                    if kind in ('evaluation', 'publication'):
+                        if kind == 'evaluation':
+                            await publish_presentation(ledger, release)
+                        else:
+                            await ledger.stage_points(release.points, now)
+
+                        await ledger.activate(
+                            context,
+                            'writing',
+                            1,
+                            release.evaluation.id,
+                            release.publication.id,
+                            release.points.id,
+                        )
+                        state = await ledger.read.family('writing')
+                        assert state is not None
+                        assert state.evaluation_id == release.evaluation.id
+                    elif kind == 'moderation':
+                        await ledger.moderate(context, fact_id, 0)
+                        assert (
+                            await transport.rows('SELECT * FROM eligible_claims') == []
+                        )
+                    elif kind == 'attribution':
+                        await ledger.attribute(context, fact_id)
+                        assert await transport.rows(
+                            'SELECT canonical_actor FROM actor_resolution '
+                            "WHERE family = 'writing' AND actor_id = 'actor'"
+                        ) == [{'canonical_actor': 'owner'}]
+                    else:
+                        await ledger.apply_import(context, fact_id)
+                        assert await transport.rows(
+                            'SELECT origin FROM vote_receipts'
+                        ) == [{'origin': 'legacy'}]
+
+                    facts = await transport.rows(f'SELECT * FROM {table} ORDER BY id')
+                    events = await transport.rows('SELECT * FROM evidence_events')
+
+                    await seals[kind](fact_id, now + 1)
+                    results = await asyncio.gather(
+                        seals[kind](fact_id, now + 2),
+                        other_seals[kind](fact_id, now + 3),
+                    )
+
+                    assert results == (None, None)
+                    assert (
+                        await transport.rows(f'SELECT * FROM {table} ORDER BY id')
+                        == facts
+                    )
+                    assert (
+                        await transport.rows('SELECT * FROM evidence_events') == events
+                    )
+
+                    with pytest.raises((CommandRejected, ValueError)):
+                        await seals[kind]('missing-fact', now + 4)
+
+                    assert (
+                        await transport.rows(f'SELECT * FROM {table} ORDER BY id')
+                        == facts
+                    )
+
+            asyncio.run(scenario())
+
     class TestSealEvaluation:
         @pytest.mark.parametrize('failure', ['absent', 'errored'])
         def test_authoritative_seal_rejects_a_passing_unusable_output(
