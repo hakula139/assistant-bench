@@ -22,6 +22,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import Row, SqlValue, Statement
+from assistant_bench_arena.releases import Release
 from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
@@ -62,6 +63,40 @@ _OWNER = """
 
             return json.dumps({'result': result})
 """
+
+
+async def publish_release(
+    ledger: Ledger, release: Release, *, seal: bool = True
+) -> None:
+    evaluation = release.evaluation
+    await ledger.stage_policy(evaluation.policy_id, release.policy)
+    await ledger.stage_evaluation(evaluation)
+
+    for system in release.systems:
+        await ledger.stage_system(evaluation.id, system)
+
+    for case in release.cases:
+        await ledger.stage_case(evaluation.id, case)
+
+    for output in release.outputs:
+        await ledger.stage_output(evaluation.id, output)
+
+    for numeric in release.numerics:
+        await ledger.stage_numerical(evaluation.id, numeric)
+
+    if seal:
+        await ledger.seal_evaluation(evaluation.id, 0)
+        await publish_presentation(ledger, release)
+
+
+async def publish_presentation(ledger: Ledger, release: Release) -> None:
+    await ledger.stage_publication(release.publication)
+
+    for rendered in release.rendered:
+        await ledger.stage_rendered(release.publication.id, rendered)
+
+    await ledger.seal_publication(release.publication.id, 0)
+    await ledger.stage_points(release.points, 0)
 
 
 class Reply(BaseModel):
