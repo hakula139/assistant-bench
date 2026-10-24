@@ -38,4 +38,6 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 ## Coverage
 
-`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. CI uploads both to Codecov under the `python` and `web` flags. The coverage bar is Codecov's `codecov/patch` check, a required check that fails when tests cover less than 80% of a PR's changed Python lines, as `codecov.yml` sets, and `codecov/patch/web` reports the same bar for the site without being required.
+`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable.
+
+CI uploads both to Codecov under the `python` and `web` flags. Codecov's required `codecov/patch` and `codecov/patch/web` checks each fail when tests cover less than 80% of a PR's changed lines in their respective runtime, as `codecov.yml` sets.
