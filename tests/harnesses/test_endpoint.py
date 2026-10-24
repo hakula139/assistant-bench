@@ -68,7 +68,7 @@ class TestModelRequests:
 class TestEndpoint:
     class TestHttpClient:
         def test_authenticates_the_configured_origin_with_its_private_headers(
-            self, endpoint: StubEndpoint
+            self, endpoint: StubEndpoint, model_requests: list[httpx.Request]
         ) -> None:
             configured = Endpoint.read(endpoint.env.get)
 
@@ -82,6 +82,13 @@ class TestEndpoint:
             (sent,) = endpoint.requests
             assert sent.headers['authorization'] == 'Bearer test-key'
             assert sent.headers['x-trace'] == 'bench'
+            (outgoing,) = model_requests
+            assert outgoing.extensions['timeout'] == {
+                'connect': 5.0,
+                'read': None,
+                'write': 600.0,
+                'pool': 600.0,
+            }
 
         @pytest.mark.parametrize('origin_part', ['scheme', 'host', 'port'])
         def test_rejects_another_origin_before_reading_the_key_or_sending(

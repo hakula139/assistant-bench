@@ -171,7 +171,8 @@ class TestRenderTaskConfig:
     def test_pins_the_version_of_a_known_task(self) -> None:
         config = jobs.render_task_config('smoke-text/en-greeting', 'Hi.')
 
-        assert version(config) == '1.0.0+79766602577d'
+        assert config.agent.timeout_sec == 3600.0
+        assert version(config) == '1.0.0+8e49aab92cda'
 
     def test_changes_the_version_with_the_agent_timeout(
         self, monkeypatch: pytest.MonkeyPatch
@@ -216,6 +217,61 @@ class TestRenderTasks:
             'smoke-text/en-greeting': DiffAction.RERUN,
             'smoke-text/zh-greeting': DiffAction.REUSE,
         }
+
+    def test_reruns_a_successful_case_at_the_new_deadline_then_reuses_its_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = make_system()
+        family = with_settings(
+            load_family('smoke-text'), systems=[system.name], reference=system.name
+        )
+        cases = load_cases(family)[:1]
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 900.0)
+        old = jobs.job(family, [system], jobs.render_tasks(family, cases)).model_copy(
+            update={'job_name': 'old-deadline'}
+        )
+        finish_generation(old, 'Earlier success.')
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 3600.0)
+
+        new = jobs.job(family, [system], jobs.render_tasks(family, cases)).model_copy(
+            update={'job_name': 'new-deadline'}
+        )
+        plan = asyncio.run(JobPlan.from_config(new))
+        diff = compare_job_trials(
+            plan,
+            load_source_trials(
+                [
+                    (source, source.path)
+                    for source in new.source_jobs
+                    if source.path is not None
+                ]
+            ),
+        )
+
+        assert [(trial.task_name, trial.action) for trial in diff.trials] == [
+            ('smoke-text/en-greeting', DiffAction.RERUN)
+        ]
+        finish_generation(new, 'Success at the current deadline.')
+
+        rerun = jobs.job(family, [system], jobs.render_tasks(family, cases))
+        plan = asyncio.run(JobPlan.from_config(rerun))
+        diff = compare_job_trials(
+            plan,
+            load_source_trials(
+                [
+                    (source, source.path)
+                    for source in rerun.source_jobs
+                    if source.path is not None
+                ]
+            ),
+        )
+
+        assert [(trial.task_name, trial.action) for trial in diff.trials] == [
+            ('smoke-text/en-greeting', DiffAction.REUSE)
+        ]
+        (output,) = jobs.collect(family, {system.name: system})
+        assert output.text == 'Success at the current deadline.'
+        assert output.job == 'new-deadline'
 
     def test_prunes_tasks_for_cases_the_family_no_longer_has(
         self, data_dir: Path
@@ -492,6 +548,30 @@ class TestJob:
         )
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
+
+    def test_keeps_a_successful_authored_task_reusable_at_its_declared_deadline(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        systems = jobs.family_systems(family, [make_system()])
+        task = case_task(family, 'echo')
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 900.0)
+        old = jobs.job(family, systems, [task]).model_copy(
+            update={'job_name': 'old-deadline'}
+        )
+        first = finish_job(old)
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 3600.0)
+
+        current = jobs.job(family, systems, [task])
+        plan = asyncio.run(JobPlan.from_config(current))
+        (source,) = current.source_jobs
+        diff = compare_job_trials(plan, load_source_trials([(source, first)]))
+
+        assert Task(task).config.agent.timeout_sec == 120.0
+        assert current.agents == old.agents
+        assert [(trial.task_name, trial.action) for trial in diff.trials] == [
+            ('f/echo', DiffAction.REUSE)
+        ]
 
     def test_diffs_against_the_earlier_jobs_of_the_family(self, data_dir: Path) -> None:
         jobs_dir = data_dir / 'jobs' / 'f'
