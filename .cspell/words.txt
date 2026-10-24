@@ -68,6 +68,7 @@ pydantic
 pydocstyle
 pypi
 pyproject
+pyrightconfig
 pytest
 PYTHONDONTWRITEBYTECODE
 redoc

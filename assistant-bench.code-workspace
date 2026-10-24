@@ -1,0 +1,15 @@
+{
+  "folders": [
+    {
+      "name": "assistant-bench",
+      "path": ".",
+    },
+    {
+      "name": "coding-verifiers",
+      "path": "families/coding-repo",
+    },
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder:assistant-bench}/.venv/bin/python",
+  },
+}
