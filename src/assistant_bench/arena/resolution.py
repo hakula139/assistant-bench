@@ -23,13 +23,11 @@ def settled_score(a: Output, b: Output) -> float | None:
     An output that fails its gates loses, both failing count as both bad, and
     identical outputs tie.
     """
-    match bool(a.gate_failures), bool(b.gate_failures):
-        case True, True:
-            return 0.5
-        case True, False:
-            return 0.0
-        case False, True:
-            return 1.0
+    if a.gate_failures:
+        return 0.5 if b.gate_failures else 0.0
+    if b.gate_failures:
+        return 1.0
+
     return 0.5 if a.text == b.text else None
 
 
@@ -47,7 +45,7 @@ def settled(outputs: Iterable[Output]) -> list[Comparison]:
             by_system = by_case.setdefault(output.case, {})
             by_system.setdefault(output.system, []).append(output)
 
-    comparisons = []
+    comparisons: list[Comparison] = []
     for case, by_system in sorted(by_case.items()):
         for x, y in combinations(sorted(by_system), 2):
             share = 1 / (len(by_system[x]) * len(by_system[y]))
@@ -73,7 +71,7 @@ def reconcile(votes: Iterable[Vote], outputs: Iterable[Output]) -> list[MatchedV
         Side.of(output): output for output in outputs if output.gate_failures == []
     }
 
-    matched = []
+    matched: list[MatchedVote] = []
     for vote in votes:
         a, b = current.get(vote.a), current.get(vote.b)
         if a is not None and b is not None and settled_score(a, b) is None:

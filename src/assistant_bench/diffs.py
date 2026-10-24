@@ -49,7 +49,7 @@ def _entries(root: Path) -> dict[str, Entry]:
     if not root.is_dir():
         return {}
 
-    entries = {}
+    entries: dict[str, Entry] = {}
     for path in root.rglob('*'):
         relative = path.relative_to(root)
         if LEFT_OUT.intersection(relative.parts):

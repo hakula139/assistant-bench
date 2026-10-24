@@ -26,7 +26,9 @@ URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
 
 
 def hosts(path: Path) -> set[str | None]:
-    return {urlsplit(url).hostname for url in URL.findall(path.read_text())}
+    return {
+        urlsplit(match.group()).hostname for match in URL.finditer(path.read_text())
+    }
 
 
 @pytest.mark.parametrize(
@@ -175,7 +177,11 @@ def test_committed_families_name_only_tabled_systems() -> None:
 @pytest.mark.parametrize(
     ('family', 'report', 'expected'),
     [
-        ({'systems': ['tabled']}, {'results': {'reference': 'retired'}}, set()),
+        (
+            {'systems': ['tabled']},
+            {'results': {'reference': 'retired'}},
+            set[tuple[str, str]](),
+        ),
         ({'systems': ['untabled']}, {}, {('f', 'untabled')}),
         ({'reference': 'untabled'}, {}, {('f', 'untabled')}),
     ],
@@ -313,7 +319,7 @@ def test_tests_never_see_a_dotenv_above_litellm(tmp_path: Path) -> None:
         """\
         import os
 
-        import litellm  # noqa: F401
+        import litellm
         import pytest
 
         AT_IMPORT = os.environ.get('BENCH_TEST_SECRET')

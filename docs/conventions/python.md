@@ -22,5 +22,8 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Dependencies
 
+- `uv run basedpyright` and the editor use the strict policy in `pyproject.toml`. The recommended VS Code extensions use the checker installed in the selected `.venv`, so `uv sync` supplies the same version as CI. Keep first-party source and tests in that policy, and fix the contract behind a diagnostic without suppressing it.
 - Pin Harbor to an exact release, since it ships daily dev builds. Give every other dependency a lower bound at the version first locked, and let `uv.lock` pin the rest.
 - Prefer packages already in Harbor's tree, such as pydantic, httpx, Typer, and the `openai` SDK.
+
+The development-only package under `typings/` supplies missing dependency contracts. Its Zhon and threadpoolctl stubs cover their public exports, while its native partial statsmodels stubs describe the NumPy `Logit` interface the ranking uses. CI runs `mypy.stubtest` against the installed versions. The statsmodels check permits missing declarations outside that partial scope and checks every declared signature. Extend the contracts and their runtime checks together when consuming another interface.

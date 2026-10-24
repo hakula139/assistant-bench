@@ -1,6 +1,7 @@
 acompletion
 asciinema
 Atoi
+basedpyright
 BFGS
 blas
 Cachix
@@ -17,6 +18,8 @@ delenv
 direnv
 dists
 dotenv
+dynlib
+endog
 envrc
 esbenp
 esbuild
@@ -107,4 +110,5 @@ workerd
 writingf
 writingzh
 zhon
+zhuyin
 zstd

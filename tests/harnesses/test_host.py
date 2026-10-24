@@ -18,6 +18,17 @@ from support import StubEndpoint, make_system
 pytestmark = pytest.mark.usefixtures('export')
 
 
+OPERATIONS: dict[
+    str, Callable[[HostEnvironment, Path], Coroutine[Any, Any, object]]
+] = {
+    'exec': lambda env, path: env.exec('true'),
+    'upload-file': lambda env, path: env.upload_file(path, '/a'),
+    'upload-dir': lambda env, path: env.upload_dir(path, '/a'),
+    'download-file': lambda env, path: env.download_file('/a', path),
+    'download-dir': lambda env, path: env.download_dir('/a', path),
+}
+
+
 async def run_in_process(config: JobConfig) -> None:
     await (await Job.create(config)).run()
 
@@ -60,25 +71,13 @@ class TestHostEnvironment:
         assert sorted(prompts) == sorted(case.instruction for case in cases)
 
     @pytest.mark.parametrize(
-        'call',
-        [
-            pytest.param(lambda env, path: env.exec('true'), id='exec'),
-            pytest.param(
-                lambda env, path: env.upload_file(path, '/a'), id='upload-file'
-            ),
-            pytest.param(lambda env, path: env.upload_dir(path, '/a'), id='upload-dir'),
-            pytest.param(
-                lambda env, path: env.download_file('/a', path), id='download-file'
-            ),
-            pytest.param(
-                lambda env, path: env.download_dir('/a', path), id='download-dir'
-            ),
-        ],
+        'operation',
+        OPERATIONS,
     )
     def test_refuses_to_run_a_command_or_move_a_file(
         self,
         tmp_path: Path,
-        call: Callable[[HostEnvironment, Path], Coroutine[Any, Any, object]],
+        operation: str,
     ) -> None:
         environment = HostEnvironment(
             environment_dir=tmp_path / 'environment',
@@ -89,4 +88,4 @@ class TestHostEnvironment:
         )
 
         with pytest.raises(RuntimeError, match='starts no container'):
-            asyncio.run(call(environment, tmp_path / 'file'))
+            asyncio.run(OPERATIONS[operation](environment, tmp_path / 'file'))

@@ -91,7 +91,7 @@ class _Issued:
 
 def load_families() -> dict[str, ArenaFamily]:
     """Return every family scored by votes that has outputs."""
-    families = {}
+    families: dict[str, ArenaFamily] = {}
     for name in family_names():
         family = load_family(name)
         match family.settings:

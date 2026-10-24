@@ -1,7 +1,7 @@
 import json
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import pytest
 import tomli_w
@@ -16,6 +16,22 @@ from assistant_bench.families import (
 )
 from assistant_bench.paths import FAMILIES_DIR
 from support import CODE_DEFECTS, write_case_family, write_task_family
+
+
+class TaskFields(TypedDict, total=False):
+    category: str | None
+    source: str | None
+    instruction: str | None
+    task_name: bool
+    task_toml: bool
+
+
+class TaskOptions(TaskFields, total=False):
+    name: str
+
+
+class TaskArguments(TaskFields):
+    name: str
 
 
 def write_family(
@@ -728,13 +744,14 @@ class TestLoadCases:
         self,
         families_dir: Path,
         directory: str,
-        options: dict[str, Any],
+        options: TaskOptions,
         message: str,
     ) -> None:
         write_task_family(families_dir)
+        arguments: TaskArguments = {'name': f'f/{directory}', **options}
         write_task(
             families_dir / 'f' / 'tasks' / directory,
-            **({'name': f'f/{directory}'} | options),
+            **arguments,
         )
 
         with pytest.raises(ValueError) as error:

@@ -59,7 +59,7 @@ Job configs are generated per run and never committed. Harbor copies each one in
 - The flake pins the stable Nixpkgs channel for Node.js and the hooks, and takes uv from Nixpkgs master to meet the Python Worker tooling's minimum version. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
 - On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](ci.md#checks) fails such a PR when the bump changes a system's fingerprint.
-- `uv.lock` pins Harbor, Ruff, mypy, and pytest, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
+- `uv.lock` pins the Python dependencies, including Ruff, mypy and basedpyright, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 
 ## The nixos-config Input
 

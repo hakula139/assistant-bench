@@ -20,13 +20,15 @@ def error_lines(error: ValidationError, prefix: str, *, skip: int = 0) -> str:
     `skip` drops that many leading parts of each error's path, such as the tag
     of a tagged union.
     """
-    lines = []
+    lines: list[str] = []
     for detail in error.errors():
-        message = (
-            str(detail['ctx']['error'])
-            if detail['type'] == 'value_error'
-            else detail['msg']
-        )
+        if detail['type'] == 'value_error':
+            context = detail.get('ctx')
+            assert context is not None
+            message = str(context['error'])
+        else:
+            message = detail['msg']
+
         path = '.'.join(str(part) for part in detail['loc'][skip:])
         line = f'{prefix}: `{path}`: {message}' if path else f'{prefix}: {message}'
         lines.append(sentence(line))

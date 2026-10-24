@@ -138,6 +138,17 @@ jobs:
       - name: Type check
         run: uv run mypy
 
+      - name: Check editor types
+        run: uv run basedpyright
+
+      - name: Check dependency type contracts
+        run: |
+          uv run python -m mypy.stubtest --mypy-config-file pyproject.toml \
+            zhon zhon.hanzi zhon.pinyin zhon.zhuyin zhon.cedict \
+            zhon.cedict.all zhon.cedict.simplified zhon.cedict.traditional threadpoolctl
+          uv run python -m mypy.stubtest --mypy-config-file pyproject.toml \
+            --ignore-missing-stub statsmodels.discrete.discrete_model
+
       - name: Test
         run: uv run pytest
 

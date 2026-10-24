@@ -2,12 +2,12 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jsonschema
 import numpy as np
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from assistant_bench import report
 from assistant_bench.arena.service import Arena, load_families
@@ -42,7 +42,7 @@ from support import (
 )
 
 
-def approx(value: Any) -> Any:
+def approx(value: JsonValue) -> object:
     """Compare floats in a JSON document within a relative 1e-6."""
     if isinstance(value, float):
         return pytest.approx(value, rel=1e-6, abs=1e-9)
@@ -228,7 +228,12 @@ class TestReport:
     @pytest.mark.parametrize(
         'change', ['missing', 'extra', 'blank-label', 'duplicate-label', 'extra-field']
     )
-    def test_requires_exact_public_identity_metadata(self, change: str) -> None:
+    def test_requires_exact_public_identity_metadata(
+        self,
+        change: Literal[
+            'missing', 'extra', 'blank-label', 'duplicate-label', 'extra-field'
+        ],
+    ) -> None:
         payload = json.loads(REPORT_FIXTURE.read_text())
         systems = payload['systems']
         first, second, *_ = systems
@@ -674,7 +679,8 @@ class TestClose:
 
         after = close_round(family, store, AT).results
 
-        assert before.scorer == after.scorer == 'votes'
+        assert before.scorer == 'votes'
+        assert after.scorer == 'votes'
         small_before, small_after = (
             next(s for s in results.standings if s.system == 'small')
             for results in (before, after)
@@ -691,7 +697,7 @@ class TestClose:
         [
             pytest.param({'b'}, False, 'a', id='one-passes'),
             pytest.param({'a', 'b'}, False, None, id='both-fail'),
-            pytest.param(set(), True, None, id='identical-passing-outputs'),
+            pytest.param(set[str](), True, None, id='identical-passing-outputs'),
         ],
     )
     @pytest.mark.parametrize('historical', [False, True], ids=['fresh', 'regraded'])
@@ -814,7 +820,7 @@ class TestClose:
         )
 
         view = restarted.start('f')
-        shown = []
+        shown: list[str] = []
         while view.pair is not None:
             shown.append(view.pair.instruction)
             view = restarted.vote(view.pair.token, 'a', Defects(), None)

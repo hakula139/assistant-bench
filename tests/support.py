@@ -749,7 +749,7 @@ def _simulated_vote(
         choice = 'both_bad'
     else:
         choice = 'a' if rng.random() < 1 / (1 + np.exp(-gap)) else 'b'
-    tagged = (
+    tagged: frozenset[Defect] = (
         frozenset({PROSE_DEFECTS[rng.integers(len(PROSE_DEFECTS))]})
         if rng.random() < 0.2
         else frozenset()

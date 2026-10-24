@@ -9,7 +9,7 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                                                           |
 | Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov                                                          |
 | Build Site      | `pnpm build`, uploading `web/dist` as the `site-dist` artifact that the deploy jobs publish                                                                                 |
-| Python Check    | `uv sync --locked`, `ruff check`, `ruff format --check`, mypy, pytest with coverage uploaded to Codecov, and the fingerprint check                                          |
+| Python Check    | `uv sync --locked`, Ruff, mypy, basedpyright, dependency stub validation, pytest with coverage uploaded to Codecov, and the fingerprint check                               |
 | Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below |
 | CI Result       | Fails when any job above fails or is cancelled                                                                                                                              |
 

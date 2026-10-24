@@ -171,9 +171,13 @@ class TestMain:
         tasks: list[str] | None,
         expected: list[str] | None,
     ) -> None:
-        calls = []
+        calls: list[list[str]] = []
         monkeypatch.setattr(sys, 'argv', ['assistant_bench.ci', 'base'])
-        monkeypatch.setattr(ci, 'selected_tasks', lambda base: tasks)
+
+        def selected_tasks(base: str | None) -> list[str] | None:
+            return tasks
+
+        monkeypatch.setattr(ci, 'selected_tasks', selected_tasks)
 
         def run(command: list[str], **kwargs: Any) -> None:
             assert kwargs == {'check': True}

@@ -17,7 +17,14 @@ from assistant_bench.arena.service import (
 from assistant_bench.arena.store import Ballot, Side, Vote, VoteStore
 from assistant_bench.families import Gate
 from assistant_bench.outputs import read_outputs, write_outputs
-from assistant_bench_arena.models import Defects, DiffPane, HtmlPane, PairView, TextPane
+from assistant_bench_arena.models import (
+    Defects,
+    DiffPane,
+    HtmlPane,
+    PairView,
+    Pane,
+    TextPane,
+)
 from support import (
     ARENA_CASES,
     ARENA_SYSTEMS,
@@ -203,7 +210,7 @@ class TestArena:
 
             view = arena.start('f')
             remaining = view.remaining
-            shown = []
+            shown: list[tuple[Pane, Pane]] = []
             while view.pair is not None:
                 shown.append((view.pair.a, view.pair.b))
                 view = arena.vote(view.pair.token, 'a', Defects(), None)
@@ -434,7 +441,7 @@ class TestArena:
             write_outputs('f', list(passing_outputs(cases, ARENA_SYSTEMS).values()))
             arena = Arena(store, load_families(), RENDER_ORIGIN, clock)
             view = arena.start('f')
-            remaining = []
+            remaining: list[int] = []
 
             while view.pair is not None:
                 remaining.append(view.remaining)

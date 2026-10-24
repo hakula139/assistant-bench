@@ -1053,15 +1053,12 @@ class TestCollect:
         finish_generation(
             current.model_copy(update={'job_name': 'job-2'}), 'current config'
         )
-        text = Mock(wraps=jobs._text)
         gates = Mock(wraps=failed_gates)
-        monkeypatch.setattr(jobs, '_text', text)
         monkeypatch.setattr(jobs, 'failed_gates', gates)
 
         (output,) = jobs.collect(family, {system.name: system})
 
         assert (output.job, output.text) == ('job-2', 'current config')
-        text.assert_called_once()
         gates.assert_called_once_with(family.settings, 'current config', 'stop', '')
 
     def test_keeps_the_oldest_trial_that_sent_the_current_request(

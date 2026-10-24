@@ -66,6 +66,7 @@ Run after implementation and before review:
 uv run ruff check                           # Lint
 uv run ruff format --check                  # Check formatting
 uv run mypy                                 # Type check (strict)
+uv run basedpyright                         # Check the shared editor type policy
 uv run pytest                               # Run the tests that need no Docker, with coverage
 uv run pytest -m docker                     # Run the Harbor trials under Docker, which need no secrets
 pnpm format                                 # Check formatting of the site, JSON, Markdown, and YAML
