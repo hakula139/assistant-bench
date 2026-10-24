@@ -86,10 +86,10 @@ def _run(operation: Coroutine[None, None, None]) -> None:
 
 
 @app.command()
-def deploy(target: TargetName) -> None:
+def deploy(target: Target) -> None:
     """Deploy the prepared site and voting services to a configured target."""
     try:
-        deploy_target(load_target(target))
+        deploy_target(load_target(_TARGET.validate_python(target)))
     except (OSError, ValueError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(1) from error
