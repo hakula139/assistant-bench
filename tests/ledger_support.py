@@ -286,7 +286,8 @@ class D1Runtime:
                     const input = createInterface({{input: process.stdin}});
 
                     for await (const line of input) {{
-                        const result = await platform.env.MANAGEMENT.execute(line);
+                        using pending = platform.env.MANAGEMENT.execute(line);
+                        const result = await pending;
                         process.stdout.write(result + '\\n');
                     }}
                 }} finally {{
