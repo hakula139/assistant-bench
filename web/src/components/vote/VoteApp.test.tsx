@@ -4,16 +4,19 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
-import type { FamilyView, SessionView } from '@/lib/arena';
+import {
+  receiptQuery,
+  resumeSessionRequest,
+  startSessionRequest,
+  voteRequest,
+  withdrawRequest,
+  type FamilyView,
+  type SessionView,
+} from '@/lib/arena';
 import { defectTerms } from '@/lib/glossary';
 import type { Defect } from '@/lib/report';
-
-const FAMILY: FamilyView = {
-  name: 'fixture',
-  aspect: 'writing',
-  display_name: 'Chinese',
-  defects: ['facts', 'punctuation', 'tone', 'formulaic', 'length'],
-};
+import { VoteFlow } from '@/lib/vote-flow';
+import { COMMAND_ID, VOTE_FAMILY as FAMILY, makeSession, requestBody } from '@/test/arena';
 
 const PRIVATE_FAMILIES: FamilyView[] = [
   { name: 'private-review', aspect: 'private-research', display_name: 'Review', defects: [] },
@@ -27,29 +30,16 @@ const PRIVATE_FAMILIES: FamilyView[] = [
   { name: 'smoke-text', aspect: null, display_name: 'Smoke', defects: [] },
 ];
 
-interface Cast {
-  token: string;
-  choice: string;
-  defects: { a: string[]; b: string[] };
-  note: string | null;
-}
+type Cast = ReturnType<typeof voteRequest.parse>;
 
 interface StubOptions {
-  /** The cases the session `s1` can show, which end it once each has a vote. */
   cases?: number;
-  /** The votes `s1` already holds, as a session cast in an earlier visit does. */
   prior?: number;
   brief?: { instruction: string; checklist: string[] };
-  /** How the outputs reach the page: as text, as pages by URL, or as diffs. */
   render?: 'text' | 'html' | 'diff';
-  /** The family's defects in place of the fixture family's. */
   defects?: Defect[];
 }
 
-/**
- * A stand-in for the arena API that keeps one open pair in session `s1` until it is voted on or
- * undone, and records each session start, resume, vote, and undo.
- */
 function stubApi({
   cases = 40,
   prior = 0,
@@ -61,25 +51,28 @@ function stubApi({
   const starts: { family: string }[] = [];
   const resumes: string[] = [];
   const casts: Cast[] = [];
+  const active = Array.from({ length: prior }, (_, index) => `prior:${index}`);
+  const withdrawn = new Set<string>();
   let undos = 0;
   let served = 0;
   let open: string | null = null;
 
-  const votes = () => prior + casts.length - undos;
+  const votes = () => active.length;
 
-  const pairOf = (token: string) => ({
-    token,
-    instruction: `Instruction ${token}`,
+  const pairOf = (id: string) => ({
+    id,
+    capability: `capability:${id}`,
+    instruction: `Instruction ${id}`,
     checklist: [],
     ...brief,
     ...(render === 'html'
       ? {
-          a: { render, url: `http://127.0.0.1:8791/render/${token}/a` },
-          b: { render, url: `http://127.0.0.1:8791/render/${token}/b` },
+          a: { render, url: `https://render.example/render/${id}-a` },
+          b: { render, url: `https://render.example/render/${id}-b` },
         }
       : {
-          a: { render, text: `Output A${token.slice(1)}` },
-          b: { render, text: `Output B${token.slice(1)}` },
+          a: { render, text: `Output A${id.slice(1)}` },
+          b: { render, text: `Output B${id.slice(1)}` },
         }),
   });
 
@@ -95,6 +88,7 @@ function stubApi({
       family,
       votes: count,
       remaining: cases - count,
+      undo_acknowledgment: active.at(-1) ?? null,
       pair: open === null ? null : pairOf(open),
     };
   };
@@ -105,40 +99,58 @@ function stubApi({
   };
 
   const respond = (value: unknown, status = 200) =>
-    Promise.resolve(new Response(JSON.stringify(value), { status }));
+    Promise.resolve(new Response(status === 204 ? null : JSON.stringify(value), { status }));
 
   vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+    if (path === '/api/status') {
+      return respond({ status: 'ready' });
+    }
     if (path === '/api/families') {
       return respond([family]);
     }
     if (path === '/api/sessions') {
-      const { family } = JSON.parse(init?.body as string) as { family: string };
+      const { family } = startSessionRequest.parse(requestBody(init));
       starts.push({ family });
-      return family === FAMILY.name ? respond(draw(), 201) : respond({ detail: 'not found' }, 404);
+      return family === FAMILY.name ? respond(draw(), 201) : respond({ error: 'not_found' }, 404);
     }
-    const resume = /^\/api\/sessions\/([^/]+)\/pair$/.exec(path);
-    if (resume) {
-      resumes.push(resume[1]);
-      return resume[1] === 's1' ? respond(view()) : respond({ detail: 'not found' }, 404);
+    if (path === '/api/sessions/resume') {
+      const { session_id } = resumeSessionRequest.parse(requestBody(init));
+      resumes.push(session_id);
+      return session_id === 's1' ? respond(view()) : respond({ error: 'not_found' }, 404);
     }
-    if (path === '/api/sessions/s1/undo') {
-      if (votes() === 0) {
-        return respond({ detail: 'no vote to undo' }, 409);
+    if (path === '/api/sessions/withdraw') {
+      const request = withdrawRequest.parse(requestBody(init));
+      if (withdrawn.has(request.command_id)) {
+        return respond(null, 204);
       }
+      if (request.acknowledgment !== active.at(-1)) {
+        return respond({ error: 'conflict' }, 409);
+      }
+      withdrawn.add(request.command_id);
+      active.pop();
       undos += 1;
       open = null;
-      return respond(draw());
+      return respond(null, 204);
     }
-    const vote = /^\/api\/pairs\/([^/]+)\/vote$/.exec(path);
-    if (vote) {
-      if (vote[1] !== open) {
-        return respond({ detail: 'not found' }, 404);
+    if (path === '/api/votes') {
+      const request = voteRequest.parse(requestBody(init));
+      if (request.lease_id !== open) {
+        return respond({ error: 'not_found' }, 404);
       }
-      casts.push({ token: vote[1], ...(JSON.parse(init?.body as string) as Omit<Cast, 'token'>) });
+      casts.push(request);
+      const acknowledgment = `ack:${casts.length}`;
+      active.push(acknowledgment);
       open = null;
-      return respond(draw());
+      return respond({ acknowledgment, session_id: 's1' });
     }
-    return respond({ detail: `unexpected ${path}` }, 404);
+    if (path === '/api/votes/resolve') {
+      const request = receiptQuery.parse(requestBody(init));
+      const index = casts.findIndex((cast) => cast.command_id === request.command_id);
+      return index < 0
+        ? respond({ error: 'not_found' }, 404)
+        : respond({ acknowledgment: `ack:${index + 1}`, session_id: 's1' });
+    }
+    throw new Error(`Unexpected API path: ${path}`);
   });
   return {
     starts,
@@ -147,19 +159,23 @@ function stubApi({
     undos: () => undos,
     // Votes the open pair in another tab, which retires it for this one.
     elsewhere: () => {
+      if (open === null) {
+        throw new Error('Expected a pending lease');
+      }
       casts.push({
-        token: open as string,
+        command_id: COMMAND_ID,
+        lease_id: open,
+        capability: `capability:${open}`,
         choice: 'tie',
         defects: { a: [], b: [] },
-        note: null,
       });
+      active.push(`ack:${casts.length}`);
       open = null;
       draw();
     },
   };
 }
 
-/** The session's status line above the prompt, such as "Writing · Chinese, 2 votes". */
 const statusLine = () =>
   screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
 
@@ -174,6 +190,8 @@ async function startSession(page = <VoteApp />) {
 describe('VoteApp', () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
+    document.head.innerHTML = '<meta name="bench-render-origin" content="https://render.example">';
     history.replaceState(null, '', '/vote/');
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
@@ -183,25 +201,115 @@ describe('VoteApp', () => {
     cleanup();
   });
 
-  test('submits from the note by chord, then takes the next key as a shortcut', async () => {
-    const api = stubApi();
+  test('keeps acceptance visible when acquiring the next pair fails', async () => {
+    const api = stubApi({ prior: 1 });
     const user = await startSession();
+    const original = globalThis.fetch;
+    let available = false;
+    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+      return path === '/api/sessions/resume' && !available
+        ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
+        : original(path, init);
+    });
 
-    await user.keyboard('a{n}');
-    await user.keyboard('第一行{Enter}第二行');
-    await user.keyboard('{Control>}{Enter}{/Control}');
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Vote accepted.');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(api.undos()).toBe(0);
+    expect(screen.queryByRole('textbox')).toBeNull();
+
+    available = true;
+    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
     await screen.findByText('Output A2');
-    await user.keyboard('b');
 
-    expect(api.casts).toEqual([
-      { token: 't1', choice: 'a', defects: { a: [], b: [] }, note: '第一行\n第二行' },
-    ]);
-    expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
-      'ariaChecked',
-      'true',
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+    expect(statusLine()).toBe('Writing · Chinese, 2 votes');
+  });
+
+  test('locks voting while an accepted withdrawal awaits session recovery', async () => {
+    const api = stubApi({ prior: 1 });
+    const user = await startSession();
+    const original = globalThis.fetch;
+    let available = false;
+    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+      return path === '/api/sessions/resume' && !available
+        ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
+        : original(path, init);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await screen.findByRole('alert');
+
+    expect(api.undos()).toBe(1);
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
+    await user.keyboard('a{Enter}');
+    expect(api.casts).toEqual([]);
+
+    available = true;
+    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
+    await screen.findByText('Output A2');
+
+    expect(api.undos()).toBe(1);
+    expect(api.casts).toEqual([]);
+    expect(statusLine()).toBe('Writing · Chinese, 0 votes');
+  });
+
+  test('keeps the prior family acknowledgment separate from the requested session', async () => {
+    const prior = makeSession();
+    const flow = new VoteFlow();
+    flow.show(prior);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
+    await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
+    const family = { ...FAMILY, name: 'other', display_name: 'Other' };
+    const other = makeSession({ id: 's2', family });
+    const starts: unknown[] = [];
+    let available = false;
+    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+      if (path === '/api/status') {
+        return Promise.resolve(Response.json({ status: 'ready' }));
+      }
+      if (path === '/api/families') {
+        return Promise.resolve(Response.json([FAMILY, family]));
+      }
+      if (path === '/api/votes/resolve') {
+        return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
+      }
+      starts.push(requestBody(init));
+      return Promise.resolve(
+        available ? Response.json(other) : Response.json({ error: 'unavailable' }, { status: 503 }),
+      );
+    });
+    history.replaceState(null, '', '/vote/?family=other');
+    const user = userEvent.setup();
+
+    render(<VoteApp />);
+    await screen.findByText('Vote accepted.');
+    available = true;
+    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
+    await screen.findByRole('button', { name: '0 votes' });
+
+    expect(starts[1]).toEqual(starts[0]);
+    expect(statusLine()).toBe('Writing · Other, 0 votes');
+    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
+    expect(screen.queryByText('Saved')).toBeNull();
+    expect(screen.queryByText('Vote accepted.')).toBeNull();
+  });
+
+  test('explains an empty public family list without owner commands', async () => {
+    vi.stubGlobal('fetch', (path: string) =>
+      Promise.resolve(Response.json(path === '/api/status' ? { status: 'ready' } : [])),
     );
-    expect(screen.getByRole('textbox')).toHaveProperty('value', '');
-    expect(document.activeElement).toBe(screen.getByRole('group', { name: 'Pair 2' }));
+
+    render(<VoteApp />);
+
+    await screen.findByText(/No .* (?:available|vote on)/);
+    expect(document.body.textContent).not.toContain('uv run');
+    expect(screen.getByRole('heading', { name: 'Start a voting session' })).toBeDefined();
   });
 
   test('submits on Enter after a click on Undo instead of undoing again', async () => {
@@ -228,7 +336,7 @@ describe('VoteApp', () => {
     await user.keyboard('{Shift>}A{/Shift}{Enter}');
     await screen.findByText('Session complete');
     await user.keyboard('u');
-    await screen.findByText('Output A3');
+    await screen.findByText('Output A2');
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(api.undos()).toBe(1);
@@ -349,7 +457,7 @@ describe('VoteApp', () => {
     const fetch = globalThis.fetch;
     const pending = Promise.withResolvers<undefined>();
     vi.stubGlobal('fetch', async (path: string, init?: RequestInit) => {
-      if (path.endsWith('/vote')) {
+      if (path === '/api/votes') {
         await pending.promise;
       }
       return fetch(path, init);
@@ -371,9 +479,7 @@ describe('VoteApp', () => {
     pending.resolve(undefined);
     await screen.findByText('Output A2');
 
-    expect(api.casts).toEqual([
-      { token: 't1', choice: 'a', defects: { a: [], b: [] }, note: null },
-    ]);
+    expect(api.casts).toMatchObject([{ lease_id: 't1', choice: 'a', defects: { a: [], b: [] } }]);
   });
 
   test('lays out page outputs at the viewport width picked', async () => {
@@ -470,7 +576,7 @@ describe('VoteApp', () => {
     expect(screen.getByRole('status').textContent).toBe('This pair changed in another tab.');
   });
 
-  test('clears a family the arena does not have, and names it', async () => {
+  test('reports an unavailable family safely and removes its retired session locator', async () => {
     history.replaceState(null, '', '/vote/?family=unknown');
     localStorage.setItem('bench-session:unknown', 'retired');
     const api = stubApi();
@@ -478,9 +584,8 @@ describe('VoteApp', () => {
     render(<VoteApp />);
 
     expect((await screen.findByRole('alert')).textContent).toBe(
-      'No family named unknown to vote on.',
+      'That item is no longer available.',
     );
-    expect(window.location.search).toBe('');
     expect(localStorage.getItem('bench-session:unknown')).toBeNull();
     expect(api.starts).toEqual([{ family: 'unknown' }]);
   });
@@ -499,7 +604,7 @@ describe('VoteApp', () => {
 
     expect(resumed).toBe('Writing · Chinese, 3 votes');
     expect(statusLine()).toBe('Writing · Chinese, 4 votes');
-    expect(api.resumes).toEqual(['s1', 's1']);
+    expect(api.resumes).toEqual(['s1', 's1', 's1']);
     expect(api.starts).toEqual([]);
   });
 
@@ -670,17 +775,6 @@ describe('VoteApp', () => {
     expect(screen.queryByRole('button', { name: 'Markdown' }) !== null).toBe(toggle);
   });
 
-  test('leaves the note on Escape, so the next key is a shortcut again', async () => {
-    const api = stubApi();
-    const user = await startSession();
-
-    await user.keyboard('n');
-    await user.keyboard('x{Escape}b{Enter}');
-    await screen.findByText('Output A2');
-
-    expect(api.casts).toEqual([{ token: 't1', choice: 'b', defects: { a: [], b: [] }, note: 'x' }]);
-  });
-
   test('leaves keys on focused header controls to those controls', async () => {
     const api = stubApi({ prior: 1 });
     const user = await startSession(
@@ -727,17 +821,25 @@ describe('VoteApp', () => {
       family: privateFamily,
       votes: 0,
       remaining: 1,
+      undo_acknowledgment: null,
       pair: {
-        token: 'private-pair',
+        id: 'private-pair',
+        capability: 'private-pair-capability',
         instruction: 'Compare these private answers.',
         checklist: [],
         a: { render: 'text', text: 'Private answer A' },
         b: { render: 'text', text: 'Private answer B' },
       },
     };
-    const fetch = vi.fn((path: string) =>
-      Promise.resolve(new Response(JSON.stringify(path === '/api/families' ? families : session))),
-    );
+    const fetch = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/status') {
+        return Promise.resolve(Response.json({ status: 'ready' }));
+      }
+      if (path === '/api/sessions') {
+        startSessionRequest.parse(requestBody(init));
+      }
+      return Promise.resolve(Response.json(path === '/api/families' ? families : session));
+    });
     vi.stubGlobal('fetch', fetch);
     const errors = vi.spyOn(console, 'error');
     const user = userEvent.setup();
@@ -771,10 +873,10 @@ describe('VoteApp', () => {
     expect(screen.getByRole('region', { name: 'Output A' }).textContent).toContain(
       'Private answer A',
     );
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/sessions',
-      expect.objectContaining({ body: JSON.stringify({ family: privateFamily.name }) }),
-    );
+    const start = fetch.mock.calls.find(([path]) => path === '/api/sessions');
+    expect(startSessionRequest.parse(requestBody(start?.[1]))).toMatchObject({
+      family: privateFamily.name,
+    });
     const title =
       privateFamily.aspect === null
         ? privateFamily.display_name
@@ -786,21 +888,18 @@ describe('VoteApp', () => {
   test.each([
     [
       'the server refuses it',
-      () =>
-        Promise.resolve(
-          new Response(JSON.stringify({ detail: 'no outputs to pair' }), { status: 409 }),
-        ),
-      'no outputs to pair',
+      () => Promise.resolve(new Response(JSON.stringify({ error: 'conflict' }), { status: 409 })),
+      'This pair changed. Review the current outputs and choose again.',
     ],
     [
       'the family is gone',
-      () => Promise.resolve(new Response(JSON.stringify({ detail: 'not found' }), { status: 404 })),
-      'This family has no outputs to vote on now. Restart uv run bench serve after a run.',
+      () => Promise.resolve(new Response(JSON.stringify({ error: 'not_found' }), { status: 404 })),
+      'This family has no outputs available to vote on.',
     ],
     [
       'no server answers',
       () => Promise.reject(new TypeError('Failed to fetch')),
-      'Could not reach the vote server. Check that uv run bench serve is still running, then reload.',
+      'The voting service is unavailable. Retry to check the same request.',
     ],
     [
       'the response body cannot be read',
@@ -809,12 +908,15 @@ describe('VoteApp', () => {
         await response.text();
         return response;
       },
-      'Body is unusable: Body has already been read',
+      'The voting service is unavailable. Retry to check the same request.',
     ],
   ])('shows on the start screen why a session did not start when %s', async (_, start, alert) => {
-    vi.stubGlobal('fetch', (path: string) =>
-      path === '/api/families' ? Promise.resolve(new Response(JSON.stringify([FAMILY]))) : start(),
-    );
+    vi.stubGlobal('fetch', (path: string) => {
+      if (path === '/api/status') {
+        return Promise.resolve(Response.json({ status: 'ready' }));
+      }
+      return path === '/api/families' ? Promise.resolve(Response.json([FAMILY])) : start();
+    });
     const user = userEvent.setup();
     render(<VoteApp />);
 

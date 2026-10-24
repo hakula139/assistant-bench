@@ -4,7 +4,7 @@ import { cn } from 'cn';
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
 import { container, stack } from '@/components/site/PageParts';
-import { REPOSITORY, SITE_NAME, type HeaderSection } from '@/lib/site';
+import { REPOSITORY, SITE_DESCRIPTION, SITE_NAME, type HeaderSection } from '@/lib/site';
 
 interface Props {
   /** The page's own title, which the site name follows. */
@@ -14,11 +14,7 @@ interface Props {
   section?: HeaderSection;
 }
 
-const {
-  title,
-  section,
-  description = "Leaderboards of AI assistant systems, ranked by one rater's blind pairwise votes or by automated tests.",
-} = Astro.props;
+const { title, section, description = SITE_DESCRIPTION } = Astro.props;
 ---
 
 <!doctype html>

@@ -14,18 +14,26 @@ interface DefectPickerProps {
   /** The family's defects, in its order. */
   defects: readonly Defect[];
   tagged: readonly Defect[];
+  disabled: boolean;
   /** The key that toggles each defect on this output, in `defects` order. */
   keys: readonly string[];
   onToggle: (defect: Defect) => void;
 }
 
-export function DefectPicker({ side, defects, tagged, keys, onToggle }: DefectPickerProps) {
+export function DefectPicker({
+  side,
+  defects,
+  tagged,
+  disabled,
+  keys,
+  onToggle,
+}: DefectPickerProps) {
   const id = useId();
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" disabled={disabled}>
           Issues
           {tagged.length > 0 && (
             <>
@@ -46,6 +54,7 @@ export function DefectPicker({ side, defects, tagged, keys, onToggle }: DefectPi
                 <Checkbox
                   id={key}
                   checked={tagged.includes(defect)}
+                  disabled={disabled}
                   onCheckedChange={() => {
                     onToggle(defect);
                   }}

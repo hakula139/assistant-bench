@@ -1,103 +1,201 @@
 import { z } from 'astro/zod';
 
-import { defects, type Defect } from '@/lib/report';
+import { defects } from '@/lib/report';
 
-// The vote page's policy forbids eval, which Zod otherwise probes for to compile its parsers.
+// The vote document's policy forbids Zod's eval-based parser optimization.
 z.config({ jitless: true });
 
-// ── API Models ──
+export const identifier = z.string().min(1).max(256);
+/** Mirrors the shared JSON Schema's true-end constraint across validators. */
+export const familyName = z
+  .string()
+  .max(256)
+  .regex(/^[a-z0-9][a-z0-9-]*(?![\s\S])/);
 
-export type Choice = 'a' | 'b' | 'tie' | 'both_bad';
-
-const pane = z.discriminatedUnion('render', [
-  z.object({ render: z.literal('text'), text: z.string() }),
-  z.object({ render: z.literal('html'), url: z.url() }),
-  z.object({ render: z.literal('diff'), text: z.string() }),
+const command = { command_id: z.uuid() };
+const capability = z.string().min(1).max(2048);
+export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
+export const taggedDefects = z.strictObject({
+  a: z.array(z.enum(defects)).default([]),
+  b: z.array(z.enum(defects)).default([]),
+});
+export const pane = z.discriminatedUnion('render', [
+  z.strictObject({ render: z.literal('text'), text: z.string() }),
+  z.strictObject({ render: z.literal('html'), url: z.string() }),
+  z.strictObject({ render: z.literal('diff'), text: z.string() }),
 ]);
-
-const pairView = z.object({
-  token: z.string(),
+export const pairView = z.strictObject({
+  id: identifier,
+  capability,
   instruction: z.string(),
   checklist: z.array(z.string()),
   a: pane,
   b: pane,
 });
-
-const familyView = z.object({
-  name: z.string(),
+export const familyView = z.strictObject({
+  name: familyName,
   aspect: z.string().nullable(),
   display_name: z.string(),
   defects: z.array(z.enum(defects)),
 });
-
-const sessionView = z.object({
-  id: z.string(),
+export const sessionView = z.strictObject({
+  id: identifier,
   family: familyView,
   votes: z.int().nonnegative(),
   remaining: z.int().nonnegative(),
+  undo_acknowledgment: identifier.nullable(),
   pair: pairView.nullable(),
 });
+export const statusView = z.strictObject({
+  status: z.enum(['admission_required', 'renewal_required', 'ready']),
+});
+export const admissionView = z.strictObject({
+  ...command,
+  action: z.enum(['bench_admit', 'bench_renew']),
+  sitekey: identifier,
+  family: familyName.nullable(),
+});
+export const admissionRequest = z.strictObject({ ...command, proof: capability });
+export const admissionReplay = z.strictObject({
+  ...command,
+  proof: capability.nullable().optional(),
+});
+export const startSessionRequest = z.strictObject({ ...command, family: familyName });
+export const resumeSessionRequest = z.strictObject({ ...command, session_id: identifier });
+export const receiptQuery = z.strictObject({
+  ...command,
+  lease_id: identifier,
+  choice: choiceSchema,
+  defects: taggedDefects.default({ a: [], b: [] }),
+});
+export const voteRequest = receiptQuery.extend({ capability });
+export const voteAcknowledgment = z.strictObject({
+  acknowledgment: identifier,
+  session_id: identifier,
+});
+export const withdrawRequest = z.strictObject({
+  ...command,
+  session_id: identifier,
+  acknowledgment: identifier,
+});
+export const freshnessRequest = z.strictObject({ export_id: identifier });
+export const freshnessView = z.strictObject({ status: z.enum(['current', 'stale', 'unknown']) });
+export const errorView = z.strictObject({
+  error: z.enum([
+    'invalid_request',
+    'admission_required',
+    'renewal_required',
+    'challenge_rejected',
+    'rate_limited',
+    'not_found',
+    'conflict',
+    'unavailable',
+  ]),
+});
 
-export type TaggedDefects = Record<'a' | 'b', Defect[]>;
+export type Choice = z.infer<typeof choiceSchema>;
+export type TaggedDefects = z.infer<typeof taggedDefects>;
 export type FamilyView = z.infer<typeof familyView>;
 export type Pane = z.infer<typeof pane>;
 export type PairView = z.infer<typeof pairView>;
 export type SessionView = z.infer<typeof sessionView>;
+export type ReceiptQuery = z.infer<typeof receiptQuery>;
+export type VoteAcknowledgment = z.infer<typeof voteAcknowledgment>;
+export type ErrorCode = z.infer<typeof errorView>['error'];
 
-// ── Client ──
+export const errorMessages: Record<ErrorCode, string> = {
+  invalid_request: 'The request could not be processed. Reload and try again.',
+  admission_required: 'Continue through admission to vote.',
+  renewal_required: 'Renew your admission to continue. Your choice is saved in this tab.',
+  challenge_rejected: 'The challenge was rejected. Complete a new challenge.',
+  rate_limited: 'Too many requests. Wait a moment, then retry.',
+  not_found: 'That item is no longer available.',
+  conflict: 'This pair changed. Review the current outputs and choose again.',
+  unavailable: 'The voting service is unavailable. Retry to check the same request.',
+};
 
-/** An error response from the vote API, carrying its HTTP status. */
+/** A fixed public error code, without backend or provider details. */
 export class ApiError extends Error {
   constructor(
-    message: string,
+    readonly code: ErrorCode,
     readonly status: number,
   ) {
-    super(message);
+    super(errorMessages[code]);
   }
 }
 
-/** No response from the vote API, as when `bench serve` has stopped. */
-export class NetworkError extends Error {}
+/** The response is uncertain and the exact command can be retried. */
+export class NetworkError extends Error {
+  constructor() {
+    super(errorMessages.unavailable);
+  }
+}
 
-async function request<T>(
+export async function request<T>(
   schema: z.ZodType<T>,
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }).catch((reason: unknown) => {
-    throw new NetworkError(`no response from ${path}`, { cause: reason });
-  });
-
-  if (!response.ok) {
-    const detail = z
-      .object({ detail: z.string() })
-      .safeParse(await response.json().catch(() => null));
-    throw new ApiError(
-      detail.success ? detail.data.detail : `HTTP ${response.status}`,
-      response.status,
-    );
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new NetworkError();
   }
-
-  return schema.parse(await response.json());
+  if (!response.ok) {
+    const parsed = errorView.safeParse(await response.json().catch(() => null));
+    throw new ApiError(parsed.success ? parsed.data.error : 'unavailable', response.status);
+  }
+  const parsed = schema.safeParse(
+    response.status === 204 ? undefined : await response.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    throw new NetworkError();
+  }
+  return parsed.data;
 }
 
+export const getStatus = () => request(statusView, 'GET', '/status');
 export const listFamilies = () => request(z.array(familyView), 'GET', '/families');
+export const startSession = (body: z.infer<typeof startSessionRequest>) =>
+  request(sessionView, 'POST', '/sessions', startSessionRequest.parse(body));
+export const resumeSession = (body: z.infer<typeof resumeSessionRequest>) =>
+  request(sessionView, 'POST', '/sessions/resume', resumeSessionRequest.parse(body));
+export const castVote = (body: z.infer<typeof voteRequest>) =>
+  request(voteAcknowledgment, 'POST', '/votes', voteRequest.parse(body));
+export const resolveVote = (body: ReceiptQuery) =>
+  request(voteAcknowledgment, 'POST', '/votes/resolve', receiptQuery.parse(body));
+export const undoVote = (body: z.infer<typeof withdrawRequest>) =>
+  request(z.undefined(), 'POST', '/sessions/withdraw', withdrawRequest.parse(body));
 
-export const startSession = (family: string) =>
-  request(sessionView, 'POST', '/sessions', { family });
-
-export const resumeSession = (id: string) =>
-  request(sessionView, 'POST', `/sessions/${encodeURIComponent(id)}/pair`);
-
-export const castVote = (
-  token: string,
-  vote: { choice: Choice; defects: TaggedDefects; note: string | null },
-) => request(sessionView, 'POST', `/pairs/${encodeURIComponent(token)}/vote`, vote);
-
-export const undoVote = (id: string) =>
-  request(sessionView, 'POST', `/sessions/${encodeURIComponent(id)}/undo`);
+/** HTML capabilities may load only from the runtime's configured, separate renderer. */
+export function validateRenderOrigins(session: SessionView): SessionView {
+  for (const output of session.pair === null ? [] : [session.pair.a, session.pair.b]) {
+    if (output.render !== 'html') {
+      continue;
+    }
+    const configured = document.querySelector<HTMLMetaElement>(
+      'meta[name="bench-render-origin"]',
+    )?.content;
+    const url = new URL(output.url);
+    if (
+      configured === undefined ||
+      url.origin !== configured ||
+      url.origin === location.origin ||
+      !/^\/render\/[^/]+$/.test(url.pathname) ||
+      url.search !== '' ||
+      url.hash !== '' ||
+      url.username !== '' ||
+      url.password !== ''
+    ) {
+      throw new NetworkError();
+    }
+  }
+  return session;
+}
