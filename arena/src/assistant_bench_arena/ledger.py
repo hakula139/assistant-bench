@@ -53,6 +53,7 @@ from assistant_bench_arena.ledger_models import (
 )
 from assistant_bench_arena.maintenance import LedgerMaintenance
 from assistant_bench_arena.models import Defects
+from assistant_bench_arena.read_models import OwnedSession
 from assistant_bench_arena.reads import LedgerReads
 from assistant_bench_arena.releases import validate_publication
 from assistant_bench_arena.serialization import (
@@ -629,6 +630,44 @@ class Ledger:
             ),
             session.model_dump(mode='json'),
         )
+
+    async def open_session(self, context: Context, family: str) -> OwnedSession:
+        """Retain the first server clock while replaying the same owner/family."""
+        session = Session(
+            id=context.command_id,
+            actor_id=context.principal,
+            family=family,
+            created_at=context.now,
+        )
+        expected = session.model_dump(mode='json', exclude={'created_at'})
+        await self._fact(
+            Statement(
+                sql="""
+                    SELECT id, actor_id, family, import_source, original_id
+                    FROM sessions WHERE id = ?
+                    """,
+                params=(session.id,),
+            ),
+            Statement(
+                sql="""
+                    INSERT INTO sessions(id, actor_id, family, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                params=(
+                    session.id,
+                    session.actor_id,
+                    session.family,
+                    session.created_at,
+                ),
+            ),
+            expected,
+        )
+        result = await self.read.session(session.actor_id, session.id)
+
+        if result is None:
+            raise CommandRejected('session_stale')
+
+        return result
 
     async def _event(self, context: Context, request_hash: str) -> Event | None:
         rows = await self._rows(
