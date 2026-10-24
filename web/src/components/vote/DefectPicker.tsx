@@ -13,16 +13,15 @@ interface DefectPickerProps {
   side: 'A' | 'B';
   /** The family's defects, in its order. */
   defects: readonly Defect[];
-  /** The defects tagged on this output. */
   tagged: readonly Defect[];
   /** The key that toggles each defect on this output, in `defects` order. */
   keys: readonly string[];
   onToggle: (defect: Defect) => void;
 }
 
-/** One output's Issues button and the issues it can be tagged with, each with what it means. */
 export function DefectPicker({ side, defects, tagged, keys, onToggle }: DefectPickerProps) {
   const id = useId();
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -41,6 +40,7 @@ export function DefectPicker({ side, defects, tagged, keys, onToggle }: DefectPi
           {defects.map((defect, index) => {
             const key = `${id}-${defect}`;
             const { term, definition } = defectTerms[defect];
+
             return (
               <li key={defect} className="flex items-start gap-2">
                 <Checkbox

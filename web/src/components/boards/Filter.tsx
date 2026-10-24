@@ -9,9 +9,9 @@ interface FilterProps {
   onChange: (value: string) => void;
 }
 
-/** One labelled filter in the row above a board's charts. */
 export function Filter({ label, value, options, onChange }: FilterProps) {
   const id = useId();
+
   return (
     <div className="flex items-center gap-2 text-sm">
       <label htmlFor={id} className="text-muted-foreground">

@@ -13,7 +13,6 @@ import {
 import type { Term } from '@/lib/glossary';
 
 export interface GlossaryEntry extends Term {
-  /** Shows the term beside the badge the leaderboard marks it with. */
   status?: Status;
 }
 
@@ -25,7 +24,6 @@ interface GlossaryProps {
 
 const wrapping = 'align-top whitespace-normal';
 
-/** A two-column table of terms and what each means, styled like the boards it explains. */
 export function Glossary({ heading, entries }: GlossaryProps) {
   return (
     <Table>
@@ -38,6 +36,7 @@ export function Glossary({ heading, entries }: GlossaryProps) {
       <TableBody>
         {entries.map(({ term, status, definition }) => {
           const Icon = status && statusIcons[status];
+
           return (
             <TableRow key={term}>
               <TableCell className={cn(wrapping, 'font-medium text-balance')}>

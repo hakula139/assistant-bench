@@ -58,6 +58,7 @@ def settled(outputs: Iterable[Output]) -> list[Comparison]:
                         comparisons.append(
                             Comparison(x, y, score, case, share, sided=False)
                         )
+
     return comparisons
 
 
@@ -71,9 +72,11 @@ def reconcile(votes: Iterable[Vote], outputs: Iterable[Output]) -> list[MatchedV
     current = {
         Side.of(output): output for output in outputs if output.gate_failures == []
     }
+
     matched = []
     for vote in votes:
         a, b = current.get(vote.a), current.get(vote.b)
         if a is not None and b is not None and settled_score(a, b) is None:
             matched.append(MatchedVote(vote, a, b))
+
     return matched

@@ -34,7 +34,6 @@ const formats: Record<ValueFormat, (value: number) => string> = {
   seconds: formatSeconds,
 };
 
-/** One dot per row on a shared axis, each with an optional range behind it. */
 export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProps) {
   const height = rows.length * ROW_HEIGHT + 48;
   const tick = formats[format];
@@ -44,6 +43,7 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
       const color = (row: DotRange) =>
         row.emphasis ? 'var(--chart-emphasis)' : 'var(--chart-series)';
       const ranged = rows.filter((row) => row.range !== undefined);
+
       return {
         marginLeft: Math.max(...rows.map((row) => measure(row.label))) + LABEL_GAP,
         marginRight: 24,

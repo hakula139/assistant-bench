@@ -57,10 +57,6 @@ export function ScorerIcon({ scorer, className }: { scorer: Scorer; className?: 
   return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;
 }
 
-/**
- * A scorer's stages from output to board, where `config` makes each step open what it means on
- * that family's board and `links` points a step at the part that explains it.
- */
 export function MethodStrip({
   scorer,
   config,
@@ -78,6 +74,7 @@ export function MethodStrip({
       {methodSteps(scorer, config).map(({ step, title, detail, hint }, i) => {
         const Icon = stepIcons[step];
         const href = links[step];
+
         return (
           <li key={step} className="flex items-center gap-2 max-md:flex-col max-md:items-start">
             {i > 0 && (

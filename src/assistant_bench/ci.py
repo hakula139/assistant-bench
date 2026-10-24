@@ -23,14 +23,17 @@ def selected_tasks(base: str | None) -> list[str] | None:
     """Return current changed task IDs, or None when every task needs checking."""
     if base is None:
         return None
+
     changed = subprocess.run(
         ['git', 'diff', '--name-only', '-z', '--no-renames', base, 'HEAD', '--'],
         check=True,
         stdout=subprocess.PIPE,
         text=True,
     ).stdout.split('\0')
+
     if any(path in RUNTIME_FILES or path.startswith(RUNTIME_DIRS) for path in changed):
         return None
+
     return sorted(
         {
             parts[3]
@@ -51,9 +54,11 @@ def main() -> None:
     if tasks == []:
         print('No coding tasks changed.')
         return
+
     command = ['bench', 'check', 'coding-repo']
     for task in tasks or []:
         command.extend(['--task', task])
+
     subprocess.run(command, check=True)
 
 
