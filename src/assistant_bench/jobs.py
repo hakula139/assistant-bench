@@ -15,6 +15,7 @@ from harbor.job_diff import SourceTrial, load_source_trials
 from harbor.models.agent.context import AgentContext
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
+from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
 from harbor.models.task.artifacts import source_host_path
 from harbor.models.task.verifier_mode import resolve_task_verifier_mode
@@ -468,9 +469,9 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     A case family keeps only trials of each case's installed task. A task family
     keeps only trials of its current tasks at a version Harbor would reuse, so a
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
-    regrades. Each case, system, and fingerprint keeps at
-    most `samples` outputs, preferring a successful trial whose recorded request
-    matches what the family would send the system now, and otherwise the oldest.
+    regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
+    preferring a successful trial whose recorded agent configuration, environment,
+    and verifier-disable setting match the current job, and otherwise the oldest.
     Costs come from the current catalog price, so a system missing from `systems`
     or without a price reports as unpriced.
 
@@ -485,10 +486,14 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
         task is invalid, or the harness is one `check_harness` refuses.
     """
     check_harness(family)
-    expected = _requests(family, list(systems.values()))
+    expected = _inputs(family, list(systems.values()))
     candidates = [
-        (output, kwargs == expected.get(output.system))
-        for output, kwargs in _read_trials(
+        (
+            output,
+            (lock.agent, lock.environment, lock.verifier.disable)
+            == expected.get(output.system),
+        )
+        for output, lock in _read_trials(
             family, _sources(family), systems, _current_versions(family)
         )
     ]
@@ -520,17 +525,25 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     return outputs
 
 
-def _requests(family: Family, systems: list[System]) -> dict[str, dict[str, Any]]:
-    """Return the agent kwargs the family would send each system now.
+def _inputs(
+    family: Family, systems: list[System]
+) -> dict[str, tuple[trial_config.AgentConfig, trial_config.EnvironmentConfig, bool]]:
+    """Return the current agent, environment, and verifier-disable inputs.
 
     A task family that lists no systems may lack the settings its harness needs,
     so it sends none.
     """
     if family.source == 'tasks' and not family.settings.systems:
         return {}
+    resolved = family_systems(family, systems)
+    environment = _environment(resolved)
     return {
-        system.name: HARNESSES[system.harness].options(system, family.settings)
-        for system in family_systems(family, systems)
+        system.name: (
+            _agent_config(family, system),
+            environment,
+            family.source != 'tasks',
+        )
+        for system in resolved
     }
 
 
@@ -552,8 +565,8 @@ def _read_trials(
     sources: list[tuple[SourceJobConfig, Path]],
     systems: dict[str, System],
     versions: dict[str, str] | None = None,
-) -> list[tuple[Output, dict[str, Any]]]:
-    """Return each kept trial's output and the agent kwargs it recorded.
+) -> list[tuple[Output, TrialLock]]:
+    """Return each kept trial's output and the inputs its lock recorded.
 
     A `versions` mapping drops a trial whose task version is not current before
     an output reads that task.
@@ -568,7 +581,7 @@ def _read_trials(
         ):
             continue
         output = _output(family, trial, _origin(trial, by_id), case, systems)
-        records.append((output, trial.result.config.agent.kwargs))
+        records.append((output, trial.lock))
     return records
 
 

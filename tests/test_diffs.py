@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from assistant_bench.arena.resolution import settled_score
 from assistant_bench.diffs import workspace_diff
+from support import make_output
 
 
 LINE_SEPARATOR = chr(0x2028)
@@ -47,21 +49,45 @@ class TestWorkspaceDiff:
             pytest.param(
                 {'logo.png': b'\x89PNG\x00'},
                 {'logo.png': b'\x89PNG\x01'},
-                header('logo.png') + 'Binary files a/logo.png and b/logo.png differ\n',
+                header('logo.png') + 'index '
+                'ad91235e882292469812e16da0b8fc77075a7c6d6f8760c24be14a5c792508cf..'
+                '871923f8e5535ef938edc1ea710d5cf9e18637ce5d39feccef23030823993e4e\n'
+                'Binary files a/logo.png and b/logo.png differ\n',
                 id='binary',
             ),
             pytest.param(
                 {'data.bin': b'a\x00b\n'},
                 {'data.bin': b'a\x00c\n'},
-                header('data.bin') + 'Binary files a/data.bin and b/data.bin differ\n',
+                header('data.bin') + 'index '
+                '3a100994c4e38751871e6e8eef9adad2b20177fdeaf650daacdcd74f4c9421e3..'
+                'f140fb535f5aeb6a5247ad72e3cb142fd7dbd3ae970f904e3a3e898cb05b6378\n'
+                'Binary files a/data.bin and b/data.bin differ\n',
                 id='utf-8-with-nul-is-binary',
             ),
             pytest.param(
                 {},
                 {'blob': b'\xff'},
-                header('blob', 'new file mode 100644\n')
+                header('blob', 'new file mode 100644\n') + 'index '
+                '0000000000000000000000000000000000000000000000000000000000000000..'
+                'a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89\n'
                 + 'Binary files /dev/null and b/blob differ\n',
                 id='added-binary',
+            ),
+            pytest.param(
+                {'blob': b'\xff'},
+                {},
+                header('blob', 'deleted file mode 100644\n') + 'index '
+                'a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89..'
+                '0000000000000000000000000000000000000000000000000000000000000000\n'
+                'Binary files a/blob and /dev/null differ\n',
+                id='deleted-binary',
+            ),
+            pytest.param(
+                {},
+                {'中文.txt': b'hello\n'},
+                header('中文.txt', 'new file mode 100644\n')
+                + '--- /dev/null\n+++ b/中文.txt\n@@ -0,0 +1 @@\n+hello\n',
+                id='unicode-path-stays-readable',
             ),
             pytest.param(
                 {},
@@ -145,6 +171,60 @@ class TestWorkspaceDiff:
         diff = workspace_diff(tmp_path / 'base', tmp_path / 'workspace')
 
         assert diff == expected
+
+    @pytest.mark.parametrize(
+        ('left', 'right', 'score'),
+        [(b'one\0', b'two\0', None), (b'one\0', b'one\0', 0.5)],
+        ids=[
+            'different-binary-solutions-need-a-vote',
+            'identical-binary-solutions-tie',
+        ],
+    )
+    def test_binary_solution_contents_decide_whether_a_pair_needs_a_vote(
+        self, tmp_path: Path, left: bytes, right: bytes, score: float | None
+    ) -> None:
+        base = tmp_path / 'base'
+        write_tree(base, {'asset.bin': b'base\0'})
+        outputs = []
+        for name, content in [('left', left), ('right', right)]:
+            workspace = tmp_path / name
+            write_tree(workspace, {'asset.bin': content})
+            outputs.append(
+                make_output(text=workspace_diff(base, workspace), gate_failures=[])
+            )
+
+        result = settled_score(*outputs)
+
+        assert result == score
+
+    @pytest.mark.parametrize(
+        ('path', 'old', 'new'),
+        [
+            ('part\n@@ spoofed', '"a/part\\n@@ spoofed"', '"b/part\\n@@ spoofed"'),
+            ('part\tname', '"a/part\\tname"', '"b/part\\tname"'),
+            ('part\\name', '"a/part\\\\name"', '"b/part\\\\name"'),
+            ('part"name', '"a/part\\"name"', '"b/part\\"name"'),
+        ],
+        ids=['newline', 'tab', 'backslash', 'quote'],
+    )
+    @pytest.mark.parametrize('binary', [False, True], ids=['text', 'binary'])
+    def test_quotes_unusual_paths_in_every_header(
+        self, tmp_path: Path, path: str, old: str, new: str, binary: bool
+    ) -> None:
+        suffix = b'\0' if binary else b'\n'
+        write_tree(tmp_path / 'base', {path: b'old' + suffix})
+        write_tree(tmp_path / 'workspace', {path: b'new' + suffix})
+
+        diff = workspace_diff(tmp_path / 'base', tmp_path / 'workspace')
+
+        assert diff.splitlines()[0] == f'diff --git {old} {new}'
+        if binary:
+            assert diff.splitlines()[-1] == f'Binary files {old} and {new} differ'
+        else:
+            assert diff == (
+                f'diff --git {old} {new}\n--- {old}\n+++ {new}\n'
+                '@@ -1 +1 @@\n-old\n+new\n'
+            )
 
     def test_compares_a_symlink_by_its_target(self, tmp_path: Path) -> None:
         secret = tmp_path / 'secret'
