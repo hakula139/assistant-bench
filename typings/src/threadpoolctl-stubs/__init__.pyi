@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from contextlib import ContextDecorator
 from ctypes import CDLL
 from types import TracebackType
-from typing import Literal, Self, final
+from typing import ClassVar, Literal, Self, final
 
 __all__ = [
     'threadpool_limits',
@@ -13,7 +13,6 @@ __all__ = [
 ]
 __version__: str
 
-type _UserApi = Literal['blas', 'openmp']
 type _Limits = (
     int
     | dict[str, int | None]
@@ -24,6 +23,10 @@ type _Limits = (
 )
 
 class LibController(ABC):
+    user_api: ClassVar[str]
+    internal_api: ClassVar[str]
+    filename_prefixes: ClassVar[tuple[str, ...]]
+
     parent: ThreadpoolController | None
     prefix: str | None
     filepath: str | None
@@ -58,7 +61,7 @@ class _ThreadpoolLimiter:
         controller: ThreadpoolController,
         *,
         limits: _Limits = None,
-        user_api: _UserApi | None = None,
+        user_api: str | None = None,
     ) -> None: ...
     def __enter__(self) -> Self: ...
     def __exit__(
@@ -73,16 +76,14 @@ class _ThreadpoolLimiter:
         controller: ThreadpoolController,
         *,
         limits: _Limits = None,
-        user_api: _UserApi | None = None,
+        user_api: str | None = None,
     ) -> ContextDecorator: ...
     def restore_original_limits(self) -> None: ...
     def unregister(self) -> None: ...
-    def get_original_num_threads(self) -> dict[_UserApi, int | None]: ...
+    def get_original_num_threads(self) -> dict[str, int | None]: ...
 
 class threadpool_limits:
-    def __init__(
-        self, limits: _Limits = None, user_api: _UserApi | None = None
-    ) -> None: ...
+    def __init__(self, limits: _Limits = None, user_api: str | None = None) -> None: ...
     def __enter__(self) -> Self: ...
     def __exit__(
         self,
@@ -92,11 +93,11 @@ class threadpool_limits:
     ) -> None: ...
     @classmethod
     def wrap(
-        cls, limits: _Limits = None, user_api: _UserApi | None = None
+        cls, limits: _Limits = None, user_api: str | None = None
     ) -> ContextDecorator: ...
     def restore_original_limits(self) -> None: ...
     def unregister(self) -> None: ...
-    def get_original_num_threads(self) -> dict[_UserApi, int | None]: ...
+    def get_original_num_threads(self) -> dict[str, int | None]: ...
 
 class ThreadpoolController:
     lib_controllers: list[LibController]
@@ -105,9 +106,9 @@ class ThreadpoolController:
     def info(self, debugging_info: bool = False) -> list[dict[str, object]]: ...
     def select(self, **kwargs: object) -> ThreadpoolController: ...
     def limit(
-        self, *, limits: _Limits = None, user_api: _UserApi | None = None
+        self, *, limits: _Limits = None, user_api: str | None = None
     ) -> _ThreadpoolLimiter: ...
     def wrap(
-        self, *, limits: _Limits = None, user_api: _UserApi | None = None
+        self, *, limits: _Limits = None, user_api: str | None = None
     ) -> ContextDecorator: ...
     def __len__(self) -> int: ...
