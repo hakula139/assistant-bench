@@ -19,6 +19,7 @@ from assistant_bench_arena.ledger_models import (
     Actor,
     Admission,
     Attribution,
+    BootstrapConfiguration,
     Context,
     ExportSection,
     Issue,
@@ -38,10 +39,17 @@ from assistant_bench_arena.ledger_models import (
     VoteMeaning,
 )
 from assistant_bench_arena.releases import Release, evaluation_identity, settlements
+from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements
 from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
-from ledger_support import D1Runtime, D1Transport, publish_presentation, publish_release
+from ledger_support import (
+    D1Runtime,
+    D1Transport,
+    publish_presentation,
+    publish_release,
+    schema_statements,
+)
 
 
 RETENTION_MS = 60 * 86_400_000
@@ -119,12 +127,14 @@ async def prepare(
     quotas: tuple[Quota, ...] = (),
 ) -> Release:
     await transport.reset()
-    await ledger.initialize(
-        'test-deployment',
-        mode,
-        quotas,
-        attribution_ms=RETENTION_MS if mode == 'public' else None,
-        local_key_id='synthetic-key-id' if mode == 'local' else None,
+    await transport.bootstrap(
+        BootstrapConfiguration(
+            namespace='test-deployment',
+            mode=mode,
+            quotas=quotas,
+            attribution_ms=RETENTION_MS if mode == 'public' else None,
+            local_key_id='synthetic-key-id' if mode == 'local' else None,
+        )
     )
     release = await publish(ledger, mode=mode)
     await ledger.activate(
@@ -157,52 +167,73 @@ def issue(*, session: str = 'session', lease: str = 'lease', case: int = 0) -> I
 
 
 class TestLedger:
-    class TestInitialize:
-        def test_initializes_once_and_rejects_conflicting_identity(
-            self, d1_runtime: D1Runtime
+    class TestBootstrap:
+        @pytest.mark.parametrize('mode', ['local', 'public'])
+        def test_atomic_profile_installs_exact_quotas_and_immutable_identity(
+            self, d1_runtime: D1Runtime, mode: Mode
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
                     assert await ledger.status() is None
-                    await ledger.initialize(
-                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    config = BootstrapConfiguration(
+                        namespace='deployment',
+                        mode=mode,
+                        quotas=(
+                            Quota(
+                                operation='issue',
+                                scope='deployment',
+                                window_ms=2_000,
+                                limit=7,
+                            ),
+                            Quota(
+                                operation='accept',
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=10,
+                            ),
+                        ),
+                        attribution_ms=RETENTION_MS if mode == 'public' else None,
+                        local_key_id='synthetic-key-id' if mode == 'local' else None,
                     )
 
-                    await ledger.initialize(
-                        'deployment', 'local', (), local_key_id='synthetic-key-id'
-                    )
-
-                    assert await transport.rows('SELECT * FROM deployment') == [
-                        {
-                            'id': 1,
-                            'namespace': 'deployment',
-                            'mode': 'local',
-                            'local_key_id': 'synthetic-key-id',
-                            'quota_body': '[]',
-                            'attribution_ms': 0,
-                            'schema_version': 1,
-                        }
-                    ]
-
-                    with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.initialize(
-                            'different', 'local', (), local_key_id='synthetic-key-id'
-                        )
-
-                    with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.initialize(
-                            'deployment', 'local', (), local_key_id='different-key-id'
-                        )
+                    await transport.bootstrap(config)
 
                     status = await ledger.status()
                     assert status is not None
-                    assert status.model_dump() == {
-                        'namespace': 'deployment',
-                        'mode': 'local',
-                        'local_key_id': 'synthetic-key-id',
-                        'schema_version': 1,
+                    assert status.model_dump() == config.model_dump() | {
+                        'schema_id': SCHEMA_ID
                     }
+                    assert await transport.rows(
+                        'SELECT operation, scope, window_ms, allowance '
+                        'FROM quota_policies ORDER BY operation'
+                    ) == [
+                        {
+                            'operation': 'accept',
+                            'scope': 'actor',
+                            'window_ms': 1_000,
+                            'allowance': 10,
+                        },
+                        {
+                            'operation': 'issue',
+                            'scope': 'deployment',
+                            'window_ms': 2_000,
+                            'allowance': 7,
+                        },
+                    ]
+                    original = await transport.rows('SELECT * FROM deployment')
+
+                    for sql in (
+                        "UPDATE deployment SET namespace = 'different'",
+                        "UPDATE deployment SET local_key_id = 'different'",
+                        'DELETE FROM deployment',
+                        'INSERT OR REPLACE INTO deployment SELECT * FROM deployment',
+                    ):
+                        with pytest.raises(CommandRejected, match='^immutable$'):
+                            await transport.execute(Statement(sql=sql))
+
+                    assert await transport.rows('SELECT * FROM deployment') == original
+                    assert await ledger.status() == status
 
             asyncio.run(scenario())
 
@@ -223,7 +254,7 @@ class TestLedger:
                 'quota',
             ],
         )
-        def test_invalid_profile_leaves_no_bootstrap_or_quota_state(
+        def test_invalid_profile_leaves_the_database_empty(
             self,
             d1_runtime: D1Runtime,
             mode: Mode,
@@ -239,16 +270,65 @@ class TestLedger:
                     )
 
                     with pytest.raises(ValidationError):
-                        await ledger.initialize(
-                            'deployment',
-                            mode,
-                            (quota, quota) if duplicate else (),
-                            attribution_ms=lifetime,
-                            local_key_id=key,
+                        await transport.bootstrap(
+                            BootstrapConfiguration(
+                                namespace='deployment',
+                                mode=mode,
+                                quotas=(quota, quota) if duplicate else (),
+                                attribution_ms=lifetime,
+                                local_key_id=key,
+                            )
                         )
 
                     assert await ledger.status() is None
-                    assert await transport.rows('SELECT * FROM quota_policies') == []
+
+            asyncio.run(scenario())
+
+        @pytest.mark.parametrize('failure', ['marker', 'late-command'])
+        def test_late_bootstrap_failure_rolls_back_schema_profile_and_quotas(
+            self, d1_runtime: D1Runtime, failure: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    config = BootstrapConfiguration(
+                        namespace='deployment',
+                        mode='local',
+                        quotas=(
+                            Quota(
+                                operation='accept',
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=10,
+                            ),
+                        ),
+                        attribution_ms=None,
+                        local_key_id='synthetic-key-id',
+                    )
+                    marker = bootstrap_statements(config)[0]
+                    statements = schema_statements()
+
+                    if failure == 'marker':
+                        statements.append(
+                            marker.model_copy(
+                                update={'params': (*marker.params[:-1], None)}
+                            )
+                        )
+                    else:
+                        statements.extend(
+                            (
+                                marker,
+                                Statement(
+                                    sql='INSERT INTO actors(id, created_at) '
+                                    "VALUES ('late-invalid', -1)"
+                                ),
+                            )
+                        )
+
+                    with pytest.raises(RuntimeError, match='CHECK constraint failed'):
+                        await transport.request(statements, batch=True)
+
+                    assert await ledger.status() is None
 
             asyncio.run(scenario())
 
@@ -273,19 +353,24 @@ class TestLedger:
             ],
             ids=['actor', 'policy', 'event', 'moderation'],
         )
-        def test_domain_roots_require_the_bootstrap_marker(
+        def test_domain_roots_reject_an_unmarked_schema(
             self, d1_runtime: D1Runtime, table: str, sql: str
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
+                    await transport.request(schema_statements(), batch=True)
 
                     with pytest.raises(
                         RuntimeError, match='FOREIGN KEY constraint failed'
                     ):
                         await transport.execute(Statement(sql=sql))
 
-                    assert await ledger.status() is None
+                    with pytest.raises(
+                        ValueError, match='no unique initialized profile'
+                    ):
+                        await ledger.status()
+
                     assert await transport.rows(f'SELECT * FROM {table}') == []
                     assert await transport.rows('SELECT * FROM actor_expiry') == []
 
@@ -318,8 +403,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'public', 'public', (), attribution_ms=RETENTION_MS
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='public',
+                            mode='public',
+                            quotas=(),
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
                     )
                     release = make_release(mode='public', cases=1, failing_case=0)
                     evaluation = release.evaluation
@@ -652,8 +743,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='deployment',
+                            mode='local',
+                            quotas=(),
+                            local_key_id='synthetic-key-id',
+                            attribution_ms=None,
+                        )
                     )
                     release = make_release(cases=1)
                     original = release.outputs[0]
@@ -723,8 +820,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'public', 'public', (), attribution_ms=RETENTION_MS
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='public',
+                            mode='public',
+                            quotas=(),
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
                     )
                     release = make_release(mode='public')
                     evaluation = release.evaluation
@@ -823,8 +926,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'public', 'public', (), attribution_ms=RETENTION_MS
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='public',
+                            mode='public',
+                            quotas=(),
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
                     )
                     release = await publish(ledger, mode='public', seal=False)
                     await ledger.seal_evaluation(release.evaluation.id, 0)
@@ -1046,8 +1155,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'large-release', 'local', (), local_key_id='synthetic-key-id'
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='large-release',
+                            mode='local',
+                            quotas=(),
+                            local_key_id='synthetic-key-id',
+                            attribution_ms=None,
+                        )
                     )
                     release = await publish(ledger, cases=60)
 
@@ -1092,19 +1207,22 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'deployment',
-                        'public',
-                        tuple(
-                            Quota(
-                                operation=operation,
-                                scope='actor',
-                                window_ms=86_400_000,
-                                limit=1_000,
-                            )
-                            for operation in ('issue', 'accept')
-                        ),
-                        attribution_ms=RETENTION_MS,
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='deployment',
+                            mode='public',
+                            quotas=tuple(
+                                Quota(
+                                    operation=operation,
+                                    scope='actor',
+                                    window_ms=86400000,
+                                    limit=1000,
+                                )
+                                for operation in ('issue', 'accept')
+                            ),
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
                     )
                     release = make_release(
                         mode='public',
@@ -1473,24 +1591,27 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'deployment',
-                        'public',
-                        (
-                            Quota(
-                                operation='admit',
-                                scope='actor',
-                                window_ms=1_000,
-                                limit=10,
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='deployment',
+                            mode='public',
+                            quotas=(
+                                Quota(
+                                    operation='admit',
+                                    scope='actor',
+                                    window_ms=1000,
+                                    limit=10,
+                                ),
+                                Quota(
+                                    operation='renew',
+                                    scope='actor',
+                                    window_ms=1000,
+                                    limit=1,
+                                ),
                             ),
-                            Quota(
-                                operation='renew',
-                                scope='actor',
-                                window_ms=1_000,
-                                limit=1,
-                            ),
-                        ),
-                        attribution_ms=RETENTION_MS,
+                            attribution_ms=RETENTION_MS,
+                            local_key_id=None,
+                        )
                     )
                     await ledger.register_actor(
                         Actor(id='owner', created_at=1, owner_namespace='owner-source')
@@ -3106,7 +3227,7 @@ class TestLedger:
                     with pytest.raises(CommandRejected, match=f'^{rejection}$'):
                         await ledger.annotate(
                             principal,
-                            ReceiptAnnotation(kind='receipt', receipt_seq=receipt.seq),
+                            ReceiptAnnotation(receipt_seq=receipt.seq),
                             'Synthetic private note.',
                         )
 
@@ -3400,8 +3521,14 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize(
-                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='deployment',
+                            mode='local',
+                            quotas=(),
+                            local_key_id='synthetic-key-id',
+                            attribution_ms=None,
+                        )
                     )
 
                     for index in range(251):

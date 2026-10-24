@@ -12,6 +12,7 @@ import sys
 import threading
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
+from importlib.resources import files
 from pathlib import Path
 from textwrap import dedent
 from typing import Self
@@ -21,8 +22,14 @@ import httpx
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from assistant_bench_arena.ledger import Ledger
-from assistant_bench_arena.ledger_models import Row, SqlValue, Statement
+from assistant_bench_arena.ledger_models import (
+    BootstrapConfiguration,
+    Row,
+    SqlValue,
+    Statement,
+)
 from assistant_bench_arena.releases import Release
+from assistant_bench_arena.schema import bootstrap_statements
 from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
@@ -99,6 +106,26 @@ async def publish_presentation(ledger: Ledger, release: Release) -> None:
     await ledger.stage_points(release.points, 0)
 
 
+def schema_statements() -> list[Statement]:
+    statements: list[Statement] = []
+    pending = ''
+
+    for line in (
+        files('assistant_bench_arena')
+        .joinpath('schema.sql')
+        .read_text()
+        .splitlines(keepends=True)
+    ):
+        pending += line
+
+        if sqlite3.complete_statement(pending):
+            statements.append(Statement(sql=pending))
+            pending = ''
+
+    assert not pending.strip()
+    return statements
+
+
 class Reply(BaseModel):
     result: dict[str, JsonValue] | list[dict[str, JsonValue]] | None = None
     error: str | None = None
@@ -164,23 +191,10 @@ class D1Transport:
         )
         await self.request(statements, batch=True)
 
-        for path in sorted((ROOT / 'arena/migrations').glob('*.sql')):
-            statements = []
-            pending = ''
-
-            for line in path.read_text().splitlines(keepends=True):
-                pending += line
-
-                if sqlite3.complete_statement(pending):
-                    statements.append(Statement(sql=pending))
-                    pending = ''
-
-            assert not pending.strip(), path
-
-            try:
-                await self.request(statements, batch=True)
-            except RuntimeError as error:
-                raise RuntimeError(f'{path.name}: {error}') from error
+    async def bootstrap(self, config: BootstrapConfiguration) -> None:
+        await self.request(
+            [*schema_statements(), *bootstrap_statements(config)], batch=True
+        )
 
 
 class D1Runtime:
