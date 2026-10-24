@@ -11,7 +11,7 @@ check(ok, 'the hidden tests pass', out)
 
 for variant, part in (
     ('top-words', 'top_words finds no words'),
-    ('top-option', 'the CLI has no --top option'),
+    ('top-option', 'the CLI ignores --top'),
     ('stopwords-option', 'the CLI ignores --stopwords'),
 ):
     failed, out = fails_on(variant, 'test*.py')

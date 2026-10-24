@@ -1,9 +1,14 @@
 """Restore the reported bug that `LRUCache.get` treats a falsy value as missing."""
 
 import types
-from typing import Any
+from collections.abc import Callable, Hashable
+from typing import TYPE_CHECKING
 
 from verify_lib import after_import, replace_function
+
+
+if TYPE_CHECKING:
+    from cachelite.lru import LRUCache
 
 
 def patch(module: types.ModuleType) -> None:
@@ -18,12 +23,20 @@ def patch(module: types.ModuleType) -> None:
         )
         original.__kwdefaults__ = module.LRUCache.get.__kwdefaults__
 
-    def get(self: Any, key: Any, default: Any = None, *, _get: Any = original) -> Any:
+    def get(
+        self: 'LRUCache[Hashable, object]',
+        key: Hashable,
+        default: object = None,
+        *,
+        _get: Callable[
+            ['LRUCache[Hashable, object]', Hashable, object], object
+        ] = original,
+    ) -> object:
         keys = self.keys()
         value = _get(self, key, default)
         if not value:
             for cached_key in keys:
-                _get(self, cached_key)
+                _get(self, cached_key, None)
             return default
         return value
 

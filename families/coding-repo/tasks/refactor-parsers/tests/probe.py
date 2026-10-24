@@ -2,7 +2,9 @@
 
 import json
 import sys
+from collections.abc import Callable
 
+from probe_contract import Failure, Outcome, Success
 from records import parsers
 
 
@@ -74,24 +76,28 @@ INPUTS = {
 }
 
 
-def describe(fn, line):
+def describe(fn: Callable[[str], object], line: str) -> Outcome:
     try:
-        return {'ok': repr(fn(line))}
+        return Success(ok=repr(fn(line)))
     # Every outcome is recorded, including unexpected exception types.
     except Exception as error:
-        return {
-            'error': type(error).__name__,
-            'message': str(error),
-            'attrs': [
-                getattr(error, name, None) for name in ('kind', 'line', 'reason')
-            ],
-            'is_value_error': isinstance(error, ValueError),
-        }
+        return Failure(
+            error=type(error).__name__,
+            message=str(error),
+            attrs=[getattr(error, name, None) for name in ('kind', 'line', 'reason')],
+            is_value_error=isinstance(error, ValueError),
+        )
 
+
+PARSERS: dict[str, Callable[[str], object]] = {
+    'parse_user': lambda line: parsers.parse_user(line),
+    'parse_order': lambda line: parsers.parse_order(line),
+    'parse_product': lambda line: parsers.parse_product(line),
+}
 
 json.dump(
     {
-        name: [describe(getattr(parsers, name), line) for line in lines]
+        name: [describe(PARSERS[name], line) for line in lines]
         for name, lines in INPUTS.items()
     },
     sys.stdout,

@@ -73,7 +73,7 @@ default = true
 target-version = "py314"
 src = ["src", "tests", "arena/src"]
 # A task's repository and hidden tests keep the style of the project under test.
-extend-exclude = ["families/*/tasks/*/environment/", "families/*/tasks/*/tests/hidden/"]
+extend-exclude = ["families/*/tasks/*/environment/app/", "families/*/tasks/*/tests/hidden/"]
 # The pre-commit hook passes staged paths, which Ruff checks despite the excludes otherwise.
 force-exclude = true
 # Task scripts run on the Python of the task's image.
@@ -123,6 +123,7 @@ exclude_also = ['case _:\n\s*assert_never\(']
 [tool.basedpyright]
 include = ["src", "tests", "arena/src", "typings"]
 extraPaths = ["src", "tests", "arena/src"]
+exclude = ["**/node_modules", "**/__pycache__"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

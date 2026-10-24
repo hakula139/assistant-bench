@@ -24,12 +24,14 @@ check(ok, 'the hidden spec tests pass', out)
 
 module = APP / 'notify' / 'channels' / 'matrix.py'
 tree = parse(module)
-if check(tree is not None, 'notify/channels/matrix.py exists and parses'):
+check(tree is not None, 'notify/channels/matrix.py exists and parses')
+if tree is not None:
     called = [n.func for n in ast.walk(tree) if isinstance(n, ast.Call)]
     check(
         not any(isinstance(f, ast.Name) and f.id == 'print' for f in called),
         'the channel never calls print',
     )
+
     raised = [
         n.exc for n in ast.walk(tree) if isinstance(n, ast.Raise) and n.exc is not None
     ]
@@ -44,7 +46,8 @@ if check(tree is not None, 'notify/channels/matrix.py exists and parses'):
         or (isinstance(r, ast.Name) and r.id in ('ValueError', 'KeyError'))
     ]
     check(not bare, 'the channel raises no bare ValueError or KeyError')
-    unannotated = []
+
+    unannotated: list[str] = []
     for fn in (
         n
         for n in ast.walk(tree)
@@ -55,8 +58,10 @@ if check(tree is not None, 'notify/channels/matrix.py exists and parses'):
         missing = [
             a.arg for a in args if a.annotation is None and a.arg not in ('self', 'cls')
         ]
+
         if fn.returns is None or missing:
             unannotated.append(fn.name)
+
     check(
         not unannotated,
         'every function in the channel is fully annotated',
@@ -78,7 +83,7 @@ changelog = (
 )
 unreleased = re.search(r'^## Unreleased\n(.*?)(?=^## |\Z)', changelog, re.S | re.M)
 check(
-    bool(unreleased)
+    unreleased is not None
     and bool(re.search(r'^- .*matrix', unreleased.group(1), re.I | re.M)),
     'CHANGELOG.md records the channel under Unreleased',
 )

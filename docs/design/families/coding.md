@@ -32,13 +32,15 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
   It also fails a workspace whose top-level module or regular package shadows a standard-library one, since `python3 -m unittest` would otherwise import the workspace's own `unittest`, and it runs git under a configuration of its own, so the workspace's `.git/config` and hooks run nothing.
 
-- **Shared files:** `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile` are the same in every task, which `test_repository.py` checks, so a change to one changes every task, and once they have run, each needs its own version bump.
+- **Shared files:** author `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to update their standalone task copies. CI checks those copies with `--check`. Each affected task needs a version bump after it has run.
 
-- **Tests the agent writes:** each variant under `tests/broken/<variant>/` holds a `sitecustomize.py` that breaks one part of the agent's own code as Python starts, such as restoring a reported bug, leaving a function unimplemented, or dropping a command-line option, and the verifier requires the agent's tests to fail under each.
+- **Tests the agent writes:** each variant under `tests/broken/<variant>/` holds a `sitecustomize.py` that breaks one part of the agent's own code as Python starts, such as restoring a reported bug, leaving a function unimplemented, or ignoring a command-line option, and the verifier requires the agent's tests to fail under each.
 
   Subprocesses inherit the variant, so a test that runs the CLI as a child process sees the defect too. The check proves that the tests fail once that part breaks, whatever the agent named its helpers, while a check on test counts or names would accept a test that never exercises it.
 
-- **Style:** `environment/` and `tests/hidden/` hold the project under test in its own style, with its intended defects, so the linters skip them as [Development](../../conventions/development.md#pre-commit-hooks) lists. The verifier scripts, the variants, and `solution/solve.sh` follow the bench's own conventions, with Ruff targeting the image's Python 3.13.
+- **Style:** `environment/app/` and `tests/hidden/` hold the project under test in its own style, with its intended defects, so the linters skip them as [Development](../../conventions/development.md#pre-commit-hooks) lists. The verifier scripts, the variants, and `solution/solve.sh` follow the bench's own conventions, with Ruff targeting the image's Python 3.13.
+
+  Strict typing checks every authored verifier, probe and fault script on Python 3.13. The candidate repository under `environment/app/` contains the faults the task asks the agent to fix. Hidden tests under `tests/hidden/` exercise the completed solution's APIs, which can be absent from that starter repository. These two input directories stay outside the verifier type-checking scope, preserving the unsolved benchmark. The canonical helper and all generated helper copies remain checked.
 
 The solution's own code runs inside the verifier's unittest process, beside the hidden tests, so it can still patch the runner or the checks it shares that process with.
 

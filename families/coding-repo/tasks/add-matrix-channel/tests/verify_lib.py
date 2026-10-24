@@ -17,14 +17,16 @@ import sys
 import tempfile
 import types
 from collections.abc import Callable, Sequence
-from typing import Any
+from contextlib import ExitStack
+from unittest.mock import patch
 
 
 APP = pathlib.Path(os.environ.get('BENCH_APP_DIR', '/app'))
 TESTS = pathlib.Path(__file__).resolve().parent
 TIMEOUT_SEC = 60
-# The `add_argument` keys that a broken option with an ignored value keeps.
-_KEPT_KEYS = ('default', 'dest', 'help', 'metavar', 'nargs', 'required')
+_patches = ExitStack()
+NativeAdd = Callable[..., argparse.Action]
+NativeCall = Callable[..., None]
 
 _failures: list[str] = []
 
@@ -107,6 +109,7 @@ class _PatchingFinder(importlib.abc.MetaPathFinder):
     ) -> importlib.machinery.ModuleSpec | None:
         if fullname != self.name:
             return None
+
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if spec is None or spec.loader is None:
             return spec
@@ -116,7 +119,7 @@ class _PatchingFinder(importlib.abc.MetaPathFinder):
             run(module)
             self.patch(module)
 
-        spec.loader.exec_module = exec_module
+        _patches.enter_context(patch.object(spec.loader, 'exec_module', exec_module))
         return spec
 
 
@@ -135,32 +138,48 @@ def replace_function(owner: object, name: str, replacement: types.FunctionType) 
         setattr(owner, name, replacement)
 
 
-def break_option(option: str, *, drop: bool) -> None:
-    """Break `option` in every argparse parser, dropping it or ignoring its value."""
-    add_argument = argparse._ActionsContainer.add_argument
+def _fault(add_argument: NativeAdd, option: str) -> NativeAdd:
+    def add(container: object, *names: str, **kwargs: object) -> argparse.Action:
+        action = add_argument(container, *names, **kwargs)
+        if option in names:
+            _ignore_action(action)
 
-    def patched(
-        self: argparse._ActionsContainer, *names: str, **kwargs: Any
-    ) -> argparse.Action | None:
-        if option not in names:
-            return add_argument(self, *names, **kwargs)
-        if drop:
-            return None
-        kept = {key: kwargs[key] for key in _KEPT_KEYS if key in kwargs}
-        return add_argument(self, *names, action=_IgnoredValue, **kept)
+        return action
 
-    argparse._ActionsContainer.add_argument = patched
+    return add
 
 
-class _IgnoredValue(argparse.Action):
-    def __call__(
-        self,
+def ignore_option(option: str) -> None:
+    """Ignore explicit values for the option in this verifier subprocess."""
+    parser = argparse.ArgumentParser(add_help=False)
+    group = parser.add_argument_group('probe')
+    exclusive = parser.add_mutually_exclusive_group()
+    originals: tuple[tuple[type[object], NativeAdd], ...] = (
+        (type(parser), type(parser).add_argument),
+        (type(group), type(group).add_argument),
+        (type(exclusive), type(exclusive).add_argument),
+    )
+
+    for container, original in originals:
+        _patches.enter_context(
+            patch.object(container, 'add_argument', _fault(original, option))
+        )
+
+
+def _ignore_action(target: argparse.Action) -> None:
+    original: NativeCall = type(target).__call__
+
+    def call(
+        action: argparse.Action,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: object,
         option_string: str | None = None,
     ) -> None:
-        setattr(namespace, self.dest, self.default)
+        if action is not target:
+            original(action, parser, namespace, values, option_string)
+
+    _patches.enter_context(patch.object(type(target), '__call__', call))
 
 
 def parse(path: pathlib.Path) -> ast.Module | None:
@@ -172,13 +191,14 @@ def parse(path: pathlib.Path) -> ast.Module | None:
 
 def calls(node: ast.AST) -> list[str]:
     """Return the names of the functions and methods called anywhere under `node`."""
-    names = []
+    names: list[str] = []
     for n in ast.walk(node):
         if isinstance(n, ast.Call):
             if isinstance(n.func, ast.Name):
                 names.append(n.func.id)
             elif isinstance(n.func, ast.Attribute):
                 names.append(n.func.attr)
+
     return names
 
 

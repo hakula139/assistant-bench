@@ -14,12 +14,13 @@ ws = copy_workspace(('test_renamed_api.py',))
 ok, out = run_unittest(ws, 'test_hidden_*.py')
 check(ok, 'the hidden tests pass', out)
 
-stale = []
+stale: list[str] = []
 for path in sorted((APP / 'shop').glob('*.py')) + sorted((APP / 'tests').glob('*.py')):
     tree = parse(path)
     if tree is None:
         stale.append(f'{path.name}: does not parse')
         continue
+
     rel = path.relative_to(APP).as_posix()
     for node in ast.walk(tree):
         if (
