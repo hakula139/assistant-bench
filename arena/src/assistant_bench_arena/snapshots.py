@@ -9,7 +9,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench_arena.models import Defect, Record
+from assistant_bench_arena.models import Defect, FamilyName, Record
 
 
 class UnitHumanWeights(Record):
@@ -101,7 +101,7 @@ type Provenance = Annotated[
 
 
 class FamilyDefinition(Record):
-    name: Annotated[str, Field(min_length=1)]
+    name: FamilyName
     reference: Annotated[str, Field(min_length=1)]
     systems: tuple[str, ...]
     categories: tuple[str, ...]
@@ -166,7 +166,7 @@ class OutputApproval(OutputContentApproval):
 
 
 class PublicApproval(Record):
-    family: Annotated[str, Field(min_length=1)]
+    family: FamilyName
     cases: tuple[CaseApproval, ...]
     outputs: tuple[OutputApproval, ...]
 
@@ -205,7 +205,7 @@ class PresentedCase(Record):
 
 
 class Presentation(Record):
-    family: Annotated[str, Field(min_length=1)]
+    family: FamilyName
     aspect: str | None
     display_name: Annotated[str, Field(min_length=1)]
     render: Literal['text', 'html', 'diff']

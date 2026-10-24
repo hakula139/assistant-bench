@@ -18,6 +18,12 @@ class Record(BaseModel):
     )
 
 
+# ── Identifiers ──
+
+
+type FamilyName = Annotated[str, Field(pattern=r'^[a-z0-9][a-z0-9-]*$')]
+
+
 # ── Choices ──
 
 
@@ -86,7 +92,7 @@ class PairView(BaseModel):
 class FamilyView(BaseModel):
     """A family the vote page can start a session on."""
 
-    name: str
+    name: FamilyName
     """Stable family ID."""
 
     aspect: str | None
@@ -120,7 +126,7 @@ NOTE_MAX_CHARS = 500
 class StartSession(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    family: str
+    family: FamilyName
 
 
 class VoteRequest(BaseModel):

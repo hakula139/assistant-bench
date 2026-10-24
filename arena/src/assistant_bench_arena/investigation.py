@@ -11,7 +11,7 @@ from assistant_bench_arena.ledger_models import (
     SqlValue,
     Statement,
 )
-from assistant_bench_arena.models import Record
+from assistant_bench_arena.models import FamilyName, Record
 from assistant_bench_arena.read_models import FamilyState
 from assistant_bench_arena.transport import Transport
 
@@ -23,7 +23,7 @@ class NetworkLookup(Record):
 
 
 class ReceiptFilter(Record):
-    family: Identifier
+    family: FamilyName
     actor_id: Identifier | None = None
     session_id: Identifier | None = None
     evaluation_id: Identifier | None = None

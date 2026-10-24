@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench_arena.models import Choice, Defects, Record
+from assistant_bench_arena.models import Choice, Defects, FamilyName, Record
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
     CaseMetadata,
@@ -75,7 +75,7 @@ class NumericalInput(Record):
 
 class Evaluation(Record):
     id: Identifier
-    family: Identifier
+    family: FamilyName
     policy_id: Identifier
     manifest: EvaluationManifest
     cases: NonNegativeInt
@@ -146,7 +146,7 @@ class Actor(Record):
 class Session(Record):
     id: Identifier
     actor_id: Identifier
-    family: Identifier
+    family: FamilyName
     created_at: Milliseconds
 
 
@@ -291,7 +291,7 @@ class Event(Record):
     seq: NonNegativeInt
     command_id: str
     kind: EventKind
-    family: str
+    family: FamilyName
     principal: str
     request_hash: str
     created_at: Milliseconds
@@ -315,7 +315,7 @@ class Lease(Record):
     request_hash: str
 
     actor_id: str
-    family: str
+    family: FamilyName
     session_id: str
 
     claim_id: str
@@ -349,7 +349,7 @@ class Receipt(Record):
 
     actor_id: str
     session_id: str
-    family: str
+    family: FamilyName
     claim_id: str
     lease_id: str
 
@@ -386,7 +386,7 @@ class Target(Record):
 
 class Moderation(Record):
     id: Identifier
-    family: Identifier
+    family: FamilyName
     principal: Identifier
     action: Literal['exclude', 'restore']
     reason: Annotated[str, Field(min_length=1, max_length=500)]
@@ -413,7 +413,7 @@ type ExportSection = Literal[
 
 class Export(Record):
     id: str
-    family: str
+    family: FamilyName
     schema_version: Literal[1]
     namespace: str
     created_at: Milliseconds

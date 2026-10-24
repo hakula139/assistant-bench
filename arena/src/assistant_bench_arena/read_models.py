@@ -4,11 +4,11 @@ from typing import Literal
 
 from pydantic import NonNegativeInt
 
-from assistant_bench_arena.models import Record
+from assistant_bench_arena.models import FamilyName, Record
 
 
 class FamilyState(Record):
-    family: str
+    family: FamilyName
     evaluation_id: str
     publication_id: str
     point_id: str
@@ -24,7 +24,7 @@ class FamilyState(Record):
 class OwnedSession(Record):
     id: str
     actor_id: str
-    family: str
+    family: FamilyName
     version: NonNegativeInt
     current_lease: str | None
 
