@@ -17,6 +17,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
+from rich.text import Text
 from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, jobs, report, revisions
@@ -180,6 +181,76 @@ class TestCheck:
         assert result.exit_code == 0, result.output
 
         assert result.output == 'Family `f`: 0 valid cases.\n'
+
+    @pytest.mark.parametrize('reward', [1.0, 0.0], ids=['passes', 'fails'])
+    def test_checks_only_named_tasks_once(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+        reward: float,
+    ) -> None:
+        write_task_family(families_dir, 'a', 'b', 'c')
+        outputs = [
+            *trials('b', 'oracle', reward),
+            *trials('b', 'nop', 0.0),
+            *trials('c', 'oracle', 1.0),
+            *trials('c', 'nop', 0.0),
+        ]
+        monkeypatch.setattr(
+            jobs, 'read_trials', lambda family, job_dir, systems: outputs
+        )
+
+        result = invoke('check', 'f', 'f', '--task', 'c', '--task', 'b', '--task', 'b')
+        assert result.exit_code == (0 if reward == 1.0 else 1), result.output
+
+        (job,) = submitted
+        assert [task.path for task in job.tasks] == [
+            families_dir / 'f' / 'tasks' / 'b',
+            families_dir / 'f' / 'tasks' / 'c',
+        ]
+        if reward == 1.0:
+            assert 'failed every selected task.' in result.stdout
+        else:
+            assert result.stderr == (
+                'Family `f`: the reference solution failed the tests of `b`.\n'
+            )
+
+    @pytest.mark.parametrize(
+        ('arguments', 'message'),
+        [
+            (('--task', 'a'), 'Select exactly one task family with `--task`.'),
+            (
+                ('f', 'g', '--task', 'a'),
+                'Select exactly one task family with `--task`.',
+            ),
+            (
+                ('cases', '--task', 'a'),
+                'Family `cases` has cases. Select a task family with `--task`.',
+            ),
+            (
+                ('f', '--task', 'unknown'),
+                'Family `f` has no task named `unknown`. Choose among `a`.',
+            ),
+        ],
+        ids=['no-family', 'several-families', 'case-family', 'unknown-task'],
+    )
+    def test_rejects_invalid_task_selection_before_running(
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        arguments: tuple[str, ...],
+        message: str,
+    ) -> None:
+        write_task_family(families_dir, 'a', name='f')
+        write_task_family(families_dir, 'a', name='g')
+        write_case_family(families_dir, ['opus-5.5'], name='cases')
+
+        result = invoke('check', *arguments)
+        assert result.exit_code == 2, result.output
+
+        assert message in Text.from_ansi(result.stderr).plain
+        assert submitted == []
 
     @pytest.mark.parametrize(
         ('tasks', 'outputs', 'exit_code', 'message'),

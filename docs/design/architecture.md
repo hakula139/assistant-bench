@@ -7,6 +7,7 @@ assistant-bench limits its code to the parts Harbor lacks: resolving systems, re
 ```text
 src/assistant_bench/
 ├── cli.py                                  # The Typer `bench` command
+├── ci.py                                   # Coding task selection and checks for Harbor Smoke
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
 ├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
 ├── report.py                               # The report schema, one results variant per scorer, and closing a round
