@@ -22,6 +22,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
+    Actor,
     BootstrapConfiguration,
     Row,
     SqlValue,
@@ -179,6 +180,15 @@ class D1Transport:
         await self.request(
             [*schema_statements(), *bootstrap_statements(config)], batch=True
         )
+
+
+async def seed_actor(transport: D1Transport, actor: Actor) -> None:
+    await transport.execute(
+        Statement(
+            sql='INSERT INTO actors(id, created_at, rate_subject) VALUES (?, ?, ?)',
+            params=(actor.id, actor.created_at, actor.rate_subject),
+        )
+    )
 
 
 class D1Runtime:

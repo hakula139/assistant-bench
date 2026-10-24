@@ -21,12 +21,14 @@ from assistant_bench_arena.ledger_models import (
     Attribution,
     BootstrapConfiguration,
     Context,
+    Export,
     ExportSection,
     Issue,
     Lease,
     Moderation,
     Network,
     NetworkTag,
+    Publication,
     Quota,
     Receipt,
     RenderedOutput,
@@ -48,6 +50,7 @@ from ledger_support import (
     publish_presentation,
     publish_release,
     schema_statements,
+    seed_actor,
 )
 
 
@@ -144,7 +147,7 @@ async def prepare(
         release.publication.id,
         release.points.id,
     )
-    await ledger.register_actor(Actor(id='actor', created_at=2))
+    await seed_actor(transport, Actor(id='actor', created_at=2))
     await ledger.start_session(
         Session(id='session', actor_id='actor', family='writing', created_at=2)
     )
@@ -430,7 +433,6 @@ class TestLedger:
                 ('evaluation', 'evaluations'),
                 ('publication', 'publications'),
                 ('moderation', 'moderation_batches'),
-                ('attribution', 'attribution_plans'),
             ],
         )
         def test_applied_fact_seals_replay_without_replacing_the_first_timestamp(
@@ -486,26 +488,15 @@ class TestLedger:
                                 ),
                             )
                         )
-                    elif kind == 'attribution':
-                        await ledger.register_actor(
-                            Actor(id='owner', owner_namespace='owner', created_at=2)
-                        )
-                        plan = await ledger.prepare_attribution(
-                            fact_id, 'writing', 'actor', 'owner'
-                        )
-                        await ledger.stage_attribution(plan)
-
                     seals = {
                         'evaluation': ledger.seal_evaluation,
                         'publication': ledger.seal_publication,
                         'moderation': ledger.seal_moderation,
-                        'attribution': ledger.seal_attribution,
                     }
                     other_seals = {
                         'evaluation': other.seal_evaluation,
                         'publication': other.seal_publication,
                         'moderation': other.seal_moderation,
-                        'attribution': other.seal_attribution,
                     }
 
                     await seals[kind](fact_id, now)
@@ -537,13 +528,6 @@ class TestLedger:
                         assert (
                             await transport.rows('SELECT * FROM eligible_claims') == []
                         )
-                    elif kind == 'attribution':
-                        await ledger.attribute(context, fact_id)
-                        assert await transport.rows(
-                            'SELECT canonical_actor FROM actor_resolution '
-                            "WHERE family = 'writing' AND actor_id = 'actor'"
-                        ) == [{'canonical_actor': 'owner'}]
-
                     facts = await transport.rows(f'SELECT * FROM {table} ORDER BY id')
                     events = await transport.rows('SELECT * FROM evidence_events')
 
@@ -834,7 +818,7 @@ class TestLedger:
                     d1_runtime.client() as (other, _),
                 ):
                     await prepare(ledger, transport)
-                    await ledger.register_actor(Actor(id='other', created_at=2))
+                    await seed_actor(transport, Actor(id='other', created_at=2))
                     session_id = 'opaque-session'
 
                     results = await asyncio.gather(
@@ -1075,7 +1059,7 @@ class TestLedger:
                     )
                     actor_id = identifier('actor')
                     session_id = identifier('session')
-                    await ledger.register_actor(Actor(id=actor_id, created_at=2))
+                    await seed_actor(transport, Actor(id=actor_id, created_at=2))
                     await ledger.start_session(
                         Session(
                             id=session_id,
@@ -1575,8 +1559,9 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestAdmit:
-        def test_renewals_share_the_global_owner_budget_across_family_links(
-            self, d1_runtime: D1Runtime
+        @pytest.mark.parametrize('operation', ['issue', 'accept'])
+        def test_renewal_preserves_actor_history_and_cross_family_quota(
+            self, d1_runtime: D1Runtime, operation: str
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
@@ -1584,30 +1569,20 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            quotas=(
-                                Quota(
-                                    operation='admit',
-                                    scope='actor',
-                                    window_ms=1000,
-                                    limit=10,
-                                ),
-                                Quota(
-                                    operation='renew',
-                                    scope='actor',
-                                    window_ms=1000,
-                                    limit=1,
-                                ),
+                            quotas=tuple(
+                                quota.model_copy(
+                                    update={'limit': 1}
+                                    if quota.operation == operation
+                                    else {}
+                                )
+                                for quota in QUOTAS
                             ),
                             attribution_ms=RETENTION_MS,
                         )
                     )
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=1, owner_namespace='owner-source')
-                    )
 
-                    for index, family in enumerate(('writing', 'other')):
-                        release = make_release(family=family)
-                        await publish_release(ledger, release)
+                    for family in ('writing', 'other'):
+                        release = await publish(ledger, family=family)
                         await ledger.activate(
                             Context(
                                 command_id=f'activate:{family}',
@@ -1620,98 +1595,136 @@ class TestLedger:
                             release.publication.id,
                             release.points.id,
                         )
-                        await ledger.admit(
-                            Context(
-                                command_id=f'admit:{index}',
-                                principal=f'bootstrap:{index}',
-                                now=2,
-                            ),
-                            Admission(
-                                operation='new',
-                                context_digest=f'bootstrap:{index}',
-                                proof_digest=f'new-proof:{index}',
-                                actor_id=f'actor:{index}',
-                                credential_id=f'credential:{index}',
-                                rate_subject=f'rate:{index}',
-                                expires_at=10_000,
-                                challenge_until=1_000,
-                            ),
-                        )
-                        await ledger.start_session(
-                            Session(
-                                id=f'session:{index}',
-                                actor_id=f'actor:{index}',
-                                family=family,
-                                created_at=3,
+
+                    admitted = await ledger.admit(
+                        Context(command_id='admit', principal='bootstrap', now=2),
+                        Admission(
+                            operation='new',
+                            context_digest='bootstrap',
+                            proof_digest='admit-proof',
+                            actor_id='actor',
+                            credential_id='original',
+                            rate_subject='rate',
+                            expires_at=10_000,
+                            challenge_until=1_000,
+                        ),
+                    )
+                    await ledger.open_session('actor', 'first', 'writing', 3)
+                    lease = await ledger.issue(
+                        Context(command_id='first-draw', principal='actor', now=10),
+                        issue(session='first'),
+                    )
+                    receipt = await ledger.accept(
+                        Context(command_id='first-vote', principal='actor', now=20),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='first',
+                            choice='a',
+                            attribution=attribution(20),
+                        ),
+                    )
+
+                    renewed = await ledger.admit(
+                        Context(command_id='renew', principal='actor', now=30),
+                        Admission(
+                            operation='renew',
+                            context_digest='original-cookie',
+                            proof_digest='renew-proof',
+                            original_credential='original',
+                            actor_id='actor',
+                            credential_id='replacement',
+                            rate_subject='rate',
+                            expires_at=20_000,
+                            challenge_until=2_000,
+                        ),
+                    )
+
+                    assert renewed.actor_id == admitted.actor_id == receipt.actor_id
+                    assert await ledger.credential('original', 31) is None
+                    credential = await ledger.credential('replacement', 31)
+                    assert credential is not None and credential.actor_id == 'actor'
+                    await ledger.open_session('actor', 'second', 'other', 31)
+                    context = Context(
+                        command_id='second-draw', principal='actor', now=32
+                    )
+                    proposed = issue(session='second', lease='second')
+
+                    if operation == 'issue':
+                        with pytest.raises(CommandRejected, match='^quota_exhausted$'):
+                            await ledger.issue(context, proposed)
+                    else:
+                        second = await ledger.issue(context, proposed)
+
+                        with pytest.raises(CommandRejected, match='^quota_exhausted$'):
+                            await ledger.accept(
+                                Context(
+                                    command_id='second-vote',
+                                    principal='actor',
+                                    now=33,
+                                ),
+                                Accept(
+                                    lease_id=second.id,
+                                    acknowledgment='second',
+                                    choice='b',
+                                    attribution=attribution(33),
+                                ),
                             )
-                        )
-                        plan = await ledger.prepare_attribution(
-                            f'link:{index}', family, f'actor:{index}', 'owner'
-                        )
-                        await ledger.stage_attribution(plan)
-                        await ledger.seal_attribution(plan.id, 10)
-                        await ledger.attribute(
-                            Context(
-                                command_id=f'link:{index}', principal='admin', now=10
-                            ),
-                            plan.id,
-                        )
 
-                    first_context = Context(
-                        command_id='renew:0', principal='actor:0', now=20
+                    await ledger.admit(
+                        Context(
+                            command_id='other-admit',
+                            principal='other-bootstrap',
+                            now=34,
+                        ),
+                        Admission(
+                            operation='new',
+                            context_digest='other-bootstrap',
+                            proof_digest='other-proof',
+                            actor_id='other',
+                            credential_id='other-credential',
+                            rate_subject='rate',
+                            expires_at=10_000,
+                            challenge_until=1_000,
+                        ),
                     )
-                    first_request = Admission(
-                        operation='renew',
-                        context_digest='original-cookie:0',
-                        proof_digest='renew-proof:0',
-                        original_credential='credential:0',
-                        actor_id='actor:0',
-                        credential_id='renewed:0',
-                        rate_subject='rate:0',
-                        expires_at=20_000,
-                        challenge_until=2_000,
+                    await ledger.open_session('other', 'other-session', 'other', 35)
+                    independent = await ledger.issue(
+                        Context(command_id='other-draw', principal='other', now=36),
+                        issue(session='other-session', lease='independent'),
                     )
-                    first = await ledger.admit(first_context, first_request)
+                    await ledger.accept(
+                        Context(command_id='other-vote', principal='other', now=37),
+                        Accept(
+                            lease_id=independent.id,
+                            acknowledgment='independent',
+                            choice='b',
+                            attribution=attribution(37),
+                        ),
+                    )
 
-                    with pytest.raises(CommandRejected, match='^quota_exhausted$'):
-                        await ledger.admit(
-                            Context(command_id='renew:1', principal='actor:1', now=21),
-                            first_request.model_copy(
-                                update={
-                                    'context_digest': 'original-cookie:1',
-                                    'proof_digest': 'renew-proof:1',
-                                    'original_credential': 'credential:1',
-                                    'actor_id': 'actor:1',
-                                    'credential_id': 'renewed:1',
-                                    'rate_subject': 'rate:1',
-                                }
-                            ),
-                        )
-
-                    assert await ledger.credential('credential:0', 22) is None
-                    assert await ledger.credential('credential:1', 22) is not None
-                    assert await ledger.credential('renewed:1', 22) is None
+                    assert await transport.rows(
+                        'SELECT actor_id, choice FROM vote_receipts ORDER BY seq'
+                    ) == [
+                        {'actor_id': 'actor', 'choice': 'a'},
+                        {'actor_id': 'other', 'choice': 'b'},
+                    ]
                     assert await transport.rows(
                         'SELECT subject, consumed FROM quota_windows '
-                        "WHERE operation = 'renew'"
-                    ) == [{'subject': 'actor:0', 'consumed': 1}]
-                    assert await transport.rows(
-                        'SELECT command_id FROM admission_results '
-                        "WHERE operation = 'renew'"
-                    ) == [{'command_id': 'renew:0'}]
-                    assert (
-                        await ledger.admit(
-                            first_context.model_copy(update={'now': 22}), first_request
-                        )
-                        == first
-                    )
+                        'WHERE operation = ? ORDER BY subject',
+                        operation,
+                    ) == [
+                        {'subject': 'actor', 'consumed': 1},
+                        {'subject': 'other', 'consumed': 1},
+                    ]
+                    frozen = await ledger.freeze('actor-history', 'writing', 40)
+                    actors = await ledger.page(frozen.id, 'actors')
+                    assert actors.rows == [{'id': 'actor', 'created_at': 2}]
 
             asyncio.run(scenario())
 
     class TestIssue:
-        @pytest.mark.parametrize('fill_actor', ['actor', 'owner'])
-        def test_pending_limit_uses_the_global_owner_group_in_both_directions(
-            self, d1_runtime: D1Runtime, fill_actor: str
+        def test_pending_limit_counts_other_families_and_excludes_expired_leases(
+            self, d1_runtime: D1Runtime
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
@@ -1727,19 +1740,6 @@ class TestLedger:
                             ),
                         ),
                     )
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner')
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 3)
-                    await ledger.attribute(
-                        Context(command_id='link', principal='admin', now=3), plan.id
-                    )
-                    attempt_actor = 'owner' if fill_actor == 'actor' else 'actor'
-
                     for index in range(5):
                         family = f'family-{index}'
                         release = await publish(ledger, family=family)
@@ -1755,11 +1755,10 @@ class TestLedger:
                             release.publication.id,
                             release.points.id,
                         )
-                        actor = fill_actor if index < 4 else attempt_actor
                         await ledger.start_session(
                             Session(
                                 id=f'session:{index}',
-                                actor_id=actor,
+                                actor_id='actor',
                                 family=family,
                                 created_at=5,
                             )
@@ -1769,7 +1768,7 @@ class TestLedger:
                             await ledger.issue(
                                 Context(
                                     command_id=f'draw:{index}',
-                                    principal=actor,
+                                    principal='actor',
                                     now=10,
                                 ),
                                 issue(
@@ -1780,7 +1779,6 @@ class TestLedger:
                             )
 
                     tables = (
-                        'actor_resolution',
                         'claims',
                         'evidence_events',
                         'lease_revocations',
@@ -1804,9 +1802,7 @@ class TestLedger:
 
                     with pytest.raises(CommandRejected, match='^pending_limit$'):
                         await ledger.issue(
-                            Context(
-                                command_id='fifth', principal=attempt_actor, now=20
-                            ),
+                            Context(command_id='fifth', principal='actor', now=20),
                             proposed,
                         )
 
@@ -1815,18 +1811,25 @@ class TestLedger:
                         for table in tables
                     } == before
 
+                    await seed_actor(transport, Actor(id='other', created_at=21))
+                    await ledger.open_session('other', 'independent', 'family-4', 22)
+                    independent = await ledger.issue(
+                        Context(command_id='independent', principal='other', now=30),
+                        issue(session='independent', lease='independent'),
+                    )
+                    assert independent.actor_id == 'other'
+
                     accepted = await ledger.issue(
-                        Context(
-                            command_id='after-expiry', principal=attempt_actor, now=100
-                        ),
+                        Context(command_id='after-expiry', principal='actor', now=100),
                         proposed,
                     )
 
                     assert accepted.id == 'fifth'
-                    assert accepted.actor_id == attempt_actor
+                    assert accepted.actor_id == 'actor'
                     assert await transport.rows(
                         'SELECT count(*) AS live FROM pair_leases '
-                        "WHERE status = 'pending' AND expires_at > 100"
+                        "WHERE actor_id = 'actor' AND status = 'pending' "
+                        'AND expires_at > 100'
                     ) == [{'live': 4}]
 
             asyncio.run(scenario())
@@ -2007,7 +2010,7 @@ class TestLedger:
                         )
 
                     if actor != 'actor':
-                        await ledger.register_actor(Actor(id=actor, created_at=30))
+                        await seed_actor(transport, Actor(id=actor, created_at=30))
 
                     await ledger.start_session(
                         Session(
@@ -2299,127 +2302,6 @@ class TestLedger:
                     assert await transport.rows('SELECT count FROM coverage') == [
                         {'count': 1}
                     ]
-
-            asyncio.run(scenario())
-
-        @pytest.mark.parametrize('operation', ['issue', 'accept'])
-        @pytest.mark.parametrize('spender', ['owner', 'other-source'])
-        def test_linked_sources_share_global_quota_across_families(
-            self, d1_runtime: D1Runtime, operation: str, spender: str
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    quotas = (
-                        Quota(
-                            operation='issue',
-                            scope='actor',
-                            window_ms=1_000,
-                            limit=1 if operation == 'issue' else 100,
-                        ),
-                        Quota(
-                            operation='accept',
-                            scope='actor',
-                            window_ms=1_000,
-                            limit=1 if operation == 'accept' else 100,
-                        ),
-                    )
-                    await prepare(ledger, transport, quotas=quotas)
-                    await publish(ledger, suffix='other', family='other')
-                    await ledger.activate(
-                        Context(command_id='activate:other', principal='admin', now=2),
-                        'other',
-                        0,
-                        make_release(family='other', suffix='other').evaluation.id,
-                        make_release(family='other', suffix='other').publication.id,
-                        make_release(family='other', suffix='other').points.id,
-                    )
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner-source')
-                    )
-
-                    if spender != 'owner':
-                        await ledger.register_actor(Actor(id=spender, created_at=2))
-
-                    await ledger.start_session(
-                        Session(
-                            id='spent-session',
-                            actor_id=spender,
-                            family='other',
-                            created_at=2,
-                        )
-                    )
-
-                    if spender != 'owner':
-                        plan = await ledger.prepare_attribution(
-                            'other-link', 'other', spender, 'owner'
-                        )
-                        await ledger.stage_attribution(plan)
-                        await ledger.seal_attribution(plan.id, 5)
-                        await ledger.attribute(
-                            Context(command_id='other-link', principal='admin', now=5),
-                            plan.id,
-                        )
-
-                    owner_lease = await ledger.issue(
-                        Context(command_id='issue:spent', principal=spender, now=10),
-                        issue(session='spent-session', lease='spent-lease'),
-                    )
-                    await ledger.accept(
-                        Context(command_id='accept:spent', principal=spender, now=20),
-                        Accept(
-                            lease_id=owner_lease.id,
-                            acknowledgment='owner-ack',
-                            choice='a',
-                            attribution=attribution(20),
-                        ),
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 30)
-                    await ledger.attribute(
-                        Context(command_id='link', principal='admin', now=30), plan.id
-                    )
-                    context = Context(
-                        command_id='issue:source', principal='actor', now=40
-                    )
-
-                    if operation == 'issue':
-                        with pytest.raises(CommandRejected, match='^quota_exhausted$'):
-                            await ledger.issue(context, issue())
-
-                        assert await ledger.resume('actor', 'session', 51) is None
-                    else:
-                        source_lease = await ledger.issue(context, issue())
-
-                        with pytest.raises(CommandRejected, match='^quota_exhausted$'):
-                            await ledger.accept(
-                                Context(
-                                    command_id='accept:source',
-                                    principal='actor',
-                                    now=50,
-                                ),
-                                Accept(
-                                    lease_id=source_lease.id,
-                                    acknowledgment='source-ack',
-                                    choice='b',
-                                    attribution=attribution(50),
-                                ),
-                            )
-
-                        assert (
-                            await ledger.resume('actor', 'session', 51) == source_lease
-                        )
-
-                    assert await transport.rows(
-                        'SELECT actor_id, family, choice FROM vote_receipts'
-                    ) == [{'actor_id': spender, 'family': 'other', 'choice': 'a'}]
-                    assert await transport.rows(
-                        'SELECT subject, consumed FROM quota_windows '
-                        'WHERE operation = ?',
-                        operation,
-                    ) == [{'subject': spender, 'consumed': 1}]
 
             asyncio.run(scenario())
 
@@ -2949,417 +2831,42 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-    class TestAttribute:
-        def test_different_families_cannot_assign_one_actor_to_conflicting_owners(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    other = await publish(ledger, family='other')
-                    await ledger.activate(
-                        Context(command_id='activate:other', principal='admin', now=2),
-                        'other',
-                        0,
-                        other.evaluation.id,
-                        other.publication.id,
-                        other.points.id,
-                    )
-                    await ledger.start_session(
-                        Session(
-                            id='other-session',
-                            actor_id='actor',
-                            family='other',
-                            created_at=3,
-                        )
-                    )
-
-                    for owner in ('first-owner', 'second-owner'):
-                        await ledger.register_actor(
-                            Actor(id=owner, created_at=2, owner_namespace=owner)
-                        )
-
-                    first = await ledger.prepare_attribution(
-                        'first', 'writing', 'actor', 'first-owner'
-                    )
-                    await ledger.stage_attribution(first)
-                    await ledger.seal_attribution(first.id, 10)
-                    await ledger.attribute(
-                        Context(command_id='first', principal='admin', now=10), first.id
-                    )
-                    conflicting = await ledger.prepare_attribution(
-                        'conflicting', 'other', 'actor', 'second-owner'
-                    )
-                    await ledger.stage_attribution(conflicting)
-                    await ledger.seal_attribution(conflicting.id, 20)
-                    resolutions = await transport.rows(
-                        'SELECT * FROM actor_resolution ORDER BY family, actor_id'
-                    )
-                    events = await transport.rows('SELECT * FROM evidence_events')
-
-                    with pytest.raises(CommandRejected, match='^attribution_stale$'):
-                        await ledger.attribute(
-                            Context(
-                                command_id='conflicting', principal='admin', now=20
-                            ),
-                            conflicting.id,
-                        )
-
-                    assert (
-                        await transport.rows(
-                            'SELECT * FROM actor_resolution ORDER BY family, actor_id'
-                        )
-                        == resolutions
-                    )
-                    assert (
-                        await transport.rows('SELECT * FROM evidence_events') == events
-                    )
-                    original = await ledger.read.session('actor', 'session')
-                    unchanged = await ledger.read.session('actor', 'other-session')
-                    assert original is not None and unchanged is not None
-                    assert original.canonical_actor == 'first-owner'
-                    assert unchanged.canonical_actor == 'actor'
-
-            asyncio.run(scenario())
-
-        def test_superseded_owner_original_revokes_only_its_dependent_repeat(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner-source')
-                    )
-                    await ledger.start_session(
-                        Session(
-                            id='owner-session',
-                            actor_id='owner',
-                            family='writing',
-                            created_at=2,
-                        )
-                    )
-                    receipts: list[Receipt] = []
-
-                    for actor, session_id, now in (
-                        ('owner', 'owner-session', 10),
-                        ('actor', 'session', 30),
-                    ):
-                        lease = await ledger.issue(
-                            Context(
-                                command_id=f'draw:{actor}', principal=actor, now=now
-                            ),
-                            issue(session=session_id, lease=f'lease:{actor}'),
-                        )
-                        receipts.append(
-                            await ledger.accept(
-                                Context(
-                                    command_id=f'vote:{actor}',
-                                    principal=actor,
-                                    now=now + 1,
-                                ),
-                                Accept(
-                                    lease_id=lease.id,
-                                    acknowledgment=f'ack:{actor}',
-                                    choice='a',
-                                    attribution=attribution(now + 1),
-                                ),
-                            )
-                        )
-
-                    original, latest = receipts
-                    now = original.recorded_at + 86_400_000
-                    await ledger.start_session(
-                        Session(
-                            id='repeat-session',
-                            actor_id='owner',
-                            family='writing',
-                            created_at=now,
-                        )
-                    )
-                    repeated = await ledger.issue(
-                        Context(command_id='repeat-draw', principal='owner', now=now),
-                        issue(session='repeat-session', lease='repeat').model_copy(
-                            update={
-                                'claim_id': 'repeat-claim',
-                                'a_output': original.b_output,
-                                'b_output': original.a_output,
-                                'expires_at': now + 1_000,
-                                'repeat_of': original.seq,
-                            }
-                        ),
-                    )
-                    other = await publish(ledger, family='other')
-                    await ledger.activate(
-                        Context(
-                            command_id='activate:other', principal='admin', now=now
-                        ),
-                        'other',
-                        0,
-                        other.evaluation.id,
-                        other.publication.id,
-                        other.points.id,
-                    )
-                    await ledger.start_session(
-                        Session(
-                            id='other-session',
-                            actor_id='owner',
-                            family='other',
-                            created_at=now,
-                        )
-                    )
-                    unrelated = await ledger.issue(
-                        Context(
-                            command_id='other-draw', principal='owner', now=now + 1
-                        ),
-                        issue(
-                            session='other-session', lease='other-lease', case=1
-                        ).model_copy(update={'expires_at': now + 1_000}),
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, now + 2)
-
-                    linked = await ledger.attribute(
-                        Context(command_id='link', principal='admin', now=now + 3),
-                        plan.id,
-                    )
-
-                    assert (
-                        await ledger.resume('owner', 'repeat-session', now + 4) is None
-                    )
-                    assert (
-                        await ledger.resume('owner', 'other-session', now + 4)
-                        == unrelated
-                    )
-                    repeated_session = await ledger.read.session(
-                        'owner', 'repeat-session'
-                    )
-                    assert repeated_session is not None
-                    assert repeated_session.current_lease is None
-                    assert repeated_session.version == 2
-                    assert await transport.rows(
-                        'SELECT superseded FROM receipt_state WHERE receipt_seq = ?',
-                        original.seq,
-                    ) == [{'superseded': linked.seq}]
-                    assert await transport.rows(
-                        'SELECT receipt_seq FROM eligible_claims '
-                        "WHERE family = 'writing'"
-                    ) == [{'receipt_seq': latest.seq}]
-
-                    with pytest.raises(CommandRejected, match='^lease_stale$'):
-                        await ledger.accept(
-                            Context(
-                                command_id='repeat-vote', principal='owner', now=now + 4
-                            ),
-                            Accept(
-                                lease_id=repeated.id,
-                                acknowledgment='repeat-ack',
-                                choice='b',
-                                attribution=attribution(now + 4),
-                            ),
-                        )
-
-            asyncio.run(scenario())
-
-        def test_linking_an_empty_source_preserves_unrelated_owner_pending_work(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner-source')
-                    )
-                    await ledger.start_session(
-                        Session(
-                            id='owner-session',
-                            actor_id='owner',
-                            family='writing',
-                            created_at=2,
-                        )
-                    )
-                    lease = await ledger.issue(
-                        Context(command_id='owner-draw', principal='owner', now=10),
-                        issue(session='owner-session', lease='owner-lease', case=1),
-                    )
-                    owned = await ledger.read.session('owner', 'owner-session')
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 20)
-
-                    await ledger.attribute(
-                        Context(command_id='link', principal='admin', now=20), plan.id
-                    )
-
-                    assert await ledger.resume('owner', 'owner-session', 21) == lease
-                    assert await ledger.read.session('owner', 'owner-session') == owned
-                    receipt = await ledger.accept(
-                        Context(command_id='owner-vote', principal='owner', now=22),
-                        Accept(
-                            lease_id=lease.id,
-                            acknowledgment='owner-ack',
-                            choice='a',
-                            attribution=attribution(22),
-                        ),
-                    )
-                    assert receipt.lease_id == lease.id
-                    assert receipt.actor_id == 'owner'
-                    assert await transport.rows(
-                        'SELECT receipt_seq FROM eligible_claims'
-                    ) == [{'receipt_seq': receipt.seq}]
-
-            asyncio.run(scenario())
-
-        def test_merges_latest_choices_and_unlink_does_not_revive_older_votes(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(
-                            id='owner', created_at=2, owner_namespace='registered-owner'
-                        )
-                    )
-                    await ledger.start_session(
-                        Session(
-                            id='owner-session',
-                            actor_id='owner',
-                            family='writing',
-                            created_at=2,
-                        )
-                    )
-                    owner_lease = await ledger.issue(
-                        Context(command_id='owner-draw', principal='owner', now=10),
-                        issue(session='owner-session', lease='owner-lease'),
-                    )
-                    old = await ledger.accept(
-                        Context(command_id='owner-vote', principal='owner', now=20),
-                        Accept(
-                            lease_id=owner_lease.id,
-                            acknowledgment='owner-ack',
-                            choice='a',
-                            attribution=attribution(20),
-                        ),
-                    )
-                    source_lease = await ledger.issue(
-                        Context(command_id='source-draw', principal='actor', now=30),
-                        issue(),
-                    )
-                    latest = await ledger.accept(
-                        Context(command_id='source-vote', principal='actor', now=40),
-                        Accept(
-                            lease_id=source_lease.id,
-                            acknowledgment='source-ack',
-                            choice='b',
-                            attribution=attribution(40),
-                        ),
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 50)
-
-                    linked = await ledger.attribute(
-                        Context(command_id='link', principal='admin', now=60), plan.id
-                    )
-
-                    assert await transport.rows(
-                        'SELECT receipt_seq FROM eligible_claims'
-                    ) == [{'receipt_seq': latest.seq}]
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-                    assert await transport.rows(
-                        'SELECT superseded FROM receipt_state WHERE receipt_seq = ?',
-                        old.seq,
-                    ) == [{'superseded': linked.seq}]
-                    assert (
-                        await ledger.attribute(
-                            Context(command_id='link', principal='admin', now=61),
-                            plan.id,
-                        )
-                        == linked
-                    )
-
-                    undo = await ledger.prepare_attribution(
-                        'unlink', 'writing', 'actor', 'actor'
-                    )
-                    await ledger.stage_attribution(undo)
-                    await ledger.seal_attribution(undo.id, 70)
-                    await ledger.attribute(
-                        Context(command_id='unlink', principal='admin', now=80), undo.id
-                    )
-
-                    assert await transport.rows(
-                        'SELECT receipt_seq FROM eligible_claims'
-                    ) == [{'receipt_seq': latest.seq}]
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-                    assert await transport.rows(
-                        'SELECT superseded FROM receipt_state WHERE receipt_seq = ?',
-                        old.seq,
-                    ) == [{'superseded': linked.seq}]
-                    assert await transport.rows(
-                        'SELECT canonical_actor FROM actor_resolution '
-                        "WHERE actor_id = 'actor'"
-                    ) == [{'canonical_actor': 'actor'}]
-
-            asyncio.run(scenario())
-
-        def test_new_pending_claim_invalidates_a_reviewed_link_plan(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(
-                            id='owner', created_at=2, owner_namespace='registered-owner'
-                        )
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'link', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 10)
-                    lease = await ledger.issue(
-                        Context(command_id='draw', principal='actor', now=20), issue()
-                    )
-                    before = await transport.rows(
-                        'SELECT * FROM actor_resolution ORDER BY actor_id'
-                    )
-
-                    with pytest.raises(CommandRejected, match='^attribution_stale$'):
-                        await ledger.attribute(
-                            Context(command_id='link', principal='admin', now=30),
-                            plan.id,
-                        )
-
-                    assert (
-                        await transport.rows(
-                            'SELECT * FROM actor_resolution ORDER BY actor_id'
-                        )
-                        == before
-                    )
-                    assert await ledger.resume('actor', 'session', 31) == lease
-                    assert (
-                        await transport.rows(
-                            "SELECT * FROM evidence_events WHERE command_id = 'link'"
-                        )
-                        == []
-                    )
-
-            asyncio.run(scenario())
-
     class TestFreeze:
+        def test_frozen_and_presentation_metadata_reject_unsafe_family_names(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    release = await prepare(ledger, transport)
+                    frozen = await ledger.freeze('family-name', 'writing', 10)
+                    assert (
+                        Export.model_validate_json(frozen.model_dump_json()) == frozen
+                    )
+
+                    for family in (
+                        '../outside',
+                        '/absolute',
+                        'writing/../../outside',
+                        'writing\n',
+                        'writing\r\n',
+                        'Writing',
+                        '',
+                    ):
+                        exported = frozen.model_dump(mode='json')
+                        exported['family'] = family
+                        publication = release.publication.model_dump(mode='json')
+                        publication['presentation']['family'] = family
+
+                        with pytest.raises(ValidationError, match='family'):
+                            Export.model_validate(exported)
+
+                        with pytest.raises(ValidationError, match='family'):
+                            Publication.model_validate(publication)
+
+                    assert await ledger.freeze(frozen.id, 'writing', 20) == frozen
+
+            asyncio.run(scenario())
+
         def test_frozen_pages_preserve_receipt_cutoff_and_inventory_after_later_changes(
             self, d1_runtime: D1Runtime
         ) -> None:
@@ -3500,7 +3007,6 @@ class TestLedger:
 
                     assert await ledger.read.session('actor', 'session') is None
                     assert await transport.rows('SELECT * FROM actors') == []
-                    assert await transport.rows('SELECT * FROM actor_resolution') == []
                     assert (
                         await transport.rows('SELECT * FROM event_targets') == targets
                     )
@@ -3553,7 +3059,6 @@ class TestLedger:
                     assert page.after is None
                     assert tuple(row.observation for row in page.rows) == (receipt,)
                     investigated = page.rows[0]
-                    assert investigated.canonical_actor == 'actor'
                     assert investigated.claim_version == 2
                     assert investigated.selected and investigated.eligible
                     assert investigated.network == request.attribution
@@ -3644,11 +3149,11 @@ class TestLedger:
                     )
 
                     for index in range(251):
-                        await ledger.register_actor(
-                            Actor(id=f'expired:{index:03}', created_at=0)
+                        await seed_actor(
+                            transport, Actor(id=f'expired:{index:03}', created_at=0)
                         )
 
-                    await ledger.register_actor(Actor(id='fresh', created_at=1))
+                    await seed_actor(transport, Actor(id='fresh', created_at=1))
 
                     await ledger.maintenance.expire(30 * 86_400_000)
 
@@ -3667,40 +3172,6 @@ class TestLedger:
                     assert await transport.rows('SELECT * FROM actor_expiry') == [
                         {'actor_id': 'fresh', 'expires_at': 30 * 86_400_000 + 1}
                     ]
-
-            asyncio.run(scenario())
-
-        def test_reviewed_owner_attribution_remains_auditable_after_browsing_expiry(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner')
-                    )
-                    plan = await ledger.prepare_attribution(
-                        'attribution', 'writing', 'actor', 'owner'
-                    )
-                    await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, 10)
-                    await ledger.attribute(
-                        Context(command_id='attribute', principal='admin', now=11),
-                        plan.id,
-                    )
-                    events = await transport.rows('SELECT * FROM evidence_events')
-
-                    await ledger.maintenance.expire(60 * 86_400_000)
-
-                    assert await transport.rows(
-                        'SELECT id FROM actors ORDER BY id'
-                    ) == [{'id': 'actor'}, {'id': 'owner'}]
-                    assert await ledger.read.session('actor', 'session') is None
-                    assert await transport.rows('SELECT * FROM actor_expiry') == []
-                    assert (
-                        await transport.rows('SELECT * FROM evidence_events') == events
-                    )
-                    assert await transport.rows('SELECT * FROM vote_receipts') == []
 
             asyncio.run(scenario())
 
