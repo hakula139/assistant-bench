@@ -178,6 +178,11 @@ class Ledger:
         if policy_id != digest(policy):
             raise ValueError('A policy identity must bind its complete definition.')
 
+        weights = policy.method.human_weights
+
+        if weights.name != 'actor-proportional-cap' or weights.cap != 100:
+            raise ValueError('A live ledger requires the 100-unit actor weighting cap.')
+
         body = canonical(policy)
         await self._fact(
             Statement(
