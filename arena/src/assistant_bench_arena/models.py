@@ -5,6 +5,33 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# ── Records ──
+
+
+class Record(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+        frozen=True,
+        strict=True,
+        allow_inf_nan=False,
+        use_attribute_docstrings=True,
+    )
+
+
+# ── Identifiers ──
+
+
+# JSON Schema uses ECMAScript, whose $ also matches before a final newline.
+type FamilyName = Annotated[
+    str,
+    Field(
+        pattern=r'^[a-z0-9][a-z0-9-]*$',
+        max_length=256,
+        json_schema_extra={'pattern': r'^[a-z0-9][a-z0-9-]*(?![\s\S])'},
+    ),
+]
+
+
 # ── Choices ──
 
 
@@ -73,7 +100,7 @@ class PairView(BaseModel):
 class FamilyView(BaseModel):
     """A family the vote page can start a session on."""
 
-    name: str
+    name: FamilyName
     """Stable family ID."""
 
     aspect: str | None
@@ -107,7 +134,7 @@ NOTE_MAX_CHARS = 500
 class StartSession(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    family: str
+    family: FamilyName
 
 
 class VoteRequest(BaseModel):

@@ -70,7 +70,7 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = [ uv ];
+          packages = [ uv ] ++ nodeTools;
           env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
@@ -214,11 +214,7 @@
           name = "assistant-bench-dev";
           inherit (pythonEnvironment) env;
 
-          packages =
-            pythonEnvironment.packages
-            ++ preCommit.enabledPackages
-            ++ [ preCommit.config.package ]
-            ++ nodeTools;
+          packages = pythonEnvironment.packages ++ preCommit.enabledPackages ++ [ preCommit.config.package ];
 
           # Other repositories enter this shell for its tools, and the flake's source is a store
           # copy that can't name its checkout, so hooks install only where the repository's
