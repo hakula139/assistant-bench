@@ -21,7 +21,15 @@ class Record(BaseModel):
 # ── Identifiers ──
 
 
-type FamilyName = Annotated[str, Field(pattern=r'^[a-z0-9][a-z0-9-]*$', max_length=256)]
+# JSON Schema uses ECMAScript, whose $ also matches before a final newline.
+type FamilyName = Annotated[
+    str,
+    Field(
+        pattern=r'^[a-z0-9][a-z0-9-]*$',
+        max_length=256,
+        json_schema_extra={'pattern': r'^[a-z0-9][a-z0-9-]*(?![\s\S])'},
+    ),
+]
 
 
 # ── Choices ──
