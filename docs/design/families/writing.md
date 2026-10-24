@@ -63,7 +63,7 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 
 | Value      | Meaning                                                                                                               |
 | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| `[]`       | The output passed every gate and is eligible for blind voting                                                         |
+| `[]`       | The output passed every gate and is eligible for an approved public comparison                                        |
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | No verdict: a case trial errored, a task was ungraded, or the family's scorer has no gates                            |
 

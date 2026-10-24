@@ -21,7 +21,7 @@ class Record(BaseModel):
 # ── Identifiers ──
 
 
-# JSON Schema uses ECMAScript, whose $ also matches before a final newline.
+# Python JSON Schema validators accept a final newline with $.
 type FamilyName = Annotated[
     str,
     Field(

@@ -192,7 +192,7 @@ class VotesResults(_Model):
 
     standings: list[Standing]
     unranked: list[str]
-    """Entrants with current outputs outside the selected comparison component."""
+    """Entrants in the frozen evaluation outside the comparison component."""
     head_to_head: list[HeadToHead]
     categories: list[CategoryBoard]
 

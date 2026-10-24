@@ -100,7 +100,7 @@ class Gates(BaseModel):
 
 
 class VotesSettings(_Settings):
-    """A family ranked by the owner's blind pairwise votes."""
+    """A family ranked by blind pairwise votes."""
 
     scorer: Literal['votes']
     public_voting: bool = False

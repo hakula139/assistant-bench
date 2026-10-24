@@ -4,7 +4,7 @@ from harbor.models.job.lock import TrialLock
 from pydantic import Field
 
 from assistant_bench import jobs
-from assistant_bench.arena.publication import load_policy, prepare
+from assistant_bench.arena.publication import load_policy, prepare, publication_settings
 from assistant_bench.arena.sources import prove_task
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.families import case_task, load_cases, load_family
@@ -31,6 +31,8 @@ class Preparation(Record):
 def prepare_selection(selection: Preparation) -> Release:
     """Recollect current inputs and refuse unproved or stale selected solutions."""
     family = load_family(selection.family)
+    publication_settings(family)
+
     cases = {case.id: case for case in load_cases(family)}
     known = load_systems(load_export())
 

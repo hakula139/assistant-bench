@@ -99,6 +99,17 @@ def output_key(output: CollectedOutput, case: str) -> str:
     )
 
 
+def publication_settings(family: Family) -> VotesSettings:
+    """Require the rendered-case source supported by public preparation."""
+    if family.source != 'cases':
+        raise ValueError('Public preparation supports rendered case families only.')
+
+    if not isinstance(family.settings, VotesSettings):
+        raise ValueError('Only a votes family can prepare an arena release.')
+
+    return family.settings
+
+
 def prepare(
     family: Family,
     cases: Sequence[Case],
@@ -112,12 +123,10 @@ def prepare(
 ) -> Release:
     """Prepare the exact explicitly approved public subset.
 
-    `source_digests` must come from verified agent-input sources, including the
-    task workspace where applicable. Case names alone cannot establish them.
+    `source_digests` must come from verified rendered-task inputs. Case names
+    alone cannot establish them.
     """
-    settings = family.settings
-    if not isinstance(settings, VotesSettings):
-        raise ValueError('Only a votes family can prepare an arena release.')
+    settings = publication_settings(family)
 
     if not settings.public_voting or approval.family != family.name:
         raise ValueError('Public voting requires this family to opt in and approve it.')

@@ -1,6 +1,6 @@
 # Ranking
 
-`scoring/ranking.py` fits a family's point scores. `report.py` records them with the method, rules and descriptive diagnostics. Every vote that [reconciles](arena.md#sessions-and-pairs) with current outputs enters the cumulative evaluation. Other votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
+`scoring/ranking.py` fits a family's point scores. `report.py` records them with the method, rules and descriptive diagnostics. Every vote that [reconciles](arena.md#sessions-and-pairs) with the export's frozen approved inventory enters the cumulative evaluation. Other votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
 
 ## The Fit
 

@@ -15,7 +15,7 @@ uv run bench arena refresh production evidence.json
 uv run bench close writing-zh --snapshot evidence.json
 ```
 
-The selection names a family and exact `outputs`, each identified by `case`, `system`, `job` and `trial`. Preparation re-collects current trials, checks the resolved family fingerprints, and proves the selected tasks against their native Harbor locks. Every selected sample of a case must have received the same instruction and source inputs. The prepared artifact contains the frozen numerical evaluation, presentation, rendered outputs and initial sampling points.
+The selection names a rendered case family and exact `outputs`, each identified by `case`, `system`, `job` and `trial`. Preparation re-collects current trials, checks the resolved family fingerprints, and proves the rendered tasks against their native Harbor locks. Every selected sample of a case must have received the same instruction and source inputs. The prepared artifact contains the frozen numerical evaluation, presentation, rendered outputs and initial sampling points.
 
 Preparation requires the family's `public_voting` opt-in and an exact `PublicApproval`: source and license attestations for the selected cases, plus content and presentation digests for every published case and output. Synthetic classification and passing gates alone do not authorize publication. Regeneration changes the approved output identities and requires another review.
 
