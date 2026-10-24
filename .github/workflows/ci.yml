@@ -102,7 +102,7 @@ jobs:
 
       - name: Bundle the voting Worker
         run: >-
-          env -u _PYTHON_SYSCONFIGDATA_NAME
+          env -u _PYTHON_SYSCONFIGDATA_NAME -u _PYTHON_HOST_PLATFORM
           uv run --directory arena pywrangler deploy --dry-run --env staging
           --env-file /dev/null --outdir /tmp/assistant-bench-worker
 
