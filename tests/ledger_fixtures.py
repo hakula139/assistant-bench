@@ -110,6 +110,7 @@ def output_key(index: int, name: str) -> str:
 def make_release(
     *,
     mode: Mode = 'local',
+    policy: AnalysisPolicy = POLICY,
     family: str = 'writing',
     suffix: str = '1',
     cases: int = 3,
@@ -170,12 +171,12 @@ def make_release(
             categories=(),
             defects=('tone',),
         ),
-        policy=POLICY,
+        policy=policy,
     )
     evaluation = Evaluation(
         id=evaluation_identity(manifest, case_rows, systems, outputs, numerics),
         family=family,
-        policy_id=digest(POLICY),
+        policy_id=digest(policy),
         manifest=manifest,
         cases=len(case_rows),
         systems=len(systems),
@@ -239,7 +240,7 @@ def make_release(
 
     return Release(
         mode=mode,
-        policy=POLICY,
+        policy=policy,
         evaluation=evaluation,
         cases=case_rows,
         systems=systems,

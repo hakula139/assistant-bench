@@ -7,6 +7,7 @@ from typing import get_args
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from assistant_bench_arena.investigation import NetworkLookup, ReceiptFilter
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
     Accept,
@@ -2320,6 +2321,12 @@ class TestLedger:
                     current_rows = await export_rows(ledger, current.id, limit=2)
 
                     assert after == before
+                    assert frozen.sections == {
+                        section: len(rows) for section, rows in before.items()
+                    }
+                    assert current.sections == {
+                        section: len(rows) for section, rows in current_rows.items()
+                    }
                     assert await ledger.freeze(frozen.id, 'writing', 50) == frozen
                     assert (
                         frozen.namespace == 'test-deployment'
@@ -2460,6 +2467,50 @@ class TestLedger:
                     frozen = await ledger.freeze('before-expiry', 'writing', 21)
                     before = await export_rows(ledger, frozen.id, limit=2)
                     expiry = context.now + RETENTION_MS
+                    filters = ReceiptFilter(
+                        family='writing',
+                        actor_id='actor',
+                        session_id='session',
+                        evaluation_id=receipt.evaluation_id,
+                        recorded_from=context.now,
+                        recorded_before=context.now + 1,
+                        status='active',
+                    )
+                    page = await ledger.investigation.receipts(filters, expiry - 1)
+
+                    assert page.after is None
+                    assert tuple(row.observation for row in page.rows) == (receipt,)
+                    investigated = page.rows[0]
+                    assert investigated.canonical_actor == 'actor'
+                    assert investigated.claim_version == 2
+                    assert investigated.selected and investigated.eligible
+                    assert investigated.network == request.attribution
+                    assert investigated.withdrawn is investigated.excluded is None
+                    assert investigated.superseded is None
+
+                    for field in ('actor_id', 'session_id'):
+                        hidden = await ledger.investigation.receipts(
+                            filters.model_copy(update={field: 'other'}), expiry - 1
+                        )
+                        assert hidden.rows == (), field
+
+                    for tag in request.attribution:
+                        lookup = filters.model_copy(
+                            update={
+                                'network': NetworkLookup(
+                                    version=tag.version, kind=tag.kind, tag=tag.tag
+                                )
+                            }
+                        )
+                        live = await ledger.investigation.receipts(lookup, expiry - 1)
+                        expired = await ledger.investigation.receipts(lookup, expiry)
+
+                        assert live.rows == page.rows, tag.kind
+                        assert expired.rows == (), tag.kind
+
+                    expired_page = await ledger.investigation.receipts(filters, expiry)
+                    assert expired_page.rows[0].observation == receipt
+                    assert expired_page.rows[0].network == ()
 
                     await ledger.maintenance.expire(expiry - 1)
 
@@ -2499,7 +2550,7 @@ class TestLedger:
                     assert await export_rows(ledger, frozen.id, limit=1) == before
                     current = await ledger.freeze('after-expiry', 'writing', expiry + 3)
                     after = await export_rows(ledger, current.id, limit=3)
-                    assert after['observations'] == before['observations']
+                    assert after['receipts'] == before['receipts']
                     assert after['events'] == before['events']
                     assert 'attribution:exact' not in json.dumps(after)
                     assert 'attribution:prefix' not in json.dumps(after)
