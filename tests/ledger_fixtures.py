@@ -112,6 +112,7 @@ def make_release(
     mode: Mode = 'local',
     policy: AnalysisPolicy = POLICY,
     family: str = 'writing',
+    systems: tuple[str, ...] = ('large', 'small'),
     suffix: str = '1',
     cases: int = 3,
     failing_case: int | None = None,
@@ -133,9 +134,9 @@ def make_release(
         )
         for index in range(cases)
     )
-    systems = tuple(
+    system_rows = tuple(
         System(id=name, fingerprint=f'fingerprint:{name}', order=index)
-        for index, name in enumerate(('large', 'small'))
+        for index, name in enumerate(systems)
     )
     outputs = tuple(
         Output(
@@ -143,7 +144,7 @@ def make_release(
             case_key=case_key(index),
             system_id=name,
             content_digest=digest(output_content(index, name)),
-            verdict='fail' if index == failing_case and name == 'large' else 'pass',
+            verdict='fail' if index == failing_case and name == systems[0] else 'pass',
             length=len(output_content(index, name)),
             approved_public=True,
             metadata=OutputMetadata(
@@ -160,26 +161,26 @@ def make_release(
             ),
         )
         for index in range(cases)
-        for name in ('large', 'small')
+        for name in systems
     )
     numerics = settlements(outputs)
     manifest = EvaluationManifest(
         family=FamilyDefinition(
             name=family,
-            reference='large',
-            systems=('large', 'small'),
+            reference=systems[0],
+            systems=systems,
             categories=(),
             defects=('tone',),
         ),
         policy=policy,
     )
     evaluation = Evaluation(
-        id=evaluation_identity(manifest, case_rows, systems, outputs, numerics),
+        id=evaluation_identity(manifest, case_rows, system_rows, outputs, numerics),
         family=family,
         policy_id=digest(policy),
         manifest=manifest,
         cases=len(case_rows),
-        systems=len(systems),
+        systems=len(system_rows),
         outputs=len(outputs),
         numerics=len(numerics),
     )
@@ -188,7 +189,7 @@ def make_release(
         aspect=None,
         display_name=f'{family} {suffix}',
         render='text',
-        systems={'large': 'Large', 'small': 'Small'},
+        systems={name: name.title() for name in systems},
         cases={case_key(index): case_document(index) for index in range(cases)},
     )
     rendered = tuple(
@@ -200,7 +201,7 @@ def make_release(
             approved_public=True,
         )
         for index in range(cases)
-        for name in ('large', 'small')
+        for name in systems
     )
     approval = (
         PublicApproval(
@@ -224,7 +225,7 @@ def make_release(
                     ),
                 )
                 for index in range(cases)
-                for name in ('large', 'small')
+                for name in systems
             ),
         )
         if mode == 'public'
@@ -243,7 +244,7 @@ def make_release(
         policy=policy,
         evaluation=evaluation,
         cases=case_rows,
-        systems=systems,
+        systems=system_rows,
         outputs=outputs,
         numerics=numerics,
         publication=publication,
@@ -251,6 +252,6 @@ def make_release(
         points=point_snapshot(
             evaluation.id,
             evaluation.policy_id,
-            {system.id: Point(score=None, component=None) for system in systems},
+            {system.id: Point(score=None, component=None) for system in system_rows},
         ),
     )
