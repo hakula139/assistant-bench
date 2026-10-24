@@ -419,6 +419,21 @@ class Ledger:
         )
         return Credential.model_validate(rows[0]) if rows else None
 
+    async def renewal_credential(
+        self, credential_id: str, command_id: str, now: int
+    ) -> Credential | None:
+        """Resolve signed renewal recovery for ten minutes after original expiry."""
+        rows = await self._rows(
+            """
+            SELECT * FROM credentials WHERE id = ? AND expires_at + 600000 > ?
+                AND (revoked_at IS NULL OR renewal_command = ?)
+            """,
+            credential_id,
+            now,
+            command_id,
+        )
+        return Credential.model_validate(rows[0]) if rows else None
+
     async def admit(self, context: Context, admission: Admission) -> AdmissionResult:
         """Consume one verified proof and preserve the first signed-cookie result."""
         if context.principal != (
