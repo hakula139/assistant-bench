@@ -32,13 +32,10 @@ uv run bench check smoke
 
 # Generate both sides of a pair
 uv run bench run smoke-text --system <first> --system <second>
-
-# Vote on the collected outputs
-uv run bench serve
 ```
 
 Pick two different names from `systems` in [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml). Each committed system resolves to a model ID from the nixos-config catalog, so on an endpoint that names models differently, add a `route` table to `systems.toml` as [Authoring](authoring.md#systems) describes and list it in the family.
 
 The run makes one request per case and selected system, then collects the replies into `outputs/smoke-text.jsonl`. Repeating it sends nothing until a case or system is added, though it retries every trial that errored.
 
-Voting needs two systems with passing, different replies on the same case. Failed gates or identical replies can leave no eligible pair even after both systems run. The collection summary reports gate failures, and [Voting](voting.md) explains the vote page.
+The smoke run validates generation and collection. Public voting uses reviewed releases published to the online arena, as [Arena](../design/arena.md) describes. Open [the vote page](https://bench.hakula.xyz/vote/) to vote on an available family. Voting needs two systems with passing, different replies on the same case. Failed gates or identical replies can leave no eligible pair even after both systems run.

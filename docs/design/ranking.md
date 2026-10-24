@@ -4,13 +4,15 @@
 
 ## The Fit
 
-Each row compares system A with B. Its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. Eligible human choices have unit weight, including reconciled swapped repeats. A settled output pair has weight `1 / (samples_a * samples_b)` on its case. Listed systems and systems with recorded votes can rank through settled comparisons even without a human choice.
+Each row compares system A with B. Its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. An actor with `n` eligible ordinary choices receives weight `min(1, 100 / n)` on each choice. These weights are assigned across the complete family evaluation before selecting components, categories or diagnostics. Swapped repeats measure consistency and carry zero fitting weight. Each report records its weighting method, including unit weights in existing closed rounds.
+
+A settled output pair has weight `1 / (samples_a * samples_b)` on its case. Listed systems and systems with recorded votes can rank through settled comparisons even without a human choice.
 
 The weighted Bradley-Terry logistic objective uses +1 for A and −1 for B. Human rows also supply an unpenalized left-side intercept. Settled rows have no sided intercept. An L2 penalty of 0.01 on system strengths keeps unanimous point estimates finite. Strengths are centered at zero, and optimizer failure raises an error.
 
 ## Point Scores
 
-Scores use 400 / ln 10 points per logit. The fit selects the component connected to the most-voted system, with deterministic ordering for equal counts. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. Reports freeze these numerical settings in `method`.
+Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective human weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. Reports freeze these numerical settings in `method`.
 
 Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
 
@@ -24,7 +26,7 @@ Intervals, best and worst ranks, separability and leader decisions are explicitl
 
 ## Counts and Diagnostics
 
-`votes` and `decisive_votes` are raw human choice counts. `effective_votes` records eligible human weight and currently equals `votes`, excluding settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices.
+`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Repeats and inactive choices remain in the accepted denominator and contribute to `dropped_votes`.
 
 | Field             | Meaning                                                                                                                                                          |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |

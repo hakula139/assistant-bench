@@ -103,6 +103,9 @@ class VotesSettings(_Settings):
     """A family ranked by the owner's blind pairwise votes."""
 
     scorer: Literal['votes']
+    public_voting: bool = False
+    """Permit preparation of explicitly approved public voting content."""
+
     reference: str
     """Listed system anchoring at `ranking.ANCHOR` when ranked.
 

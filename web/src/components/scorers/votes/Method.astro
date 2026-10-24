@@ -45,8 +45,10 @@ const diagnostics = [terms.raterAgreement, terms.splitHalf, terms.leftOut, terms
 <Part id={id('scores')} title={votesParts.scores}>
   <p>
     A penalized Bradley-Terry model fits Elo-like point scores to human votes and settled pairs.
-    Ties and both-bad votes count half a win. Human choices have unit weight, including reconciled
-    repeats. Each settled output pairing receives its share of that case's sample pairs.
+    Ties and both-bad votes count half a win. Each round records its human weighting policy. Ledger
+    rounds cap each actor's complete family contribution before fitting category or component
+    subsets, and use repeats only for consistency diagnostics. Historical rounds may record unit
+    weights. Each settled output pairing receives its share of that case's sample pairs.
   </p>
   <p>
     Compare scores within one round of one family. Each closed board records its point method,

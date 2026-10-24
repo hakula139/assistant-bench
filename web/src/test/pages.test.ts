@@ -76,6 +76,22 @@ async function codingFamily(): Promise<Family> {
   return listedFamily('coding-repo', config, (await family()).rounds);
 }
 
+async function ledgerFamily(): Promise<Family> {
+  const closed = reportSchema.parse(await readFixture('report-ledger'));
+  const config: VotesConfig = {
+    scorer: 'votes',
+    aspect: 'writing',
+    display_name: 'Synthetic writing',
+    systems: ['large', 'small'],
+    reference: 'large',
+    render: 'text',
+    gates: {},
+    public: true,
+  };
+
+  return { ...listedFamily(closed.family, config, [closed]), systemNames: {} };
+}
+
 function headerStats(html: string): string[] {
   return [...new JSDOM(html).window.document.querySelectorAll('header dl dt')].map(
     (label) => `${label.textContent} ${label.nextElementSibling?.textContent ?? ''}`,
@@ -197,6 +213,17 @@ function islandHints(html: string, name: string): (string | null)[] {
 }
 
 describe('family page', () => {
+  test('renders a genuine closed ledger board without current catalog labels', async () => {
+    const closed = await ledgerFamily();
+
+    const html = await render(FamilyPage, { family: closed, boards: [] });
+
+    expect(text(html)).toContain('Small');
+    expect(text(html)).toContain('Large');
+    expect(text(html)).toContain('Effective vote mass 120');
+    expect(text(html)).not.toContain('No round has closed yet.');
+  });
+
   test('links each system to its page under the board', async () => {
     const arena = await family();
 
@@ -466,6 +493,18 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test('renders weighted rates from a genuine closed ledger without current labels', async () => {
+    const closed = await ledgerFamily();
+
+    const html = await render(SystemPage, { family: closed, system: 'large', boards: [] });
+
+    expect(text(html)).toContain('Win rates use the recorded actor weights.');
+    expect(text(html)).toContain('Counts show raw ordinary votes.');
+    expect(text(html)).toContain('58%');
+    expect(text(html)).not.toContain('57%');
+    expect(html).toContain('<title>Large on Writing · Synthetic writing | HAKULA†BENCH</title>');
+  });
+
   test('renders closed labels after runnable entries retire or change their names', async () => {
     const arena = await family();
     arena.systemNames = {};

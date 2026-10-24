@@ -17,8 +17,8 @@ export const EMPTY_DOMAIN: [number, number] = [600, 1400];
 const TICKS = 5;
 
 /**
- * Clips the low end at the visual span below the top point. Equal points use the empty plot's
- * display span centered on their score.
+ * Clips the low end below the top point and keeps ticks at whole-score resolution. Equal points
+ * use the empty plot's display span centered on their score.
  */
 export function forestDomain(estimates: Estimate[]): [number, number] {
   if (estimates.length === 0) {
@@ -37,7 +37,8 @@ export function forestDomain(estimates: Estimate[]): [number, number] {
     return [low - halfSpan, high + halfSpan];
   }
 
-  const [start, stop] = nice(low, high, TICKS);
+  const padding = Math.max(0, (TICKS - (high - low)) / 2);
+  const [start, stop] = nice(low - padding, high + padding, TICKS);
 
   return [start, stop];
 }

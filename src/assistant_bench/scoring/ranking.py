@@ -90,13 +90,14 @@ class Matchups:
         )
 
     def root(self, order: Sequence[str]) -> str:
-        """Return the system to root a fit at, the one in the most votes.
+        """Return the system incident on the greatest effective human weight.
 
         Only sided rows count as votes. A tie follows `order`, then the name.
         """
         sided = self.sided > 0
         rows = np.concatenate([self.left[sided], self.right[sided]])
-        counts = np.bincount(rows, minlength=len(self.systems))
+        weights = np.concatenate([self.weight[sided], self.weight[sided]])
+        counts = np.bincount(rows, weights=weights, minlength=len(self.systems))
         votes = dict(zip(self.systems, counts, strict=True))
         position = {system: i for i, system in enumerate(order)}
 

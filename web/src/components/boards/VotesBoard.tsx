@@ -8,6 +8,7 @@ import {
   leaderboardMarks,
   type LeaderboardRow,
 } from '@/components/boards/Leaderboard';
+import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 import { CategoryForests, categoryMarks } from '@/components/charts/CategoryForests';
 import type { Refit } from '@/components/charts/ForestPlot';
 import {
@@ -62,6 +63,7 @@ interface VotesBoardProps {
   rounds: VotesRound[];
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
+  liveOrigin?: string;
 }
 
 const ALL = 'aggregate';
@@ -130,6 +132,19 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
         >
           {formatCount(results.votes)}
         </Stat>
+        {results.method.human_weights.name === 'actor-proportional-cap' && (
+          <>
+            <Stat
+              label="Accepted choices"
+              detail="including repeats and choices excluded from this fit"
+            >
+              {formatCount(results.votes + results.dropped_votes)}
+            </Stat>
+            <Stat label="Effective vote mass" detail="after the complete family actor cap">
+              {formatScore(results.effective_votes)}
+            </Stat>
+          </>
+        )}
         <Stat
           label={<Hint term={agreementTerm(results.rules)} />}
           detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}
@@ -154,7 +169,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
+export function VotesBoard({ base, rounds, labels, liveOrigin }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', null);
@@ -241,6 +256,20 @@ export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
       </div>
 
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
+      {results.provenance?.status === 'ledger' && (
+        <SnapshotStatus
+          key={results.provenance.export_id}
+          exportId={results.provenance.export_id}
+          capturedAt={results.provenance.captured_at}
+          liveOrigin={liveOrigin}
+        />
+      )}
+      {results.method.human_weights.name === 'actor-proportional-cap' && (
+        <p className={note}>
+          Vote counts show raw ordinary coverage. Scores, win rates and both-bad rates use the
+          recorded actor weights. Repeats contribute only to consistency diagnostics.
+        </p>
+      )}
       <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>

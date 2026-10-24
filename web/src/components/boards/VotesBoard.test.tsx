@@ -25,7 +25,9 @@ vi.mock('@/lib/use-search-param', () => ({
   ],
 }));
 
-async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRound> {
+async function load(
+  name: 'report' | 'report-early' | 'report-ledger' = 'report',
+): Promise<VotesRound> {
   const report = reportSchema.parse(await readFixture(name));
   if (report.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
@@ -87,6 +89,89 @@ describe('VotesBoard', () => {
     search.delete('category');
     search.delete('round');
     cleanup();
+  });
+
+  test('separates genuine raw coverage from accepted choices and explains weighted rates', async () => {
+    const round = await load('report-ledger');
+
+    const html = render(round);
+
+    expect(stats(html)).toEqual(
+      expect.arrayContaining([
+        ['Votes', '150 over 3 sessions, 1 left out'],
+        ['Accepted choices', '151 including repeats and choices excluded from this fit'],
+        ['Effective vote mass', '120 after the complete family actor cap'],
+      ]),
+    );
+    expect(text(html)).toContain(
+      'Scores, win rates and both-bad rates use the recorded actor weights.',
+    );
+    expect(text(html)).toContain('Repeats contribute only to consistency diagnostics.');
+    expect(text(html)).toContain('Current voting evidence could not be checked.');
+    expect(text(html)).not.toMatch(/refresh deadline|confidence interval/i);
+  });
+
+  test('clears the previous capture status while checking a different round', async () => {
+    const earlier = await load('report-ledger');
+    const later = structuredClone(earlier);
+    later.round = '2026-10-24';
+    if (later.results.provenance?.status !== 'ledger') {
+      throw new Error('Expected ledger provenance');
+    }
+    later.results.provenance.export_id = 'next-capture';
+    const pending = Promise.withResolvers<Response>();
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(Response.json({ status: 'current' }))
+      .mockReturnValueOnce(pending.promise);
+    vi.stubGlobal('fetch', fetch);
+    stubPlotFrame();
+    search.set('round', earlier.round);
+    const board = () => (
+      <VotesBoard
+        base={BOARD}
+        rounds={[earlier, later]}
+        labels={CASES}
+        liveOrigin={window.location.origin}
+      />
+    );
+    const { rerender } = renderInDom(board());
+    await screen.findByText(/The ranking uses the current voting evidence/);
+
+    search.set('round', later.round);
+    rerender(board());
+
+    expect(screen.getByRole('status').textContent).toContain(
+      'Current voting evidence could not be checked.',
+    );
+    expect(screen.getByRole('status').textContent).not.toContain(
+      'uses the current voting evidence',
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map(([, options]) => options?.body)).toEqual([
+      JSON.stringify({ export_id: 'before' }),
+      JSON.stringify({ export_id: 'next-capture' }),
+    ]);
+    pending.resolve(Response.json({ status: 'stale' }));
+    await screen.findByText(/Votes, moderation or evaluation settings have changed/);
+  });
+
+  test('does not query live freshness for a historical unit report', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    stubPlotFrame();
+
+    renderInDom(
+      <VotesBoard
+        base={BOARD}
+        rounds={[await load()]}
+        labels={CASES}
+        liveOrigin={window.location.origin}
+      />,
+    );
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   test('switches historical labels, coverage marks, and copy with the selected round', async () => {

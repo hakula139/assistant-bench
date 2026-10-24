@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { Forest } from '@/components/site/Forest';
+import { forestDomain, roundRows } from '@/lib/forest';
+import { reportSchema } from '@/lib/report';
+import { reportNames } from '@/lib/systems';
+import { readFixture } from '@/test/fixture';
 
 const estimate = (score: number) => ({ score });
 
@@ -65,6 +69,34 @@ describe('Forest', () => {
     const { cut } = drawings();
 
     expect(cut.arrows).toEqual(['start']);
+  });
+
+  test('labels the genuine near-tied ledger scores at their displayed precision', async () => {
+    const report = reportSchema.parse(await readFixture('report-ledger'));
+    if (report.results.scorer !== 'votes') {
+      throw new Error('the fixture is a votes report');
+    }
+    const rows = roundRows(
+      () => '/',
+      report.results,
+      reportNames(report.systems),
+      report.results.rules,
+    );
+
+    const { container } = render(
+      <Forest
+        caption="Ledger scores"
+        domain={forestDomain(report.results.standings)}
+        rows={rows}
+      />,
+    );
+
+    const labels = [...container.querySelectorAll('thead [aria-hidden] span')].map(
+      (label) => label.textContent,
+    );
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(container.querySelector('tbody')?.textContent).toContain('Large');
+    expect(container.querySelector('tbody')?.textContent).toContain('Small');
   });
 
   test.each<[[number, number], string, string[]]>([

@@ -1,0 +1,27 @@
+[method]
+name = "bradley-terry"
+version = 1
+l2_penalty = 0.01
+points_per_logit = 173.71779276130073
+anchor_score = 1000.0
+
+[method.human_weights]
+name = "actor-proportional-cap"
+version = 1
+cap = 100
+scope = "family-evaluation"
+repeat_handling = "excluded"
+
+[method.settled_weights]
+name = "sample-pair-share"
+version = 1
+
+[rules]
+preliminary_decisive_votes = 40
+preliminary_decisive_vote_unit = "raw-votes"
+rater_agreement_floor = 0.7
+
+[inference]
+status = "unavailable"
+target = "new-cases-and-voters"
+reason = "population-method-not-validated"

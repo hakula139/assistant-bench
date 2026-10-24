@@ -12,11 +12,16 @@ src/assistant_bench/
 ├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
 ├── report.py                               # The report schema, one results variant per scorer, and closing a round
 ├── arena/
-│   ├── api.py                              # The FastAPI vote API and the render origin
-│   ├── service.py                          # Sessions and blinded pairs
-│   ├── scheduler.py                        # Pair choice: swapped repeats, the balanced seed, adaptive pairing
-│   ├── resolution.py                       # Results the outputs settle: gate failures and identical text
-│   └── store.py                            # The append-only SQLite vote store
+│   ├── commands.py                         # Publication, evidence and private administration commands
+│   ├── evidence.py                         # Replay of immutable receipt and control history
+│   ├── exports.py                          # Bounded capture and verification of registered evidence cuts
+│   ├── management.py                       # Authenticated native Service client
+│   ├── preparation.py                      # Explicit solution selection and current provenance checks
+│   ├── publication.py                      # Approved numerical and presentation projections
+│   ├── publishing.py                       # Guarded release activation and sampling refresh
+│   ├── runtime.py                          # Named native targets and Service-only configuration
+│   ├── snapshots.py                        # Frozen numerical inputs and offline point fitting
+│   └── sources.py                          # Native task hash and agent-input proof
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
@@ -29,7 +34,9 @@ src/assistant_bench/
 │   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
-│   └── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
+│   ├── length.py                           # Shared output length measurement
+│   ├── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
+│   └── weighting.py                        # Family-wide cumulative actor caps
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
@@ -62,9 +69,9 @@ arena/src/assistant_bench_arena/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
-2. `revisions`
-3. `jobs` and `report`
-4. `arena`
+2. `arena.commands`, `revisions`, and `report`
+3. `arena.preparation` and `jobs`
+4. The remaining offline `arena` modules
 5. `outputs`, `harnesses`, and `scoring`
 6. `families` and `catalog`
 7. `generation`, `messages`, `paths`, and `diffs`
@@ -83,18 +90,18 @@ A family directory holds only data: `family.toml` and either `cases.jsonl` or `t
 
 In `family.toml`, `scorer` discriminates the settings model, which decides how the outputs rank, and each place that depends on the scorer matches on that model and ends in `assert_never`, so mypy reports any scorer that a `match` misses:
 
-| Scorer  | Sources       | Ranks by                                                                                                   |
-| ------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `votes` | Both          | The owner's votes, after `gate_failures` settle each pair a gate decides: a case's gates or a task's tests |
-| `tests` | `tasks/` only | The mean of each system's rewards                                                                          |
+| Scorer  | Sources       | Ranks by                                                                                                      |
+| ------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `votes` | Both          | Blind pairwise votes, after `gate_failures` settle each pair a gate decides: a case's gates or a task's tests |
+| `tests` | `tasks/` only | The mean of each system's rewards                                                                             |
 
 ## Data Flow
 
 1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: `Generate` sends one chat-completions request from the host, writes the reply to `output.txt` in the trial's agent logs, and records tokens, latency, the finish reason, the response model, the request ID, and the nixos-config rev on the trial's `AgentContext`. `Terminus` drives the task's container from the host until the model completes the task or runs out of turns, and Harbor then grades the container's `/app` with the task's tests in a fresh container.
 3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench serve` collects every family scored by votes that has jobs, then serves the vote page for each that has outputs, and the [arena](arena.md) records each vote in `votes.sqlite` in the data directory.
-5. `bench close <family>` collects the family's trials, then fits the [ranking](ranking.md) over the family's votes on its current outputs, or aggregates a `tests` family's rewards, and writes the [report](reports.md) to `reports/<family>/<round>.json`.
+4. `bench arena prepare` proves the exact selected solution inputs and public content approvals. `publish` seals and activates the release in the canonical D1 owner. The public [arena](arena.md) records real votes there.
+5. `bench arena export` captures an immutable D1 evidence cut. `bench close <family> --snapshot <path>` fits its frozen [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes directly from its collected trial rewards with `bench close <family>`.
 
 `bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that collection never reads them.
 

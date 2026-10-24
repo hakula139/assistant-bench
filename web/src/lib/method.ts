@@ -4,7 +4,13 @@ import { terms, type Term } from '@/lib/glossary';
 import type { VotesMethod, VotesRules } from '@/lib/report';
 
 export function roundMethod(method: VotesMethod, rules: VotesRules): string {
-  return `Bradley-Terry v${method.version}, L2 penalty ${method.l2_penalty}, ${method.points_per_logit} points per logit, anchor ${method.anchor_score}. Human votes have unit weight, including repeats. Settled output pairs share each case's weight. Preliminary coverage requires ${rules.preliminary_decisive_votes} raw decisive votes. The repeat-consistency floor is ${rules.rater_agreement_floor}.`;
+  const weights = method.human_weights;
+  const human =
+    weights.name === 'unit'
+      ? 'Human votes have unit weight, including repeats.'
+      : `Each voter identity contributes at most ${weights.cap} ordinary comparison units per family evaluation. Every eligible choice shares its identity's weight equally. Repeats do not enter the fit.`;
+
+  return `Bradley-Terry v${method.version}, L2 penalty ${method.l2_penalty}, ${method.points_per_logit} points per logit, anchor ${method.anchor_score}. ${human} Settled output pairs share each case's weight. Preliminary coverage requires ${rules.preliminary_decisive_votes} raw decisive votes. The repeat-consistency floor is ${rules.rater_agreement_floor}.`;
 }
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */

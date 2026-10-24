@@ -17,6 +17,7 @@ import {
   type ForestRow,
   type LegendMark,
 } from '@/lib/forest';
+import { formatScore } from '@/lib/format';
 import { reportSchema } from '@/lib/report';
 import { reportNames } from '@/lib/systems';
 import { readFixture } from '@/test/fixture';
@@ -58,6 +59,22 @@ describe('forestDomain', () => {
     expect(new Set(ticks).size).toBe(ticks.length);
     expect(estimates).toEqual(original);
   });
+
+  test.each([1000, 0, -1000])(
+    'keeps distinct whole-point labels around near ties at %s',
+    (score) => {
+      const estimates = [estimate(score), estimate(score + 0.0139186)];
+      const original = structuredClone(estimates);
+
+      const domain = forestDomain(estimates);
+      const labels = forestTicks(domain).map(formatScore);
+
+      expect(new Set(labels).size).toBe(labels.length);
+      expect(domain[0]).toBeLessThanOrEqual(score);
+      expect(domain[1]).toBeGreaterThanOrEqual(score + 0.0139186);
+      expect(estimates).toEqual(original);
+    },
+  );
 });
 
 describe('sharedDomain', () => {

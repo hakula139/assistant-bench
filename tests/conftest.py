@@ -9,14 +9,10 @@ import pytest
 import trustme
 
 from assistant_bench import families, jobs
-from assistant_bench.arena import scheduler
-from assistant_bench.arena.store import VoteStore, votes_file
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
-from assistant_bench.cli import LOCAL_SITE_VAR
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.paths import DATA_DIR_VAR
-from assistant_bench.scoring import ranking
-from support import EXPORT_FILE, Clock, Refits, StubEndpoint, serve_stub
+from support import EXPORT_FILE, StubEndpoint, serve_stub
 
 
 # Set as `bench` sets it, before a test module imports LiteLLM.
@@ -68,16 +64,9 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the data directory at a scratch path, away from the shell's endpoint.
-
-    The endpoint and proxy variables the shell exports are cleared, and the
-    variable `bench serve` sets is removed after each test.
-    """
+    """Isolate data and clear the shell's endpoint and proxy variables."""
     path = tmp_path / 'data'
     monkeypatch.setenv(DATA_DIR_VAR, str(path))
-    # Setting it first makes teardown restore its absence.
-    monkeypatch.setenv(LOCAL_SITE_VAR, '')
-    monkeypatch.delenv(LOCAL_SITE_VAR)
     monkeypatch.chdir(tmp_path)
     for name in ENDPOINT_VARS:
         monkeypatch.delenv(name, raising=False)
@@ -92,19 +81,6 @@ def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     directory = tmp_path / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
-
-
-@pytest.fixture
-def fits(monkeypatch: pytest.MonkeyPatch) -> Refits:
-    refits = Refits()
-
-    def rate_point(matchups: ranking.Matchups, root: str) -> ranking.PointRatings:
-        refits.comparisons.append(len(matchups.score))
-        refits.roots.append(root)
-        return ranking.rate_point(matchups, root)
-
-    monkeypatch.setattr(scheduler, 'rate_point', rate_point)
-    return refits
 
 
 @pytest.fixture
@@ -150,15 +126,3 @@ def tls_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
 @pytest.fixture
 def ipv6_endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
     yield from serve_stub(tmp_path, host='::1')
-
-
-@pytest.fixture
-def clock() -> Clock:
-    return Clock()
-
-
-@pytest.fixture
-def store(data_dir: Path) -> Iterator[VoteStore]:
-    store = VoteStore(votes_file())
-    yield store
-    store.close()

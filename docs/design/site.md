@@ -1,6 +1,6 @@
 # Site
 
-The site under `web/` has two views built from one Astro project and one component set: the public results, built from committed families, systems, reports, and the nixos-config catalog, and the local vote page, which only `bench serve` hosts. [TypeScript](../conventions/typescript.md) gives their conventions, and [CI](../conventions/ci.md#deploy) covers deployment.
+The site under `web/` has two views built from one Astro project and one component set: the public results, built from committed families, systems, reports, and the nixos-config catalog, and the vote page, served with the voting runtime. [TypeScript](../conventions/typescript.md) gives their conventions, and [CI](../conventions/ci.md#deploy) covers deployment.
 
 ## Results
 
@@ -23,7 +23,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 ## The Vote Page
 
-`/vote/` exists only in builds with `BENCH_LOCAL=1`, which `bench serve` makes. The page fetches pairs from the [vote API](arena.md#vote-api) at runtime, so no vote data enters a build.
+`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 ledger, and staging has a separate D1 ledger for validation. Admission runs in its own document at `/admit`. Static previews without the API show an unavailable state.
 
 The prompt and the checklist are separate because the model never saw the checklist. Outputs scroll independently and render as text, diffs, or sandboxed HTML from the render origin. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze HTML viewports and diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 

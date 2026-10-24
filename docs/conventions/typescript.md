@@ -14,13 +14,13 @@ web/src/
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
-├── integrations/local-vote.ts              # Injects the vote route when BENCH_LOCAL=1
+├── integrations/local-vote.ts              # Injects the vote route and builds the admission client
 ├── layouts/                                # The page shell
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
 ├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
-└── vote/vote.astro                         # The vote page, outside pages/ so only the integration routes it
+└── vote/vote.astro                         # The vote page, routed by the integration
 ```
 
 ## Comments
@@ -55,7 +55,7 @@ web/src/
 
 ## The Vote Page
 
-- The page exists only in builds with `BENCH_LOCAL=1`, so the public site never routes it. Keep it out of `src/pages/`.
+- The integration routes `/vote/` in every build. Its island fetches personalized data only at runtime.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- `bench serve` sends everything under `/vote/` with the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so the policy is not the only thing that stops an output from loading a remote image.
-- HTML outputs load by URL in `<iframe sandbox="allow-scripts">` from the separate render origin. Never use `srcdoc`, which inherits the vote page's policy.
+- The voting runtime applies the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so output text cannot load a remote image.
+- HTML outputs load by URL in `<iframe sandbox="allow-scripts" referrerPolicy="no-referrer">` from the configured separate render origin. Never use `srcdoc`, which inherits the vote page's policy.
