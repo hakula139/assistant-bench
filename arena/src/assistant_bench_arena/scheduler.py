@@ -5,6 +5,7 @@ import random
 from collections import defaultdict
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from itertools import permutations, product
 
 from assistant_bench_arena.ledger_models import Output, PointSnapshot
@@ -124,10 +125,7 @@ class CandidatePool:
             )
         else:
             pairs = sorted({(min(pair), max(pair)) for pair in self.ordinary})
-            log_weights = [
-                pair_log_weight(points, pair, counts, points_per_logit)
-                for pair in pairs
-            ]
+            log_weights = pair_log_weights(points, pairs, counts, points_per_logit)
             largest = max(log_weights)
             weights = [math.exp(weight - largest) for weight in log_weights]
             left, right = rng.choices(pairs, weights=weights, k=1)[0]
@@ -150,20 +148,42 @@ class CandidatePool:
         )
 
 
-def pair_log_weight(
+def pair_log_weights(
     points: PointSnapshot,
-    pair: tuple[str, str],
+    pairs: Sequence[tuple[str, str]],
     counts: dict[tuple[str, str], int],
     points_per_logit: float,
-) -> float:
-    left, right = pair
-    a, b = points.points[left], points.points[right]
-    information = math.log(0.25)
+) -> list[float]:
+    gaps: list[Fraction] = []
 
-    if a.score is not None and b.score is not None and a.component == b.component:
-        gap = abs(a.score / points_per_logit - b.score / points_per_logit)
-        information = -gap - 2 * math.log1p(math.exp(-gap))
+    for left, right in pairs:
+        a, b = points.points[left], points.points[right]
+        gap = Fraction(0)
 
-    return information - math.log(
-        counts.get(pair, 0) + counts.get((right, left), 0) + 1
-    )
+        if a.score is not None and b.score is not None and a.component == b.component:
+            gap = abs(Fraction(a.score) - Fraction(b.score)) / Fraction(
+                points_per_logit
+            )
+
+        gaps.append(gap)
+
+    smallest = min(gaps)
+    weights: list[float] = []
+
+    for (left, right), gap in zip(pairs, gaps, strict=True):
+        information = -_float_gap(gap - smallest) - 2 * math.log1p(
+            math.exp(-_float_gap(gap))
+        )
+        weights.append(
+            information
+            - math.log(counts.get((left, right), 0) + counts.get((right, left), 0) + 1)
+        )
+
+    return weights
+
+
+def _float_gap(gap: Fraction) -> float:
+    try:
+        return float(gap)
+    except OverflowError:
+        return math.inf

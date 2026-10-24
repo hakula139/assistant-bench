@@ -38,7 +38,7 @@ src/assistant_bench/
 
 ## Import Layers
 
-`arena/src/assistant_bench_arena` owns voting contracts and the durable ledger. It depends only on Pydantic and never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports these contracts for family validation, release preparation, and evidence analysis.
+`arena/src/assistant_bench_arena` owns voting contracts and the durable ledger. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports these contracts for family validation, release preparation, and evidence analysis.
 
 ```text
 arena/src/assistant_bench_arena/
