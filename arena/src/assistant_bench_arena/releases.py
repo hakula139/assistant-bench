@@ -244,6 +244,11 @@ def validate_evaluation(bundle: EvaluationBundle) -> None:
         if output.case_key not in cases or output.system_id not in systems:
             raise ValueError('Every output must belong to its frozen case and system.')
 
+        if output.verdict == 'pass' and (
+            output.content_digest == digest(None) or output.metadata.errored
+        ):
+            raise ValueError('An absent or errored output cannot pass its gate.')
+
         if output.key != digest(
             {
                 'source_digest': output.metadata.source_digest,
