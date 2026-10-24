@@ -30,4 +30,5 @@ def error_lines(error: ValidationError, prefix: str, *, skip: int = 0) -> str:
         path = '.'.join(str(part) for part in detail['loc'][skip:])
         line = f'{prefix}: `{path}`: {message}' if path else f'{prefix}: {message}'
         lines.append(sentence(line))
+
     return '\n'.join(lines)

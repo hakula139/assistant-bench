@@ -44,7 +44,6 @@ const GONE_FAMILY = (
 );
 const VIEWPORTS = [375, 768, 1280] as const;
 
-/** The verdicts from left to right. On phones, two to a row, A and B share the first. */
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
   { value: 'a', label: 'A is better', key: 'a' },
   { value: 'tie', label: 'Tie', key: 't', className: 'max-sm:order-1' },
@@ -52,7 +51,6 @@ const CHOICES: { value: Choice; label: string; key: string; className?: string }
   { value: 'b', label: 'B is better', key: 'b' },
 ];
 
-/** The two panes, with the tagged state and keys each one reads. */
 const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
   { side: 'A', key: 'a' },
   { side: 'B', key: 'b' },
@@ -60,16 +58,12 @@ const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
 
 const UNTAGGED: TaggedDefects = { a: [], b: [] };
 
-/**
- * The digits that tag each of the family's defects in order, the left half on output A and the
- * right half on B, which covers the five defects a family lists at most.
- */
+/** Five shortcut keys per pane match the family's maximum defect count. */
 const DEFECT_KEYS: Record<keyof TaggedDefects, readonly string[]> = {
   a: ['1', '2', '3', '4', '5'],
   b: ['6', '7', '8', '9', '0'],
 };
 
-/** The defect each digit toggles for a family's defects, on the side that owns it. */
 function keyedDefects(defects: readonly Defect[]) {
   return new Map(
     SIDES.flatMap(({ key }) =>
@@ -94,6 +88,7 @@ async function enterFamily(family: string): Promise<SessionView> {
       }
     }
   }
+
   try {
     return await startSession(family);
   } catch (reason) {
@@ -104,7 +99,6 @@ async function enterFamily(family: string): Promise<SessionView> {
   }
 }
 
-/** What went wrong, in words that say what to do when the server is out of reach. */
 function message(error: unknown): ReactNode {
   if (error instanceof NetworkError) {
     return (
@@ -114,6 +108,7 @@ function message(error: unknown): ReactNode {
       </>
     );
   }
+
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -137,7 +132,6 @@ function Notice({ notice }: { notice: string | null }) {
   );
 }
 
-/** A centered page for the states around a session, with its heading. */
 function Screen({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-16">
@@ -175,6 +169,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
       {families &&
         groupByAspect(families).map(({ aspect, members }) => {
           const id = `aspect-${aspect ?? 'unlisted'}`;
+
           return (
             <section key={id} className="flex flex-col gap-3" aria-labelledby={id}>
               <h2 id={id} className={cn(sectionTitle, 'flex items-center gap-2')}>
@@ -207,15 +202,11 @@ const checklistHint = {
   definition: 'Points for you to judge by. The model never saw them.',
 };
 
-/**
- * The case's prompt and checklist, with the session's status in its band. It spans the top of the
- * pair while `stacked`, and otherwise takes a column beside the outputs from `xl` up.
- */
 function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
   const checklistTitle = useId();
-  // The prompt opens for each pair unless the owner collapsed that pair's own prompt. Keeping this
-  // component mounted across pairs is what lets the status band's live region announce a change.
+  // Keep this component mounted across pairs so the live region announces changes.
   const [collapsed, setCollapsed] = useState<string | null>(null);
+
   return (
     <Collapsible
       open={collapsed !== pair.token}
@@ -278,7 +269,6 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
   );
 }
 
-/** The local vote page: blinded pairs from the arena API, voted on by keyboard or pointer. */
 export function VoteApp() {
   const [session, setSession] = useState<SessionView | null>(null);
   // The page renders only in the browser, so its URL is readable on the first render.
@@ -303,8 +293,6 @@ export function VoteApp() {
   const hasFrames = pair !== null && (pair.a.render === 'html' || pair.b.render === 'html');
   const hasText = pair !== null && (pair.a.render === 'text' || pair.b.render === 'text');
 
-  // A new pair takes focus from the control that loaded it, so the next key is a shortcut again,
-  // and opens at the top of the page on phones, where the page scrolls.
   useEffect(() => {
     pairView.current?.focus({ preventScroll: true });
     window.scrollTo({ top: 0 });
@@ -313,6 +301,7 @@ export function VoteApp() {
   const show = (next: SessionView) => {
     localStorage.setItem(sessionKey(next.family.name), next.id);
     history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
+
     setSession(next);
     setChoice(null);
     setTagged(UNTAGGED);
@@ -355,6 +344,7 @@ export function VoteApp() {
     if (resumingFamily === null) {
       return;
     }
+
     enterFamily(resumingFamily)
       .then(show, (reason: unknown) => {
         if (notFound(reason)) {
@@ -373,9 +363,11 @@ export function VoteApp() {
     if (savedAt === null) {
       return;
     }
+
     const timer = setTimeout(() => {
       setSavedAt(null);
     }, SAVED_MS);
+
     return () => {
       clearTimeout(timer);
     };
@@ -388,8 +380,10 @@ export function VoteApp() {
     const onFocus = () => {
       setFrameFocused(false);
     };
+
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
+
     return () => {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
@@ -400,6 +394,7 @@ export function VoteApp() {
     if (pair === null || choice === null || busy) {
       return;
     }
+
     const text = note.trim();
     void run(
       () => castVote(pair.token, { choice, defects: tagged, note: text === '' ? null : text }),
@@ -411,6 +406,7 @@ export function VoteApp() {
     if (session === null || session.votes === 0 || busy) {
       return;
     }
+
     void run(() => undoVote(session.id));
   };
 
@@ -425,6 +421,7 @@ export function VoteApp() {
     if (event.defaultPrevented || event.isComposing || event.repeat || busy) {
       return;
     }
+
     const target = event.target;
     // Plain Enter in the note adds a line, since Safari reports the Enter that commits an IME
     // composition as an ordinary keypress.
@@ -437,9 +434,11 @@ export function VoteApp() {
       }
       return;
     }
+
     if (event.metaKey || event.ctrlKey || event.altKey) {
       return;
     }
+
     if (event.key === 'Enter') {
       if (target === pairView.current || target === document.body) {
         event.preventDefault();
@@ -447,6 +446,7 @@ export function VoteApp() {
       }
       return;
     }
+
     if (
       !(target instanceof Element) ||
       !pairView.current?.contains(target) ||
@@ -454,6 +454,7 @@ export function VoteApp() {
     ) {
       return;
     }
+
     const key = event.key.toLowerCase();
     if (key === 'u') {
       event.preventDefault();
@@ -463,6 +464,7 @@ export function VoteApp() {
     if (pair === null) {
       return;
     }
+
     const picked = CHOICES.find((item) => item.key === key);
     const keyed = keyedDefects(familyDefects).get(event.key);
     if (picked) {
@@ -474,11 +476,13 @@ export function VoteApp() {
     } else {
       return;
     }
+
     event.preventDefault();
   });
 
   useEffect(() => {
     window.addEventListener('keydown', onKey);
+
     return () => {
       window.removeEventListener('keydown', onKey);
     };

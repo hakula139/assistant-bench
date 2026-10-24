@@ -71,7 +71,6 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point family discovery at a scratch `families/` directory."""
     directory = tmp_path / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
@@ -79,7 +78,6 @@ def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def fits(monkeypatch: pytest.MonkeyPatch) -> Refits:
-    """Record each refit of the scheduler's board."""
     refits = Refits()
 
     def rate_point(matchups: ranking.Matchups, root: str) -> ranking.PointRatings:

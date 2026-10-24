@@ -151,7 +151,7 @@ def test_lru_verifier_requires_regressions_with_different_private_storage(
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:
-    """Return every system that a family's config names."""
+    """Includes the reference even when `systems` omits it."""
     systems = {str(system) for system in config.get('systems', [])}
     reference = config.get('reference')
     return systems | ({str(reference)} if reference else set())
