@@ -76,6 +76,22 @@ async function codingFamily(): Promise<Family> {
   return listedFamily('coding-repo', config, (await family()).rounds);
 }
 
+async function ledgerFamily(): Promise<Family> {
+  const closed = reportSchema.parse(await readFixture('report-ledger'));
+  const config: VotesConfig = {
+    scorer: 'votes',
+    aspect: 'writing',
+    display_name: 'Synthetic writing',
+    systems: ['large', 'small'],
+    reference: 'large',
+    render: 'text',
+    gates: {},
+    public: true,
+  };
+
+  return { ...listedFamily(closed.family, config, [closed]), systemNames: {} };
+}
+
 function headerStats(html: string): string[] {
   return [...new JSDOM(html).window.document.querySelectorAll('header dl dt')].map(
     (label) => `${label.textContent} ${label.nextElementSibling?.textContent ?? ''}`,
@@ -172,8 +188,11 @@ function guide(html: string): string {
 
 /** Every root-relative page link, leaving out the home page, its anchors, and the methodology. */
 function boardLinks(html: string): string[] {
-  return [...html.matchAll(/href="(\/[^"#]+)"/g)]
-    .map(([, href]) => href)
+  const document = new JSDOM(html).window.document;
+
+  return [...document.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')]
+    .filter((link) => link.closest('nav') === null)
+    .map((link) => link.getAttribute('href') ?? '')
     .filter((href) => !href.startsWith('/methodology/') && !/\.\w+$/.test(href));
 }
 
@@ -197,6 +216,17 @@ function islandHints(html: string, name: string): (string | null)[] {
 }
 
 describe('family page', () => {
+  test('renders a genuine closed ledger board without current catalog labels', async () => {
+    const closed = await ledgerFamily();
+
+    const html = await render(FamilyPage, { family: closed, boards: [] });
+
+    expect(text(html)).toContain('Small');
+    expect(text(html)).toContain('Large');
+    expect(text(html)).toContain('Effective vote mass 120');
+    expect(text(html)).not.toContain('No round has closed yet.');
+  });
+
   test('links each system to its page under the board', async () => {
     const arena = await family();
 
@@ -466,6 +496,18 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test('renders weighted rates from a genuine closed ledger without current labels', async () => {
+    const closed = await ledgerFamily();
+
+    const html = await render(SystemPage, { family: closed, system: 'large', boards: [] });
+
+    expect(text(html)).toContain('Win rates use the recorded actor weights.');
+    expect(text(html)).toContain('Counts show raw ordinary votes.');
+    expect(text(html)).toContain('58%');
+    expect(text(html)).not.toContain('57%');
+    expect(html).toContain('<title>Large on Writing · Synthetic writing | HAKULA†BENCH</title>');
+  });
+
   test('renders closed labels after runnable entries retire or change their names', async () => {
     const arena = await family();
     arena.systemNames = {};
@@ -764,6 +806,7 @@ describe('header', () => {
     expect(navLinks(html, 'Main')).toEqual([
       ['/', 'Leaderboards', 'page'],
       ['/methodology/', 'Methodology', null],
+      ['/vote/', 'Vote', null],
     ]);
   });
 
@@ -783,18 +826,23 @@ describe('header', () => {
       expect(navLinks(html, 'Main')).toEqual([
         ['/', 'Leaderboards', 'true'],
         ['/methodology/', 'Methodology', null],
+        ['/vote/', 'Vote', null],
       ]);
     }
   });
 
-  test('marks the link to the page itself as the current page', async () => {
-    const html = await render(Header, { section: 'methodology' }, '/methodology/');
+  test.each(['methodology', 'vote'] as const)(
+    'marks the %s link as the current page',
+    async (section) => {
+      const html = await render(Header, { section }, `/${section}/`);
 
-    expect(navLinks(html, 'Main')).toEqual([
-      ['/', 'Leaderboards', null],
-      ['/methodology/', 'Methodology', 'page'],
-    ]);
-  });
+      expect(navLinks(html, 'Main')).toEqual([
+        ['/', 'Leaderboards', null],
+        ['/methodology/', 'Methodology', section === 'methodology' ? 'page' : null],
+        ['/vote/', 'Vote', section === 'vote' ? 'page' : null],
+      ]);
+    },
+  );
 });
 
 describe('board switcher', () => {

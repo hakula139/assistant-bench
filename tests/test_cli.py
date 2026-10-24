@@ -1,14 +1,10 @@
 import asyncio
 import os
-import sqlite3
 import subprocess
 import textwrap
 from collections import defaultdict
-from contextlib import closing
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Never
+from typing import Any
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -21,9 +17,6 @@ from rich.text import Text
 from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, jobs, report, revisions
-from assistant_bench.arena import api
-from assistant_bench.arena.service import Arena
-from assistant_bench.arena.store import Ballot, Side, VoteStore, votes_file
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -33,14 +26,11 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.cli import app
 from assistant_bench.families import Family, Gate, family_names, load_cases, load_family
-from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.outputs import Output
 from support import (
-    AT,
     finish_job,
-    make_ballot,
     make_output,
     make_system,
-    passing_outputs,
     write_case_family,
     write_task_family,
     write_trial,
@@ -72,48 +62,6 @@ def write_job(job_dir: Path) -> None:
     (job_dir / 'result.json').touch()
 
 
-def write_removed_case(families_dir: Path, data_dir: Path) -> None:
-    """Write a script-gated votes family whose trial ran a case that is then removed."""
-    write_votes_family(
-        families_dir, 'f', ['large', 'small'], {'a': 'reply', 'b': 'reply'}
-    )
-    config = families_dir / 'f' / 'family.toml'
-    config.write_text(config.read_text() + '\n[gates]\nscript = "hans"\n')
-    family = load_family('f')
-    cases = load_cases(family)
-    tasks = jobs.render_tasks(family, cases)
-    systems = [make_system(name=name) for name in family.settings.systems]
-    job = jobs.job(family, jobs.family_systems(family, systems), tasks)
-    for task in tasks:
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            f'{task.name}__large__1',
-            job.agents[0],
-            task=f'f/{task.name}',
-            output='你好，世界。',
-            instruction=None,
-            context=AgentContext(metadata={'finish_reason': 'stop'}),
-            environment=job.environment,
-            verifier_disabled=job.verifier.disable,
-        )
-    (families_dir / 'f' / 'cases.jsonl').write_text(cases[0].model_dump_json() + '\n')
-    jobs.render_tasks(family, cases[:1])
-
-
-@pytest.fixture
-def synthetic_systems(monkeypatch: pytest.MonkeyPatch) -> dict[str, System]:
-    systems = {name: make_system(name=name) for name in ('large', 'small')}
-    monkeypatch.setattr(cli, '_load_systems', lambda: systems)
-    return systems
-
-
-def write_version_one_store() -> None:
-    path = votes_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(path)) as db:
-        db.execute('PRAGMA user_version = 1')
-
-
 @pytest.fixture
 def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig]:
     """Record each job `bench` submits in place of running Harbor."""
@@ -125,32 +73,6 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
-
-
-@dataclass
-class Site:
-    path: Path
-    builds: list[tuple[list[str], str | None]] = field(default_factory=list)
-    served: list[tuple[list[str], Path]] = field(default_factory=list)
-
-
-@pytest.fixture
-def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Site:
-    """Replace the site build with one that writes a vote page, and record serves."""
-    stub = Site(tmp_path / 'dist')
-
-    def build(args: list[str], **options: Any) -> None:
-        stub.builds.append((args, os.environ.get(cli.LOCAL_SITE_VAR)))
-        (stub.path / 'vote').mkdir(parents=True)
-        (stub.path / 'vote' / 'index.html').write_text('<h1>Vote</h1>')
-
-    def serve(arena: Arena, site: Path) -> None:
-        stub.served.append(([family.name for family in arena.families()], site))
-
-    monkeypatch.setattr(cli, 'SITE_DIR', stub.path)
-    monkeypatch.setattr(subprocess, 'run', build)
-    monkeypatch.setattr(api, 'serve', serve)
-    return stub
 
 
 class TestMain:
@@ -1330,300 +1252,80 @@ class TestCollect:
         )
 
 
-class TestServe:
-    def test_builds_the_local_site_and_serves_the_families_with_outputs(
-        self, families_dir: Path, site: Site
-    ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
-
-        result = invoke('serve')
-        assert result.exit_code == 0, result.output
-
-        assert site.builds == [(['pnpm', '--filter', 'web', 'build'], '1')]
-        assert site.served == [(['f'], site.path)]
-        assert result.output == (
-            'Voting on `f` at http://127.0.0.1:8790/vote/. Open that exact address, '
-            'since the server refuses `localhost`.\n'
-        )
-
-    def test_serves_after_a_case_is_removed(
-        self,
-        families_dir: Path,
-        data_dir: Path,
-        site: Site,
-        synthetic_systems: dict[str, System],
-    ) -> None:
-        write_removed_case(families_dir, data_dir)
-
-        result = invoke('serve')
-        assert result.exit_code == 0, result.output
-
-        assert [names for names, _ in site.served] == [['f']]
-
-    def test_stops_when_the_build_leaves_no_vote_page(
-        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
-        monkeypatch.setattr(cli, 'SITE_DIR', tmp_path / 'dist')
-
-        def build(args: list[str], *, check: bool, cwd: Path) -> None:
-            pass
-
-        def serve(arena: Arena, site: Path) -> Never:
-            pytest.fail('served')
-
-        monkeypatch.setattr(subprocess, 'run', build)
-        monkeypatch.setattr(api, 'serve', serve)
-
-        result = invoke('serve')
-
-        assert result.exit_code == 1
-        assert (
-            f'No vote page at `{tmp_path / "dist" / "vote" / "index.html"}`.'
-            in result.output
-        )
-        assert '`BENCH_LOCAL=1 pnpm --filter web build`' in result.output
-
-    def test_points_at_pnpm_install_when_the_site_build_fails(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
-
-        def build(args: list[str], **options: Any) -> None:
-            raise subprocess.CalledProcessError(4, args)
-
-        monkeypatch.setattr(subprocess, 'run', build)
-
-        result = invoke('serve')
-
-        assert (result.exit_code, result.output) == (
-            4,
-            'Building the vote page failed. If the checkout lacks node_modules, run '
-            '`pnpm install` once, then rerun `uv run bench serve`.\n',
-        )
-
-    def test_collects_every_votes_family_with_jobs_before_loading(
-        self,
-        families_dir: Path,
-        data_dir: Path,
-        site: Site,
-        synthetic_systems: dict[str, System],
-    ) -> None:
-        for name in ('f', 'g', 'h'):
-            write_votes_family(families_dir, name, ['large', 'small'], {'c1': 'reply'})
-        write_task_family(families_dir, name='z')
-        write_job(data_dir / 'jobs' / 'z' / 'job-1')
-        for name in ('f', 'g'):
-            family = load_family(name)
-            tasks = jobs.render_tasks(family, load_cases(family))
-            job = jobs.job(family, list(synthetic_systems.values()), tasks)
-            write_trial(
-                data_dir / 'jobs' / name / 'job-1',
-                'c1__large__1',
-                job.agents[0],
-                task=f'{name}/c1',
-                output='text',
-                instruction=None,
-                context=AgentContext(metadata={'finish_reason': 'stop'}),
-                environment=job.environment,
-                verifier_disabled=job.verifier.disable,
-            )
-
-        result = invoke('serve')
-        assert result.exit_code == 0, result.output
-
-        assert (data_dir / 'outputs' / 'f.jsonl').exists()
-        assert (data_dir / 'outputs' / 'g.jsonl').exists()
-        assert not (data_dir / 'outputs' / 'h.jsonl').exists()
-        assert not (data_dir / 'outputs' / 'z.jsonl').exists()
-        assert [names for names, _ in site.served] == [['f', 'g']]
-
-    def test_stops_when_no_family_has_outputs(self, families_dir: Path) -> None:
-        result = invoke('serve')
-
-        assert (result.exit_code, result.output) == (
-            1,
-            'No family scored by votes has outputs yet. Run '
-            '`uv run bench run <family>` first.\n',
-        )
-
-    def test_reports_a_store_of_another_schema_version(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_outputs('f', [make_output(case='c1', system='large', gate_failures=[])])
-        write_version_one_store()
-
-        def build(args: list[str], *, check: bool, cwd: Path) -> Never:
-            pytest.fail('built the site')
-
-        monkeypatch.setattr(subprocess, 'run', build)
-
-        result = invoke('serve')
-
-        assert result.exit_code == 1
-        assert 'has schema version 1, while this bench reads version 2' in result.output
-
-
 class TestClose:
-    def test_closes_with_verified_retired_metadata_from_an_earlier_report(
-        self,
-        families_dir: Path,
-        store: VoteStore,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+    def test_requires_a_saved_export_for_votes_without_collecting_current_trials(
+        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        outputs = passing_outputs({'c1': 'reply'}, ['large', 'small'])
-        write_outputs('f', list(outputs.values()))
-        session = store.start_session('f', AT)
-        store.record(
-            make_ballot(
-                outputs['c1', 'large'], outputs['c1', 'small'], session=session.id
-            ),
-            AT,
-        )
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        prior = report.close(
-            load_family('f'),
-            store,
-            AT,
-            system_names={'large': 'Prior Large', 'small': 'Retired Small'},
-            previous_reports=[],
-        )
-        report.write_report(prior)
-        monkeypatch.setattr(
-            cli,
-            '_load_systems',
-            lambda: {'large': make_system(display_name='Current Large')},
-        )
 
-        def collect(family: Family) -> None:
-            pass
+        def refuse_collection(family: Family) -> None:
+            pytest.fail(f'Votes tried to collect current family {family.name}.')
 
-        monkeypatch.setattr(cli, '_collect', collect)
+        monkeypatch.setattr(cli, '_collect', refuse_collection)
 
         result = invoke('close', 'f')
-        assert result.exit_code == 0, result.output
 
-        current = report.read_reports('f', datetime.max.replace(tzinfo=UTC))[-1]
-        assert current.systems['large'].display_name == 'Current Large'
-        assert current.systems['small'].display_name == 'Retired Small'
-        assert report.read_reports('f', current.closed_at) == [prior]
-        assert set(current.systems['small'].model_dump()) == {
-            'display_name',
-            'fingerprint',
-        }
+        assert result.exit_code == 1
+        assert 'Votes require a saved canonical D1 export.' in result.output
+        assert '--snapshot <path>' in result.output
 
-    def test_collects_the_family_before_writing_the_report(
+    @pytest.mark.parametrize('exists', [False, True], ids=['missing', 'malformed'])
+    def test_rejects_an_unreadable_export_without_reading_current_family_inputs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exists: bool
+    ) -> None:
+        snapshot = tmp_path / 'capture.json'
+        if exists:
+            snapshot.write_text('{')
+
+        def refuse_family(name: str) -> None:
+            pytest.fail(f'Frozen close tried to load current family {name}.')
+
+        monkeypatch.setattr(cli, '_load_family', refuse_family)
+
+        result = invoke('close', 'f', '--snapshot', str(snapshot))
+
+        assert result.exit_code == 1
+        assert 'Report written' not in result.output
+        assert 'Traceback' not in result.output
+
+    def test_collects_real_test_trials_before_writing_their_aggregate(
         self,
         families_dir: Path,
-        store: VoteStore,
-        data_dir: Path,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_votes_family(
-            families_dir, 'f', ['large', 'small'], {'c1': 'reply', 'c2': 'reply'}
-        )
-        systems = {
-            'large': make_system(name='large', display_name='Acme Large'),
-            'small': make_system(name='small', display_name='Acme Small'),
-        }
-        monkeypatch.setattr(cli, '_load_systems', lambda: systems)
-        family = load_family('f')
-        tasks = jobs.render_tasks(family, load_cases(family))
-        config = jobs.job(family, list(systems.values()), tasks)
-        agents = {agent.kwargs['system']: agent for agent in config.agents}
-        job = data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00'
-        for case in ('c1', 'c2'):
-            for system in ('large', 'small'):
-                write_trial(
-                    job,
-                    f'{case}__{system}__1',
-                    agents[system],
-                    task=f'f/{case}',
-                    output=f'{system} answers {case}',
-                    context=AgentContext(metadata={'finish_reason': 'stop'}),
-                    instruction=None,
-                    environment=config.environment,
-                    verifier_disabled=config.verifier.disable,
-                )
-        outputs = jobs.collect(family, systems)
-        by_key = {(output.case, output.system): output for output in outputs}
-        at = datetime(2026, 10, 22, tzinfo=UTC)
-        session = store.start_session('f', at)
-        for case in ('c1', 'c2'):
-            store.record(
-                Ballot(
-                    session=session.id,
-                    case=case,
-                    a=Side.of(by_key[case, 'large']),
-                    b=Side.of(by_key[case, 'small']),
-                    choice='a',
-                    duration_sec=3.0,
-                ),
-                at,
+        write_task_family(families_dir, 'echo')
+        settings = families_dir / 'f/family.toml'
+        settings.write_text(
+            settings.read_text()
+            + textwrap.dedent(
+                """\
+                systems = ["large"]
+                harness = "terminus-2"
+                """
             )
-        (data_dir / 'outputs' / 'f.jsonl').unlink()
+        )
+        task = families_dir / 'f/tasks/echo'
+        config = TaskConfig.model_validate_toml((task / 'task.toml').read_text())
+        config.metadata['author'] = 'large'
+        (task / 'task.toml').write_text(config.model_dump_toml())
+        family = load_family('f')
+        system = make_system(name='large', display_name='Public Large')
+        (resolved,) = jobs.family_systems(family, [system])
+        finish_job(jobs.job(family, [resolved], [task]))
+        monkeypatch.setattr(cli, '_load_systems', lambda: {'large': system})
         monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+
         result = invoke('close', 'f')
         assert result.exit_code == 0, result.output
 
         (path,) = (tmp_path / 'reports' / 'f').iterdir()
-        assert result.output == (
-            f'Family `f`: 4 outputs, 0 errored.\nReport written to `{path}`.\n'
-        )
         closed = report.Report.model_validate_json(path.read_text())
-        assert isinstance(closed.results, report.VotesResults)
-        assert closed.family == 'f'
-        assert {
-            name: metadata.display_name for name, metadata in closed.systems.items()
-        } == {name: systems[name].display_name for name in ('large', 'small')}
-        assert {
-            name: metadata.fingerprint for name, metadata in closed.systems.items()
-        } == {name: systems[name].fingerprint for name in ('large', 'small')}
-        assert {standing.system for standing in closed.results.standings} == {
-            'large',
-            'small',
-        }
-
-    def test_rejects_a_family_without_outputs(self, families_dir: Path) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-
-        result = invoke('close', 'f')
-
-        assert result.exit_code == 1
-        assert 'Family `f` has no outputs on its current cases.' in result.output
-        assert 'Usage:' not in result.output
-
-    def test_collects_past_a_removed_case_before_closing(
-        self,
-        families_dir: Path,
-        data_dir: Path,
-        synthetic_systems: dict[str, System],
-    ) -> None:
-        write_removed_case(families_dir, data_dir)
-
-        result = invoke('close', 'f')
-
-        assert result.exit_code == 1
-        assert 'Family `f` has no votes yet.' in result.output
-
-    def test_reports_a_store_of_another_schema_version(
-        self, families_dir: Path
-    ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
-        write_version_one_store()
-
-        result = invoke('close', 'f')
-
-        assert result.exit_code == 1
-        assert 'has schema version 1, while this bench reads version 2' in result.output
-        assert 'Invalid value for' not in result.output
+        assert closed.results.scorer == 'tests'
+        assert closed.results.standings[0].pass_rate == 1.0
+        assert closed.systems['large'].display_name == 'Public Large'
+        assert closed.systems['large'].fingerprint == resolved.fingerprint
+        assert 'Family `f`: 1 outputs, 0 errored.' in result.output
 
 
 class TestFingerprints:

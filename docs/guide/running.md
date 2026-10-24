@@ -4,7 +4,7 @@ Learn how to point the bench at a model endpoint, check and run a family, collec
 
 ## The Model Endpoint
 
-Every system sends OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
+Every system uses its configured OpenAI-compatible Chat Completions or Responses API at the endpoint in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
 
 | Variable                  | Value                                                                                                                                                                  |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -16,7 +16,7 @@ Every system sends OpenAI chat-completions requests to an endpoint configured in
 
 Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 
-Each system's route is the model ID the endpoint expects. Every request uses its resolved completion allowance as `max_completion_tokens`, including reasoning, and its effort when one is selected. A case trial sends the instruction as the user message and the optional system prompt. A task trial uses the family's harness to drive the task's container.
+Each system's route is the model ID the endpoint expects. Requests use the system's resolved completion allowance, including reasoning, and its selected effort through the configured API. A case trial sends the instruction as the user message and the optional system prompt. A task trial uses the family's harness to drive the task's container.
 
 ## Checking a Family
 
@@ -47,11 +47,11 @@ When Harbor exits, `bench run` collects the family's trials into `outputs/<famil
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
 
-An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists. Editing a case's instruction reruns it under its ID on every system, and collecting the family keeps only the new trials, so its earlier outputs and the votes on them drop out.
+An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists. Editing a case's instruction reruns it under its ID on every system, and collection keeps the current trials. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
 
-To regenerate a family, move `jobs/<family>/` out of the data directory and run, and the votes on its old outputs drop out of every fit.
+Moving `jobs/<family>/` out of the data directory makes the next run regenerate that family's trials. Publishing the resulting outputs requires a new reviewed release.
 
-Removing a system from the family's `systems` stops new trials and current collection. Its closed reports remain unchanged. A removed `reference` needs a replacement.
+Removing a system from the family's `systems` stops new trials and current collection. Closed reports keep their frozen identities, and a removed `reference` needs a replacement for later rounds.
 
 A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
@@ -64,7 +64,7 @@ uv run bench collect
 uv run bench collect smoke-text
 ```
 
-`bench run` collects its own trials, and `bench serve` and `bench close` re-collect the families they read. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary.
+`bench run` collects its own trials, and closing a `tests` family re-collects its trials. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. Voted reports use frozen canonical evidence.
 
 It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
 
@@ -92,21 +92,18 @@ Each record holds:
 
 ## Voting
 
-```bash
-uv run bench serve
-```
-
-`bench serve` collects every family scored by votes that has jobs, then builds the vote page and serves it at `http://127.0.0.1:8790/vote/` for each family with outputs. It runs until interrupted and reads outputs at start, so restart it after a run. Open that address exactly, since the API admits no other host.
+Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate releases and runtime changes. Publishing collected outputs requires exact source proof and explicit public approval, as [Arena](../design/arena.md) describes.
 
 A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ## Closing a Round
 
 ```bash
-uv run bench close writing-zh
+uv run bench arena export production writing-zh <snapshot-path>
+uv run bench close writing-zh --snapshot <snapshot-path>
 ```
 
-`bench close` collects the family's trials first, then fits every vote of the family, or aggregates a `tests` family's rewards, and writes `reports/<family>/<round>.json`, dated by the UTC day. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+For a voted family, export a registered evidence cut from production, then pass that saved export to `bench close --snapshot`. The close command fits that frozen evidence and writes `reports/<family>/<round>.json`, dated by the UTC day. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 
@@ -118,9 +115,8 @@ assistant-bench/
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
-├── outputs/<family>.jsonl                  # Records written by `bench run`, `bench collect`, `bench serve`, and `bench close`
-├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
-└── votes.sqlite                            # Sessions, votes, and undos from `bench serve`
+├── outputs/<family>.jsonl                  # Collected Harbor trial records
+└── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 ```
 
 Run `harbor view` on a family's job directory to browse its trials.

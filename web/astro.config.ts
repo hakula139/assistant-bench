@@ -2,11 +2,11 @@ import react from '@astrojs/react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'astro/config';
 
-import localVote from './src/integrations/local-vote';
+import voting from './src/integrations/voting';
 
 export default defineConfig({
   site: 'https://bench.hakula.xyz',
-  integrations: [react(), localVote()],
+  integrations: [react(), voting()],
   vite: {
     plugins: [tailwindcss()],
   },

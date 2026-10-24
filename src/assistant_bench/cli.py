@@ -3,7 +3,6 @@
 import os
 import subprocess
 from collections import Counter
-from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -13,9 +12,9 @@ from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 
 from assistant_bench import jobs, report, revisions
-from assistant_bench.arena import api
-from assistant_bench.arena.service import Arena, load_families
-from assistant_bench.arena.store import VoteStore, votes_file
+from assistant_bench.arena.commands import app as arena_app
+from assistant_bench.arena.exports import read_export
+from assistant_bench.arena.snapshots import analyze_export
 from assistant_bench.catalog import (
     SYSTEMS_FILE,
     System,
@@ -33,15 +32,14 @@ from assistant_bench.families import (
 )
 from assistant_bench.messages import code
 from assistant_bench.outputs import Output
-from assistant_bench.paths import REPO_ROOT
+from assistant_bench.paths import REPORTS_DIR, write_atomically
 
 
-LOCAL_SITE_VAR = 'BENCH_LOCAL'
-SITE_DIR = REPO_ROOT / 'web' / 'dist'
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
 HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(arena_app, name='arena', help='Prepare and manage frozen arena evidence.')
 
 
 # ── Arguments ──
@@ -58,11 +56,6 @@ def _known_families(names: list[str] | None) -> list[str] | None:
             f'No family named {code(unknown)}. Choose among {code(known)}.'
         )
     return list(dict.fromkeys(names))
-
-
-def _known_family(name: str) -> str:
-    _known_families([name])
-    return name
 
 
 FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
@@ -196,74 +189,73 @@ def collect(families: FamilyNames = None) -> None:
 
 
 @app.command()
-def serve() -> None:
-    """Collect every family scored by votes, then serve the vote page until stopped."""
-    for name in family_names():
-        family = _load_family(name)
-        if isinstance(family.settings, VotesSettings) and jobs.has_jobs(family):
-            _collect(family)
-    families = load_families()
-    if not families:
-        _fail(
-            'No family scored by votes has outputs yet. Run '
-            '`uv run bench run <family>` first.'
-        )
-    os.environ[LOCAL_SITE_VAR] = '1'
-    with closing(_vote_store()) as store:
-        try:
-            subprocess.run(
-                ['pnpm', '--filter', 'web', 'build'], check=True, cwd=REPO_ROOT
-            )
-        except subprocess.CalledProcessError as error:
-            typer.echo(
-                'Building the vote page failed. If the checkout lacks node_modules, '
-                'run `pnpm install` once, then rerun `uv run bench serve`.',
-                err=True,
-            )
-            raise typer.Exit(error.returncode) from error
-        page = SITE_DIR / api.VOTE_DIR / 'index.html'
-        if not page.is_file():
-            _fail(
-                f'No vote page at `{page}`. Build the site with '
-                f'`{LOCAL_SITE_VAR}=1 pnpm --filter web build` and fix what it '
-                'reports.'
-            )
-        typer.echo(
-            f'Voting on {code(families)} at {api.APP_ORIGIN}/{api.VOTE_DIR}/. '
-            'Open that exact address, since the server refuses `localhost`.'
-        )
-        api.serve(Arena(store, families, api.RENDER_ORIGIN), SITE_DIR)
-
-
-@app.command()
 def close(
-    family: Annotated[
-        str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP, callback=_known_family)
-    ],
+    family: Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)],
+    snapshot: Annotated[
+        Path | None,
+        typer.Option(
+            help='Close a saved ledger export without collecting current trials.'
+        ),
+    ] = None,
 ) -> None:
-    """Collect the family's trials and write its report to reports/ in the checkout.
-
-    The report is reports/<family>/<UTC date>.json, replacing one closed earlier the
-    same day.
-    """
-    selected = _load_family(family)
-    with closing(_vote_store()) as store:
-        _collect(selected)
+    """Write a frozen vote report or aggregate a test-scored family's trials."""
+    if snapshot is not None:
         try:
+            frozen = analyze_export(read_export(snapshot))
+            if frozen.analysis.family.name != family:
+                raise ValueError('The snapshot belongs to another family.')
+
             closed_at = datetime.now(UTC)
-            systems = _load_systems()
-            closed = report.close(
-                selected,
-                store,
+            closed = report.close_snapshot(
+                frozen,
                 closed_at,
-                system_names={
-                    name: system.display_name for name, system in systems.items()
-                },
                 previous_reports=report.read_reports(family, closed_at),
             )
-        except ValueError as error:
+        except (OSError, ValueError) as error:
             _fail(str(error))
+
+        typer.echo(f'Report written to `{report.write_report(closed)}`.')
+        return
+
+    _known_families([family])
+    selected = _load_family(family)
+    if isinstance(selected.settings, VotesSettings):
+        _fail('Votes require a saved canonical D1 export. Use `--snapshot <path>`.')
+
+    _collect(selected)
+    try:
+        closed_at = datetime.now(UTC)
+        systems = _load_systems()
+        closed = report.close(
+            selected,
+            closed_at,
+            system_names={
+                name: system.display_name for name, system in systems.items()
+            },
+            previous_reports=report.read_reports(family, closed_at),
+        )
+    except ValueError as error:
+        _fail(str(error))
+
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
+
+
+@arena_app.command()
+def points(
+    snapshot: Annotated[Path, typer.Argument(help='A saved ledger export.')],
+    output: Annotated[Path, typer.Argument(help='The fitted point snapshot to write.')],
+) -> None:
+    """Fit every connected component from a saved export without a running owner."""
+    try:
+        if output.resolve().is_relative_to(REPORTS_DIR.resolve()):
+            raise ValueError('Only `bench close` writes under reports/.')
+
+        frozen = analyze_export(read_export(snapshot))
+        write_atomically(output, f'{frozen.points.model_dump_json(indent=2)}\n')
+    except (OSError, ValueError) as error:
+        _fail(str(error))
+
+    typer.echo(f'Point snapshot written to `{output}`.')
 
 
 @app.command()
@@ -597,13 +589,5 @@ def _run(job: JobConfig) -> Path:
 def _read_trials(family: Family, job_dir: Path) -> list[Output]:
     try:
         return jobs.read_trials(family, job_dir, {})
-    except ValueError as error:
-        _fail(str(error))
-
-
-def _vote_store() -> VoteStore:
-    """Open the vote store, reporting a schema mismatch."""
-    try:
-        return VoteStore(votes_file())
     except ValueError as error:
         _fail(str(error))

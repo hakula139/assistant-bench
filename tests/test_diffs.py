@@ -2,10 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant_bench.arena.resolution import settled_score
 from assistant_bench.diffs import workspace_diff
-from assistant_bench.outputs import Output
-from support import make_output
 
 
 LINE_SEPARATOR = chr(0x2028)
@@ -172,31 +169,6 @@ class TestWorkspaceDiff:
         diff = workspace_diff(tmp_path / 'base', tmp_path / 'workspace')
 
         assert diff == expected
-
-    @pytest.mark.parametrize(
-        ('left', 'right', 'score'),
-        [(b'one\0', b'two\0', None), (b'one\0', b'one\0', 0.5)],
-        ids=[
-            'different-binary-solutions-need-a-vote',
-            'identical-binary-solutions-tie',
-        ],
-    )
-    def test_binary_solution_contents_decide_whether_a_pair_needs_a_vote(
-        self, tmp_path: Path, left: bytes, right: bytes, score: float | None
-    ) -> None:
-        base = tmp_path / 'base'
-        write_tree(base, {'asset.bin': b'base\0'})
-        outputs: list[Output] = []
-        for name, content in [('left', left), ('right', right)]:
-            workspace = tmp_path / name
-            write_tree(workspace, {'asset.bin': content})
-            outputs.append(
-                make_output(text=workspace_diff(base, workspace), gate_failures=[])
-            )
-
-        result = settled_score(*outputs)
-
-        assert result == score
 
     @pytest.mark.parametrize(
         ('path', 'old', 'new'),

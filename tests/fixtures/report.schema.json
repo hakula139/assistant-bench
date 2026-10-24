@@ -1,5 +1,44 @@
 {
   "$defs": {
+    "CappedHumanWeights": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "actor-proportional-cap",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "cap": {
+          "exclusiveMinimum": 0,
+          "title": "Cap",
+          "type": "integer"
+        },
+        "scope": {
+          "const": "family-evaluation",
+          "title": "Scope",
+          "type": "string"
+        },
+        "repeat_handling": {
+          "const": "excluded",
+          "title": "Repeat Handling",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "cap",
+        "scope",
+        "repeat_handling"
+      ],
+      "title": "CappedHumanWeights",
+      "type": "object"
+    },
     "CategoryBoard": {
       "additionalProperties": false,
       "description": "A category point fit in the overall anchor's connected component.",
@@ -124,6 +163,11 @@
       "title": "Distribution",
       "type": "object"
     },
+    "FamilyName": {
+      "maxLength": 256,
+      "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])",
+      "type": "string"
+    },
     "HeadToHead": {
       "additionalProperties": false,
       "description": "Human choices between two systems, with half credit for either tie.",
@@ -180,6 +224,145 @@
       ],
       "title": "HeadToHead",
       "type": "object"
+    },
+    "HumanWeights": {
+      "discriminator": {
+        "mapping": {
+          "actor-proportional-cap": "#/$defs/CappedHumanWeights",
+          "unit": "#/$defs/UnitHumanWeights"
+        },
+        "propertyName": "name"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/UnitHumanWeights"
+        },
+        {
+          "$ref": "#/$defs/CappedHumanWeights"
+        }
+      ]
+    },
+    "LedgerProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "export_id": {
+          "minLength": 1,
+          "title": "Export Id",
+          "type": "string"
+        },
+        "export_digest": {
+          "minLength": 1,
+          "title": "Export Digest",
+          "type": "string"
+        },
+        "namespace": {
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "captured_at": {
+          "format": "date-time",
+          "title": "Captured At",
+          "type": "string"
+        },
+        "event_cutoff": {
+          "minimum": 0,
+          "title": "Event Cutoff",
+          "type": "integer"
+        },
+        "receipt_cutoff": {
+          "minimum": 0,
+          "title": "Receipt Cutoff",
+          "type": "integer"
+        },
+        "family_revision": {
+          "minimum": 0,
+          "title": "Family Revision",
+          "type": "integer"
+        },
+        "analysis_sequence": {
+          "minimum": 0,
+          "title": "Analysis Sequence",
+          "type": "integer"
+        },
+        "evaluation_id": {
+          "minLength": 1,
+          "title": "Evaluation Id",
+          "type": "string"
+        },
+        "publication_id": {
+          "minLength": 1,
+          "title": "Publication Id",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "sampling_point_snapshot_id": {
+          "minLength": 1,
+          "title": "Sampling Point Snapshot Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "ledger",
+          "title": "Status",
+          "type": "string"
+        },
+        "weighted_evidence_digest": {
+          "minLength": 1,
+          "title": "Weighted Evidence Digest",
+          "type": "string"
+        },
+        "fitted_point_snapshot_id": {
+          "minLength": 1,
+          "title": "Fitted Point Snapshot Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "export_id",
+        "export_digest",
+        "namespace",
+        "captured_at",
+        "event_cutoff",
+        "receipt_cutoff",
+        "family_revision",
+        "analysis_sequence",
+        "evaluation_id",
+        "publication_id",
+        "policy_id",
+        "sampling_point_snapshot_id",
+        "status",
+        "weighted_evidence_digest",
+        "fitted_point_snapshot_id"
+      ],
+      "title": "LedgerProvenance",
+      "type": "object"
+    },
+    "Provenance": {
+      "discriminator": {
+        "mapping": {
+          "ledger": "#/$defs/LedgerProvenance",
+          "unrecorded": "#/$defs/UnrecordedProvenance"
+        },
+        "propertyName": "status"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/UnrecordedProvenance"
+        },
+        {
+          "$ref": "#/$defs/LedgerProvenance"
+        }
+      ]
     },
     "PublicSystem": {
       "additionalProperties": false,
@@ -257,6 +440,10 @@
           "$ref": "#/$defs/TestsResults"
         }
       ]
+    },
+    "RoundName": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
     },
     "SettledWeights": {
       "additionalProperties": false,
@@ -560,6 +747,21 @@
       "title": "UnitHumanWeights",
       "type": "object"
     },
+    "UnrecordedProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "unrecorded",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "UnrecordedProvenance",
+      "type": "object"
+    },
     "VotesMethod": {
       "additionalProperties": false,
       "properties": {
@@ -589,7 +791,7 @@
           "type": "number"
         },
         "human_weights": {
-          "$ref": "#/$defs/UnitHumanWeights"
+          "$ref": "#/$defs/HumanWeights"
         },
         "settled_weights": {
           "$ref": "#/$defs/SettledWeights"
@@ -625,6 +827,12 @@
         "inference": {
           "$ref": "#/$defs/UnavailableInference"
         },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "status": "unrecorded"
+          }
+        },
         "reference": {
           "description": "Configured reference, whether or not comparisons connect it.",
           "title": "Reference",
@@ -648,7 +856,7 @@
           "type": "number"
         },
         "dropped_votes": {
-          "description": "Recorded choices excluded by current cases, outputs or gates.",
+          "description": "Accepted choices excluded from the fit, including repeats and moderation.",
           "title": "Dropped Votes",
           "type": "integer"
         },
@@ -665,7 +873,7 @@
           "type": "array"
         },
         "unranked": {
-          "description": "Entrants with current outputs outside the selected comparison component.",
+          "description": "Entrants in the frozen evaluation outside the comparison component.",
           "items": {
             "type": "string"
           },
@@ -763,7 +971,7 @@
       "additionalProperties": false,
       "properties": {
         "preliminary_decisive_votes": {
-          "description": "Coverage threshold, independent of population inference availability.",
+          "description": "Raw coverage threshold, independent of inference availability.",
           "exclusiveMinimum": 0,
           "title": "Preliminary Decisive Votes",
           "type": "integer"
@@ -793,12 +1001,10 @@
   "description": "A closed round of one family, written to `reports/<family>/<round>.json`.",
   "properties": {
     "family": {
-      "title": "Family",
-      "type": "string"
+      "$ref": "#/$defs/FamilyName"
     },
     "round": {
-      "title": "Round",
-      "type": "string"
+      "$ref": "#/$defs/RoundName"
     },
     "closed_at": {
       "format": "date-time",

@@ -89,11 +89,20 @@ const votesMethod = z.strictObject({
   l2_penalty: z.number().positive(),
   points_per_logit: z.number().positive(),
   anchor_score: z.number(),
-  human_weights: z.strictObject({
-    name: z.literal('unit'),
-    version: z.literal(1),
-    repeat_handling: z.literal('included'),
-  }),
+  human_weights: z.discriminatedUnion('name', [
+    z.strictObject({
+      name: z.literal('unit'),
+      version: z.literal(1),
+      repeat_handling: z.literal('included'),
+    }),
+    z.strictObject({
+      name: z.literal('actor-proportional-cap'),
+      version: z.literal(1),
+      cap: z.int().positive(),
+      scope: z.literal('family-evaluation'),
+      repeat_handling: z.literal('excluded'),
+    }),
+  ]),
   settled_weights: z.strictObject({
     name: z.literal('sample-pair-share'),
     version: z.literal(1),
@@ -112,11 +121,34 @@ const unavailableInference = z.strictObject({
   reason: z.literal('population-method-not-validated'),
 });
 
+const provenance = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('unrecorded') }),
+  z.strictObject({
+    status: z.literal('ledger'),
+    schema_version: z.literal(1),
+    export_id: z.string().min(1),
+    export_digest: z.string().min(1),
+    namespace: z.string().min(1),
+    captured_at: z.iso.datetime({ offset: true }),
+    event_cutoff: z.int().nonnegative(),
+    receipt_cutoff: z.int().nonnegative(),
+    family_revision: z.int().nonnegative(),
+    analysis_sequence: z.int().nonnegative(),
+    evaluation_id: z.string().min(1),
+    publication_id: z.string().min(1),
+    policy_id: z.string().min(1),
+    sampling_point_snapshot_id: z.string().min(1),
+    weighted_evidence_digest: z.string().min(1),
+    fitted_point_snapshot_id: z.string().min(1),
+  }),
+]);
+
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   method: votesMethod,
   rules: votesRules,
   inference: unavailableInference,
+  provenance: provenance.optional(),
   reference: z.string(),
   anchor: z.string(),
   votes: z.int().nonnegative(),
@@ -156,8 +188,11 @@ const testsResults = z.strictObject({
 /** Mirrors the pydantic `Report` model, which writes `reports/<family>/<round>.json`. */
 export const reportSchema = z
   .strictObject({
-    family: z.string(),
-    round: z.string(),
+    family: z
+      .string()
+      .max(256)
+      .regex(/^[a-z0-9][a-z0-9-]*$/),
+    round: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/),
     closed_at: z.iso.datetime({ offset: true }),
     systems: z.record(z.string().min(1), publicSystem),
     results: z.discriminatedUnion('scorer', [votesResults, testsResults]),
@@ -202,8 +237,93 @@ export const reportSchema = z
         ...results.categories.flatMap((board) => [board, ...board.standings]),
       ];
 
-      if (aggregates.some(({ votes, effective_votes }) => effective_votes !== votes)) {
+      if (
+        results.method.human_weights.name === 'unit' &&
+        aggregates.some(({ votes, effective_votes }) => effective_votes !== votes)
+      ) {
         reject('Unit human weights require effective_votes to equal votes');
+      }
+
+      if (aggregates.some(({ votes, effective_votes }) => effective_votes > votes)) {
+        reject('Effective votes cannot exceed raw votes');
+      }
+
+      if (
+        results.method.human_weights.name === 'actor-proportional-cap' &&
+        results.provenance?.status !== 'ledger'
+      ) {
+        reject('Capped human weights require sealed ledger provenance');
+      }
+
+      if (results.method.human_weights.name === 'actor-proportional-cap') {
+        const close = (left: number, right: number) =>
+          Math.abs(left - right) <=
+          Math.max(1e-9, 1e-9 * Math.max(Math.abs(left), Math.abs(right)));
+        const bounded = (row: { votes: number; effective_votes: number }, total: typeof row) =>
+          row.votes <= total.votes &&
+          (row.effective_votes <= total.effective_votes ||
+            close(row.effective_votes, total.effective_votes));
+        const totals = (rows: { votes: number; effective_votes: number }[]) => ({
+          votes: rows.reduce((sum, row) => sum + row.votes, 0),
+          effective_votes: rows.reduce((sum, row) => sum + row.effective_votes, 0),
+        });
+
+        if (
+          [...results.standings, ...results.head_to_head, ...results.categories].some(
+            (row) => !bounded(row, results),
+          )
+        ) {
+          reject('Subset counts cannot exceed complete family evidence');
+        }
+
+        if (
+          new Set(results.categories.map(({ category }) => category)).size !==
+            results.categories.length ||
+          !bounded(totals(results.categories), results)
+        ) {
+          reject('Category boards must partition eligible family evidence');
+        }
+
+        if (
+          results.categories.some((board) => board.standings.some((row) => !bounded(row, board)))
+        ) {
+          reject('Category standings cannot exceed category evidence');
+        }
+
+        const sided = { votes: 2 * results.votes, effective_votes: 2 * results.effective_votes };
+        if (!bounded(totals(results.standings), sided)) {
+          reject('Standing totals cannot exceed both sides of each vote');
+        }
+
+        const headTotals = totals(results.head_to_head);
+        const heads = new Map(
+          results.head_to_head.map((row) => [JSON.stringify([row.system, row.opponent]), row]),
+        );
+        if (
+          heads.size !== results.head_to_head.length ||
+          headTotals.votes !== sided.votes ||
+          !close(headTotals.effective_votes, sided.effective_votes)
+        ) {
+          reject('Head-to-head totals must account for both sides of each vote');
+        }
+
+        for (const row of heads.values()) {
+          const mirror = heads.get(JSON.stringify([row.opponent, row.system]));
+          if (
+            row.system === row.opponent ||
+            !mirror ||
+            row.votes !== mirror.votes ||
+            !close(row.effective_votes, mirror.effective_votes) ||
+            row.wins !== mirror.losses ||
+            row.losses !== mirror.wins ||
+            row.ties !== mirror.ties ||
+            row.both_bad !== mirror.both_bad ||
+            row.wins + row.losses + row.ties + row.both_bad !== row.votes ||
+            !close(row.win_rate + mirror.win_rate, 1)
+          ) {
+            reject('Head-to-head rows must describe mirrored choices');
+          }
+        }
       }
 
       const { agreement, below_floor } = results.rater_agreement;

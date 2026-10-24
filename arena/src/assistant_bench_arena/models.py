@@ -21,7 +21,7 @@ class Record(BaseModel):
 # ── Identifiers ──
 
 
-# JSON Schema uses ECMAScript, whose $ also matches before a final newline.
+# Python JSON Schema validators accept a final newline with $.
 type FamilyName = Annotated[
     str,
     Field(
@@ -63,19 +63,19 @@ class Defects(BaseModel):
 # ── Views ──
 
 
-class TextPane(BaseModel):
+class TextPane(Record):
     render: Literal['text']
     text: str
 
 
-class HtmlPane(BaseModel):
+class HtmlPane(Record):
     """An HTML output, loaded in a sandboxed frame from the render origin."""
 
     render: Literal['html']
     url: str
 
 
-class DiffPane(BaseModel):
+class DiffPane(Record):
     """A solution as a unified diff of the task's repository."""
 
     render: Literal['diff']
@@ -85,63 +85,16 @@ class DiffPane(BaseModel):
 type Pane = Annotated[TextPane | HtmlPane | DiffPane, Field(discriminator='render')]
 
 
-class PairView(BaseModel):
-    """A pair as the vote page receives it, identifying no system."""
-
-    token: str
-    """Opaque and valid until the pair is voted on or undone."""
-
-    instruction: str
-    checklist: list[str]
-    a: Pane
-    b: Pane
-
-
-class FamilyView(BaseModel):
+class FamilyView(Record):
     """A family the vote page can start a session on."""
 
     name: FamilyName
     """Stable family ID."""
 
     aspect: str | None
-    """Private aspects may use IDs outside the public site's registry."""
+    """Site aspect ID, absent for family-specific boards."""
 
     display_name: str
 
     defects: list[Defect]
     """Available output tags, in the family's order."""
-
-
-class SessionView(BaseModel):
-    """A session's votes and the pair to show."""
-
-    id: str
-    family: FamilyView
-    votes: int
-    remaining: int
-    """Cases still eligible for this session, including the open pair's."""
-
-    pair: PairView | None
-    """Absent once no eligible case remains."""
-
-
-# ── Requests ──
-
-
-NOTE_MAX_CHARS = 500
-
-
-class StartSession(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    family: FamilyName
-
-
-class VoteRequest(BaseModel):
-    """A choice on a pair, where `a` is the left pane."""
-
-    model_config = ConfigDict(extra='forbid')
-
-    choice: Choice
-    defects: Defects = Defects()
-    note: str | None = Field(default=None, max_length=NOTE_MAX_CHARS)

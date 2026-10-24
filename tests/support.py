@@ -10,13 +10,12 @@ import textwrap
 import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-import numpy as np
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
@@ -39,22 +38,14 @@ from harbor.models.trial.result import (
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
-from assistant_bench.arena.service import Arena, load_families
-from assistant_bench.arena.store import (
-    SWAPPED,
-    Ballot,
-    Side,
-    Vote,
-    VoteStore,
-)
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import Gate, TaskTestsSettings
+from assistant_bench.families import TaskTestsSettings
 from assistant_bench.harnesses.endpoint import BASE_URL_VAR, HEADERS_VAR, KEY_FILE_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
-from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
-from assistant_bench_arena.models import Choice, Defect, Defects
+from assistant_bench_arena.models import Defect
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -561,29 +552,6 @@ def passing_outputs(
     }
 
 
-def make_ballot(a: Output, b: Output, **fields: Any) -> Ballot:
-    """Return a vote for `a`, shown on the left, against `b` on `a`'s case."""
-    return Ballot.model_validate(_ballot_fields(a, b) | fields)
-
-
-def make_vote(a: Output, b: Output, **fields: Any) -> Vote:
-    """Return vote 1, recorded at `AT`, for `a` on the left against `b`."""
-    return Vote.model_validate(
-        {'id': 1, 'recorded_at': AT} | _ballot_fields(a, b) | fields
-    )
-
-
-def _ballot_fields(a: Output, b: Output) -> dict[str, Any]:
-    return {
-        'session': 's',
-        'case': a.case,
-        'a': Side.of(a),
-        'b': Side.of(b),
-        'choice': 'a',
-        'duration_sec': 5.0,
-    }
-
-
 def write_votes_family(
     families_dir: Path,
     name: str,
@@ -634,209 +602,4 @@ def write_votes_family(
             + '\n'
             for case, category in categories.items()
         )
-    )
-
-
-ARENA_SYSTEMS = ['large', 'small']
-ARENA_CASES = {'c1': 'reply', 'c2': 'docs', 'c3': 'reply'}
-RENDER_ORIGIN = 'http://127.0.0.1:9'
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = AT
-
-    def __call__(self) -> datetime:
-        return self.now
-
-
-@dataclass
-class Refits:
-    """Comparison counts and roots captured on each scheduler refit."""
-
-    comparisons: list[int] = field(default_factory=list)
-    roots: list[str] = field(default_factory=list)
-
-
-def make_arena(
-    families_dir: Path,
-    clock: Clock,
-    store: VoteStore,
-    texts: dict[str, str] | None = None,
-    cut_off: tuple[str, ...] = (),
-    render: str = 'text',
-) -> Arena:
-    """Serve family `f`, where `texts` overrides each system's output text."""
-    write_votes_family(families_dir, 'f', ARENA_SYSTEMS, ARENA_CASES, render=render)
-    outputs = passing_outputs(ARENA_CASES, ARENA_SYSTEMS).values()
-    truncated = {'finish_reason': 'length', 'gate_failures': [Gate.TRUNCATED]}
-    write_outputs(
-        'f',
-        [
-            output.model_copy(
-                update={'text': (texts or {}).get(output.system, output.text)}
-                | (truncated if output.system in cut_off else {})
-            )
-            for output in outputs
-        ],
-    )
-    return Arena(store, load_families(), RENDER_ORIGIN, clock, np.random.default_rng(0))
-
-
-SYNTHETIC_SYSTEMS = {
-    'acme-large': 0.6,
-    'acme-small': 0.2,
-    'acme-pro': 0.5,
-    'acme-flash': -0.1,
-    'acme-mini': -0.4,
-}
-SYNTHETIC_STRAYS = {'acme-edge': 0.3, 'acme-nano': -0.2, 'acme-tiny': -1.0}
-SYNTHETIC_NAMES = {
-    system: system.replace('-', ' ').title()
-    for system in SYNTHETIC_SYSTEMS | SYNTHETIC_STRAYS
-}
-SYNTHETIC_START = datetime(2026, 10, 1, 9, tzinfo=UTC)
-SYNTHETIC_CLOSE = datetime(2026, 10, 21, 18, tzinfo=UTC)
-SYNTHETIC_EARLY_CLOSE = datetime(2026, 10, 1, 18, tzinfo=UTC)
-
-
-def write_synthetic_round(
-    families_dir: Path, store: VoteStore, sessions: int = 10
-) -> None:
-    """Write family `arena` with outputs and about 30 votes per daily session.
-
-    A seeded rater follows Bradley-Terry with the strengths above and a small
-    left-side bias, ties 15% and calls both bad 5% of the time, and swaps sides
-    on about one vote in ten from an earlier session. About 3% of the outputs
-    fail a gate, so their pairs are settled without a vote.
-
-    Each session also pits `acme-edge` against `acme-nano` on the two cases
-    where every other output passes, which leaves them unranked, and casts two
-    votes for `acme-tiny` on `case-retired`, which has outputs but is no longer
-    a case. Those votes are dropped, so `acme-tiny` ranks only through settled
-    results, where it fails a gate on most cases.
-    """
-    rng = np.random.default_rng(7)
-    systems = list(SYNTHETIC_SYSTEMS)
-    categories = ['docs', 'message', 'reply']
-    cases = {f'case-{i:02}': categories[i % 3] for i in range(30)}
-    everyone = [*systems, *SYNTHETIC_STRAYS]
-    write_votes_family(families_dir, 'arena', everyone, cases)
-
-    def output(case: str, system: str, sample: int, failing: float) -> Output:
-        words = int(rng.integers(40, 400))
-        return make_output(
-            trial=f'{case}__{system}__{sample}',
-            job='job-1',
-            case=case,
-            system=system,
-            fingerprint=f'fp-{system}',
-            text=' '.join([system if system in SYNTHETIC_STRAYS else 'word'] * words),
-            gate_failures=[Gate.TRUNCATED] if rng.random() < failing else [],
-            output_tokens=words * 2,
-            cost_usd=words * 2e-5 * (1 + everyone.index(system)),
-            latency_sec=float(rng.uniform(2, 40)),
-        )
-
-    outputs = [
-        output(case, system, sample, 0.03)
-        for case in cases
-        for system in systems
-        for sample in range(2)
-    ]
-    failing = {o.case for o in outputs if o.gate_failures}
-    clean = [case for case in cases if case not in failing][:2]
-    outputs += [
-        output(case, system, sample, 0.0)
-        for case in clean
-        for system in ('acme-edge', 'acme-nano')
-        for sample in range(2)
-    ]
-    failable = set(cases) - set(clean)
-    outputs += [
-        output(case, 'acme-tiny', sample, 0.7 if case in failable else 0.0)
-        for case in [*cases, 'case-retired']
-        for sample in range(2)
-    ]
-    outputs += [output('case-retired', 'acme-large', 0, 0.0)]
-    write_outputs('arena', outputs)
-
-    by_slot: dict[tuple[str, str], list[Output]] = {}
-    for o in outputs:
-        if not o.gate_failures:
-            by_slot.setdefault((o.case, o.system), []).append(o)
-    strays = [
-        (case, pair)
-        for case in clean
-        for pair in (('acme-edge', 'acme-nano'), ('acme-nano', 'acme-edge'))
-    ] + [
-        ('case-retired', pair)
-        for pair in (('acme-tiny', 'acme-large'), ('acme-large', 'acme-tiny'))
-    ]
-    recorded: list[tuple[int, Vote]] = []
-    for day in range(sessions):
-        session = store.start_session('arena', SYNTHETIC_START + timedelta(days=day))
-        at = session.started_at
-        for case in rng.permutation(list(cases)):
-            at += timedelta(seconds=float(rng.uniform(20, 90)))
-            earlier = [
-                vote
-                for vote_day, vote in recorded
-                if vote_day < day and vote.repeat_of is None
-            ]
-            if earlier and rng.random() < 0.1:
-                original = earlier[rng.integers(len(earlier))]
-                agree = rng.random() < 0.85
-                ballot = Ballot(
-                    session=session.id,
-                    case=original.case,
-                    a=original.b,
-                    b=original.a,
-                    choice=SWAPPED[original.choice] if agree else original.choice,
-                    duration_sec=float(rng.uniform(15, 120)),
-                    repeat_of=original.id,
-                )
-            else:
-                left, right = rng.choice(systems, size=2, replace=False)
-                lefts = by_slot.get((str(case), str(left)), [])
-                rights = by_slot.get((str(case), str(right)), [])
-                if not (lefts and rights):
-                    continue
-                a = lefts[rng.integers(len(lefts))]
-                b = rights[rng.integers(len(rights))]
-                ballot = _simulated_vote(rng, session.id, a, b)
-            recorded.append((day, store.record(ballot, at)))
-        for case, (left, right) in strays:
-            at += timedelta(seconds=float(rng.uniform(20, 90)))
-            a, b = by_slot[case, left][0], by_slot[case, right][-1]
-            store.record(_simulated_vote(rng, session.id, a, b), at)
-
-
-def _simulated_vote(
-    rng: np.random.Generator, session: str, a: Output, b: Output
-) -> Ballot:
-    strengths = SYNTHETIC_SYSTEMS | SYNTHETIC_STRAYS
-    gap = strengths[a.system] - strengths[b.system] + 0.1
-    draw = rng.random()
-    choice: Choice
-    if draw < 0.15:
-        choice = 'tie'
-    elif draw < 0.2:
-        choice = 'both_bad'
-    else:
-        choice = 'a' if rng.random() < 1 / (1 + np.exp(-gap)) else 'b'
-    tagged: frozenset[Defect] = (
-        frozenset({PROSE_DEFECTS[rng.integers(len(PROSE_DEFECTS))]})
-        if rng.random() < 0.2
-        else frozenset()
-    )
-    defects = Defects(b=tagged) if choice == 'a' else Defects(a=tagged)
-    return Ballot(
-        session=session,
-        case=a.case,
-        a=Side.of(a),
-        b=Side.of(b),
-        choice=choice,
-        defects=defects,
-        duration_sec=float(rng.uniform(15, 120)),
     )

@@ -2,75 +2,64 @@
 
 The arena shows blind pairs of outputs from a family scored by votes and records each choice. The [module map](architecture.md#module-map) identifies its implementation boundaries.
 
+## Publication and Evidence
+
+`bench arena` manages immutable releases through a named native Worker profile in `arena/wrangler.toml`. The private Service binding admits typed publication, export and moderation operations. A target must be explicitly configured before its commands can connect.
+
+```bash
+uv run bench arena prepare selection.json release.json
+uv run bench arena publish production release.json
+uv run bench arena status production writing-zh
+uv run bench arena health production
+uv run bench arena export production writing-zh evidence.json
+uv run bench arena refresh production evidence.json
+uv run bench close writing-zh --snapshot evidence.json
+```
+
+The selection names a rendered case family and exact `outputs`, each identified by `case`, `system`, `job` and `trial`. Preparation re-collects current trials, checks the resolved family fingerprints, and proves the rendered tasks against their native Harbor locks. Every selected sample of a case must have received the same instruction and source inputs. The prepared artifact contains the frozen numerical evaluation, presentation, rendered outputs and initial sampling points.
+
+Preparation requires the family's `public_voting` opt-in and an exact `PublicApproval`: source and license attestations for the selected cases, plus content and presentation digests for every published case and output. Synthetic classification and passing gates alone do not authorize publication. Regeneration changes the approved output identities and requires another review.
+
+Publication seals the replacement before activating it with the current family revision. A presentation refresh retains the active fitted points when its numerical evaluation is unchanged. `refresh` fits the saved evidence offline, then updates sampling points while retaining the active presentation. Concurrent evidence or control changes can refuse activation, so inspect the current status before choosing another cut.
+
+`status` includes the deployment's aggregate network-association expiry lag in milliseconds. `health` checks the selected deployment and exits unsuccessfully while expired associations await cleanup.
+
+An export captures every section at registered immutable cutoffs. Its authoritative section counts detect missing pages, while its content digest detects later file changes. Captures contain numerical evidence and provenance without network associations. `bench close --snapshot` reads the saved inventory, labels and measurements without consulting the running owner or current catalog. The raw accepted count includes repeats and withdrawn or moderated receipts. The actor cap applies once to all eligible ordinary votes before any report subset or diagnostic is fitted.
+
+Generate the application's safe static family list from approved releases:
+
+```bash
+uv run bench arena catalog web/public/arena-families.json release.json
+```
+
+The catalog contains only family IDs, display labels, aspects and available defect tags. It carries no case, output or system inventory.
+
+For private administration, `bench arena investigate <target> filters.json` returns one bounded receipt page with its continuation sequence. Filters can select a family, actor, session, evaluation, time range, current status or an unexpired keyed network tag. Continue with `--after <sequence>`. `bench arena moderate <target> plan.json` stages and seals an exact reviewed exclusion or restoration plan, then applies its bounded chunks. Repeating the same plan resumes its immutable commands. Network associations remain searchable for 60 days and are excluded from permanent numerical exports.
+
 ## Blinding
 
-The vote page receives an opaque pair token, the current case's checklist and instruction, and the two outputs. Collection admits only trials matching that source. The server keeps the mapping from each token to its systems, fingerprints, and trials. Nothing the page receives identifies a system: no name, fingerprint, timing, token count, or error text, and every unknown session, pair, or output answers with the same `not found`. Votes record their duration from the server's clock, from serving the pair to receiving the vote.
-
-A task family with `render = "diff"` sends each solution as the diff of its `/app` against the task's repository. Collection excludes `.git` and Python tool caches. Every system runs under the same agent, and the page receives no commit metadata, trajectory, command, turn count, test output or reward. Paths are sorted and context is fixed.
-
-A model can still identify itself in a comment or file it writes, as it can in prose.
+The browser receives the approved instruction and checklist, two output panes and opaque capabilities. The owner keeps the mapping to systems, fingerprints and source trials. Pane responses omit system names, timing, token counts, errors and request metadata. Output text can still identify its author, so public content review must check the exact rendered bytes.
 
 ## Sessions and Pairs
 
-A session belongs to one family, shows each eligible case at most once and ends when none remain. Eligibility requires passing, different outputs from two systems. `remaining` counts eligible cases still awaiting a choice, including the open pair's.
+A browser session belongs to one family. The server retains its current lease and accepted choices, so tabs and retries share one authoritative state. A submitted command keeps its identity while its outcome is unresolved. Changing families preserves that pending command for its original session.
 
-The vote page keeps each family's session ID in `localStorage` and asks the arena to resume it. The store determines recorded choices and remaining cases. An unknown session gives way to a new one.
+Only different outputs that passed their gates can form a human comparison. The scheduler balances initial pair coverage, then uses stored sampling points to favor close pairs with little evidence. Swapped repeats measure consistency and carry zero fitting mass. The offline actor cap also limits cumulative browser influence across the complete family evaluation.
 
-Tabs that resume the same session share its open pair, so a vote or undo in one retires the pair the others show, and each follows the session's current pair.
+Gate failures and identical outputs settle comparisons without a browser vote. A failing output loses, two failing outputs count as both bad, and identical outputs tie. Every pairing of two systems' samples on a case carries weight 1 / (the product of their sample counts), so one case contributes at most one settled vote per pair of systems. Settled comparisons have no display side.
 
-Each draw picks two systems from the family's `systems` list and one of the family's current cases that both have outputs for, then draws one sample of each at random, so every sample collects votes over time. The scheduler chooses pairs in this order:
-
-1. **Repeats:** once a vote is a day old, it may return with its sides swapped, at 10% odds per draw, until it has been repeated once. Agreement on repeats is the rater-consistency figure in [Ranking](ranking.md#counts-and-diagnostics).
-2. **Seed:** every ordered pair of systems first collects 2 votes, so each pair reaches 4 with both sides counterbalanced, taking the pair with the fewest votes first.
-3. **Adaptive:** after the seed, the scheduler fits the family's point scores, rooted at the most-voted system as in [Ranking](ranking.md#point-scores). It weighs eligible pairs by p(1 − p) / (n + 1), where p is the fitted preference and n the pair's votes, favoring close pairs with few votes. The order shown less often goes on the left.
-
-The scheduler refits at session start, after 5 choices have been cast or undone, and when the board lacks a system the draw weighs. Other draws reuse the fit. These points guide acquisition and supply no population confidence claim.
-
-Only outputs that passed every gate reach the owner, and two samples with identical text are never paired, since the outputs already decide those results. `arena/resolution.py` derives them afresh from the current outputs whenever the scheduler or `bench close` fits the board, so a later collection that changes a [gate verdict](families/writing.md#gate-verdicts) changes the results with it, and the vote store holds the owner's votes alone.
-
-A failing output loses, two failing outputs count as both bad, and identical outputs tie. Each pairing of two systems' samples on a case counts 1 / (the product of the two systems' sample counts on the case) of a vote, so a case weighs at most one vote per pair of systems, and since no pane showed either side, the fit's left-side intercept leaves these results out. Outputs without a verdict, such as ungraded trials, take no part.
-
-On a task family, the hidden tests are the only gate, so the owner sees only pairs of passing solutions. A task with one passing system needs no vote, since that system beats every failing one and the failing ones tie, and a task no system passes ties every pair, so `remaining` counts only the tasks where two systems' passing solutions differ.
-
-`reconcile` in `resolution.py` maps each recorded vote to the current outputs it compared, and the scheduler, `bench close`, and undo all go through it. A vote drops out of every fit when either output has left the outputs file, as a lower `samples` or a case that left `cases.jsonl` removes it, or no longer passes its gates, and when the two outputs now settle the pair, whose settled result takes its place. A regraded task trial keeps the identity of the trial whose agent wrote its solution, so a tests-only fix keeps each vote while both solutions still pass.
-
-Undo withdraws the latest vote either way, and when its pair cannot return, the session draws a fresh one.
+The numerical evaluation freezes these output facts. A later publication changes them through a new evaluation, while a presentation-only refresh keeps the same numerical identity. Withdrawals and moderation append evidence events. An export replays the captured history and keeps inactive receipts in its accepted denominator.
 
 ## Vote Store
 
-`votes.sqlite` in the data directory holds append-only `sessions`, `votes` and `undos` tables. Triggers reject updates, deletes and replacement inserts. Foreign keys ensure an undo names a recorded choice, and reads exclude withdrawn choices.
+Production D1 is the sole source of real votes, including votes cast from a MacBook. Staging uses a separate preview D1 for deployed validation.
 
-Votes record the session, case, both output identities, choice, defect tags, note, duration, repeat link and time. The file's `user_version` holds the schema version, and the store refuses to open another version.
+The ledger holds immutable evaluations, approved publications, sampling snapshots, receipt history and guarded control events. Typed private management commands publish and investigate these records. Database bindings belong to the native owner, while the management client has only its authenticated Service capability.
 
 ## Vote API
 
-`uv run bench serve` builds the vote page with `BENCH_LOCAL=1` and serves it from `web/dist/` with the API on `http://127.0.0.1:8790`, for every family scored by votes that has outputs:
-
-| Route                          | Does                                                                                     |
-| ------------------------------ | ---------------------------------------------------------------------------------------- |
-| `GET /api/families`            | Lists the families with outputs, each as `{"name", "aspect", "display_name", "defects"}` |
-| `POST /api/sessions`           | Starts a session on `{"family": ...}` and returns it with its first pair                 |
-| `POST /api/sessions/{id}/pair` | Returns the session's open pair, drawing one if none is open                             |
-| `POST /api/pairs/{token}/vote` | Records `{"choice", "defects", "note"}` and returns the session's next pair              |
-| `POST /api/sessions/{id}/undo` | Withdraws the session's latest owner vote and shows its pair again                       |
-
-`TrustedHostMiddleware` admits only the `127.0.0.1` host, and every POST must carry the app's own `Origin`, so another page or a DNS-rebound host cannot vote. `defects` maps `a` and `b` to lists drawn from the family's `defects`, and a vote that tags another issue answers 422 and leaves its pair open. A note holds at most 500 characters and never leaves the store, since it may quote a private case. The app serves no API docs, whose page would load scripts from a CDN with access to the API.
-
-The vote page is `web/dist/vote/index.html`, and `bench serve` stops when the build leaves none. Every file served from `vote/` carries the vote page's policy, decided on the path after normalization, so a URL that doubles or percent-encodes a slash carries it too. The policy loads scripts, styles, fonts, images, and API calls from the app alone and frames only the render origin:
-
-```text
-Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
-  font-src 'self'; img-src 'self'; connect-src 'self'; frame-src http://127.0.0.1:8791; base-uri 'none';
-  form-action 'none'; frame-ancestors 'none'
-```
+Anonymous browsers qualify through abuse checks and receive bounded session authority. The native owner validates the configured origin, capability scope, command identity and current ledger state before accepting a choice. Browser and network admission quotas limit submissions, while the offline cap limits one browser actor's total ranking influence. Private management has no public HTTP route.
 
 ## Render Origin
 
-A family with `render = "html"` sends each output as a URL on a second origin, `http://127.0.0.1:8791`, which the vote page loads in `<iframe sandbox="allow-scripts">`. The origin answers with the output under this policy:
-
-```text
-Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';
-  style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-ancestors http://127.0.0.1:8790
-```
-
-Outputs load by URL because a `srcdoc` frame inherits the vote page's policy. An output's URL stops working once its pair is voted on or undone.
+HTML outputs load from a separate cookie host inside sandboxed frames. The renderer receives a narrow read capability for the current authorized output and has no database or management binding. Its content policy blocks network requests and permits only the output's contained scripts, styles and data images. Text and diff panes retain the same identity blinding.

@@ -139,6 +139,8 @@ const roundRows = appearances.map(({ round, systems, reference, anchor, results,
       <Section title="Head to head">
         <p class={note}>
           Win rate against each opponent, where ties and both-bad votes count half.
+          {results.method.human_weights.name === 'actor-proportional-cap' &&
+            ' Counts show raw ordinary votes. Win rates use the recorded actor weights.'}
         </p>
         <DotRangePlot
           client:visible

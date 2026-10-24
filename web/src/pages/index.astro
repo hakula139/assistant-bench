@@ -8,6 +8,7 @@ import Base from '@/layouts/Base.astro';
 import { groupByAspect } from '@/lib/aspects';
 import { unionMarks } from '@/lib/forest';
 import { getFamilies } from '@/lib/reports';
+import { SITE_DESCRIPTION } from '@/lib/site';
 
 const families = await getFamilies();
 const marks = unionMarks(families.map((family) => scorerViews[family.config.scorer].marks(family)));
@@ -16,11 +17,10 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
 <Base section="leaderboards">
   <section class="flex flex-col gap-4">
     <h1 class="text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
-      AI assistants ranked on everyday work
+      AI models and agents ranked on everyday work
     </h1>
     <p class={intro}>
-      Leaderboards of AI assistant systems, ranked by one rater's blind pairwise votes or by
-      automated tests. The <a href="/methodology/">methodology</a> explains how to read them.
+      {SITE_DESCRIPTION} The <a href="/methodology/">methodology</a> explains how to read them.
     </p>
   </section>
 

@@ -1,14 +1,14 @@
 # AGENTS.md: assistant-bench
 
-assistant-bench is a public benchmark in which every AI assistant system in a family receives the same instruction, and the family scores the outputs by the owner's blind pairwise votes or by each task's own tests. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
+assistant-bench publishes leaderboards for AI models and agents, ranked through public blind pairwise voting or automated tests. Every system in a family receives the same instruction. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials. Real votes from every device use one production D1 database. Staging uses a separate D1 database for validation.
 
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 
 ```bash
-uv run bench check                          # Validate every family, running each task's reference solution and a do-nothing agent
-uv run bench run --system <name>            # Generate one system's missing trials on every family that lists it
-uv run bench serve                          # Collect every votes family's trials, then serve the vote page
-uv run bench close writing-zh               # Write a family's report to reports/<family>/<round>.json
+uv run bench check                               # Validate every family and its reference solutions
+uv run bench run --system <name>                  # Generate a system's missing trials
+uv run bench arena status production writing-zh  # Inspect the published voting family
+uv run bench close writing-zh --snapshot <path>   # Close a voted round from canonical evidence
 ```
 
 ## Project Layout
@@ -24,7 +24,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
-└── web/                                    # The results site and the local vote page, a pnpm workspace package
+└── web/                                    # The results site and public vote page, a pnpm workspace package
 ```
 
 ## Read Before You Edit

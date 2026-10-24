@@ -13,7 +13,8 @@ interface Props {
 const { family } = Astro.props;
 const config = configOf(family, 'votes');
 const rounds = votesRounds(family);
-const rows = unmeasuredRows(config.systems, config.reference, family.systemNames);
+const rows =
+  rounds.length === 0 ? unmeasuredRows(config.systems, config.reference, family.systemNames) : [];
 ---
 
 {rounds.length === 0 ? (
@@ -29,5 +30,11 @@ const rows = unmeasuredRows(config.systems, config.reference, family.systemNames
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard client:load base={boardPath(family)} rounds={rounds} labels={boardLabels(config)} />
+  <VotesBoard
+    client:load
+    base={boardPath(family)}
+    rounds={rounds}
+    labels={boardLabels(config)}
+    liveOrigin={Astro.site?.origin}
+  />
 )}
