@@ -10,6 +10,7 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 uv run bench arena prepare selection.json release.json
 uv run bench arena publish production release.json
 uv run bench arena status production writing-zh
+uv run bench arena health production
 uv run bench arena export production writing-zh evidence.json
 uv run bench arena refresh production evidence.json
 uv run bench close writing-zh --snapshot evidence.json
@@ -20,6 +21,8 @@ The selection names a rendered case family and exact `outputs`, each identified 
 Preparation requires the family's `public_voting` opt-in and an exact `PublicApproval`: source and license attestations for the selected cases, plus content and presentation digests for every published case and output. Synthetic classification and passing gates alone do not authorize publication. Regeneration changes the approved output identities and requires another review.
 
 Publication seals the replacement before activating it with the current family revision. A presentation refresh retains the active fitted points when its numerical evaluation is unchanged. `refresh` fits the saved evidence offline, then updates sampling points while retaining the active presentation. Concurrent evidence or control changes can refuse activation, so inspect the current status before choosing another cut.
+
+`status` includes the deployment's aggregate network-association expiry lag in milliseconds. `health` checks the selected deployment and exits unsuccessfully while expired associations await cleanup.
 
 An export captures every section at registered immutable cutoffs. Its authoritative section counts detect missing pages, while its content digest detects later file changes. Captures contain numerical evidence and provenance without network associations. `bench close --snapshot` reads the saved inventory, labels and measurements without consulting the running owner or current catalog. The raw accepted count includes repeats and withdrawn or moderated receipts. The actor cap applies once to all eligible ordinary votes before any report subset or diagnostic is fitted.
 

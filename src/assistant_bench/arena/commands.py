@@ -193,6 +193,25 @@ async def _refresh(target: str, path: Path) -> None:
 
 
 @app.command()
+def health(target: Target) -> None:
+    """Fail when the selected arena has overdue network-association cleanup."""
+    _run(_health(target))
+
+
+async def _health(target: str) -> None:
+    async with _connection(target) as management:
+        current = await management.domain(command.Status(), _STATUS)
+
+    if current is None:
+        raise ValueError('The arena deployment is not initialized.')
+
+    if current.expiry_lag_ms > 0:
+        raise ValueError('The arena has expired network associations awaiting cleanup.')
+
+    typer.echo('The arena has no overdue network associations.')
+
+
+@app.command()
 def status(
     target: Target,
     family: Annotated[str, typer.Argument(help='An active arena family.')],

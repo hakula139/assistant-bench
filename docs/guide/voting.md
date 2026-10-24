@@ -30,10 +30,6 @@ An issue counts against the output you tag, whatever your verdict. Each family l
 
 Outputs appear exactly as written. The Markdown toggle renders both text panes as Markdown, with raw HTML shown as text and images left unloaded.
 
-## Diffs
-
-A task family scored by votes shows each solution as a diff of what it changed in the task's repository, with added and removed lines tinted and each file under its own header, and both solutions passed the task's hidden tests. Judge them as you would review a pull request against the prompt. The diff leaves out the repository's history and the caches that Python's tools write, so neither a commit message nor a trace of the agent's test runs shows.
-
 ## HTML Outputs
 
 A family that renders HTML loads each output in a sandboxed frame from a second origin, under a policy that blocks network requests. The viewport presets of 375, 768, and 1280 px lay out both frames at that width, scaled down to fit the pane.
