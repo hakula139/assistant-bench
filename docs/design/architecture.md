@@ -42,6 +42,7 @@ src/assistant_bench/
 
 ```text
 arena/src/assistant_bench_arena/
+├── investigation.py       # Private receipt filters and expiring network associations
 ├── ledger.py              # Atomic commands and authenticated command recovery
 ├── ledger_models.py       # Private evidence, control inputs, and export contracts
 ├── maintenance.py         # Bounded expiry of private and unaccepted state

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue
 
+from assistant_bench_arena.investigation import LedgerInvestigation
 from assistant_bench_arena.ledger_models import (
     Accept,
     Actor,
@@ -89,6 +90,7 @@ class Ledger:
         self.transport = transport
         self.read = LedgerReads(transport)
         self.maintenance = LedgerMaintenance(transport)
+        self.investigation = LedgerInvestigation(transport)
 
     async def _rows(self, sql: str, *params: SqlValue) -> list[Row]:
         return await self.transport.query(Statement(sql=sql, params=params))

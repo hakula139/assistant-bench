@@ -515,8 +515,8 @@ CREATE VIEW export_numerics(export_id, section, row_key, body) AS
 SELECT x.id, 'numerics', json_array(n.section, n.row_key), n.body
 FROM analysis_exports x JOIN evaluation_numerics n ON n.evaluation_id = x.evaluation_id;
 
-CREATE VIEW export_receipts(export_id, section, row_key, body) AS
-SELECT x.id, 'receipts', printf('%020d', r.seq), json_patch(json_object(
+CREATE VIEW observation_bodies(seq, body) AS
+SELECT r.seq, json_patch(json_object(
     'seq', r.seq, 'acknowledgment', r.acknowledgment, 'origin', r.origin,
     'actor_id', r.actor_id, 'session_id', r.session_id, 'family', r.family,
     'claim_id', r.claim_id,
@@ -531,7 +531,12 @@ SELECT x.id, 'receipts', printf('%020d', r.seq), json_patch(json_object(
     ELSE json_object('import_source', r.import_source, 'original_id', r.original_id,
     'import_row_seq', r.import_row_seq, 'proof_evaluation_id', r.proof_evaluation_id,
     'legacy_duration_sec', r.legacy_duration_sec) END)
-FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff;
+FROM vote_receipts r;
+
+CREATE VIEW export_receipts(export_id, section, row_key, body) AS
+SELECT x.id, 'receipts', printf('%020d', r.seq), o.body
+FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff
+JOIN observation_bodies o ON o.seq = r.seq;
 
 CREATE VIEW export_events(export_id, section, row_key, body) AS
 SELECT x.id, 'events', printf('%020d', e.seq), json_object(
