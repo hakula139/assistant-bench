@@ -15,6 +15,18 @@ const FAMILY: FamilyView = {
   defects: ['facts', 'punctuation', 'tone', 'formulaic', 'length'],
 };
 
+const PRIVATE_FAMILIES: FamilyView[] = [
+  { name: 'private-review', aspect: 'private-research', display_name: 'Review', defects: [] },
+  { name: 'private-unlisted', aspect: 'unlisted', display_name: 'Unlisted review', defects: [] },
+  {
+    name: 'private-spaced',
+    aspect: 'private research',
+    display_name: 'Spaced review',
+    defects: [],
+  },
+  { name: 'smoke-text', aspect: null, display_name: 'Smoke', defects: [] },
+];
+
 interface Cast {
   token: string;
   choice: string;
@@ -700,13 +712,45 @@ describe('VoteApp', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Theme' }));
   });
 
-  test('groups the families by aspect, with those without one last', async () => {
+  test.each(PRIVATE_FAMILIES)('groups aspects and starts $display_name', async (privateFamily) => {
     const families: FamilyView[] = [
-      { name: 'smoke-text', aspect: null, display_name: 'Smoke', defects: [] },
+      ...PRIVATE_FAMILIES,
+      { name: 'coding-repo', aspect: 'coding', display_name: 'Repository', defects: [] },
       FAMILY,
+      { name: 'private-draft', aspect: 'writing-lab', display_name: 'Draft', defects: [] },
       { name: 'writing-en', aspect: 'writing', display_name: 'English', defects: [] },
+      { name: 'private-edit', aspect: 'private-research', display_name: 'Edit', defects: [] },
+      { name: 'prototype', aspect: '__proto__', display_name: 'Prototype', defects: [] },
     ];
-    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(families))));
+    const session: SessionView = {
+      id: 'private-session',
+      family: privateFamily,
+      votes: 0,
+      remaining: 1,
+      pair: {
+        token: 'private-pair',
+        instruction: 'Compare these private answers.',
+        checklist: [],
+        a: { render: 'text', text: 'Private answer A' },
+        b: { render: 'text', text: 'Private answer B' },
+      },
+    };
+    const fetch = vi.fn((path: string) =>
+      Promise.resolve(new Response(JSON.stringify(path === '/api/families' ? families : session))),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const errors = vi.spyOn(console, 'error');
+    const user = userEvent.setup();
+    const expectedGroups: [string, string[]][] = [
+      ['Writing', ['Chinese', 'English']],
+      ['Coding', ['Repository']],
+      ['private-research', ['Review', 'Edit']],
+      ['unlisted', ['Unlisted review']],
+      ['private research', ['Spaced review']],
+      ['writing-lab', ['Draft']],
+      ['__proto__', ['Prototype']],
+      ['Unlisted', ['Smoke']],
+    ];
 
     render(<VoteApp />);
     const groups = await screen.findAllByRole('region');
@@ -718,10 +762,25 @@ describe('VoteApp', () => {
           .getAllByRole('button')
           .map((button) => button.textContent),
       ]),
-    ).toEqual([
-      ['Writing', ['Chinese', 'English']],
-      ['Unlisted', ['Smoke']],
-    ]);
+    ).toEqual(expectedGroups);
+    expect(groups).toEqual(expectedGroups.map(([name]) => screen.getByRole('region', { name })));
+
+    await user.click(screen.getByRole('button', { name: privateFamily.display_name }));
+    await screen.findByRole('radio', { name: 'A is better' });
+
+    expect(screen.getByRole('region', { name: 'Output A' }).textContent).toContain(
+      'Private answer A',
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/sessions',
+      expect.objectContaining({ body: JSON.stringify({ family: privateFamily.name }) }),
+    );
+    const title =
+      privateFamily.aspect === null
+        ? privateFamily.display_name
+        : `${privateFamily.aspect} · ${privateFamily.display_name}`;
+    expect(statusLine()).toBe(`${title}, 0 votes`);
+    expect(errors).not.toHaveBeenCalled();
   });
 
   test.each([

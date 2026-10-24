@@ -92,21 +92,27 @@ export function publicFamilies(
   const rounds = Map.groupBy(reports, (report) => report.family);
 
   return configs
-    .filter(({ config }) => config.public)
-    .map(({ name, config }) => {
+    .flatMap(({ name, config }) => {
+      if (!config.public) {
+        return [];
+      }
+
       if (config.aspect === undefined) {
         throw new Error(`public family ${name} has no aspect`);
       }
-      return {
-        name,
-        title: familyTitle(config),
-        aspect: config.aspect,
-        config,
-        rounds: (rounds.get(name) ?? []).toSorted(
-          (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
-        ),
-        systemNames,
-      };
+
+      return [
+        {
+          name,
+          title: familyTitle(config),
+          aspect: config.aspect,
+          config,
+          rounds: (rounds.get(name) ?? []).toSorted(
+            (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
+          ),
+          systemNames,
+        },
+      ];
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
 }

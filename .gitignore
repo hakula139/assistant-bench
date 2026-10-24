@@ -9,6 +9,8 @@ __pycache__/
 
 # Dependencies
 /.venv/
+/arena/.venv-workers/
+/arena/python_modules/
 node_modules/
 
 # Environment

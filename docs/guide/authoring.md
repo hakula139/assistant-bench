@@ -18,16 +18,16 @@ categories = ["message"]
 
 Shared fields:
 
-| Field               | Required                                     | Meaning                                                                                                                     |
-| ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`            | yes                                          | `votes` for blind pairwise votes, or `tests` for a task family's test rewards                                               |
-| `aspect`            | public families                              | The skill measured, from `web/src/lib/aspects.ts`. A public family's ID starts with its aspect, as in `writing-zh`          |
-| `display_name`      | yes                                          | The short name within the aspect, or the whole name without one. The full name, such as `Writing · English`, must be unique |
-| `public`            | no                                           | Whether the site lists the family, its systems, and reports. Defaults to `false`                                            |
-| `systems`           | no                                           | The `systems.toml` tables to run. Defaults to empty                                                                         |
-| `samples`           | yes                                          | Harbor attempts per task and system, at least 1                                                                             |
-| `max_output_tokens` | case families and task families with systems | The completion bound per model call, including reasoning                                                                    |
-| `categories`        | no                                           | The allowed case categories, which reports publish                                                                          |
+| Field               | Required                                     | Meaning                                                                                                                                                            |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scorer`            | yes                                          | `votes` for blind pairwise votes, or `tests` for a task family's test rewards                                                                                      |
+| `aspect`            | public families                              | The skill measured. Public families use `web/src/lib/aspects.ts` and an ID starting with that aspect, such as `writing-zh`. Private families may use any aspect ID |
+| `display_name`      | yes                                          | The short name within the aspect, or the whole name without one. The full name, such as `Writing · English`, must be unique                                        |
+| `public`            | no                                           | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                   |
+| `systems`           | no                                           | The `systems.toml` tables to run. Defaults to empty                                                                                                                |
+| `samples`           | yes                                          | Harbor attempts per task and system, at least 1                                                                                                                    |
+| `max_output_tokens` | case families and task families with systems | The completion bound per model call, including reasoning                                                                                                           |
+| `categories`        | no                                           | The allowed case categories, which reports publish                                                                                                                 |
 
 Vote-only fields:
 

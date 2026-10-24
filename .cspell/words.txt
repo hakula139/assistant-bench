@@ -71,6 +71,7 @@ redoc
 rstrip
 Sarasa
 scipy
+sdist
 shadcn
 shfmt
 srcdoc

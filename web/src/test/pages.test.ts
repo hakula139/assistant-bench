@@ -83,8 +83,8 @@ function headerStats(html: string): string[] {
 }
 
 function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
-  if (config.aspect === undefined) {
-    throw new Error(`family ${name} has no aspect`);
+  if (!config.public || config.aspect === undefined) {
+    throw new Error(`family ${name} is not listed under a public aspect`);
   }
   return {
     name,

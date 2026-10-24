@@ -8,20 +8,22 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Scope
 
 from assistant_bench.arena.service import (
     OUTPUTS_PATH,
     Arena,
-    FamilyView,
     NothingToUndo,
-    SessionView,
     UnknownItem,
     UnlistedDefects,
 )
-from assistant_bench.arena.store import Choice, Defects
+from assistant_bench_arena.models import (
+    FamilyView,
+    SessionView,
+    StartSession,
+    VoteRequest,
+)
 
 
 HOST = '127.0.0.1'
@@ -45,25 +47,6 @@ RENDER_POLICY = (
     "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
     f'frame-ancestors {APP_ORIGIN}'
 )
-
-
-class StartSession(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    family: str
-
-
-NOTE_MAX_CHARS = 500
-
-
-class VoteRequest(BaseModel):
-    """The owner's choice on a pair, where `a` is the left pane."""
-
-    model_config = ConfigDict(extra='forbid')
-
-    choice: Choice
-    defects: Defects = Defects()
-    note: str | None = Field(default=None, max_length=NOTE_MAX_CHARS)
 
 
 def same_origin(request: Request) -> None:
