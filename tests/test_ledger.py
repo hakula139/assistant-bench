@@ -47,6 +47,25 @@ from assistant_bench_arena.ledger_models import (
     Target,
 )
 from assistant_bench_arena.serialization import digest, source_identity
+from assistant_bench_arena.snapshots import (
+    AnalysisPolicy,
+    CappedHumanWeights,
+    CaseApproval,
+    CaseContentApproval,
+    CaseMetadata,
+    EvaluationManifest,
+    FamilyDefinition,
+    OutputApproval,
+    OutputContentApproval,
+    OutputMetadata,
+    Presentation,
+    PresentedCase,
+    PublicApproval,
+    SettledWeights,
+    UnavailableInference,
+    VotesMethod,
+    VotesRules,
+)
 from ledger_support import D1Runtime, D1Transport
 
 
@@ -54,6 +73,33 @@ RETENTION_MS = 90 * 86_400_000
 LEGACY_TIME = '2026-01-01T00:00:00+00:00'
 LEGACY_MS = int(datetime.fromisoformat(LEGACY_TIME).timestamp() * 1_000)
 IMPORT_MS = LEGACY_MS + 86_400_000
+POLICY = AnalysisPolicy(
+    method=VotesMethod(
+        name='bradley-terry',
+        version=1,
+        l2_penalty=0.01,
+        points_per_logit=100.0,
+        anchor_score=1_000.0,
+        human_weights=CappedHumanWeights(
+            name='actor-proportional-cap',
+            version=1,
+            cap=100,
+            scope='family-evaluation',
+            repeat_handling='excluded',
+        ),
+        settled_weights=SettledWeights(name='sample-pair-share', version=1),
+    ),
+    rules=VotesRules(
+        preliminary_decisive_votes=10,
+        preliminary_decisive_vote_unit='raw-votes',
+        rater_agreement_floor=0.5,
+    ),
+    inference=UnavailableInference(
+        status='unavailable',
+        target='new-cases-and-voters',
+        reason='population-method-not-validated',
+    ),
+)
 SECTIONS = TypeAdapter(tuple[ExportSection, ...]).validate_python(
     get_args(ExportSection.__value__)
 )
@@ -256,13 +302,22 @@ async def publish(
     family: str = 'writing',
     cases: int = 3,
 ) -> None:
-    await ledger.stage_policy('policy', {'actor_cap': 100})
+    await ledger.stage_policy('policy', POLICY)
     await ledger.stage_evaluation(
         Evaluation(
             id=f'evaluation:{suffix}',
             family=family,
             policy_id='policy',
-            manifest={'defects': ['tone']},
+            manifest=EvaluationManifest(
+                family=FamilyDefinition(
+                    name=family,
+                    reference='large',
+                    systems=('large', 'small'),
+                    categories=(),
+                    defects=('tone',),
+                ),
+                policy=POLICY,
+            ),
             cases=cases,
             systems=2,
             outputs=cases * 2,
@@ -278,50 +333,122 @@ async def publish(
 
     for index in range(cases):
         case = f'case:{index}'
+        document = case_document(index)
         await ledger.stage_case(
             f'evaluation:{suffix}',
             Case(
-                key=case, source='synthetic', instruction_digest=f'instruction:{case}'
+                key=case,
+                source='synthetic',
+                instruction_digest=digest(document.instruction),
+                metadata=CaseMetadata(
+                    source_digest=digest({'instruction': document.instruction}),
+                    approval=CaseContentApproval(
+                        case_key=case,
+                        source='synthetic',
+                        attestation='Synthetic fixture content.',
+                        instruction_digest=digest(document.instruction),
+                    ),
+                ),
             ),
         )
 
         for name in ('large', 'small'):
+            content = output_content(index, name)
             await ledger.stage_output(
                 f'evaluation:{suffix}',
                 Output(
                     key=f'{case}:{name}',
                     case_key=case,
                     system_id=name,
-                    content_digest=f'content:{case}:{name}',
+                    content_digest=digest(content),
                     verdict='pass',
-                    length=100,
+                    length=len(content),
                     approved_public=True,
-                    metadata={
-                        'source_digest': source_identity(
+                    metadata=OutputMetadata(
+                        source_digest=source_identity(
                             case,
                             name,
                             f'fingerprint:{name}',
                             'synthetic-private-job',
                             f'original-{name}-trial',
-                        )
-                    },
+                        ),
+                        errored=False,
+                        reward=1.0,
+                        cost_usd=None,
+                        latency_sec=None,
+                        output_tokens=None,
+                        approval=OutputContentApproval(
+                            output_key=f'{case}:{name}', content_digest=digest(content)
+                        ),
+                    ),
                 ),
             )
 
     await ledger.seal_evaluation(f'evaluation:{suffix}', 0)
     await publish_presentation(
-        ledger, suffix=suffix, evaluation_id=f'evaluation:{suffix}', cases=cases
+        ledger,
+        suffix=suffix,
+        evaluation_id=f'evaluation:{suffix}',
+        cases=cases,
+        family=family,
     )
 
 
+def case_document(index: int) -> PresentedCase:
+    return PresentedCase(
+        instruction=f'Synthetic instruction for case {index}.',
+        checklist=('Use the requested tone.',),
+    )
+
+
+def output_content(index: int, name: str) -> str:
+    return f'Output for case {index} from {name}.'
+
+
 async def publish_presentation(
-    ledger: Ledger, *, suffix: str, evaluation_id: str, cases: int = 3
+    ledger: Ledger,
+    *,
+    suffix: str,
+    evaluation_id: str,
+    cases: int = 3,
+    family: str = 'writing',
 ) -> None:
     await ledger.stage_publication(
         Publication(
             id=f'publication:{suffix}',
             evaluation_id=evaluation_id,
-            presentation={},
+            presentation=Presentation(
+                family=family,
+                aspect=None,
+                display_name=family,
+                render='text',
+                systems={'large': 'Large', 'small': 'Small'},
+                cases={f'case:{index}': case_document(index) for index in range(cases)},
+            ),
+            approval=PublicApproval(
+                family=family,
+                cases=tuple(
+                    CaseApproval(
+                        case_key=f'case:{index}',
+                        source='synthetic',
+                        attestation='Synthetic fixture content.',
+                        instruction_digest=digest(case_document(index).instruction),
+                        presentation_digest=digest(case_document(index)),
+                    )
+                    for index in range(cases)
+                ),
+                outputs=tuple(
+                    OutputApproval(
+                        output_key=f'case:{index}:{name}',
+                        content_digest=digest(output_content(index, name)),
+                        render_digest=digest(
+                            {'render': 'text', 'content': output_content(index, name)}
+                        ),
+                    )
+                    for index in range(cases)
+                    for name in ('large', 'small')
+                ),
+            ),
             outputs=cases * 2,
         )
     )
@@ -333,8 +460,8 @@ async def publish_presentation(
                 RenderedOutput(
                     output_key=f'case:{index}:{name}',
                     render='text',
-                    content=f'Output for case {index} from {name}.',
-                    content_digest=f'content:case:{index}:{name}',
+                    content=output_content(index, name),
+                    content_digest=digest(output_content(index, name)),
                     approved_public=True,
                 ),
             )
@@ -1175,6 +1302,71 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+        @pytest.mark.parametrize(
+            'sql',
+            [
+                "UPDATE vote_receipts SET choice = 'b'",
+                'DELETE FROM vote_receipts',
+                'INSERT OR REPLACE INTO vote_receipts SELECT * FROM vote_receipts',
+                "UPDATE evidence_events SET principal = 'other' WHERE kind = 'accept'",
+                "DELETE FROM evidence_events WHERE kind = 'accept'",
+                """
+                    INSERT OR REPLACE INTO evidence_events(command_id, kind, family,
+                        principal, request_hash, created_at, data)
+                    SELECT command_id, kind, family, 'other', request_hash,
+                        created_at, data FROM evidence_events WHERE kind = 'accept'
+                """,
+            ],
+            ids=[
+                'receipt-update',
+                'receipt-delete',
+                'receipt-replace',
+                'event-update',
+                'event-delete',
+                'event-command-replace',
+            ],
+        )
+        def test_receipts_and_events_reject_mutation_and_replacement(
+            self, d1_runtime: D1Runtime, sql: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    lease = await ledger.issue(
+                        Context(command_id='draw', principal='actor', now=10), issue()
+                    )
+                    receipt = await ledger.accept(
+                        Context(command_id='vote', principal='actor', now=20),
+                        Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                    )
+                    tables = (
+                        'vote_receipts',
+                        'evidence_events',
+                        'receipt_state',
+                        'coverage',
+                    )
+                    before = [
+                        await transport.rows(f'SELECT * FROM {table} ORDER BY rowid')
+                        for table in tables
+                    ]
+
+                    with pytest.raises(CommandRejected, match='^immutable$'):
+                        await transport.execute(Statement(sql=sql))
+
+                    assert [
+                        await transport.rows(f'SELECT * FROM {table} ORDER BY rowid')
+                        for table in tables
+                    ] == before
+                    assert (
+                        await ledger.accept(
+                            Context(command_id='vote', principal='actor', now=21),
+                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                        )
+                        == receipt
+                    )
+
+            asyncio.run(scenario())
+
     class TestWithdraw:
         def test_withdrawal_racing_a_repeat_acceptance_leaves_no_primary_coverage(
             self, d1_runtime: D1Runtime
@@ -1407,6 +1599,81 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestPreserveImport:
+        def test_original_identity_replay_rejects_a_changed_receipt(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    await legacy_plan(ledger, transport, receipts=1)
+                    before = await transport.rows(
+                        'SELECT * FROM import_rows ORDER BY seq'
+                    )
+                    changed = legacy_vote(1).model_copy(update={'choice': 'b'})
+
+                    with pytest.raises(CommandRejected, match='^conflict$'):
+                        await ledger.preserve_import(
+                            'source',
+                            ImportRow(
+                                kind='receipt',
+                                original_id='1',
+                                source_hash=digest(changed),
+                                raw=changed,
+                            ),
+                        )
+
+                    assert (
+                        await transport.rows('SELECT * FROM import_rows ORDER BY seq')
+                        == before
+                    )
+                    assert await transport.rows('SELECT * FROM vote_receipts') == []
+                    assert await transport.rows('SELECT * FROM coverage_members') == []
+
+            asyncio.run(scenario())
+
+        def test_native_raw_storage_rejects_private_notes(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    await legacy_plan(ledger, transport, receipts=1)
+                    before = await transport.rows(
+                        'SELECT * FROM import_rows ORDER BY seq'
+                    )
+                    raw = legacy_vote(2).model_dump(mode='json')
+                    raw['note'] = 'Synthetic private note.'
+
+                    with pytest.raises(CommandRejected, match='^import_invalid$'):
+                        await transport.execute(
+                            Statement(
+                                sql="""
+                                INSERT INTO import_rows(source_id, row_kind,
+                                    original_id, row_hash, raw, initial_disposition)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                                params=(
+                                    'source',
+                                    'receipt',
+                                    '2',
+                                    digest(raw),
+                                    json.dumps(raw),
+                                    'unresolved',
+                                ),
+                            )
+                        )
+
+                    assert (
+                        await transport.rows('SELECT * FROM import_rows ORDER BY seq')
+                        == before
+                    )
+                    assert (
+                        await transport.rows('SELECT * FROM private_annotations') == []
+                    )
+
+            asyncio.run(scenario())
+
     class TestApplyImport:
         @pytest.mark.parametrize(
             'withdrawals', [(), (2,)], ids=['latest', 'latest-undone']
@@ -1439,10 +1706,11 @@ class TestLedger:
                     assert await transport.rows('SELECT count FROM coverage') == [
                         {'count': 1}
                     ]
-                    assert {row['original_id'] for row in rows['receipts']} == {
-                        '1',
-                        '2',
-                    }
+                    assert sorted(
+                        TypeAdapter(list[str]).validate_python(
+                            [row['original_id'] for row in rows['receipts']]
+                        )
+                    ) == ['1', '2']
 
                     for receipt in rows['receipts']:
                         assert receipt['origin'] == 'legacy'
@@ -1647,6 +1915,69 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestAnnotate:
+        @pytest.mark.parametrize(
+            ('mode', 'principal', 'rejection'),
+            [
+                ('local', 'other', 'annotation_target'),
+                ('public', 'actor', 'private_material'),
+            ],
+            ids=['wrong-actor', 'public-deployment'],
+        )
+        def test_rejects_notes_without_local_receipt_authority(
+            self, d1_runtime: D1Runtime, mode: Mode, principal: str, rejection: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(
+                        ledger,
+                        transport,
+                        mode=mode,
+                        quotas=tuple(
+                            Quota(
+                                operation=operation,
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=100,
+                            )
+                            for operation in ('issue', 'accept')
+                        ),
+                    )
+                    lease = await ledger.issue(
+                        Context(command_id='draw', principal='actor', now=10), issue()
+                    )
+                    receipt = await ledger.accept(
+                        Context(command_id='vote', principal='actor', now=20),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='ack',
+                            choice='a',
+                            attribution=attribution(20) if mode == 'public' else (),
+                        ),
+                    )
+
+                    with pytest.raises(CommandRejected, match=f'^{rejection}$'):
+                        await ledger.annotate(
+                            principal,
+                            ReceiptAnnotation(kind='receipt', receipt_seq=receipt.seq),
+                            'Synthetic private note.',
+                        )
+
+                    assert (
+                        await transport.rows('SELECT * FROM private_annotations') == []
+                    )
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 1}
+                    ]
+                    assert (
+                        await ledger.accept(
+                            Context(command_id='vote', principal='actor', now=21),
+                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                        )
+                        == receipt
+                    )
+
+            asyncio.run(scenario())
+
         @pytest.mark.parametrize(
             'redact_before_link',
             [True, False],
