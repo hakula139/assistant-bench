@@ -3,7 +3,7 @@ CREATE INDEX leases_pending_expiry ON pair_leases(expires_at, id) WHERE status =
 CREATE INDEX sessions_created ON sessions(created_at, id);
 CREATE INDEX actors_created ON actors(created_at, id);
 
-CREATE TABLE expiring_leases (
+CREATE TABLE lease_revocations (
     id TEXT PRIMARY KEY REFERENCES pair_leases(id)
 ) STRICT;
 
@@ -11,19 +11,19 @@ CREATE VIEW expire_leases AS SELECT NULL AS now_ms WHERE 0;
 
 CREATE TRIGGER expire_leases_insert INSTEAD OF INSERT ON expire_leases
 BEGIN
-    INSERT INTO expiring_leases(id)
+    INSERT INTO lease_revocations(id)
     SELECT id FROM pair_leases WHERE status = 'pending' AND expires_at <= NEW.now_ms
     ORDER BY expires_at, id LIMIT 250;
 
-    UPDATE pair_leases SET status = 'revoked' WHERE id IN (SELECT id FROM expiring_leases);
+    UPDATE pair_leases SET status = 'revoked' WHERE id IN (SELECT id FROM lease_revocations);
 
     UPDATE claims SET current_lease = NULL, version = version + 1
-    WHERE current_lease IN (SELECT id FROM expiring_leases);
+    WHERE current_lease IN (SELECT id FROM lease_revocations);
 
     UPDATE session_state SET current_lease = NULL, version = version + 1
-    WHERE current_lease IN (SELECT id FROM expiring_leases);
+    WHERE current_lease IN (SELECT id FROM lease_revocations);
 
-    DELETE FROM expiring_leases;
+    DELETE FROM lease_revocations;
 END;
 
 DROP TRIGGER sessions_no_delete;

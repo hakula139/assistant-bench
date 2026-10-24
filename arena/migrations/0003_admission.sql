@@ -251,10 +251,13 @@ BEGIN
             AND NEW.a_output = r.b_output AND NEW.b_output = r.a_output
     ) THEN RAISE(ABORT, 'repeat_ineligible') END;
 
-    UPDATE pair_leases SET status = 'revoked' WHERE status = 'pending'
+    INSERT INTO lease_revocations(id)
+    SELECT id FROM pair_leases WHERE status = 'pending'
         AND (actor_id = NEW.actor_id AND family = (SELECT family FROM sessions WHERE id = NEW.session_id)
             OR claim_id = NEW.claim_id)
         AND (expires_at <= NEW.now_ms OR id NOT IN (SELECT id FROM compatible_leases));
+
+    UPDATE pair_leases SET status = 'revoked' WHERE id IN (SELECT id FROM lease_revocations);
 
     SELECT CASE WHEN EXISTS (
         SELECT 1 FROM pair_leases WHERE status = 'pending' AND actor_id = NEW.actor_id
@@ -305,6 +308,12 @@ BEGIN
     JOIN evaluation_systems sa ON sa.evaluation_id = a.evaluation_id AND sa.system_id = a.system_id
     JOIN evaluation_systems sb ON sb.evaluation_id = b.evaluation_id AND sb.system_id = b.system_id
     WHERE s.id = NEW.session_id;
+
+    UPDATE claims SET current_lease = NULL, version = version + 1
+    WHERE id != NEW.claim_id AND current_lease IN (SELECT id FROM lease_revocations);
+    UPDATE session_state SET current_lease = NULL, version = version + 1
+    WHERE session_id != NEW.session_id AND current_lease IN (SELECT id FROM lease_revocations);
+    DELETE FROM lease_revocations;
 
     UPDATE claims SET version = version + 1, current_lease = NEW.lease_id WHERE id = NEW.claim_id;
     UPDATE session_state SET version = version + 1, current_lease = NEW.lease_id WHERE session_id = NEW.session_id;

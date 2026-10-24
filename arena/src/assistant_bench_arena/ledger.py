@@ -751,9 +751,6 @@ class Ledger:
         if len(systems) != 2:
             raise CommandRejected('candidate_stale')
 
-        if len(systems) != 2:
-            raise CommandRejected('candidate_stale')
-
         comparison_key = (
             comparison_identity(
                 issue.case_key,
@@ -1046,7 +1043,12 @@ class Ledger:
                 c.selected_receipt, r.recorded_at FROM claims c
             LEFT JOIN vote_receipts r ON r.seq = c.selected_receipt
             WHERE c.family = ? AND c.merged_into IS NULL AND (
-                (? != ? AND c.canonical_actor IN (?, ?))
+                (? != ? AND (c.canonical_actor = ? OR (
+                    c.canonical_actor = ? AND EXISTS (
+                        SELECT 1 FROM claims source WHERE source.family = c.family
+                            AND source.canonical_actor = ?
+                            AND source.merged_into IS NULL AND source.kind = c.kind
+                            AND source.comparison_key = c.comparison_key))))
                 OR (? = ? AND (r.actor_id = ? OR c.current_lease IN (
                     SELECT id FROM pair_leases
                     WHERE actor_id = ? AND status = 'pending'))))
@@ -1057,6 +1059,7 @@ class Ledger:
             owner_id,
             actor_id,
             owner_id,
+            actor_id,
             actor_id,
             owner_id,
             actor_id,

@@ -300,7 +300,11 @@ END;
 CREATE VIEW attribution_candidates AS
 SELECT p.id AS plan_id, c.id AS claim_id FROM attribution_plans p
 JOIN claims c ON c.family = p.family AND c.merged_into IS NULL
-WHERE (p.actor_id != p.owner_id AND c.canonical_actor IN (p.actor_id, p.owner_id))
+WHERE (p.actor_id != p.owner_id AND (
+    c.canonical_actor = p.actor_id OR (c.canonical_actor = p.owner_id AND EXISTS (
+        SELECT 1 FROM claims source WHERE source.family = c.family
+            AND source.canonical_actor = p.actor_id AND source.merged_into IS NULL
+            AND source.kind = c.kind AND source.comparison_key = c.comparison_key))))
     OR (p.actor_id = p.owner_id AND (c.selected_receipt IN (
         SELECT seq FROM vote_receipts WHERE actor_id = p.actor_id)
         OR c.current_lease IN (SELECT id FROM pair_leases WHERE actor_id = p.actor_id AND status = 'pending')));

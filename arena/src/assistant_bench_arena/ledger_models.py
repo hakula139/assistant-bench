@@ -116,6 +116,7 @@ class Point(Record):
             raise ValueError(
                 'A point and its component must both be present or absent.'
             )
+
         return self
 
 
