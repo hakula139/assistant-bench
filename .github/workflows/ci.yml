@@ -141,6 +141,9 @@ jobs:
       - name: Check editor types
         run: uv run basedpyright
 
+      - name: Check standalone task assets
+        run: uv run python -m assistant_bench.task_assets --check
+
       - name: Check complete dependency type contracts
         run: >-
           uv run python -m mypy.stubtest --mypy-config-file pyproject.toml

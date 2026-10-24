@@ -1,6 +1,6 @@
-"""Leave the `--top` option out of every command-line parser."""
+"""Ignore the `--top` option's effect in every command-line parser."""
 
-from verify_lib import break_option
+from verify_lib import ignore_option
 
 
-break_option('--top', drop=True)
+ignore_option('--top')

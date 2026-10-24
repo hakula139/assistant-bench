@@ -1,11 +1,11 @@
 """Verify identical behavior on the probe inputs and the requested structure."""
 
 import ast
-import json
 import os
 import subprocess
 import sys
 
+from probe_contract import read_results
 from verify_lib import (
     APP,
     TESTS,
@@ -31,12 +31,13 @@ proc = subprocess.run(
     timeout=TIMEOUT_SEC,
     env={**os.environ, 'PYTHONPATH': str(ws)},
 )
-expected = json.loads((TESTS / 'expected.json').read_text())
+expected = read_results((TESTS / 'expected.json').read_text())
 try:
-    actual = json.loads(proc.stdout)
-except json.JSONDecodeError:
+    actual = read_results(proc.stdout)
+except ValueError:
     actual = None
-if check(actual is not None, 'the probe ran', proc.stderr):
+check(actual is not None, 'the probe ran', proc.stderr)
+if actual is not None:
     for name, outcomes in expected.items():
         mismatches = [
             i
@@ -56,12 +57,14 @@ if check(actual is not None, 'the probe ran', proc.stderr):
         )
 
 tree = parse(APP / 'records' / 'parsers.py')
-if check(tree is not None, 'records/parsers.py parses'):
+check(tree is not None, 'records/parsers.py parses')
+if tree is not None:
     module_defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     check('_parse_fields' in module_defs, 'a module-level _parse_fields helper exists')
     for name in ('parse_user', 'parse_order', 'parse_product'):
         fn = module_defs.get(name)
-        if not check(fn is not None, f'{name} is still a module-level function'):
+        check(fn is not None, f'{name} is still a module-level function')
+        if fn is None:
             continue
         check('_parse_fields' in calls(fn), f'{name} calls _parse_fields')
         check(

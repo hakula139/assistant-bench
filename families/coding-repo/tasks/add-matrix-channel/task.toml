@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/add-matrix-channel"
 description = "Add a notification channel that follows the conventions in the repository AGENTS.md"
-version = "1.1.0"
+version = "1.2.0"
 
 [metadata]
 category = "feature"

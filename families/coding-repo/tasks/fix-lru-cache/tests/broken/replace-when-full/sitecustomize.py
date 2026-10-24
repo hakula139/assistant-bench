@@ -1,9 +1,14 @@
 """Restore the reported bug that `LRUCache.put` of a cached key evicts another."""
 
 import types
-from typing import Any
+from collections.abc import Callable, Hashable
+from typing import TYPE_CHECKING
 
 from verify_lib import after_import, replace_function
+
+
+if TYPE_CHECKING:
+    from cachelite.lru import LRUCache
 
 
 def patch(module: types.ModuleType) -> None:
@@ -18,7 +23,15 @@ def patch(module: types.ModuleType) -> None:
         )
         original.__kwdefaults__ = module.LRUCache.put.__kwdefaults__
 
-    def put(self: Any, key: Any, value: Any, *, _put: Any = original) -> None:
+    def put(
+        self: 'LRUCache[Hashable, object]',
+        key: Hashable,
+        value: object,
+        *,
+        _put: Callable[
+            ['LRUCache[Hashable, object]', Hashable, object], None
+        ] = original,
+    ) -> None:
         if key in self and len(self) >= self.capacity:
             old_key = self.keys()[0]
             old_value = self.pop(old_key)

@@ -121,13 +121,86 @@ source = ["assistant_bench", "assistant_bench_arena"]
 exclude_also = ['case _:\n\s*assert_never\(']
 
 [tool.basedpyright]
-include = ["src", "tests", "arena/src", "typings"]
+include = [
+  "src",
+  "tests",
+  "arena/src",
+  "typings",
+  "families/coding-repo/shared/tests",
+  "families/coding-repo/tasks",
+]
 extraPaths = ["src", "tests", "arena/src"]
+exclude = [
+  "**/node_modules",
+  "**/__pycache__",
+  "families/coding-repo/tasks/*/environment",
+  "families/coding-repo/tasks/*/tests/hidden",
+]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/shared"
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/add-matrix-channel/tests"
+extraPaths = [
+  "families/coding-repo/tasks/add-matrix-channel/tests",
+  "families/coding-repo/tasks/add-matrix-channel/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/add-top-words/tests"
+extraPaths = [
+  "families/coding-repo/tasks/add-top-words/tests",
+  "families/coding-repo/tasks/add-top-words/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/fix-lru-cache/tests"
+extraPaths = [
+  "families/coding-repo/tasks/fix-lru-cache/tests",
+  "families/coding-repo/tasks/fix-lru-cache/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/fix-pagination/tests"
+extraPaths = [
+  "families/coding-repo/tasks/fix-pagination/tests",
+  "families/coding-repo/tasks/fix-pagination/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/implement-durations/tests"
+extraPaths = [
+  "families/coding-repo/tasks/implement-durations/tests",
+  "families/coding-repo/tasks/implement-durations/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/refactor-parsers/tests"
+extraPaths = [
+  "families/coding-repo/tasks/refactor-parsers/tests",
+  "families/coding-repo/tasks/refactor-parsers/environment/app",
+]
+pythonVersion = "3.13"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks/rename-customer-api/tests"
+extraPaths = [
+  "families/coding-repo/tasks/rename-customer-api/tests",
+  "families/coding-repo/tasks/rename-customer-api/environment/app",
+]
+pythonVersion = "3.13"
 
 [tool.mypy]
 files = ["src", "tests", "arena/src"]
