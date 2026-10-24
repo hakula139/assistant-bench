@@ -9,7 +9,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.llms.base import BaseLLM
 from harbor.models.agent.context import AgentContext
 
-from assistant_bench.catalog import load_export
+from assistant_bench.catalog import generation_version, load_export
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 
@@ -26,6 +26,10 @@ class Terminus(Terminus2):
     """
 
     options_model: ClassVar[type[Terminus2Options]] = TerminusOptions
+
+    @override
+    def version(self) -> str:
+        return generation_version('terminus-2')
 
     @classmethod
     @override

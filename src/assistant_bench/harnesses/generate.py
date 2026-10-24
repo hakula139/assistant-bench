@@ -2,7 +2,6 @@
 
 import time
 from collections.abc import Mapping
-from importlib import metadata
 from typing import Any, override
 
 from harbor.agents.base import BaseAgent
@@ -10,7 +9,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai.types.chat import ChatCompletionMessageParam
 
-from assistant_bench.catalog import load_export
+from assistant_bench.catalog import generation_version, load_export
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 
@@ -40,7 +39,7 @@ class Generate(BaseAgent):
 
     @override
     def version(self) -> str:
-        return metadata.version('assistant-bench')
+        return generation_version('generate')
 
     @classmethod
     @override

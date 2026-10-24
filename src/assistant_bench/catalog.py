@@ -6,6 +6,7 @@ import json
 import os
 import tomllib
 from collections.abc import Callable
+from importlib import metadata
 from pathlib import Path
 from typing import Self
 
@@ -26,6 +27,14 @@ EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 GENERATION_PROTOCOL = 1
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
+
+
+def generation_version(harness: str) -> str:
+    """Version of generation behavior, including Harbor's native agent prompts."""
+    protocol = str(GENERATION_PROTOCOL)
+    if harness == 'terminus-2':
+        return f'{metadata.version("harbor")}+bench.{protocol}'
+    return protocol
 
 
 # ── nixos-config Export ──
@@ -181,7 +190,7 @@ class System(BaseModel):
         """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
-            'protocol': GENERATION_PROTOCOL,
+            'version': generation_version(self.harness),
             'route': self.route,
             'effort': self.effort,
             'harness': self.harness,
