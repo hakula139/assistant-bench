@@ -38,13 +38,11 @@ const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConic
 
 const aspectIcons: Record<Aspect, LucideIcon> = { writing: PenLine, coding: SquareTerminal };
 
-/** An aspect's icon, which decorates the aspect's title beside it. */
 export function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
   const Icon = aspectIcons[aspect];
   return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;
 }
 
-/** An aspect's icon and title, the content of a heading that names the aspect. */
 export function AspectTitle({ aspect }: { aspect: Aspect }) {
   return (
     <>
@@ -54,7 +52,6 @@ export function AspectTitle({ aspect }: { aspect: Aspect }) {
   );
 }
 
-/** A scorer's icon, which decorates the scorer's title beside it. */
 export function ScorerIcon({ scorer, className }: { scorer: Scorer; className?: string }) {
   const Icon = scorerIcons[scorer];
   return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;

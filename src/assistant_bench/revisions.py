@@ -23,6 +23,7 @@ def systems_at(revision: str) -> dict[str, System]:
     """
     commit = _output('git', 'rev-parse', '--verify', f'{revision}^{{commit}}')
     systems = _output('git', 'show', f'{commit}:{SYSTEMS_FILE}')
+
     export_path = _output(
         'nix',
         'build',
@@ -30,7 +31,9 @@ def systems_at(revision: str) -> dict[str, System]:
         '--print-out-paths',
         f'git+file:{REPO_ROOT}?rev={commit}#nixos-config',
     )
+
     export = NixosConfigExport.model_validate_json(Path(export_path).read_bytes())
+
     return parse_systems(export, systems)
 
 
