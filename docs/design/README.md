@@ -11,3 +11,4 @@ Architecture decisions for assistant-bench. Each page covers the current design 
 | [Reports](reports.md)           | What one closed round publishes and how the fixture mirrors it   |
 | [Site](site.md)                 | What the results and vote pages show, and how they look          |
 | [Writing](families/writing.md)  | How the two writing families source, gate, and judge their cases |
+| [Coding](families/coding.md)    | How the coding family builds, grades, and judges its tasks       |

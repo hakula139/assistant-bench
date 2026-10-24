@@ -13,8 +13,9 @@ import pytest
 import tomli_w
 from typer.testing import CliRunner
 
+from assistant_bench import jobs
 from assistant_bench.cli import app
-from assistant_bench.families import Case
+from assistant_bench.families import Case, case_task, load_cases, load_family
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -57,6 +58,19 @@ def test_committed_case_families_pass_check(name: str) -> None:
     result = CliRunner().invoke(app, ['check', name])
 
     assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    'name',
+    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/tasks')),
+)
+def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
+    family = load_family(name)
+
+    tasks = [case_task(family, case.id) for case in load_cases(family)]
+
+    assert tasks
+    jobs.check_tasks(family, tasks)
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:

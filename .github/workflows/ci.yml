@@ -172,6 +172,9 @@ jobs:
       - name: Run trials under Docker
         run: uv run pytest -m docker
 
+      - name: Check the coding family
+        run: uv run bench check coding-repo
+
   result:
     name: CI Result
     # A skipped job counts as a passing required check, so the gate must run after failures too.
