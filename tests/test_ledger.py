@@ -146,7 +146,7 @@ async def legacy_plan(
             raw=session,
         ),
     )
-    observations = []
+    observations: list[ImportObservation] = []
 
     for original_id in range(1, receipts + 1):
         raw = legacy_vote(original_id)
@@ -815,6 +815,49 @@ class TestLedger:
                     assert tuple(row.observation for row in active.rows) == (
                         receipts[-1],
                     )
+
+                    withdrawn_sequences: list[int] = []
+                    after = 0
+
+                    while True:
+                        withdrawn_page = await ledger.investigation.receipts(
+                            filters.model_copy(update={'status': 'withdrawn'}),
+                            1_000,
+                            after,
+                        )
+                        withdrawn_sequences.extend(
+                            row.observation.seq for row in withdrawn_page.rows
+                        )
+
+                        if withdrawn_page.after is None:
+                            break
+
+                        assert withdrawn_page.after > after
+                        after = withdrawn_page.after
+
+                    assert withdrawn_sequences == [row.seq for row in receipts[:-1]]
+                    exact_filter = ReceiptFilter(
+                        family=release.evaluation.family,
+                        actor_id=actor_id,
+                        session_id=session_id,
+                        evaluation_id=release.evaluation.id,
+                        status='withdrawn',
+                        recorded_from=receipts[40].recorded_at,
+                        recorded_before=receipts[41].recorded_at,
+                    )
+                    exact_page = await ledger.investigation.receipts(
+                        exact_filter, 1_000
+                    )
+                    assert tuple(row.observation for row in exact_page.rows) == (
+                        receipts[40],
+                    )
+                    mismatched = await ledger.investigation.receipts(
+                        exact_filter.model_copy(
+                            update={'evaluation_id': 'other-evaluation'}
+                        ),
+                        1_000,
+                    )
+                    assert mismatched.rows == ()
 
             asyncio.run(scenario())
 
@@ -1633,8 +1676,8 @@ class TestLedger:
                         ),
                     )
                     base = 1_728_000_000_000
-                    receipts = []
-                    requests = []
+                    receipts: list[Receipt] = []
+                    requests: list[Accept] = []
 
                     for index, now in enumerate(
                         (base + window_ms - 1, base + window_ms, base + window_ms + 1)
@@ -3401,6 +3444,23 @@ class TestLedger:
                             lease_id=replacement.id, acknowledgment='latest', choice='b'
                         ),
                     )
+
+                    for status, expected in (
+                        ('active', (latest,)),
+                        ('excluded', (old,)),
+                        ('superseded', (old,)),
+                    ):
+                        page = await ledger.investigation.receipts(
+                            ReceiptFilter(family='writing').model_copy(
+                                update={'status': status}
+                            ),
+                            51,
+                        )
+                        assert (
+                            tuple(row.observation for row in page.rows) == expected
+                        ), status
+                        assert page.rows[0].claim_version == 5
+
                     await ledger.stage_moderation(
                         Moderation(
                             id='restore',
@@ -3440,6 +3500,18 @@ class TestLedger:
                     assert await transport.rows(
                         'SELECT choice FROM vote_receipts WHERE seq = ?', old.seq
                     ) == [{'choice': 'a'}]
+                    excluded_page = await ledger.investigation.receipts(
+                        ReceiptFilter(family='writing', status='excluded'), 61
+                    )
+                    superseded_page = await ledger.investigation.receipts(
+                        ReceiptFilter(family='writing', status='superseded'), 61
+                    )
+                    assert excluded_page.rows == ()
+                    assert tuple(row.observation for row in superseded_page.rows) == (
+                        old,
+                    )
+                    assert superseded_page.rows[0].claim_version == 6
+                    assert not superseded_page.rows[0].selected
 
             asyncio.run(scenario())
 
@@ -3449,7 +3521,7 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await prepare(ledger, transport)
-                    receipts = []
+                    receipts: list[Receipt] = []
                     version = 0
 
                     for index in range(251):

@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from textwrap import dedent
@@ -158,7 +158,7 @@ class D1Transport:
             "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' "
             'ORDER BY type DESC, rowid DESC'
         )
-        statements = [Statement(sql='PRAGMA defer_foreign_keys = ON')]
+        statements: list[Statement] = [Statement(sql='PRAGMA defer_foreign_keys = ON')]
         statements.extend(
             Statement(sql=f'DROP {item["type"]} "{item["name"]}"') for item in objects
         )
@@ -205,7 +205,7 @@ class D1Runtime:
         )
 
     @contextmanager
-    def owner(self) -> Iterator[Self]:
+    def owner(self) -> Generator[Self]:
         name = f'ledger-test-{uuid4().hex}'
         source = self.directory / 'src'
         source.mkdir()
@@ -343,7 +343,7 @@ class D1Runtime:
             reader.join(timeout=5)
 
     @asynccontextmanager
-    async def client(self) -> AsyncIterator[tuple[Ledger, D1Transport]]:
+    async def client(self) -> AsyncGenerator[tuple[Ledger, D1Transport]]:
         with (self.directory / f'client-{uuid4().hex}.log').open('wb') as errors:
             process = await asyncio.create_subprocess_exec(
                 'node',
