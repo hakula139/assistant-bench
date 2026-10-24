@@ -7,7 +7,6 @@ from assistant_bench_arena.ledger_models import Row, Statement
 
 type Rejection = Literal[
     'attribution_context',
-    'attribution_stale',
     'attribution_expiry',
     'candidate_stale',
     'claim_stale',

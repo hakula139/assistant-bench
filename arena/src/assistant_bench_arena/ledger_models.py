@@ -32,9 +32,7 @@ type SqlValue = StrictStr | StrictInt | StrictFloat | None
 type Row = dict[str, JsonValue]
 type Identifier = Annotated[str, Field(min_length=1, max_length=256)]
 type Milliseconds = NonNegativeInt
-type EventKind = Literal[
-    'activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute'
-]
+type EventKind = Literal['activate', 'accept', 'withdraw', 'exclude', 'restore']
 
 
 class Statement(Record):
@@ -142,9 +140,6 @@ class PointSnapshot(Record):
 class Actor(Record):
     id: Identifier
     created_at: Milliseconds
-    owner_namespace: Identifier | None = None
-    """Explicitly registered owner identity for reviewed attribution."""
-
     rate_subject: Identifier | None = None
 
 
@@ -312,8 +307,6 @@ class EventTarget(Record):
     transition: str
     reference_seq: NonNegativeInt | None
     lease_id: str | None
-    target_claim: str | None
-    target_actor: str | None
 
 
 class Lease(Record):
@@ -389,35 +382,6 @@ class Target(Record):
     receipt_seq: Annotated[int, Field(strict=True, gt=0)]
     claim_version: NonNegativeInt
     exclusion_seq: NonNegativeInt | None = None
-
-
-class AttributionTarget(Record):
-    claim_id: Identifier
-    version: NonNegativeInt
-    canonical_actor: Identifier
-    kind: Literal['ordinary', 'repeat']
-    comparison_key: str
-    selected_receipt: NonNegativeInt | None
-    winner_id: Identifier
-
-
-class AttributionPlan(Record):
-    id: Identifier
-    family: Identifier
-    revision: NonNegativeInt
-    actor_id: Identifier
-    owner_id: Identifier
-    targets: tuple[AttributionTarget, ...]
-
-
-class AttributionClaim(Record):
-    id: str
-    canonical_actor: str
-    kind: Literal['ordinary', 'repeat']
-    comparison_key: str
-    version: NonNegativeInt
-    selected_receipt: NonNegativeInt | None
-    recorded_at: Milliseconds | None
 
 
 class Moderation(Record):

@@ -36,7 +36,6 @@ class ReceiptFilter(Record):
 
 class InvestigatedReceipt(Record):
     observation: Receipt
-    canonical_actor: str
     claim_version: NonNegativeInt
     selected: bool
     eligible: bool
@@ -207,9 +206,9 @@ class LedgerInvestigation:
         where = ' AND '.join(predicates)
         query = f"""
             SELECT r.seq, json_object('observation', json(o.body),
-                'canonical_actor', a.canonical_actor, 'claim_version', c.version,
+                'claim_version', c.version,
                 'selected', json(CASE WHEN c.selected_receipt = r.seq
-                    AND c.merged_into IS NULL THEN 'true' ELSE 'false' END),
+                    THEN 'true' ELSE 'false' END),
                 'eligible', json(CASE WHEN EXISTS (SELECT 1 FROM coverage_members m
                     WHERE m.receipt_seq = r.seq) THEN 'true' ELSE 'false' END),
                 'withdrawn', s.withdrawn, 'excluded', s.excluded,
@@ -222,7 +221,6 @@ class LedgerInvestigation:
             FROM vote_receipts r JOIN observation_bodies o ON o.seq = r.seq
             JOIN receipt_state s ON s.receipt_seq = r.seq
             JOIN claims c ON c.id = r.claim_id
-            JOIN actor_resolution a ON a.actor_id = r.actor_id AND a.family = r.family
             WHERE {where} ORDER BY r.seq
             """
         decoded, through = await self._page(query, tuple(params), InvestigatedReceipt)

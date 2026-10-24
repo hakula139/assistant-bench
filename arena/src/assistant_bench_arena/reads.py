@@ -195,7 +195,7 @@ class LedgerReads:
         rows = await self.transport.query(
             Statement(
                 sql="""
-                    SELECT s.id, s.actor_id, s.family, r.canonical_actor,
+                    SELECT s.id, s.actor_id, s.family,
                         t.version, t.current_lease,
                         (SELECT count(*) FROM vote_receipts v
                             JOIN coverage_members m ON m.receipt_seq = v.seq
@@ -206,8 +206,6 @@ class LedgerReads:
                             ORDER BY v.seq DESC LIMIT 1) AS undo_acknowledgment
                     FROM sessions s
                     JOIN session_state t ON t.session_id = s.id
-                    JOIN actor_resolution r ON r.family = s.family
-                        AND r.actor_id = s.actor_id
                     WHERE s.id = ? AND s.actor_id = ?
                     """,
                 params=(session_id, actor_id),
@@ -223,13 +221,10 @@ class LedgerReads:
                         c.selected_receipt, c.current_lease,
                         EXISTS (SELECT 1 FROM coverage_members m
                             WHERE m.claim_id = c.id) AS eligible
-                    FROM claims c WHERE c.family = ? AND c.canonical_actor =
-                        COALESCE((SELECT canonical_actor FROM actor_resolution
-                            WHERE family = ? AND actor_id = ?), ?)
-                        AND c.merged_into IS NULL AND c.id > ?
+                    FROM claims c WHERE c.family = ? AND c.actor_id = ? AND c.id > ?
                     ORDER BY c.id LIMIT 251
                     """,
-                params=(family, family, actor_id, actor_id, after),
+                params=(family, actor_id, after),
             )
         )
         selected = rows[:_PAGE_ROWS]
@@ -295,7 +290,7 @@ class LedgerReads:
                         AND r.output_key = l.{side}_output
                     WHERE l.id = ? AND l.status = 'pending' AND l.expires_at > ?
                         AND c.current_lease = l.id AND c.version = l.claim_version
-                        AND s.current_lease = l.id AND c.merged_into IS NULL
+                        AND s.current_lease = l.id
                         AND length(CAST(r.content AS BLOB)) <= ?
                     """,
                 params=(lease_id, now, _PAGE_BYTES),
@@ -314,10 +309,8 @@ class LedgerReads:
                         c.version AS claim_version FROM vote_receipts r
                     JOIN coverage_members m ON m.receipt_seq = r.seq
                     LEFT JOIN claims c ON c.family = r.family AND c.kind = 'repeat'
-                        AND c.canonical_actor = (SELECT canonical_actor
-                            FROM actor_resolution WHERE family = ? AND actor_id = ?)
+                        AND c.actor_id = ?
                         AND c.comparison_key = CAST(r.seq AS TEXT)
-                        AND c.merged_into IS NULL
                     WHERE r.family = ? AND r.actor_id = ? AND r.seq > ?
                         AND r.repeat_of IS NULL AND r.recorded_at <= ? - 86400000
                         AND (c.id IS NULL OR c.selected_receipt IS NULL)
@@ -326,7 +319,7 @@ class LedgerReads:
                                 AND l.expires_at > ?)
                     ORDER BY r.seq LIMIT 251
                     """,
-                params=(family, actor_id, family, actor_id, after, now, now),
+                params=(actor_id, family, actor_id, after, now, now),
             )
         )
         selected = tuple(DueRepeat.model_validate(row) for row in rows[:_PAGE_ROWS])

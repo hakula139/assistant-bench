@@ -25,7 +25,6 @@ class OwnedSession(Record):
     id: str
     actor_id: str
     family: str
-    canonical_actor: str
     version: NonNegativeInt
     current_lease: str | None
 

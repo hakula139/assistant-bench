@@ -8,12 +8,8 @@ from pydantic import BaseModel, JsonValue
 from assistant_bench_arena.investigation import LedgerInvestigation
 from assistant_bench_arena.ledger_models import (
     Accept,
-    Actor,
     Admission,
     AdmissionResult,
-    AttributionClaim,
-    AttributionPlan,
-    AttributionTarget,
     Case,
     Context,
     Credential,
@@ -380,31 +376,6 @@ class Ledger:
                 ),
             ),
             {'body': body},
-        )
-
-    async def register_actor(self, actor: Actor) -> None:
-        expected = actor.model_dump(mode='json')
-        await self._fact(
-            Statement(
-                sql="""
-                    SELECT id, created_at, owner_namespace, rate_subject
-                    FROM actors WHERE id = ?
-                    """,
-                params=(actor.id,),
-            ),
-            Statement(
-                sql="""
-                    INSERT INTO actors(id, created_at, owner_namespace, rate_subject)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                params=(
-                    actor.id,
-                    actor.created_at,
-                    actor.owner_namespace,
-                    actor.rate_subject,
-                ),
-            ),
-            expected,
         )
 
     async def credential(self, credential_id: str, now: int) -> Credential | None:
@@ -989,184 +960,6 @@ class Ledger:
                     context.now,
                     batch_id,
                     chunk_index,
-                ),
-            ),
-        )
-
-    async def prepare_attribution(
-        self, plan_id: str, family: str, actor_id: str, owner_id: str
-    ) -> AttributionPlan:
-        state = await self._rows(
-            'SELECT revision FROM family_state WHERE family = ?', family
-        )
-
-        if not state:
-            raise CommandRejected('family_missing')
-
-        revision = state[0]['revision']
-
-        if not isinstance(revision, int):
-            raise TypeError('A family revision must be an integer.')
-
-        rows = await self._rows(
-            """
-            SELECT c.id, c.canonical_actor, c.kind, c.comparison_key, c.version,
-                c.selected_receipt, r.recorded_at FROM claims c
-            LEFT JOIN vote_receipts r ON r.seq = c.selected_receipt
-            WHERE c.family = ? AND c.merged_into IS NULL AND (
-                (? != ? AND (c.canonical_actor = ? OR (
-                    c.canonical_actor = ? AND EXISTS (
-                        SELECT 1 FROM claims source WHERE source.family = c.family
-                            AND source.canonical_actor = ?
-                            AND source.merged_into IS NULL AND source.kind = c.kind
-                            AND source.comparison_key = c.comparison_key))))
-                OR (? = ? AND (r.actor_id = ? OR c.current_lease IN (
-                    SELECT id FROM pair_leases
-                    WHERE actor_id = ? AND status = 'pending'))))
-            ORDER BY c.id
-            """,
-            family,
-            actor_id,
-            owner_id,
-            actor_id,
-            owner_id,
-            actor_id,
-            actor_id,
-            owner_id,
-            actor_id,
-            actor_id,
-        )
-        groups: dict[tuple[str, str], list[AttributionClaim]] = {}
-
-        for row in rows:
-            claim = AttributionClaim.model_validate(row)
-            groups.setdefault((claim.kind, claim.comparison_key), []).append(claim)
-
-        targets: list[AttributionTarget] = []
-
-        for claims in groups.values():
-            winner = min(
-                claims,
-                key=lambda claim: (
-                    -(claim.recorded_at if claim.recorded_at is not None else -1),
-                    -(claim.selected_receipt or 0),
-                    claim.id,
-                ),
-            )
-
-            for claim in claims:
-                targets.append(
-                    AttributionTarget(
-                        claim_id=claim.id,
-                        version=claim.version,
-                        canonical_actor=claim.canonical_actor,
-                        kind=claim.kind,
-                        comparison_key=claim.comparison_key,
-                        selected_receipt=claim.selected_receipt,
-                        winner_id=winner.id,
-                    )
-                )
-
-        return AttributionPlan(
-            id=plan_id,
-            family=family,
-            revision=revision,
-            actor_id=actor_id,
-            owner_id=owner_id,
-            targets=tuple(sorted(targets, key=lambda target: target.claim_id)),
-        )
-
-    async def stage_attribution(self, plan: AttributionPlan) -> None:
-        targets = sorted(plan.targets, key=lambda target: target.claim_id)
-        header: Row = {
-            'id': plan.id,
-            'family': plan.family,
-            'revision': plan.revision,
-            'actor_id': plan.actor_id,
-            'owner_id': plan.owner_id,
-            'target_count': len(targets),
-            'target_digest': digest(
-                [target.model_dump(mode='json') for target in targets]
-            ),
-        }
-        await self._fact(
-            Statement(
-                sql="""
-                    SELECT id, family, revision, actor_id, owner_id,
-                        target_count, target_digest FROM attribution_plans WHERE id = ?
-                    """,
-                params=(plan.id,),
-            ),
-            Statement(
-                sql="""
-                    INSERT INTO attribution_plans(id, family, revision, actor_id,
-                        owner_id, target_count, target_digest)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                params=(
-                    plan.id,
-                    plan.family,
-                    plan.revision,
-                    plan.actor_id,
-                    plan.owner_id,
-                    len(targets),
-                    str(header['target_digest']),
-                ),
-            ),
-            header,
-        )
-
-        for target in targets:
-            await self._fact(
-                Statement(
-                    sql="""
-                        SELECT claim_id, version, canonical_actor, kind,
-                            comparison_key, selected_receipt, winner_id
-                        FROM attribution_targets WHERE plan_id = ? AND claim_id = ?
-                        """,
-                    params=(plan.id, target.claim_id),
-                ),
-                Statement(
-                    sql="""
-                        INSERT INTO attribution_targets(plan_id, claim_id, version,
-                            canonical_actor, kind, comparison_key, selected_receipt,
-                            winner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                    params=(
-                        plan.id,
-                        target.claim_id,
-                        target.version,
-                        target.canonical_actor,
-                        target.kind,
-                        target.comparison_key,
-                        target.selected_receipt,
-                        target.winner_id,
-                    ),
-                ),
-                target.model_dump(mode='json'),
-            )
-
-    async def seal_attribution(self, plan_id: str, now: int) -> None:
-        await self._execute(
-            'INSERT INTO seal_attribution(plan_id, now_ms) VALUES (?, ?)', plan_id, now
-        )
-
-    async def attribute(self, context: Context, plan_id: str) -> Event:
-        request_hash = digest({'kind': 'attribute', 'plan_id': plan_id})
-        return await self._command(
-            context,
-            request_hash,
-            Statement(
-                sql="""
-                    INSERT INTO attribute_owner(command_id, request_hash,
-                        principal, now_ms, plan_id) VALUES (?, ?, ?, ?, ?)
-                    """,
-                params=(
-                    context.command_id,
-                    request_hash,
-                    context.principal,
-                    context.now,
-                    plan_id,
                 ),
             ),
         )

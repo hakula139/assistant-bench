@@ -89,7 +89,7 @@ class LedgerMaintenance:
                             AND NOT EXISTS (SELECT 1 FROM credentials c
                                 WHERE c.actor_id = e.actor_id)
                             AND NOT EXISTS (SELECT 1 FROM claims c
-                                WHERE c.canonical_actor = e.actor_id)
+                                WHERE c.actor_id = e.actor_id)
                             AND NOT EXISTS (SELECT 1 FROM admission_results a
                                 WHERE a.actor_id = e.actor_id)
                         ORDER BY e.expires_at, e.actor_id LIMIT 250)
