@@ -1,3 +1,4 @@
+families/*/tasks/*/environment/
 pnpm-lock.yaml
 reports/
 tests/fixtures/report*.json

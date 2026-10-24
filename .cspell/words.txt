@@ -21,10 +21,13 @@ esbenp
 esbuild
 exog
 expit
+fdopen
+fsmonitor
 hakula
 hanzi
 httpx
 intp
+isinstance
 isort
 jitless
 jnoortheen
@@ -32,6 +35,8 @@ katex
 kimi
 kwarg
 kwargs
+kwdefaults
+kwonlyargs
 lastrowid
 libstdc
 linkify
@@ -59,7 +64,9 @@ pydocstyle
 pypi
 pyproject
 pytest
+PYTHONDONTWRITEBYTECODE
 redoc
+rstrip
 Sarasa
 scipy
 shadcn

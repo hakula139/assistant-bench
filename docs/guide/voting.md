@@ -25,7 +25,7 @@ An issue counts against the output you tag, whatever your verdict. Each family l
 
 ## Diffs
 
-A task family scored by votes shows each solution as a diff of what it changed in the task's repository, with added and removed lines tinted and each file under its own header, and both solutions passed the task's hidden tests. Judge them as you would review a pull request against the prompt. The diff leaves out the repository's history, so a commit message never shows.
+A task family scored by votes shows each solution as a diff of what it changed in the task's repository, with added and removed lines tinted and each file under its own header, and both solutions passed the task's hidden tests. Judge them as you would review a pull request against the prompt. The diff leaves out the repository's history and the caches that Python's tools write, so neither a commit message nor a trace of the agent's test runs shows.
 
 ## HTML Outputs
 

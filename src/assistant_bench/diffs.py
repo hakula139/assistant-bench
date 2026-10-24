@@ -14,17 +14,23 @@ SYMLINK_MODE = '120000'
 EXECUTABLE_MODE = '100755'
 FILE_MODE = '100644'
 
+LEFT_OUT = frozenset(
+    {'.git', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache'}
+)
+
 type Entry = tuple[str, bytes]
 
 
 def workspace_diff(base: Path, workspace: Path) -> str:
     """Return the git-style diff that turns `base` into `workspace`, in path order.
 
-    Either directory may be missing, which counts as empty. Paths under a `.git`
-    directory are left out. A symlink compares by its target and is never
-    followed, so a link the agent planted cannot read a file outside the
-    workspace. Each file shows its mode as git does, and a file that holds a NUL
-    byte or is not UTF-8 on either side shows as one `Binary files` line.
+    Either directory may be missing, which counts as empty. Paths under a
+    `LEFT_OUT` directory are left out, since history and tool caches record how
+    the agent worked, which the vote page must not show. A symlink compares by
+    its target and is never followed, so a link the agent planted cannot read a
+    file outside the workspace. Each file shows its mode as git does, and a file
+    that holds a NUL byte or is not UTF-8 on either side shows as one `Binary
+    files` line.
     """
     before = _entries(base)
     after = _entries(workspace)
@@ -42,7 +48,7 @@ def _entries(root: Path) -> dict[str, Entry]:
     entries = {}
     for path in root.rglob('*'):
         relative = path.relative_to(root)
-        if '.git' in relative.parts:
+        if LEFT_OUT.intersection(relative.parts):
             continue
         if path.is_symlink():
             entries[relative.as_posix()] = (

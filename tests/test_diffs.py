@@ -108,6 +108,20 @@ class TestWorkspaceDiff:
                 id='git-directories-left-out',
             ),
             pytest.param(
+                {'app.py': b'x\n'},
+                {
+                    'app.py': b'x\n',
+                    'pkg/__pycache__/app.cpython-313.pyc': b'\x00',
+                    '.pytest_cache/v/cache/lastfailed': b'{"t": true}\n',
+                    '.mypy_cache/3.13/app.meta.json': b'{}\n',
+                    '.ruff_cache/CACHEDIR.TAG': b'tag\n',
+                    'pycache/keep.py': b'k\n',
+                },
+                header('pycache/keep.py', 'new file mode 100644\n')
+                + '--- /dev/null\n+++ b/pycache/keep.py\n@@ -0,0 +1 @@\n+k\n',
+                id='tool-caches-left-out',
+            ),
+            pytest.param(
                 {},
                 {'b.py': b'b\n', 'a/z.py': b'z\n'},
                 header('a/z.py', 'new file mode 100644\n')

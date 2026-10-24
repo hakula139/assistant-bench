@@ -60,6 +60,12 @@ default = true
 [tool.ruff]
 target-version = "py314"
 src = ["src", "tests"]
+# A task's repository and hidden tests keep the style of the project under test.
+extend-exclude = ["families/*/tasks/*/environment/", "families/*/tasks/*/tests/hidden/"]
+# The pre-commit hook passes staged paths, which Ruff checks despite the excludes otherwise.
+force-exclude = true
+# Task scripts run on the Python of the task's image.
+per-file-target-version = { "families/**" = "py313" }
 
 [tool.ruff.format]
 quote-style = "single"

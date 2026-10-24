@@ -1,0 +1,21 @@
+scorer = "votes"
+aspect = "coding"
+display_name = "Repository Tasks"
+public = false
+systems = [
+  "opus-5.5",
+  "gpt-6-astra",
+  "gpt-6.1-sol",
+  "gemini-4-argon",
+  "gemini-3.8-flash",
+  "deepseek-v4.1-flash-1017",
+  "kimi-k3",
+]
+reference = "gemini-3.8-flash"
+render = "diff"
+samples = 1
+harness = "terminus-2"
+max_turns = 40
+max_output_tokens = 32000
+categories = ["bug-fix", "feature", "refactor"]
+defects = ["scope", "conventions", "complexity", "testing", "clarity"]
