@@ -31,6 +31,7 @@ from assistant_bench_arena.ledger_models import (
     Context,
     Issue,
     Moderation,
+    Point,
     Publication,
     Quota,
     Receipt,
@@ -38,7 +39,9 @@ from assistant_bench_arena.ledger_models import (
     Target,
 )
 from assistant_bench_arena.models import Choice
+from assistant_bench_arena.releases import point_snapshot
 from assistant_bench_arena.serialization import canonical, digest
+from assistant_bench_arena.snapshots import LedgerProvenance
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import D1Runtime, publish_presentation, publish_release
@@ -452,9 +455,53 @@ class TestAnalyzeExport:
         )
 
         written = closed.model_dump_json(indent=2) + '\n'
-        if not REPORT_FIXTURE.exists() or json.loads(
-            REPORT_FIXTURE.read_text()
-        ) != json.loads(written):
+        if not REPORT_FIXTURE.exists():
+            stale_fixture(REPORT_FIXTURE, written)
+            return
+
+        recorded = REPORT_FIXTURE.read_text()
+        expected = report.Report.model_validate_json(recorded)
+        assert isinstance(closed.results, report.VotesResults)
+        assert isinstance(expected.results, report.VotesResults)
+        assert isinstance(closed.results.provenance, LedgerProvenance)
+        assert isinstance(expected.results.provenance, LedgerProvenance)
+        assert snapshot.points.id == digest(
+            snapshot.points.model_dump(mode='json', exclude={'id'})
+        )
+        assert closed.results.provenance.fitted_point_snapshot_id == snapshot.points.id
+        assert {row.system: row.score for row in closed.results.standings} == {
+            system: point.score
+            for system, point in snapshot.points.points.items()
+            if point.score is not None
+        }
+
+        scores = {row.system: row.score for row in expected.results.standings}
+        expected_points = point_snapshot(
+            snapshot.points.evaluation_id,
+            snapshot.points.policy_id,
+            {
+                system: Point(score=scores.get(system), component=point.component)
+                for system, point in snapshot.points.points.items()
+            },
+            source_export_id=snapshot.points.source_export_id,
+            source_export_digest=snapshot.points.source_export_digest,
+            weighted_evidence_digest=snapshot.points.weighted_evidence_digest,
+        )
+        if expected.results.provenance.fitted_point_snapshot_id != expected_points.id:
+            stale_fixture(REPORT_FIXTURE, written)
+            return
+
+        comparison = json.loads(recorded)
+        # BLAS implementations can move the fitted score by about 2e-11 points.
+        for row in comparison['results']['standings']:
+            row['score'] = pytest.approx(row['score'], rel=0, abs=1e-9)
+        comparison['results']['position'] = pytest.approx(
+            expected.results.position, rel=0, abs=1e-9
+        )
+        comparison['results']['provenance']['fitted_point_snapshot_id'] = (
+            snapshot.points.id
+        )
+        if comparison != json.loads(written):
             stale_fixture(REPORT_FIXTURE, written)
 
     def test_caps_the_complete_actor_across_sessions_and_keeps_repeats_separate(
