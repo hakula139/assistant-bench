@@ -109,6 +109,7 @@ class _PatchingFinder(importlib.abc.MetaPathFinder):
     ) -> importlib.machinery.ModuleSpec | None:
         if fullname != self.name:
             return None
+
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if spec is None or spec.loader is None:
             return spec
@@ -197,6 +198,7 @@ def calls(node: ast.AST) -> list[str]:
                 names.append(n.func.id)
             elif isinstance(n.func, ast.Attribute):
                 names.append(n.func.attr)
+
     return names
 
 

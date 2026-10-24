@@ -31,6 +31,7 @@ if tree is not None:
         not any(isinstance(f, ast.Name) and f.id == 'print' for f in called),
         'the channel never calls print',
     )
+
     raised = [
         n.exc for n in ast.walk(tree) if isinstance(n, ast.Raise) and n.exc is not None
     ]
@@ -45,6 +46,7 @@ if tree is not None:
         or (isinstance(r, ast.Name) and r.id in ('ValueError', 'KeyError'))
     ]
     check(not bare, 'the channel raises no bare ValueError or KeyError')
+
     unannotated: list[str] = []
     for fn in (
         n
@@ -56,8 +58,10 @@ if tree is not None:
         missing = [
             a.arg for a in args if a.annotation is None and a.arg not in ('self', 'cls')
         ]
+
         if fn.returns is None or missing:
             unannotated.append(fn.name)
+
     check(
         not unannotated,
         'every function in the channel is fully annotated',

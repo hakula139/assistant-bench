@@ -31,11 +31,13 @@ proc = subprocess.run(
     timeout=TIMEOUT_SEC,
     env={**os.environ, 'PYTHONPATH': str(ws)},
 )
+
 expected = read_results((TESTS / 'expected.json').read_text())
 try:
     actual = read_results(proc.stdout)
 except ValueError:
     actual = None
+
 check(actual is not None, 'the probe ran', proc.stderr)
 if actual is not None:
     for name, outcomes in expected.items():
@@ -66,11 +68,13 @@ if tree is not None:
         check(fn is not None, f'{name} is still a module-level function')
         if fn is None:
             continue
+
         check('_parse_fields' in calls(fn), f'{name} calls _parse_fields')
         check(
             not any(isinstance(n, ast.Try) for n in ast.walk(fn)),
             f'{name} has no try statement',
         )
+
     helper = module_defs.get('_parse_fields')
     outside = [
         n
@@ -79,9 +83,11 @@ if tree is not None:
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == 'split'
     ]
+
     inside = list(ast.walk(helper)) if helper else []
     check(
         all(n in inside for n in outside) and bool(outside),
         'lines are split only inside _parse_fields',
     )
+
 finish()

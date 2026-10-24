@@ -20,6 +20,7 @@ for path in sorted((APP / 'shop').glob('*.py')) + sorted((APP / 'tests').glob('*
     if tree is None:
         stale.append(f'{path.name}: does not parse')
         continue
+
     rel = path.relative_to(APP).as_posix()
     for node in ast.walk(tree):
         if (
