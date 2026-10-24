@@ -23,7 +23,12 @@ from uuid import uuid4
 import coverage
 from pydantic import JsonValue, TypeAdapter
 
-from assistant_bench.arena.runtime import facade_config, load_target, renderer_config
+from assistant_bench.arena.runtime import (
+    facade_config,
+    load_target,
+    management_config,
+    renderer_config,
+)
 from assistant_bench_arena.ledger import Ledger
 from ledger_support import D1Transport, Reply
 
@@ -129,7 +134,10 @@ _CONTROL = """
                     'weights': [math.exp(value) for value in values],
                 }})
             if payload.get('operation') == 'scheduled':
-                await Default(self.ctx, self.env).scheduled(None, None, None)
+                try:
+                    await Default(self.ctx, self.env).scheduled(None, None, None)
+                except RuntimeError as error:
+                    return json.dumps({'result': {'error': str(error)}})
                 return json.dumps({'result': {'completed': True}})
             statements = [
                 self.env.DB.prepare(item['sql']).bind(*item.get('params', []))
@@ -263,9 +271,12 @@ class NativeClient(D1Transport):
         self,
         path: str,
         *,
-        body: dict[str, JsonValue] | None = None,
+        body: dict[str, JsonValue] | str | None = None,
         cookie: str = '',
         renderer: bool = False,
+        address: str = '192.0.2.10',
+        forwarded_worker: bool = False,
+        origin: str = APP_ORIGIN,
     ) -> dict[str, JsonValue]:
         return await self.call(
             {
@@ -274,6 +285,9 @@ class NativeClient(D1Transport):
                 'body': body,
                 'cookie': cookie,
                 'renderer': renderer,
+                'address': address,
+                'forwarded_worker': forwarded_worker,
+                'origin': origin,
             }
         )
 
@@ -293,7 +307,7 @@ class NativeRuntime:
             'NODE_EXTRA_CA_CERTS',
         }
         self.environment = {
-            key: value for key, value in os.environ.items() if key in allowed
+            key: os.environ[key] for key in allowed if key in os.environ
         }
         self.environment.update(
             PATH=os.pathsep.join(
@@ -434,7 +448,13 @@ class NativeRuntime:
             facade = tomllib.loads(path.read_text())
         with renderer_config(target) as path:
             renderer = tomllib.loads(path.read_text())
-        for item in (*facade['services'], *renderer['services']):
+        with management_config(target) as path:
+            management = tomllib.loads(path.read_text())
+        for item in (
+            *facade['services'],
+            *renderer['services'],
+            *management['services'],
+        ):
             item['remote'] = False
         facade['main'] = str(self.directory / 'test_driver.ts')
         facade['services'].extend(
@@ -478,6 +498,7 @@ class NativeRuntime:
             ('facade', facade),
             ('renderer', renderer),
             ('client', client),
+            ('management', management),
         ):
             (self.directory / f'{label}.json').write_text(json.dumps(value))
         (self.directory / 'wrangler.jsonc').write_text(json.dumps(configuration))
@@ -492,15 +513,19 @@ class NativeRuntime:
                         const payload = JSON.parse(serialized);
                         const renderer = payload.renderer;
                         const headers = new Headers({{
-                            'CF-Connecting-IP': '192.0.2.10',
+                            'CF-Connecting-IP': payload.address,
                         }});
+                        if (payload.forwarded_worker) {{
+                            headers.set('CF-Worker', 'synthetic.example');
+                        }}
                         if (payload.cookie) headers.set('Cookie', payload.cookie);
                         const init = {{headers}};
                         if (payload.body !== null) {{
                             init.method = 'POST';
-                            headers.set('Origin', {json.dumps(APP_ORIGIN)});
+                            headers.set('Origin', payload.origin);
                             headers.set('Content-Type', 'application/json');
-                            init.body = JSON.stringify(payload.body);
+                            init.body = typeof payload.body === 'string'
+                                ? payload.body : JSON.stringify(payload.body);
                         }}
                         const origin = renderer
                             ? {json.dumps(RENDER_ORIGIN)}
@@ -655,6 +680,49 @@ class NativeRuntime:
                     await process.stdin.wait_closed()
                     output, _ = await asyncio.wait_for(process.communicate(), 30)
                     assert process.returncode == 0 and not output
+
+    async def management_status(self) -> dict[str, JsonValue]:
+        source = dedent("""
+            import asyncio
+            import sys
+            from pathlib import Path
+
+            from pydantic import TypeAdapter
+
+            from assistant_bench.arena.management import connect
+            from assistant_bench_arena.management_domain import ManagementStatus, Status
+
+
+            async def main():
+                async with connect(Path(sys.argv[1])) as management:
+                    status = await management.domain(
+                        Status(), TypeAdapter(ManagementStatus | None),
+                    )
+                    assert status is not None
+                    print(status.model_dump_json())
+
+
+            asyncio.run(main())
+        """)
+        assert (
+            not {'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'}
+            & self.environment.keys()
+        )
+        with (self.directory / 'management.log').open('wb') as errors:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                '-c',
+                source,
+                str(self.directory / 'management.json'),
+                cwd=ROOT,
+                env=self.environment,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=errors,
+            )
+            output, _ = await asyncio.wait_for(process.communicate(), 60)
+
+        assert process.returncode == 0, (self.directory / 'management.log').read_text()
+        return TypeAdapter(dict[str, JsonValue]).validate_json(output)
 
     def _merge_coverage(self, exported: dict[str, JsonValue]) -> None:
         assert self.coverage is not None

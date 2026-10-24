@@ -9,11 +9,13 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue, SecretBytes, TypeAdapter
 
+from assistant_bench_arena.admission import TokenCodec
 from assistant_bench_arena.ledger_models import Point, Statement
 from assistant_bench_arena.policy import configuration
 from assistant_bench_arena.releases import Release, point_snapshot, publication_identity
+from assistant_bench_arena.runtime_models import CredentialClaims, KeyRing, KeyVersion
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import publish_release
@@ -145,6 +147,42 @@ class TestNativeRuntime:
 
                     assert weighted['weights'] == pytest.approx([1 / 5, 1 / 19, 0.0])
 
+                remaining = 60 - time.time() % 60
+                if remaining < 30:
+                    await asyncio.sleep(remaining + 0.1)
+                epoch = time.time_ns() // 60_000_000_000
+                rate_cases: tuple[
+                    tuple[str, str, dict[str, JsonValue] | str | None, int], ...
+                ] = (
+                    ('192.0.2.20', '/api/sessions', '{', 400),
+                    (
+                        '198.51.100.20',
+                        '/api/sessions',
+                        {'command_id': 'malformed', 'family': 'writing'},
+                        400,
+                    ),
+                    ('203.0.113.20', '/api/unknown', None, 404),
+                    ('2001:db8:1234::20', '/api/status', None, 200),
+                )
+                for address, path, payload, expected in rate_cases:
+                    for index in range(120):
+                        response = await transport.http(
+                            path, body=payload, address=address
+                        )
+
+                        assert response['status'] == expected, (path, index, response)
+                    limited = await transport.http(path, body=payload, address=address)
+
+                    assert limited['status'] == 429, (path, limited)
+                    assert body(limited) == {'error': 'rate_limited'}
+                assert time.time_ns() // 60_000_000_000 == epoch
+                assert runtime.provider.calls == []
+                worker_rejected = await transport.http(
+                    '/api/sessions', body='{', forwarded_worker=True
+                )
+                assert worker_rejected['status'] == 400
+                assert body(worker_rejected) == {'error': 'invalid_request'}
+
                 page = await transport.http('/')
                 assert page['status'] == 200
                 assert 'bench-render-origin' in str(page['body'])
@@ -212,6 +250,8 @@ class TestNativeRuntime:
                 )
                 assert isinstance(status['result'], dict)
                 assert status['result']['namespace'] == NAMESPACE
+                assert status['result']['expiry_lag_ms'] == 0
+                assert await runtime.management_status() == status['result']
 
                 document = await transport.http('/admit?family=writing')
                 assert document['status'] == 200
@@ -260,13 +300,20 @@ class TestNativeRuntime:
                     '/api/admission', body=request, cookie=flow_cookie
                 )
                 assert replayed['status'] == 200
-                assert cookie(replayed) == credential_cookie
+                for credential in (credential_cookie, cookie(replayed)):
+                    ready = await transport.http('/api/status', cookie=credential)
+
+                    assert ready['status'] == 200
+                    assert body(ready) == {'status': 'ready'}
                 assert runtime.provider.calls == [command, command]
                 assert await transport.rows('SELECT count(*) AS count FROM actors') == [
                     {'count': 1}
                 ]
                 assert await transport.rows(
                     'SELECT count(*) AS count FROM admission_results'
+                ) == [{'count': 1}]
+                assert await transport.rows(
+                    'SELECT count(*) AS count FROM credentials'
                 ) == [{'count': 1}]
                 assert await transport.rows(
                     'SELECT scope, consumed FROM quota_windows '
@@ -397,13 +444,52 @@ class TestNativeRuntime:
                             params=(f'expired-{index}',),
                         )
                     )
+                    await transport.execute(
+                        Statement(
+                            sql="""
+                                INSERT INTO network_attribution(receipt_seq,
+                                    key_version, tag_kind, tag, created_at, expires_at)
+                                SELECT seq, ?, 'exact', 'synthetic', 0, 1
+                                FROM vote_receipts
+                            """,
+                            params=(f'expired-{index}',),
+                        )
+                    )
+
+                before_status = time.time_ns() // 1_000_000
+                lagging = await transport.call(
+                    {'operation': 'management', 'request': {'operation': 'status'}}
+                )
+                after_status = time.time_ns() // 1_000_000
+                assert isinstance(lagging['result'], dict)
+                lag = lagging['result']['expiry_lag_ms']
+                assert isinstance(lag, int)
+                assert before_status - 1 <= lag <= after_status - 1
+                assert set(lagging['result']) == set(status['result'])
 
                 scheduled = await transport.call({'operation': 'scheduled'})
-                assert scheduled == {'completed': True}
+                assert scheduled == {
+                    'error': 'Scheduled voting cleanup has expired associations.'
+                }
                 assert await transport.rows(
                     'SELECT subject FROM quota_windows WHERE expires_at <= ?',
                     time.time_ns() // 1_000_000,
                 ) == [{'subject': 'expired-250'}]
+                assert await transport.rows(
+                    'SELECT key_version FROM network_attribution WHERE expires_at <= ?',
+                    time.time_ns() // 1_000_000,
+                ) == [{'key_version': 'expired-250'}]
+                assert await transport.rows(
+                    'SELECT count(*) AS count FROM vote_receipts'
+                ) == [{'count': 1}]
+                assert await transport.call({'operation': 'scheduled'}) == {
+                    'completed': True
+                }
+                cleared = await transport.call(
+                    {'operation': 'management', 'request': {'operation': 'status'}}
+                )
+                assert isinstance(cleared['result'], dict)
+                assert cleared['result']['expiry_lag_ms'] == 0
                 assert await transport.rows(
                     'SELECT count(*) AS count FROM vote_receipts'
                 ) == [{'count': 1}]
@@ -414,3 +500,74 @@ class TestNativeRuntime:
         assert (tmp_path / 'pylock.toml').read_bytes() == (
             ROOT / 'arena' / 'pylock.toml'
         ).read_bytes()
+
+    def test_limits_rejected_native_inputs_and_static_asset_requests(
+        self, tmp_path: Path
+    ) -> None:
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
+                remaining = 60 - time.time() % 60
+                if remaining < 30:
+                    await asyncio.sleep(remaining + 0.1)
+                epoch = time.time_ns() // 60_000_000_000
+                for address, path, payload, origin, expected in (
+                    (
+                        '192.0.2.20',
+                        '/api/sessions',
+                        '{}',
+                        'https://other.example.com',
+                        400,
+                    ),
+                    (
+                        '198.51.100.20',
+                        '/api/sessions',
+                        'x' * 8193,
+                        'https://app.example.com',
+                        400,
+                    ),
+                    ('203.0.113.20', '/', None, 'https://app.example.com', 200),
+                ):
+                    for index in range(120):
+                        response = await transport.http(
+                            path, body=payload, address=address, origin=origin
+                        )
+
+                        assert response['status'] == expected, (path, index, response)
+                    limited = await transport.http(
+                        path, body=payload, address=address, origin=origin
+                    )
+
+                    assert limited['status'] == 429, (path, limited)
+                    assert body(limited) == {'error': 'rate_limited'}
+                assert time.time_ns() // 60_000_000_000 == epoch
+                now = time.time_ns() // 1_000_000
+                keys = KeyRing(
+                    versions=(
+                        KeyVersion(
+                            version='test', starts_at=0, key=SecretBytes(b'k' * 32)
+                        ),
+                    )
+                )
+                expired = TokenCodec(
+                    CredentialClaims, keys, NAMESPACE, 'credential', 1000
+                ).encode(
+                    CredentialClaims(
+                        namespace=NAMESPACE,
+                        issued_at=now - 2000,
+                        expires_at=now - 1000,
+                        credential='expired',
+                        rate_subject='expired',
+                    )
+                )
+                for credential in ('invalid', expired):
+                    recovered = await transport.http(
+                        '/admit', cookie=f'__Host-bench-credential={credential}'
+                    )
+
+                    assert recovered['status'] == 200
+                    assert admission(recovered)
+                    assert 'bench_admit' in str(recovered['body'])
+                assert runtime.provider.calls == []
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
