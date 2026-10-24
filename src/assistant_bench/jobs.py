@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
 from uuid import UUID
@@ -15,7 +16,6 @@ from harbor.job_diff import SourceTrial, load_source_trials
 from harbor.models.agent.context import AgentContext
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
-from harbor.models.job.lock import TrialLock
 from harbor.models.task import config as task_config
 from harbor.models.task.artifacts import source_host_path
 from harbor.models.task.verifier_mode import resolve_task_verifier_mode
@@ -499,6 +499,41 @@ def run_job(config: JobConfig) -> Path:
 # ── Collection ──
 
 
+@dataclass(frozen=True)
+class _Candidate:
+    """A trial's verdict and originating solution, before reading its artifacts."""
+
+    trial: SourceTrial
+    origin: SourceTrial
+    case: str
+
+    @property
+    def system(self) -> str:
+        result = self.origin.result
+        system: str = result.config.agent.kwargs.get('system', result.agent_info.name)
+        return system
+
+    @property
+    def fingerprint(self) -> str | None:
+        fingerprint: str | None = self.origin.result.config.agent.kwargs.get(
+            'fingerprint'
+        )
+        return fingerprint
+
+    @property
+    def job(self) -> str:
+        return self.origin.trial_dir.parent.name
+
+    @property
+    def name(self) -> str:
+        return self.origin.result.trial_name
+
+    @property
+    def error(self) -> str | None:
+        exception = self.trial.result.exception_info
+        return exception.exception_type if exception else None
+
+
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
 
@@ -525,12 +560,16 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     expected = _inputs(family, list(systems.values()))
     candidates = [
         (
-            output,
-            (lock.agent, lock.environment, lock.verifier.disable)
-            == expected.get(output.system),
+            candidate,
+            (
+                candidate.trial.lock.agent,
+                candidate.trial.lock.environment,
+                candidate.trial.lock.verifier.disable,
+            )
+            == expected.get(candidate.system),
         )
-        for output, lock in _read_trials(
-            family, _sources(family), systems, _current_versions(family)
+        for candidate in _read_trials(
+            family, _sources(family), _current_versions(family)
         )
     ]
     candidates.sort(
@@ -538,21 +577,25 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
             candidate[0].error is not None,
             not candidate[1],
             candidate[0].job,
-            candidate[0].trial,
+            candidate[0].name,
         )
     )
-    groups: defaultdict[tuple[str, str, str | None], list[Output]] = defaultdict(list)
+    groups: defaultdict[tuple[str, str, str | None], list[_Candidate]] = defaultdict(
+        list
+    )
     solutions = set()
-    for output, _ in candidates:
-        if (output.job, output.trial) in solutions:
+    for candidate, _ in candidates:
+        if (candidate.job, candidate.name) in solutions:
             continue
-        solutions.add((output.job, output.trial))
-        groups[(output.case, output.system, output.fingerprint)].append(output)
+        solutions.add((candidate.job, candidate.name))
+        groups[(candidate.case, candidate.system, candidate.fingerprint)].append(
+            candidate
+        )
     outputs = sorted(
         (
-            output
+            _output(family, candidate, systems)
             for group in groups.values()
-            for output in group[: family.settings.samples]
+            for candidate in group[: family.settings.samples]
         ),
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )
@@ -593,16 +636,18 @@ def read_trials(
     ValueError
         The directory is not a job directory, or a trial record is unreadable.
     """
-    return [output for output, _ in _read_trials(family, [_source(job_dir)], systems)]
+    return [
+        _output(family, candidate, systems)
+        for candidate in _read_trials(family, [_source(job_dir)])
+    ]
 
 
 def _read_trials(
     family: Family,
     sources: list[tuple[SourceJobConfig, Path]],
-    systems: dict[str, System],
     versions: dict[str, str] | None = None,
-) -> list[tuple[Output, TrialLock]]:
-    """Return each kept trial's output and the inputs its lock recorded.
+) -> list[_Candidate]:
+    """Return each kept trial's verdict, origin, and selection metadata.
 
     A `versions` mapping drops a trial whose task version is not current before
     an output reads that task.
@@ -616,8 +661,7 @@ def _read_trials(
             family, trial.lock.task.version, versions.get(case)
         ):
             continue
-        output = _output(family, trial, _origin(trial, by_id), case, systems)
-        records.append((output, trial.lock))
+        records.append(_Candidate(trial, _origin(trial, by_id), case))
     return records
 
 
@@ -685,15 +729,12 @@ def _task_config(task_dir: Path) -> task_config.TaskConfig:
 
 def _output(
     family: Family,
-    trial: SourceTrial,
-    origin: SourceTrial,
-    case: str,
+    candidate: _Candidate,
     systems: dict[str, System],
 ) -> Output:
-    """Return the output that `origin` wrote, with the verdict `trial` recorded."""
+    """Materialize the originating solution with its selected trial's verdict."""
+    trial, origin, case = candidate.trial, candidate.origin, candidate.case
     result = origin.result
-    kwargs = result.config.agent.kwargs
-    system = kwargs.get('system', result.agent_info.name)
     context = result.agent_result or AgentContext()
     metadata = context.metadata or {}
     exception = trial.result.exception_info
@@ -702,14 +743,14 @@ def _output(
     finish_reason = metadata.get('finish_reason')
 
     return Output(
-        trial=result.trial_name,
-        job=origin.trial_dir.parent.name,
+        trial=candidate.name,
+        job=candidate.job,
         case=case,
-        system=system,
-        fingerprint=kwargs.get('fingerprint'),
+        system=candidate.system,
+        fingerprint=candidate.fingerprint,
         nixos_config_rev=metadata.get('nixos_config_rev'),
         harness_version=metadata.get('harbor_version'),
-        error=exception.exception_type if exception else None,
+        error=candidate.error,
         text=text,
         reward=reward,
         gate_failures=_gate_failures(
@@ -720,7 +761,7 @@ def _output(
         cached_tokens=context.n_cache_tokens,
         output_tokens=context.n_output_tokens,
         reasoning_tokens=metadata.get('reasoning_tokens'),
-        cost_usd=_cost(systems.get(system), context),
+        cost_usd=_cost(systems.get(candidate.system), context),
         latency_sec=_latency(result, metadata),
         response_model=metadata.get('response_model'),
         request_id=metadata.get('request_id'),
