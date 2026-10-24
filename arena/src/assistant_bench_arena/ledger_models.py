@@ -16,6 +16,14 @@ from pydantic import (
 
 from assistant_bench_arena.models import Choice, Defects
 from assistant_bench_arena.serialization import digest
+from assistant_bench_arena.snapshots import (
+    AnalysisPolicy,
+    CaseMetadata,
+    EvaluationManifest,
+    OutputMetadata,
+    Presentation,
+    PublicApproval,
+)
 
 
 type SqlValue = StrictStr | StrictInt | StrictFloat | None
@@ -48,14 +56,13 @@ class Case(Record):
     category: str | None = None
     source: Literal['public', 'synthetic', 'private']
     instruction_digest: Identifier
-    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    metadata: CaseMetadata
 
 
 class System(Record):
     id: Identifier
     fingerprint: Identifier
     order: NonNegativeInt
-    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class Output(Record):
@@ -68,7 +75,7 @@ class Output(Record):
     approved_public: bool = False
     """Explicit approval of the output, independent of its case's source."""
 
-    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    metadata: OutputMetadata
 
 
 class NumericalInput(Record):
@@ -81,7 +88,7 @@ class Evaluation(Record):
     id: Identifier
     family: Identifier
     policy_id: Identifier
-    manifest: dict[str, JsonValue]
+    manifest: EvaluationManifest
     cases: NonNegativeInt
     systems: NonNegativeInt
     outputs: NonNegativeInt
@@ -91,7 +98,8 @@ class Evaluation(Record):
 class Publication(Record):
     id: Identifier
     evaluation_id: Identifier
-    presentation: dict[str, JsonValue]
+    presentation: Presentation
+    approval: PublicApproval | None
     outputs: NonNegativeInt
 
 
@@ -578,7 +586,7 @@ class Export(Record):
     publication_id: str
     point_id: str
     policy_id: str
-    policy: dict[str, JsonValue]
+    policy: AnalysisPolicy
 
 
 class Page(Record):

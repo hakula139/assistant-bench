@@ -342,7 +342,7 @@ BEGIN
         SELECT 1 FROM pair_leases l JOIN family_state f ON f.family = l.family
         JOIN evaluations e ON e.id = f.evaluation_id, json_each(NEW.defects) side, json_each(side.value) defect
         WHERE l.id = NEW.lease_id AND defect.value NOT IN (
-            SELECT value FROM json_each(e.body, '$.manifest.defects'))
+            SELECT value FROM json_each(e.body, '$.manifest.family.defects'))
     ) THEN RAISE(ABORT, 'defects_invalid') END;
 
     SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(NEW.attribution) a

@@ -48,6 +48,7 @@ from assistant_bench_arena.ledger_models import (
 )
 from assistant_bench_arena.models import Defects
 from assistant_bench_arena.serialization import canonical, digest, source_identity
+from assistant_bench_arena.snapshots import AnalysisPolicy
 
 
 type Rejection = Literal[
@@ -196,7 +197,7 @@ class Ledger:
             },
         )
 
-    async def stage_policy(self, policy_id: str, policy: dict[str, JsonValue]) -> None:
+    async def stage_policy(self, policy_id: str, policy: AnalysisPolicy) -> None:
         body = canonical(policy)
         await self._fact(
             Statement(
