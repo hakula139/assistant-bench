@@ -1,19 +1,16 @@
 import asyncio
 import json
 from collections.abc import Iterator
-from datetime import datetime
 from typing import get_args
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from assistant_bench_arena.investigation import (
-    ImportRowPage,
     InvestigatedReceipt,
     InvestigationPage,
     NetworkLookup,
     ReceiptFilter,
-    StoredImportRow,
 )
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
@@ -23,19 +20,8 @@ from assistant_bench_arena.ledger_models import (
     Attribution,
     Context,
     ExportSection,
-    ImportAnnotation,
-    ImportDisposition,
-    ImportObservation,
-    ImportPlan,
-    ImportRow,
-    ImportSelection,
-    ImportSession,
-    ImportSource,
     Issue,
     Lease,
-    LegacySession,
-    LegacyVote,
-    LegacyWithdrawal,
     Mode,
     Moderation,
     Network,
@@ -51,16 +37,13 @@ from assistant_bench_arena.ledger_models import (
     VoteMeaning,
 )
 from assistant_bench_arena.releases import Release, evaluation_identity, settlements
-from assistant_bench_arena.serialization import digest, source_identity
+from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import D1Runtime, D1Transport, publish_presentation, publish_release
 
 
 RETENTION_MS = 60 * 86_400_000
-LEGACY_TIME = '2026-01-01T00:00:00+00:00'
-LEGACY_MS = int(datetime.fromisoformat(LEGACY_TIME).timestamp() * 1_000)
-IMPORT_MS = LEGACY_MS + 86_400_000
 SECTIONS = TypeAdapter(tuple[ExportSection, ...]).validate_python(
     get_args(ExportSection.__value__)
 )
@@ -90,152 +73,6 @@ async def export_rows(
         result[section] = rows
 
     return result
-
-
-def legacy_vote(original_id: int) -> LegacyVote:
-    return LegacyVote(
-        id=original_id,
-        session='legacy-session',
-        case_id='original-case',
-        a_system='large',
-        a_fingerprint='fingerprint:large',
-        a_job='synthetic-private-job',
-        a_trial='original-large-trial',
-        b_system='small',
-        b_fingerprint='fingerprint:small',
-        b_job='synthetic-private-job',
-        b_trial='original-small-trial',
-        choice='a',
-        a_defects='[]',
-        b_defects='[]',
-        duration_sec=1.5,
-        repeat_of=None,
-        recorded_at=LEGACY_TIME,
-    )
-
-
-async def legacy_plan(
-    ledger: Ledger,
-    transport: D1Transport,
-    *,
-    receipts: int = 2,
-    withdrawals: tuple[int, ...] = (),
-) -> ImportPlan:
-    await ledger.register_actor(
-        Actor(id='owner', created_at=2, owner_namespace='legacy-owner')
-    )
-    await ledger.register_import(
-        ImportSource(
-            id='source',
-            family='writing',
-            owner_id='owner',
-            source_schema='2',
-            file_digest=digest('synthetic-source'),
-            sessions=1,
-            receipts=receipts,
-            withdrawals=len(withdrawals),
-        )
-    )
-    session = LegacySession(
-        id='legacy-session', family='writing', started_at=LEGACY_TIME
-    )
-    await ledger.preserve_import(
-        'source',
-        ImportRow(
-            kind='session',
-            original_id=session.id,
-            source_hash=digest(session),
-            raw=session,
-        ),
-    )
-    observations: list[ImportObservation] = []
-
-    for original_id in range(1, receipts + 1):
-        raw = legacy_vote(original_id)
-        await ledger.preserve_import(
-            'source',
-            ImportRow(
-                kind='receipt',
-                original_id=str(original_id),
-                source_hash=digest(raw),
-                raw=raw,
-            ),
-        )
-        rows = await transport.rows(
-            "SELECT seq FROM import_rows WHERE source_id = 'source' "
-            "AND row_kind = 'receipt' AND original_id = ?",
-            str(original_id),
-        )
-        observations.append(
-            ImportObservation(
-                raw_seq=TypeAdapter(int).validate_python(rows[0]['seq']),
-                raw_hash=digest(raw),
-                command_id=f'legacy:{original_id}',
-                acknowledgment=f'legacy-ack:{original_id}',
-                claim_id='legacy-claim',
-                proof_evaluation_id=make_release().evaluation.id,
-                case_key=case_key(0),
-                a_output=output_key(0, 'large'),
-                b_output=output_key(0, 'small'),
-                a_source_digest=source_identity(
-                    case_key(0), 'large', 'fingerprint:large', raw.a_job, raw.a_trial
-                ),
-                b_source_digest=source_identity(
-                    case_key(0), 'small', 'fingerprint:small', raw.b_job, raw.b_trial
-                ),
-                recorded_at=LEGACY_MS,
-            )
-        )
-
-    for original_id in withdrawals:
-        undo = LegacyWithdrawal(vote=original_id, undone_at=LEGACY_TIME)
-        await ledger.preserve_import(
-            'source',
-            ImportRow(
-                kind='withdrawal',
-                original_id=str(original_id),
-                source_hash=digest(undo),
-                raw=undo,
-            ),
-        )
-
-    state = await transport.rows(
-        "SELECT revision FROM family_state WHERE family = 'writing'"
-    )
-    winner = next(
-        (
-            f'legacy-ack:{original_id}'
-            for original_id in reversed(range(1, receipts + 1))
-            if original_id not in withdrawals
-        ),
-        None,
-    )
-    return ImportPlan(
-        id='import-plan',
-        source_id='source',
-        revision=TypeAdapter(int).validate_python(state[0]['revision']),
-        initial=True,
-        sessions=(
-            ImportSession(
-                original_id=session.id,
-                session_id='imported-session',
-                created_at=LEGACY_MS,
-            ),
-        ),
-        observations=tuple(observations),
-        selections=(
-            ImportSelection(
-                claim_id='legacy-claim',
-                expected_version=0,
-                expected_receipt=None,
-                selected_acknowledgment=winner,
-            ),
-        ),
-        dispositions=tuple(
-            ImportDisposition(raw_seq=row.raw_seq, state='linked', reason='proved')
-            for row in observations
-        ),
-    )
 
 
 def attribution(now: int) -> tuple[Attribution, ...]:
@@ -461,7 +298,6 @@ class TestLedger:
                 ('publication', 'publications'),
                 ('moderation', 'moderation_batches'),
                 ('attribution', 'attribution_plans'),
-                ('import', 'import_plans'),
             ],
         )
         def test_applied_fact_seals_replay_without_replacing_the_first_timestamp(
@@ -520,25 +356,18 @@ class TestLedger:
                             fact_id, 'writing', 'actor', 'owner'
                         )
                         await ledger.stage_attribution(plan)
-                    else:
-                        imported = await legacy_plan(ledger, transport, receipts=1)
-                        await ledger.stage_import(imported)
-                        fact_id = imported.id
-                        now = IMPORT_MS
 
                     seals = {
                         'evaluation': ledger.seal_evaluation,
                         'publication': ledger.seal_publication,
                         'moderation': ledger.seal_moderation,
                         'attribution': ledger.seal_attribution,
-                        'import': ledger.seal_import,
                     }
                     other_seals = {
                         'evaluation': other.seal_evaluation,
                         'publication': other.seal_publication,
                         'moderation': other.seal_moderation,
                         'attribution': other.seal_attribution,
-                        'import': other.seal_import,
                     }
 
                     await seals[kind](fact_id, now)
@@ -576,11 +405,6 @@ class TestLedger:
                             'SELECT canonical_actor FROM actor_resolution '
                             "WHERE family = 'writing' AND actor_id = 'actor'"
                         ) == [{'canonical_actor': 'owner'}]
-                    else:
-                        await ledger.apply_import(context, fact_id)
-                        assert await transport.rows(
-                            'SELECT origin FROM vote_receipts'
-                        ) == [{'origin': 'legacy'}]
 
                     facts = await transport.rows(f'SELECT * FROM {table} ORDER BY id')
                     events = await transport.rows('SELECT * FROM evidence_events')
@@ -866,8 +690,8 @@ class TestLedger:
                     assert results[0].eligible_votes == 0
                     assert results[0].undo_acknowledgment is None
                     original = await transport.rows(
-                        'SELECT actor_id, family, created_at, '
-                        'import_source, original_id FROM sessions WHERE id = ?',
+                        'SELECT actor_id, family, created_at '
+                        'FROM sessions WHERE id = ?',
                         session_id,
                     )
                     assert original == [
@@ -875,8 +699,6 @@ class TestLedger:
                             'actor_id': 'actor',
                             'family': 'writing',
                             'created_at': original[0]['created_at'],
-                            'import_source': None,
-                            'original_id': None,
                         }
                     ]
                     assert original[0]['created_at'] in (20, 30)
@@ -895,8 +717,8 @@ class TestLedger:
 
                     assert (
                         await transport.rows(
-                            'SELECT actor_id, family, created_at, '
-                            'import_source, original_id FROM sessions WHERE id = ?',
+                            'SELECT actor_id, family, created_at '
+                            'FROM sessions WHERE id = ?',
                             session_id,
                         )
                         == original
@@ -1046,173 +868,6 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestInvestigation:
-        @pytest.mark.parametrize(
-            ('receipts', 'defect_count'),
-            [(80, 0), (3, 40_000), (1, 140_000)],
-            ids=['row-limit', 'byte-limit', 'oversized-record'],
-        )
-        def test_preserved_import_pages_retain_exact_rows_and_exclude_private_notes(
-            self, d1_runtime: D1Runtime, receipts: int, defect_count: int
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='owner-source')
-                    )
-                    assert await ledger.investigation.import_source('unknown') is None
-                    assert (
-                        await ledger.investigation.import_rows('unknown')
-                    ).rows == ()
-                    source = ImportSource(
-                        id='source',
-                        family='writing',
-                        owner_id='owner',
-                        source_schema='2',
-                        file_digest=digest('synthetic-source'),
-                        sessions=1,
-                        receipts=receipts,
-                        withdrawals=0,
-                    )
-                    await ledger.register_import(source)
-                    empty = await ledger.investigation.import_source(source.id)
-                    assert empty is not None
-                    assert empty.source == source
-                    assert (empty.sessions, empty.receipts, empty.withdrawals) == (
-                        0,
-                        0,
-                        0,
-                    )
-                    assert empty.completed_at is None
-                    raw_session = LegacySession(
-                        id='legacy-session', family='writing', started_at=LEGACY_TIME
-                    )
-                    session_row = ImportRow(
-                        kind='session',
-                        original_id=raw_session.id,
-                        source_hash=digest(raw_session),
-                        raw=raw_session,
-                    )
-                    await ledger.preserve_import(source.id, session_row)
-                    other_source = source.model_copy(
-                        update={
-                            'id': 'other-source',
-                            'receipts': 0,
-                            'file_digest': digest('other'),
-                        }
-                    )
-                    await ledger.register_import(other_source)
-                    await ledger.preserve_import(other_source.id, session_row)
-                    expected = [session_row]
-
-                    for index in range(1, receipts + 1):
-                        raw = legacy_vote(index).model_copy(
-                            update={'a_defects': json.dumps(['tone'] * defect_count)}
-                        )
-                        row = ImportRow(
-                            kind='receipt',
-                            original_id=str(index),
-                            source_hash=digest(raw),
-                            raw=raw,
-                        )
-                        await ledger.preserve_import(source.id, row)
-                        expected.append(row)
-
-                        if index == 1:
-                            partial = await ledger.investigation.import_source(
-                                source.id
-                            )
-                            assert partial is not None
-                            assert partial.source.receipts == receipts
-                            assert partial.sessions == partial.receipts == 1
-
-                    await ledger.annotate(
-                        'owner',
-                        ImportAnnotation(
-                            kind='import', source_id=source.id, original_id='1'
-                        ),
-                        'Synthetic private note.',
-                    )
-                    stored = await ledger.investigation.import_source(source.id)
-                    assert stored is not None
-                    assert (stored.sessions, stored.receipts, stored.withdrawals) == (
-                        1,
-                        receipts,
-                        0,
-                    )
-                    assert stored.completed_at is None
-                    first = await ledger.investigation.import_rows(source.id)
-
-                    if defect_count == 140_000:
-                        assert tuple(row.row for row in first.rows) == (session_row,)
-                        assert first.after == first.rows[0].seq
-
-                        with pytest.raises(
-                            ValueError,
-                            match='record exceeds the transport limit',
-                        ):
-                            await ledger.investigation.import_rows(
-                                source.id, first.rows[0].seq
-                            )
-
-                        assert (
-                            await ledger.investigation.import_source(source.id)
-                            == stored
-                        )
-                        return
-
-                    pages: list[ImportRowPage] = [first]
-                    observed: list[StoredImportRow] = list(first.rows)
-                    page = first
-
-                    while page.after is not None:
-                        previous = page.after
-                        page = await ledger.investigation.import_rows(
-                            source.id, previous
-                        )
-                        assert page.rows[0].seq > previous
-                        pages.append(page)
-                        observed.extend(page.rows)
-
-                    assert tuple(row.row for row in observed) == tuple(expected)
-                    assert [row.seq for row in observed] == [
-                        value['seq']
-                        for value in await transport.rows(
-                            'SELECT seq FROM import_rows '
-                            'WHERE source_id = ? ORDER BY seq',
-                            source.id,
-                        )
-                    ]
-                    assert all(row.source_id == source.id for row in observed)
-                    assert all(
-                        sum(len(row.model_dump_json().encode()) for row in page.rows)
-                        <= 1_048_576
-                        for page in pages
-                    )
-                    assert all(
-                        'Synthetic private note.' not in page.model_dump_json()
-                        for page in pages
-                    )
-                    assert await transport.rows('SELECT * FROM vote_receipts') == []
-
-                    if defect_count:
-                        assert tuple(row.row for row in first.rows) == tuple(
-                            expected[:3]
-                        )
-                        assert (
-                            sum(
-                                len(row.model_dump_json().encode())
-                                for row in (*first.rows, pages[1].rows[0])
-                            )
-                            > 1_048_576
-                        )
-                    else:
-                        assert tuple(row.row for row in first.rows) == tuple(
-                            expected[:75]
-                        )
-
-            asyncio.run(scenario())
-
         @pytest.mark.parametrize(
             'wide', [False, True], ids=['row-limit', 'utf8-byte-limit']
         )
@@ -3131,324 +2786,6 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-    class TestPreserveImport:
-        def test_original_identity_replay_rejects_a_changed_receipt(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await legacy_plan(ledger, transport, receipts=1)
-                    before = await transport.rows(
-                        'SELECT * FROM import_rows ORDER BY seq'
-                    )
-                    changed = legacy_vote(1).model_copy(update={'choice': 'b'})
-
-                    with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.preserve_import(
-                            'source',
-                            ImportRow(
-                                kind='receipt',
-                                original_id='1',
-                                source_hash=digest(changed),
-                                raw=changed,
-                            ),
-                        )
-
-                    assert (
-                        await transport.rows('SELECT * FROM import_rows ORDER BY seq')
-                        == before
-                    )
-                    assert await transport.rows('SELECT * FROM vote_receipts') == []
-                    assert await transport.rows('SELECT * FROM coverage_members') == []
-
-            asyncio.run(scenario())
-
-        def test_native_raw_storage_rejects_private_notes(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await legacy_plan(ledger, transport, receipts=1)
-                    before = await transport.rows(
-                        'SELECT * FROM import_rows ORDER BY seq'
-                    )
-                    raw = legacy_vote(2).model_dump(mode='json')
-                    raw['note'] = 'Synthetic private note.'
-
-                    with pytest.raises(CommandRejected, match='^import_invalid$'):
-                        await transport.execute(
-                            Statement(
-                                sql="""
-                                INSERT INTO import_rows(source_id, row_kind,
-                                    original_id, row_hash, raw, initial_disposition)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                            """,
-                                params=(
-                                    'source',
-                                    'receipt',
-                                    '2',
-                                    digest(raw),
-                                    json.dumps(raw),
-                                    'unresolved',
-                                ),
-                            )
-                        )
-
-                    assert (
-                        await transport.rows('SELECT * FROM import_rows ORDER BY seq')
-                        == before
-                    )
-                    assert (
-                        await transport.rows('SELECT * FROM private_annotations') == []
-                    )
-
-            asyncio.run(scenario())
-
-    class TestApplyImport:
-        @pytest.mark.parametrize(
-            'withdrawals', [(), (2,)], ids=['latest', 'latest-undone']
-        )
-        def test_import_preserves_original_undo_and_honest_legacy_provenance(
-            self, d1_runtime: D1Runtime, withdrawals: tuple[int, ...]
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    plan = await legacy_plan(ledger, transport, withdrawals=withdrawals)
-                    await ledger.stage_import(plan)
-                    await ledger.seal_import(plan.id, IMPORT_MS)
-                    context = Context(
-                        command_id='import', principal='admin', now=IMPORT_MS
-                    )
-
-                    applied = await ledger.apply_import(context, plan.id)
-                    replay = await ledger.apply_import(
-                        context.model_copy(update={'now': IMPORT_MS + 10}), plan.id
-                    )
-                    frozen = await ledger.freeze('imported', 'writing', IMPORT_MS + 20)
-                    rows = await export_rows(ledger, frozen.id, limit=1)
-
-                    assert replay == applied
-                    assert await transport.rows(
-                        'SELECT r.original_id FROM eligible_claims c '
-                        'JOIN vote_receipts r ON r.seq = c.receipt_seq'
-                    ) == [{'original_id': '1' if withdrawals else '2'}]
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-                    assert sorted(
-                        TypeAdapter(list[str]).validate_python(
-                            [row['original_id'] for row in rows['receipts']]
-                        )
-                    ) == ['1', '2']
-
-                    for receipt in rows['receipts']:
-                        assert receipt['origin'] == 'legacy'
-                        assert receipt['import_source'] == 'source'
-                        assert (
-                            receipt['proof_evaluation_id']
-                            == make_release().evaluation.id
-                        )
-                        assert receipt['recorded_at'] == LEGACY_MS
-                        assert receipt['legacy_duration_sec'] == 1.5
-                        assert all(
-                            field not in receipt
-                            for field in (
-                                'lease_id',
-                                'claim_version',
-                                'evaluation_id',
-                                'publication_id',
-                                'point_id',
-                                'duration_ms',
-                            )
-                        )
-
-                    assert await transport.rows('SELECT * FROM pair_leases') == []
-                    assert await transport.rows('SELECT * FROM quota_windows') == []
-                    assert await transport.rows(
-                        'SELECT r.original_id FROM receipt_state s '
-                        'JOIN vote_receipts r ON r.seq = s.receipt_seq '
-                        'WHERE s.withdrawn IS NOT NULL'
-                    ) == ([{'original_id': '2'}] if withdrawals else [])
-                    assert 'synthetic-private-job' not in json.dumps(rows)
-                    assert await transport.rows('SELECT * FROM import_execution') == []
-
-            asyncio.run(scenario())
-
-        def test_late_observation_failure_rolls_back_the_entire_reviewed_plan(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    lease = await ledger.issue(
-                        Context(command_id='draw', principal='actor', now=10), issue()
-                    )
-                    await ledger.accept(
-                        Context(command_id='vote', principal='actor', now=20),
-                        Accept(
-                            lease_id=lease.id, acknowledgment='collision', choice='a'
-                        ),
-                    )
-                    good = await legacy_plan(ledger, transport)
-                    bad = good.model_copy(
-                        update={
-                            'observations': (
-                                good.observations[0],
-                                good.observations[1].model_copy(
-                                    update={'acknowledgment': 'collision'}
-                                ),
-                            ),
-                            'selections': (
-                                good.selections[0].model_copy(
-                                    update={'selected_acknowledgment': 'collision'}
-                                ),
-                            ),
-                        }
-                    )
-                    await ledger.stage_import(bad)
-                    await ledger.seal_import(bad.id, IMPORT_MS)
-                    tables = (
-                        'evidence_events',
-                        'event_targets',
-                        'vote_receipts',
-                        'receipt_state',
-                        'claims',
-                        'sessions',
-                        'session_state',
-                        'session_cases',
-                        'coverage',
-                        'coverage_members',
-                        'import_sources',
-                        'import_rows',
-                        'import_execution',
-                        'import_applications',
-                        'family_state',
-                    )
-                    before = [
-                        await transport.rows(f'SELECT * FROM {table} ORDER BY rowid')
-                        for table in tables
-                    ]
-
-                    with pytest.raises(CommandRejected, match='^immutable$'):
-                        await ledger.apply_import(
-                            Context(
-                                command_id='import', principal='admin', now=IMPORT_MS
-                            ),
-                            bad.id,
-                        )
-
-                    assert [
-                        await transport.rows(f'SELECT * FROM {table} ORDER BY rowid')
-                        for table in tables
-                    ] == before
-                    assert (
-                        await transport.rows(
-                            "SELECT * FROM sessions WHERE id = 'imported-session'"
-                        )
-                        == []
-                    )
-
-                    corrected = good.model_copy(update={'id': 'corrected'})
-                    await ledger.stage_import(corrected)
-                    await ledger.seal_import(corrected.id, IMPORT_MS + 1)
-                    await ledger.apply_import(
-                        Context(
-                            command_id='import', principal='admin', now=IMPORT_MS + 1
-                        ),
-                        corrected.id,
-                    )
-
-                    assert await transport.rows(
-                        "SELECT original_id FROM vote_receipts WHERE origin = 'legacy' "
-                        'ORDER BY original_id'
-                    ) == [{'original_id': '1'}, {'original_id': '2'}]
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 2}
-                    ]
-
-            asyncio.run(scenario())
-
-        def test_later_resolution_preserves_earlier_frozen_unresolved_exports(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    linked = await legacy_plan(ledger, transport)
-                    raw = linked.model_copy(
-                        update={
-                            'observations': (),
-                            'selections': (),
-                            'dispositions': (
-                                ImportDisposition(
-                                    raw_seq=linked.observations[0].raw_seq,
-                                    state='unresolved',
-                                    reason='missing_proof',
-                                ),
-                                ImportDisposition(
-                                    raw_seq=linked.observations[1].raw_seq,
-                                    state='incompatible',
-                                    reason='retired_output',
-                                ),
-                            ),
-                        }
-                    )
-                    await ledger.stage_import(raw)
-                    await ledger.seal_import(raw.id, IMPORT_MS)
-                    finalized = await ledger.apply_import(
-                        Context(
-                            command_id='finalize', principal='admin', now=IMPORT_MS
-                        ),
-                        raw.id,
-                    )
-                    before = await ledger.freeze(
-                        'before-link', 'writing', IMPORT_MS + 1
-                    )
-                    original = await export_rows(ledger, before.id, limit=1)
-                    resolved = linked.model_copy(
-                        update={
-                            'id': 'resolve',
-                            'revision': finalized.seq,
-                            'initial': False,
-                            'observations': linked.observations[:1],
-                            'selections': (
-                                linked.selections[0].model_copy(
-                                    update={'selected_acknowledgment': 'legacy-ack:1'}
-                                ),
-                            ),
-                            'dispositions': linked.dispositions[:1],
-                        }
-                    )
-                    await ledger.stage_import(resolved)
-                    await ledger.seal_import(resolved.id, IMPORT_MS + 2)
-
-                    await ledger.apply_import(
-                        Context(
-                            command_id='resolve', principal='admin', now=IMPORT_MS + 3
-                        ),
-                        resolved.id,
-                    )
-                    after = await ledger.freeze('after-link', 'writing', IMPORT_MS + 4)
-                    current = await export_rows(ledger, after.id, limit=2)
-
-                    assert await export_rows(ledger, before.id, limit=3) == original
-                    assert original['receipts'] == []
-                    assert [row['original_id'] for row in current['receipts']] == ['1']
-                    assert [row['seq'] for row in current['import_rows']] == [
-                        row['seq'] for row in original['import_rows']
-                    ]
-                    assert current['import_sources'] == original['import_sources']
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-                    assert all('raw' not in row for row in current['import_rows'])
-                    assert 'synthetic-private-job' not in json.dumps(current)
-
-            asyncio.run(scenario())
-
     class TestAnnotate:
         def test_opaque_acknowledgments_preserve_note_authority_and_redaction(
             self, d1_runtime: D1Runtime
@@ -3579,153 +2916,46 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-        @pytest.mark.parametrize(
-            'redact_before_link',
-            [True, False],
-            ids=['raw-redaction', 'normalized-redaction'],
-        )
-        def test_import_note_redaction_survives_normalization_and_redelivery(
-            self, d1_runtime: D1Runtime, redact_before_link: bool
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    plan = await legacy_plan(ledger, transport, receipts=1)
-                    raw_target = ImportAnnotation(
-                        kind='import', source_id='source', original_id='1'
-                    )
-                    await ledger.annotate(
-                        'owner', raw_target, 'Synthetic private note.'
-                    )
-
-                    if redact_before_link:
-                        await ledger.redact_annotation('owner', raw_target, IMPORT_MS)
-
-                    await ledger.stage_import(plan)
-                    await ledger.seal_import(plan.id, IMPORT_MS + 1)
-                    await ledger.apply_import(
-                        Context(
-                            command_id='import', principal='admin', now=IMPORT_MS + 2
-                        ),
-                        plan.id,
-                    )
-                    receipts = await transport.rows(
-                        "SELECT seq FROM vote_receipts WHERE origin = 'legacy'"
-                    )
-                    normalized = ReceiptAnnotation(
-                        kind='receipt',
-                        receipt_seq=TypeAdapter(int).validate_python(
-                            receipts[0]['seq']
-                        ),
-                    )
-
-                    if not redact_before_link:
-                        await ledger.redact_annotation(
-                            'owner', normalized, IMPORT_MS + 3
-                        )
-
-                    await ledger.annotate(
-                        'owner', raw_target, 'Synthetic private note.'
-                    )
-                    await ledger.annotate(
-                        'owner', normalized, 'Another delivered note.'
-                    )
-                    vote = legacy_vote(1)
-                    await ledger.preserve_import(
-                        'source',
-                        ImportRow(
-                            kind='receipt',
-                            original_id='1',
-                            source_hash=digest(vote),
-                            raw=vote,
-                        ),
-                    )
-                    frozen = await ledger.freeze('redacted', 'writing', IMPORT_MS + 4)
-                    rows = await export_rows(ledger, frozen.id, limit=2)
-
-                    assert await transport.rows(
-                        'SELECT receipt_seq, source_id, original_id, note, redacted_at '
-                        'FROM private_annotations'
-                    ) == [
-                        {
-                            'receipt_seq': None,
-                            'source_id': 'source',
-                            'original_id': '1',
-                            'note': None,
-                            'redacted_at': IMPORT_MS
-                            if redact_before_link
-                            else IMPORT_MS + 3,
-                        }
-                    ]
-                    assert 'Synthetic private note.' not in json.dumps(rows)
-                    assert 'Another delivered note.' not in json.dumps(rows)
-                    assert 'Synthetic private note.' not in json.dumps(
-                        await transport.rows('SELECT raw FROM import_rows')
-                    )
-                    assert not any('annotations' in section for section in rows)
-
-            asyncio.run(scenario())
-
     class TestFreeze:
-        def test_frozen_pages_preserve_raw_cutoff_and_inventory_after_later_changes(
+        def test_frozen_pages_preserve_receipt_cutoff_and_inventory_after_later_changes(
             self, d1_runtime: D1Runtime
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await prepare(ledger, transport)
-                    await ledger.register_actor(
-                        Actor(id='owner', created_at=2, owner_namespace='legacy-owner')
+                    lease = await ledger.issue(
+                        Context(command_id='first-draw', principal='actor', now=10),
+                        issue(),
                     )
-                    source = ImportSource(
-                        id='source',
-                        family='writing',
-                        owner_id='owner',
-                        source_schema='2',
-                        file_digest=digest('synthetic-source'),
-                        sessions=1,
-                        receipts=2,
-                        withdrawals=0,
+                    first = await ledger.accept(
+                        Context(command_id='first-vote', principal='actor', now=11),
+                        Accept(lease_id=lease.id, acknowledgment='first', choice='a'),
                     )
-                    await ledger.register_import(source)
-                    session = LegacySession(
-                        id='legacy-session',
-                        family='writing',
-                        started_at='2026-01-01T00:00:00+00:00',
+                    await ledger.annotate_ack(
+                        'actor', first.acknowledgment, 'Private note.', 12
                     )
-                    session_row = ImportRow(
-                        kind='session',
-                        original_id=session.id,
-                        source_hash=digest(session),
-                        raw=session,
-                    )
-                    vote = legacy_vote(1)
-                    first = ImportRow(
-                        kind='receipt',
-                        original_id='1',
-                        source_hash=digest(vote),
-                        raw=vote,
-                    )
-                    await ledger.preserve_import(source.id, session_row)
-                    await ledger.preserve_import(source.id, first)
                     frozen = await ledger.freeze('frozen', 'writing', 20)
                     before = await export_rows(ledger, frozen.id, limit=1)
 
-                    await ledger.preserve_import(source.id, first)
-                    later = legacy_vote(2)
-                    await ledger.preserve_import(
-                        source.id,
-                        ImportRow(
-                            kind='receipt',
-                            original_id='2',
-                            source_hash=digest(later),
-                            raw=later,
+                    later_lease = await ledger.issue(
+                        Context(command_id='later-draw', principal='actor', now=21),
+                        issue(case=1, lease='later').model_copy(
+                            update={'session_version': 2}
+                        ),
+                    )
+                    later = await ledger.accept(
+                        Context(command_id='later-vote', principal='actor', now=22),
+                        Accept(
+                            lease_id=later_lease.id, acknowledgment='later', choice='b'
                         ),
                     )
                     refreshed = await publish(ledger, suffix='next', cases=4)
+                    state = await ledger.read.family('writing')
+                    assert state is not None
                     await ledger.activate(
                         Context(command_id='activate:next', principal='admin', now=30),
                         'writing',
-                        frozen.family_revision,
+                        state.revision,
                         refreshed.evaluation.id,
                         refreshed.publication.id,
                         refreshed.points.id,
@@ -3742,32 +2972,15 @@ class TestLedger:
                         section: len(rows) for section, rows in current_rows.items()
                     }
                     assert await ledger.freeze(frozen.id, 'writing', 50) == frozen
-                    assert (
-                        frozen.namespace == 'test-deployment'
-                        and frozen.schema_version == 1
-                    )
-                    assert {
-                        (row['row_kind'], row['original_id'])
-                        for row in before['import_rows']
-                    } == {
-                        ('session', 'legacy-session'),
-                        ('receipt', '1'),
-                    }
-                    assert {
-                        (row['row_kind'], row['original_id'])
-                        for row in current_rows['import_rows']
-                    } == {
-                        ('session', 'legacy-session'),
-                        ('receipt', '1'),
-                        ('receipt', '2'),
-                    }
-                    assert all(
-                        row['initial_disposition'] == 'unresolved'
-                        for row in current_rows['import_rows']
-                    )
-                    assert before['receipts'] == current_rows['receipts'] == []
-                    assert 'synthetic-private-job' not in json.dumps(current_rows)
-                    assert all('raw' not in row for row in current_rows['import_rows'])
+                    assert frozen.namespace == 'test-deployment'
+                    assert frozen.schema_version == 1
+                    assert [row['seq'] for row in before['receipts']] == [first.seq]
+                    assert [row['seq'] for row in current_rows['receipts']] == [
+                        first.seq,
+                        later.seq,
+                    ]
+                    assert 'Private note.' not in json.dumps(before)
+                    assert 'Private note.' not in json.dumps(current_rows)
                     assert (
                         len(before['outputs']) == 6
                         and len(current_rows['outputs']) == 8
@@ -4008,58 +3221,37 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-        def test_imported_sessions_and_reviewed_owner_attribution_remain_auditable(
+        def test_reviewed_owner_attribution_remains_auditable_after_browsing_expiry(
             self, d1_runtime: D1Runtime
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await prepare(ledger, transport)
-                    imported = await legacy_plan(ledger, transport, receipts=1)
-                    await ledger.stage_import(imported)
-                    await ledger.seal_import(imported.id, IMPORT_MS)
-                    await ledger.apply_import(
-                        Context(command_id='import', principal='admin', now=IMPORT_MS),
-                        imported.id,
+                    await ledger.register_actor(
+                        Actor(id='owner', created_at=2, owner_namespace='owner')
                     )
                     plan = await ledger.prepare_attribution(
                         'attribution', 'writing', 'actor', 'owner'
                     )
                     await ledger.stage_attribution(plan)
-                    await ledger.seal_attribution(plan.id, IMPORT_MS + 1)
+                    await ledger.seal_attribution(plan.id, 10)
                     await ledger.attribute(
-                        Context(
-                            command_id='attribute', principal='admin', now=IMPORT_MS + 2
-                        ),
+                        Context(command_id='attribute', principal='admin', now=11),
                         plan.id,
                     )
                     events = await transport.rows('SELECT * FROM evidence_events')
 
-                    await ledger.maintenance.expire(IMPORT_MS + 60 * 86_400_000)
+                    await ledger.maintenance.expire(60 * 86_400_000)
 
                     assert await transport.rows(
                         'SELECT id FROM actors ORDER BY id'
-                    ) == [
-                        {'id': 'actor'},
-                        {'id': 'owner'},
-                    ]
-                    assert (
-                        await ledger.read.session('owner', 'imported-session')
-                        is not None
-                    )
+                    ) == [{'id': 'actor'}, {'id': 'owner'}]
                     assert await ledger.read.session('actor', 'session') is None
                     assert await transport.rows('SELECT * FROM actor_expiry') == []
                     assert (
                         await transport.rows('SELECT * FROM evidence_events') == events
                     )
-                    assert await transport.rows(
-                        'SELECT origin, import_source, original_id FROM vote_receipts'
-                    ) == [
-                        {
-                            'origin': 'legacy',
-                            'import_source': 'source',
-                            'original_id': '1',
-                        }
-                    ]
+                    assert await transport.rows('SELECT * FROM vote_receipts') == []
 
             asyncio.run(scenario())
 
