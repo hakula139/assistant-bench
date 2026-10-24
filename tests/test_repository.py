@@ -108,6 +108,8 @@ def test_coding_tasks_share_their_common_files(shared: str) -> None:
 
     for metadata in tasks:
         artifact = metadata.parent / shared
+
+        assert not artifact.is_symlink(), f'`{artifact}` must be a regular copy'
         assert artifact.read_bytes() == canonical, f'`{artifact}` needs regeneration'
 
 

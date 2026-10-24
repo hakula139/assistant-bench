@@ -18,12 +18,19 @@ def sync(root: Path, *, check: bool = False) -> list[Path]:
         content = (family / 'shared' / asset).read_bytes()
         for metadata in sorted((family / 'tasks').glob('*/task.toml')):
             destination = metadata.parent / asset
-            if destination.is_file() and destination.read_bytes() == content:
+            if (
+                not destination.is_symlink()
+                and destination.is_file()
+                and destination.read_bytes() == content
+            ):
                 continue
 
             stale.append(destination)
             if not check:
                 destination.parent.mkdir(parents=True, exist_ok=True)
+                if destination.is_symlink():
+                    destination.unlink()
+
                 destination.write_bytes(content)
 
     return stale
