@@ -271,9 +271,13 @@ class D1Runtime:
         (source / 'owner.py').write_text(dedent(_OWNER))
         (self.directory / 'bridge.mjs').write_text(
             dedent(f"""
+                import {{Console}} from 'node:console';
                 import {{createRequire}} from 'node:module';
                 import {{createInterface}} from 'node:readline';
 
+                globalThis.console = new Console({{
+                    stdout: process.stderr, stderr: process.stderr,
+                }});
                 const {{getPlatformProxy}} = createRequire(
                     {json.dumps(str(ROOT / 'package.json'))}
                 )('wrangler');
