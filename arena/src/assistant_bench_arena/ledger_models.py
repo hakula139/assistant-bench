@@ -272,6 +272,20 @@ class Event(Record):
     data: dict[str, JsonValue]
 
 
+class EventTarget(Record):
+    event_seq: NonNegativeInt
+    ordinal: NonNegativeInt
+    receipt_seq: NonNegativeInt | None
+    claim_id: str | None
+    expected_version: NonNegativeInt | None
+    transition: str
+    reference_seq: NonNegativeInt | None
+    lease_id: str | None
+    target_claim: str | None
+    target_actor: str | None
+    source_row: NonNegativeInt | None
+
+
 class Lease(Record):
     id: str
     command_id: str
@@ -433,6 +447,16 @@ class LegacyVote(Record):
 class LegacyWithdrawal(Record):
     vote: StrictInt
     undone_at: str
+
+
+class ImportSummary(Record):
+    source_id: str
+    row_kind: Literal['session', 'receipt', 'withdrawal']
+    original_id: str
+    seq: NonNegativeInt
+    row_hash: str
+    initial_disposition: Literal['unresolved', 'incompatible']
+    repeat_of: StrictInt | None
 
 
 class ImportSource(Record):

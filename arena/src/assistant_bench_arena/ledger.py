@@ -47,10 +47,16 @@ from assistant_bench_arena.ledger_models import (
     System,
     VoteMeaning,
 )
+from assistant_bench_arena.maintenance import LedgerMaintenance
 from assistant_bench_arena.models import Defects
 from assistant_bench_arena.reads import LedgerReads
 from assistant_bench_arena.releases import validate_publication
-from assistant_bench_arena.serialization import canonical, digest, source_identity
+from assistant_bench_arena.serialization import (
+    canonical,
+    comparison_identity,
+    digest,
+    source_identity,
+)
 from assistant_bench_arena.snapshots import AnalysisPolicy
 from assistant_bench_arena.transport import CommandRejected, Transport
 
@@ -80,6 +86,7 @@ class Ledger:
     def __init__(self, transport: Transport) -> None:
         self.transport = transport
         self.read = LedgerReads(transport)
+        self.maintenance = LedgerMaintenance(transport)
 
     async def _rows(self, sql: str, *params: SqlValue) -> list[Row]:
         return await self.transport.query(Statement(sql=sql, params=params))
@@ -367,6 +374,37 @@ class Ledger:
         )
 
     async def stage_points(self, points: PointSnapshot, now: int) -> None:
+        bundle = await self.read.evaluation(points.evaluation_id)
+
+        if (
+            points.id != digest(points.model_dump(mode='json', exclude={'id'}))
+            or points.policy_id != bundle.evaluation.policy_id
+            or set(points.points) != {system.id for system in bundle.systems}
+            or (
+                points.source_export_id is None
+                and any(point.score is not None for point in points.points.values())
+            )
+        ):
+            raise ValueError(
+                'Points must bind their complete inventory and provenance.'
+            )
+
+        if points.source_export_id is not None:
+            sources = await self._rows(
+                """
+                    SELECT id FROM analysis_exports WHERE id = ?
+                        AND evaluation_id = ? AND policy_id = ?
+                    """,
+                points.source_export_id,
+                points.evaluation_id,
+                points.policy_id,
+            )
+
+            if not sources:
+                raise ValueError(
+                    'Fitted points require a matching frozen source export.'
+                )
+
         body = canonical(points)
         await self._fact(
             Statement(
@@ -509,6 +547,37 @@ class Ledger:
 
         return result
 
+    async def resolve_admission(
+        self,
+        context: Context,
+        operation: Literal['new', 'renew'],
+        context_digest: str,
+        original_credential: str | None,
+        proof_digest: str | None = None,
+    ) -> AdmissionResult | None:
+        """Recover only after the caller authenticates the original signed context."""
+        rows = await self._rows(
+            'SELECT * FROM admission_results WHERE command_id = ?', context.command_id
+        )
+
+        if not rows:
+            return None
+
+        result = AdmissionResult.model_validate(rows[0])
+
+        if (
+            result.operation != operation
+            or result.context_digest != context_digest
+            or result.original_credential != original_credential
+            or context.principal
+            != (context_digest if operation == 'new' else result.actor_id)
+            or (proof_digest is not None and result.proof_digest != proof_digest)
+            or (operation == 'new' and proof_digest is None)
+        ):
+            raise CommandRejected('conflict')
+
+        return await self._admission_result(context, result.request_hash)
+
     async def start_session(self, session: Session) -> None:
         await self._fact(
             Statement(sql='SELECT * FROM sessions WHERE id = ?', params=(session.id,)),
@@ -647,9 +716,14 @@ class Ledger:
         if len(systems) != 2:
             raise CommandRejected('candidate_stale')
 
+        if len(systems) != 2:
+            raise CommandRejected('candidate_stale')
+
         comparison_key = (
-            canonical(
-                [issue.case_key, *sorted(str(row['system_id']) for row in systems)]
+            comparison_identity(
+                issue.case_key,
+                str(systems[0]['system_id']),
+                str(systems[1]['system_id']),
             )
             if issue.repeat_of is None
             else str(issue.repeat_of)
@@ -766,7 +840,6 @@ class Ledger:
                 'kind': 'withdraw',
                 'actor_id': context.principal,
                 'session_id': session_id,
-                'session_version': session_version,
                 'receipt_seq': receipt_seq,
             }
         )
@@ -790,6 +863,33 @@ class Ledger:
                 ),
             ),
         )
+
+    async def withdraw_ack(
+        self, context: Context, session_id: str, acknowledgment: str
+    ) -> Event:
+        rows = await self._rows(
+            """
+                SELECT r.seq, s.version FROM vote_receipts r
+                JOIN session_state s ON s.session_id = r.session_id
+                WHERE r.acknowledgment = ? AND r.actor_id = ? AND r.session_id = ?
+                """,
+            acknowledgment,
+            context.principal,
+            session_id,
+        )
+
+        if not rows:
+            raise CommandRejected('session_stale')
+
+        seq = rows[0]['seq']
+        version = rows[0]['version']
+
+        if not isinstance(seq, int) or not isinstance(version, int):
+            raise TypeError(
+                'A withdrawal must resolve integer receipt and version facts.'
+            )
+
+        return await self.withdraw(context, session_id, version, seq)
 
     async def stage_moderation(self, batch: Moderation) -> None:
         header: Row = {

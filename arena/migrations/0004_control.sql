@@ -515,18 +515,21 @@ SELECT x.id, 'numerics', json_array(n.section, n.row_key), n.body
 FROM analysis_exports x JOIN evaluation_numerics n ON n.evaluation_id = x.evaluation_id;
 
 CREATE VIEW export_receipts(export_id, section, row_key, body) AS
-SELECT x.id, 'receipts', printf('%020d', r.seq), json_object(
-    'seq', r.seq, 'acknowledgment', r.acknowledgment, 'origin', r.origin, 'lease_id', r.lease_id,
+SELECT x.id, 'receipts', printf('%020d', r.seq), json_patch(json_object(
+    'seq', r.seq, 'acknowledgment', r.acknowledgment, 'origin', r.origin,
     'actor_id', r.actor_id, 'session_id', r.session_id, 'family', r.family,
-    'evaluation_id', r.evaluation_id, 'publication_id', r.publication_id,
-    'point_id', r.point_id, 'claim_id', r.claim_id, 'claim_version', r.claim_version,
+    'claim_id', r.claim_id,
     'case_key', r.case_key, 'a_output', r.a_output, 'b_output', r.b_output,
     'a_system', r.a_system, 'b_system', r.b_system, 'a_fingerprint', r.a_fingerprint,
     'b_fingerprint', r.b_fingerprint, 'choice', r.choice, 'defects', json(r.defects),
-    'duration_ms', r.duration_ms, 'repeat_of', r.repeat_of,
-    'recorded_at', r.recorded_at, 'import_source', r.import_source, 'original_id', r.original_id,
+    'repeat_of', r.repeat_of, 'recorded_at', r.recorded_at),
+    CASE r.origin WHEN 'served' THEN json_object(
+        'lease_id', r.lease_id, 'evaluation_id', r.evaluation_id,
+        'publication_id', r.publication_id, 'point_id', r.point_id,
+        'claim_version', r.claim_version, 'duration_ms', r.duration_ms)
+    ELSE json_object('import_source', r.import_source, 'original_id', r.original_id,
     'import_row_seq', r.import_row_seq, 'proof_evaluation_id', r.proof_evaluation_id,
-    'legacy_duration_sec', r.legacy_duration_sec)
+    'legacy_duration_sec', r.legacy_duration_sec) END)
 FROM analysis_exports x JOIN vote_receipts r ON r.family = x.family AND r.seq <= x.receipt_cutoff;
 
 CREATE VIEW export_events(export_id, section, row_key, body) AS
@@ -557,7 +560,8 @@ FROM analysis_exports x JOIN actors a ON a.id IN (
 
 CREATE VIEW export_sessions(export_id, section, row_key, body) AS
 SELECT x.id, 'sessions', s.id, json_object('id', s.id, 'actor_id', s.actor_id,
-    'family', s.family, 'created_at', s.created_at, 'import_source', s.import_source)
+    'family', s.family, 'created_at', s.created_at, 'import_source', s.import_source,
+    'original_id', s.original_id)
 FROM analysis_exports x JOIN sessions s ON s.id IN (
     SELECT session_id FROM vote_receipts WHERE family = x.family AND seq <= x.receipt_cutoff);
 

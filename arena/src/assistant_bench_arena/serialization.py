@@ -17,6 +17,10 @@ def digest(value: BaseModel | JsonValue) -> str:
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def comparison_identity(case_key: str, a_system: str, b_system: str) -> str:
+    return canonical([case_key, *sorted((a_system, b_system))])
+
+
 def source_identity(
     case_key: str, system: str, fingerprint: str, job: str, trial: str
 ) -> str:
