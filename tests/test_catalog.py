@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench.catalog import (
+    Api,
     NixosConfigExport,
     Price,
     System,
@@ -69,6 +70,7 @@ class TestSystemConfig:
             {'model': 'acme-large', 'vendor': 'other'},
             {'model': 'acme-large', 'max_output_tokens': 64},
             {'model': 'acme-large', 'context_window': 8192},
+            {'model': 'acme-large', 'api': 'unsupported'},
             {
                 'route': 'acme/large',
                 'display_name': 'Acme Large',
@@ -88,6 +90,7 @@ class TestSystemConfig:
             'model-with-vendor',
             'model-with-output-override',
             'model-with-context-override',
+            'unsupported-api',
             'route-without-context',
             'route-without-output-capacity',
         ],
@@ -161,10 +164,10 @@ class TestSystem:
             assert differences == expected
 
         def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
-            assert make_system().fingerprint == '0612e0518a555f77'
-            assert make_system(name='x').fingerprint == '0612e0518a555f77'
-            assert make_system(display_name='x').fingerprint == '0612e0518a555f77'
-            assert make_system(vendor='other').fingerprint == '0612e0518a555f77'
+            assert make_system().fingerprint == 'c8899f53b1177f65'
+            assert make_system(name='x').fingerprint == 'c8899f53b1177f65'
+            assert make_system(display_name='x').fingerprint == 'c8899f53b1177f65'
+            assert make_system(vendor='other').fingerprint == 'c8899f53b1177f65'
 
         @pytest.mark.parametrize(
             'change',
@@ -175,8 +178,17 @@ class TestSystem:
                 {'harness': 'terminus-2'},
                 {'max_output_tokens': 128},
                 {'context_window': 16384},
+                {'api': 'openai-responses'},
             ],
-            ids=['route', 'effort', 'prompt', 'harness', 'output-capacity', 'context'],
+            ids=[
+                'route',
+                'effort',
+                'prompt',
+                'harness',
+                'output-capacity',
+                'context',
+                'api',
+            ],
         )
         def test_changes_with_what_shapes_the_outputs(
             self, change: dict[str, str | int]
@@ -301,9 +313,59 @@ class TestLoadSystems:
             'deepseek-v4.1-flash-1017-max': 'max',
             'kimi-k3-max': 'max',
         }
+        assert {
+            name for name, system in systems.items() if system.api == 'openai-responses'
+        } == {'gpt-6-astra-max', 'gpt-6.1-sol-max'}
 
 
 class TestResolveSystem:
+    @pytest.mark.parametrize(
+        ('api', 'effort', 'required', 'expected'),
+        [
+            ('openai-chat-completions', 'high', True, 'high'),
+            ('openai-chat-completions', 'max', True, 'invalid'),
+            ('openai-responses', 'max', True, 'max'),
+            ('openai-chat-completions', None, True, 'invalid'),
+            ('openai-responses', None, True, 'max'),
+            ('openai-chat-completions', None, False, None),
+        ],
+        ids=[
+            'chat-high',
+            'chat-rejects-max',
+            'responses-max',
+            'chat-default-rejected',
+            'responses-default',
+            'optional-default',
+        ],
+    )
+    def test_validates_effort_for_the_selected_api_without_downgrading_it(
+        self,
+        export: NixosConfigExport,
+        api: Api,
+        effort: str | None,
+        required: bool,
+        expected: str | None,
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        thinking = document['catalog']['models']['acme-large']['thinking']
+        thinking['efforts'] = ['low', 'medium', 'high', 'max']
+        thinking['apiEfforts'] = {'openai-chat-completions': ['low', 'medium', 'high']}
+        thinking['defaultLevel'] = 'max'
+        thinking['requiresEffort'] = required
+        resolved_export = NixosConfigExport.model_validate(document)
+        config = SystemConfig(model='acme-large', api=api, effort=effort)
+
+        if expected == 'invalid':
+            with pytest.raises(
+                ValueError, match='effort `max`.*`openai-chat-completions`'
+            ):
+                resolve_system('large', config, resolved_export)
+        else:
+            system = resolve_system('large', config, resolved_export)
+
+            assert system.api == api
+            assert system.effort == expected
+
     def test_resolves_historical_exports_without_vendor_metadata(
         self, export: NixosConfigExport
     ) -> None:
@@ -356,6 +418,7 @@ class TestResolveSystem:
             'x',
             SystemConfig(
                 route='router/acme/x',
+                api='openai-responses',
                 max_output_tokens=32768,
                 context_window=131072,
                 vendor='acme',
@@ -373,6 +436,7 @@ class TestResolveSystem:
             price,
         )
         assert system.vendor == 'acme'
+        assert system.api == 'openai-responses'
         assert (system.max_output_tokens, system.context_window) == (32768, 131072)
 
     def test_takes_a_display_name_over_the_catalog_name(
@@ -413,7 +477,8 @@ class TestResolveSystem:
             ),
             (
                 SystemConfig(model='acme-small', effort='medium'),
-                'System `x`: effort `medium` is not one of `low`, `high`.',
+                'System `x`: effort `medium` is not one of `low`, `high` for '
+                '`openai-chat-completions`.',
             ),
             (
                 SystemConfig(model='local-model', effort='low'),

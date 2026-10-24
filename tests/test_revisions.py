@@ -60,12 +60,14 @@ class TestCurrentSystems:
 class TestSystemsAt:
     @staticmethod
     def fake_git(
-        monkeypatch: pytest.MonkeyPatch, project: str = PROJECT
+        monkeypatch: pytest.MonkeyPatch,
+        project: str = PROJECT,
+        systems: str = SYSTEMS,
     ) -> list[tuple[str, ...]]:
         documents = FAMILIES | {
             'pyproject.toml': project,
             'uv.lock': LOCK,
-            'systems.toml': SYSTEMS,
+            'systems.toml': systems,
         }
         calls: list[tuple[str, ...]] = []
 
@@ -131,6 +133,34 @@ class TestSystemsAt:
         assert systems == {}
         assert not any(args[:2] == ('nix', 'build') for args in calls)
         assert ('git', 'show', 'abc123:pyproject.toml') not in calls
+
+    def test_detects_transport_changes_against_the_revision_owned_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.fake_git(monkeypatch)
+        generation = Generation(protocol=1, harbor='0.23.0')
+        head = {
+            'writing/large': make_system(
+                name='large', generation=generation, api='openai-responses'
+            ),
+            'coding/large': make_system(
+                name='large',
+                harness='terminus-2',
+                generation=generation,
+                api='openai-responses',
+            ),
+        }
+
+        base = revisions.systems_at('origin/main', set(head))
+
+        assert revisions.changed_fingerprints(base, head) == list(head)
+        assert all(system.api == 'openai-chat-completions' for system in base.values())
+
+        self.fake_git(monkeypatch, systems=SYSTEMS + 'api = "openai-responses"\n')
+
+        responses_base = revisions.systems_at('origin/main', set(head))
+
+        assert revisions.changed_fingerprints(responses_base, head) == []
 
     def test_requires_a_new_name_when_a_shared_cohort_has_no_declared_protocol(
         self, monkeypatch: pytest.MonkeyPatch

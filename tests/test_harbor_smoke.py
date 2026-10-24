@@ -12,6 +12,7 @@ from assistant_bench.families import case_task, load_cases, load_family
 from support import (
     StubEndpoint,
     make_system,
+    reasoned_response,
     terminus_completion,
     write_task_family,
 )
@@ -54,19 +55,39 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None
     )
 
 
+@pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
 def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
     export: NixosConfigExport,
     families_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
+    api: str,
 ) -> None:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
-    endpoint.response = terminus_completion(solution_commands(task))
-    system = make_system()
+    command = terminus_completion(solution_commands(task))
+    tool_response = reasoned_response(
+        command['choices'][0]['message']['content'], 'resp-tool'
+    )
+    if api == 'openai-responses':
+        final = terminus_completion()
+        endpoint.responses = [
+            tool_response,
+            reasoned_response(
+                final['choices'][0]['message']['content'], 'resp-final', 'final_answer'
+            ),
+        ]
+    else:
+        endpoint.response = command
+    system = make_system(
+        api=api,
+        effort='max' if api == 'openai-responses' else 'medium',
+        max_output_tokens=32768,
+        context_window=131072,
+    )
     systems = jobs.family_systems(family, [system])
 
     job_dir = jobs.run_job(jobs.job(family, systems, [task]))
@@ -89,11 +110,29 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     }
     assert (output.job, output.nixos_config_rev) == (job_dir.name, export.rev)
     assert output.harness_version == metadata.version('harbor')
+    turns = 2
+    assert (output.input_tokens, output.cached_tokens, output.output_tokens) == (
+        turns * 120,
+        turns * 100,
+        turns * 40,
+    )
+    assert output.cost_usd == pytest.approx(turns * 0.00046)
     for request in endpoint.requests:
         assert request.headers['authorization'] == 'Bearer test-key'
         assert request.headers['x-trace'] == 'bench'
-        assert request.body['reasoning_effort'] == 'medium'
-        assert request.body['max_completion_tokens'] == 64
+        if api == 'openai-responses':
+            assert request.path == '/v1/responses'
+            assert request.body['reasoning'] == {'effort': 'max'}
+            assert request.body['max_output_tokens'] == 32768
+            assert request.body['store'] is False
+            assert 'previous_response_id' not in request.body
+            assert 'max_completion_tokens' not in request.body
+        else:
+            assert request.body['reasoning_effort'] == 'medium'
+            assert request.body['max_completion_tokens'] == 32768
+    if api == 'openai-responses':
+        assert len(endpoint.requests) == 2
+        assert endpoint.requests[1].body['input'][1:3] == tool_response['output']
     key = endpoint.key_file.read_text().strip().encode()
     assert not [
         path

@@ -12,7 +12,7 @@ from harbor.models.trial.paths import TrialPaths
 from assistant_bench import jobs
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.host import HostEnvironment
-from support import StubEndpoint, make_system
+from support import StubEndpoint, make_system, response
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -34,14 +34,21 @@ async def run_in_process(config: JobConfig) -> None:
 
 
 class TestHostEnvironment:
+    @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
     def test_runs_generate_on_each_case_once_across_reruns(
-        self, data_dir: Path, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+        self,
+        data_dir: Path,
+        endpoint: StubEndpoint,
+        monkeypatch: pytest.MonkeyPatch,
+        api: str,
     ) -> None:
         for name, value in endpoint.env.items():
             monkeypatch.setenv(name, value)
         family = load_family('smoke-text')
         cases = load_cases(family)
-        system = make_system()
+        system = make_system(api=api)
+        if api == 'openai-responses':
+            endpoint.response = response()
         family = family.model_copy(
             update={
                 'settings': family.settings.model_copy(
@@ -72,8 +79,12 @@ class TestHostEnvironment:
             ('en-greeting', None, 'Hello there.', 40),
             ('zh-greeting', None, 'Hello there.', 40),
         ]
+        assert all(output.cost_usd == pytest.approx(0.00046) for output in outputs)
         prompts = [
-            request.body['messages'][0]['content'] for request in endpoint.requests
+            request.body['input']
+            if api == 'openai-responses'
+            else request.body['messages'][0]['content']
+            for request in endpoint.requests
         ]
         assert sorted(prompts) == sorted(case.instruction for case in cases)
 

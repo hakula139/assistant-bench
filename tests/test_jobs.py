@@ -10,6 +10,8 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
+import httpx
+import openai
 import pytest
 import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -21,6 +23,8 @@ from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TimingInfo, TrialResult
+from harbor.trial.queue import TrialQueue
+from openai.types.responses import Response
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System
@@ -37,12 +41,14 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HOST_ENVIRONMENT, options
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.responses import ResponseResult
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
 from support import (
     finish_job,
     make_system,
+    response,
     write_case_family,
     write_task_family,
     write_trial,
@@ -66,6 +72,11 @@ GREETING_DIFF = (
     'diff --git a/greeting.txt b/greeting.txt\nnew file mode 100644\n'
     '--- /dev/null\n+++ b/greeting.txt\n@@ -0,0 +1 @@\n+hello\n'
 )
+
+
+class RetryProbe(TrialQueue):
+    def retries(self, name: str) -> bool:
+        return self._should_retry_exception(name)
 
 
 def votes_family(**settings: Any) -> Family:
@@ -384,6 +395,38 @@ class TestDriftedSystems:
 
 
 class TestJob:
+    @pytest.mark.parametrize(
+        ('status', 'reason', 'refusal'),
+        [
+            ('failed', None, None),
+            ('incomplete', 'content_filter', None),
+            ('completed', None, 'I cannot answer.'),
+        ],
+        ids=['failed', 'filtered', 'refused'],
+    )
+    def test_retries_infrastructure_failures_without_regenerating_bad_responses(
+        self, status: str, reason: str | None, refusal: str | None
+    ) -> None:
+        result = ResponseResult(
+            Response.model_validate(
+                response(status=status, incomplete_reason=reason, refusal=refusal)
+            ),
+            'req-1',
+        )
+        config = jobs.job(VOTES, [make_system(api='openai-responses')], [])
+        queue = RetryProbe(n_concurrent=1, retry_config=config.retry)
+
+        with pytest.raises(openai.APIError) as error:
+            result.check(
+                httpx.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
+            )
+
+        assert not queue.retries(type(error.value).__name__)
+        assert queue.retries('APIConnectionError')
+        assert queue.retries('InternalServerError')
+        assert not queue.retries('AgentTimeoutError')
+        assert not queue.retries('VerifierTimeoutError')
+
     def test_runs_each_case_system_through_generate_in_its_route_group(
         self, data_dir: Path
     ) -> None:
@@ -401,6 +444,7 @@ class TestJob:
             ('assistant_bench.harnesses.generate:Generate', 'acme/small', 'acme/small'),
         ]
         assert job.agents[0].kwargs == {
+            'api': 'openai-chat-completions',
             'system': 'acme-large',
             'fingerprint': large.fingerprint,
             'effort': 'medium',
@@ -433,6 +477,7 @@ class TestJob:
             'acme/large',
         )
         assert agent.kwargs == {
+            'use_responses_api': False,
             'system': 'acme-large',
             'fingerprint': systems[0].fingerprint,
             'llm_call_kwargs': {'max_completion_tokens': 64},
@@ -1007,9 +1052,10 @@ class TestCollect:
 
         assert outputs == []
 
-    def test_collects_generations_and_errors(self, data_dir: Path) -> None:
+    @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+    def test_collects_generations_and_errors(self, data_dir: Path, api: str) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
-        system = make_system()
+        system = make_system(api=api)
         generate = current_agent(VOTES, system)
         record_trial(
             job_dir,
@@ -1021,6 +1067,7 @@ class TestCollect:
                 n_input_tokens=1_000,
                 n_cache_tokens=600,
                 n_output_tokens=500,
+                cost_usd=0.0,
                 metadata={
                     'reasoning_tokens': 100,
                     'latency_sec': 1.5,
@@ -1267,6 +1314,7 @@ class TestCollect:
         [
             pytest.param({'name': 'old-name'}, id='renamed'),
             pytest.param({'route': 'acme/old'}, id='new-fingerprint'),
+            pytest.param({'api': 'openai-responses'}, id='changed-transport'),
         ],
     )
     def test_excludes_a_previous_system_identity(
@@ -1793,16 +1841,22 @@ class TestCollect:
             'Family `f`: harness `claude-code` is not one of `generate`, `terminus-2`.'
         )
 
+    @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
     def test_leaves_a_current_system_without_a_price_unpriced(
-        self, data_dir: Path
+        self, data_dir: Path, api: str
     ) -> None:
-        system = make_system(price=None)
+        system = make_system(price=None, api=api)
         record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
             current_agent(VOTES, system),
             task='f/a',
-            context=AgentContext(n_input_tokens=10, n_output_tokens=5),
+            context=AgentContext(
+                n_input_tokens=10,
+                n_cache_tokens=8,
+                n_output_tokens=5,
+                cost_usd=0.0,
+            ),
             family=VOTES,
         )
 

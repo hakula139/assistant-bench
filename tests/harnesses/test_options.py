@@ -32,6 +32,7 @@ class TestGenerate:
         assert kwargs == {
             'system': 'acme-large',
             'fingerprint': system.fingerprint,
+            'api': 'openai-chat-completions',
             **settings,
             'max_output_tokens': 64,
         }
@@ -46,6 +47,7 @@ class TestTerminus:
         assert kwargs == {
             'system': 'acme-large',
             'fingerprint': system.fingerprint,
+            'use_responses_api': False,
             'llm_call_kwargs': {'max_completion_tokens': 64},
             'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
             'reasoning_effort': 'medium',
@@ -58,3 +60,23 @@ class TestTerminus:
         kwargs = options.terminus(system)
 
         assert 'reasoning_effort' not in kwargs
+
+    def test_uses_native_responses_limits_without_chat_only_kwargs(self) -> None:
+        system = make_system(
+            api='openai-responses',
+            harness='terminus-2',
+            effort='max',
+            max_output_tokens=32768,
+            context_window=131072,
+        )
+
+        kwargs = options.terminus(system)
+
+        assert kwargs == {
+            'system': system.name,
+            'fingerprint': system.fingerprint,
+            'use_responses_api': True,
+            'model_info': {'max_input_tokens': 98304, 'max_output_tokens': 32768},
+            'reasoning_effort': 'max',
+            'record_terminal_session': False,
+        }
