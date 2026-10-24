@@ -541,6 +541,17 @@ WHERE c.merged_into IS NULL AND c.kind = 'ordinary'
 
 CREATE VIEW refresh_coverage AS SELECT NULL AS claim_id WHERE 0;
 
+CREATE VIEW operational_owners AS
+SELECT a.id AS actor_id, coalesce((
+    SELECT canonical_actor FROM actor_resolution
+    WHERE actor_id = a.id AND canonical_actor != actor_id LIMIT 1
+), a.id) AS owner_id FROM actors a;
+
+CREATE VIEW operational_members AS
+SELECT canonical_actor AS owner_id, actor_id FROM actor_resolution
+WHERE canonical_actor != actor_id
+UNION SELECT id, id FROM actors;
+
 CREATE VIEW spend_quotas AS
 SELECT NULL AS operation, NULL AS actor_id, NULL AS family, NULL AS now_ms,
     NULL AS network WHERE 0;
@@ -1042,15 +1053,9 @@ BEGIN
                     AND q.window_start = CAST(NEW.now_ms / p.window_ms AS INTEGER) * p.window_ms
                     AND CASE p.scope
                         WHEN 'actor' THEN q.subject IN (
-                            SELECT actor_id FROM actor_resolution
-                            WHERE canonical_actor = COALESCE((
-                                SELECT canonical_actor FROM actor_resolution
-                                WHERE actor_id = NEW.actor_id AND canonical_actor != actor_id
-                                LIMIT 1
-                            ), NEW.actor_id)
-                            UNION SELECT COALESCE((SELECT canonical_actor FROM actor_resolution
-                                WHERE actor_id = NEW.actor_id AND canonical_actor != actor_id
-                                LIMIT 1), NEW.actor_id)
+                            SELECT actor_id FROM operational_members
+                            WHERE owner_id = (SELECT owner_id FROM operational_owners
+                                WHERE actor_id = NEW.actor_id)
                         )
                         WHEN 'deployment' THEN q.subject = (SELECT namespace FROM deployment WHERE id = 1)
                         ELSE q.subject = (SELECT json_extract(n.value, '$.tag') FROM json_each(NEW.network) n
@@ -1162,10 +1167,10 @@ BEGIN
     ) THEN RAISE(ABORT, 'pending_exists') END;
 
     SELECT CASE WHEN (SELECT count(*) FROM pair_leases l
-        JOIN actor_resolution a ON a.family = l.family AND a.actor_id = l.actor_id
         WHERE l.status = 'pending' AND l.expires_at > NEW.now_ms
-            AND a.canonical_actor = (SELECT canonical_actor FROM actor_resolution
-                WHERE actor_id = NEW.actor_id AND family = (SELECT family FROM sessions WHERE id = NEW.session_id))) >= 4
+            AND l.actor_id IN (SELECT actor_id FROM operational_members
+                WHERE owner_id = (SELECT owner_id FROM operational_owners
+                    WHERE actor_id = NEW.actor_id))) >= 4
         THEN RAISE(ABORT, 'pending_limit') END;
 
     INSERT INTO claims(id, family, canonical_actor, kind, comparison_key, repeat_of)
