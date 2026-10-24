@@ -135,13 +135,14 @@ BEGIN
                     AND CASE p.scope
                         WHEN 'actor' THEN q.subject IN (
                             SELECT actor_id FROM actor_resolution
-                            WHERE family = NEW.family AND canonical_actor = COALESCE((
+                            WHERE canonical_actor = COALESCE((
                                 SELECT canonical_actor FROM actor_resolution
-                                WHERE family = NEW.family AND actor_id = NEW.actor_id
+                                WHERE actor_id = NEW.actor_id AND canonical_actor != actor_id
+                                LIMIT 1
                             ), NEW.actor_id)
-                            UNION SELECT NEW.actor_id
                             UNION SELECT COALESCE((SELECT canonical_actor FROM actor_resolution
-                                WHERE family = NEW.family AND actor_id = NEW.actor_id), NEW.actor_id)
+                                WHERE actor_id = NEW.actor_id AND canonical_actor != actor_id
+                                LIMIT 1), NEW.actor_id)
                         )
                         WHEN 'deployment' THEN q.subject = (SELECT namespace FROM deployment WHERE id = 1)
                         ELSE q.subject = (SELECT json_extract(n.value, '$.tag') FROM json_each(NEW.network) n

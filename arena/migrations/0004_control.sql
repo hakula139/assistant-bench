@@ -328,6 +328,10 @@ BEGIN
             AND (p.actor_id = p.owner_id OR (o.owner_namespace IS NOT NULL
                 AND NOT EXISTS (SELECT 1 FROM actor_resolution WHERE family = p.family AND actor_id = o.id AND canonical_actor != o.id)))
             AND NOT EXISTS (SELECT 1 FROM actors WHERE id = p.actor_id AND owner_namespace IS NOT NULL AND id != p.owner_id)
+            AND (p.actor_id = p.owner_id OR NOT EXISTS (
+                SELECT 1 FROM actor_resolution other WHERE other.actor_id = p.actor_id
+                    AND other.canonical_actor != other.actor_id
+                    AND other.canonical_actor != p.owner_id))
             AND (a.canonical_actor = a.actor_id OR p.owner_id = p.actor_id)
             AND p.target_count = (SELECT count(*) FROM attribution_candidates WHERE plan_id = p.id)
             AND NOT EXISTS (SELECT 1 FROM attribution_candidates c WHERE c.plan_id = p.id
