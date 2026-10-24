@@ -23,7 +23,12 @@ from assistant_bench.arena.publishing import publish_release
 from assistant_bench.arena.runtime import RuntimeTarget, TargetName
 from assistant_bench.arena.snapshots import analyze_export
 from assistant_bench_arena import management_domain as command
-from assistant_bench_arena.ledger_models import Moderation, Receipt, Target
+from assistant_bench_arena.ledger_models import (
+    BootstrapConfiguration,
+    Moderation,
+    Receipt,
+    Target,
+)
 from assistant_bench_arena.runtime_models import Profile
 from assistant_bench_arena.serialization import canonical
 from ledger_fixtures import make_release
@@ -51,11 +56,38 @@ def use_management(
 
 
 class TestConnection:
-    def test_refuses_a_valid_different_namespace_before_sending_the_operation(
-        self, runtime: D1Runtime, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    @pytest.mark.parametrize(
+        ('operation', 'namespace'),
+        [
+            pytest.param('health', None, id='health-missing'),
+            pytest.param('health', 'different', id='health-different'),
+            pytest.param('health', 'same', id='health-ready'),
+            pytest.param('status', None, id='status-missing'),
+            pytest.param('status', 'different', id='status-different'),
+        ],
+    )
+    def test_checks_the_namespace_before_sending_the_operation(
+        self,
+        runtime: D1Runtime,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        operation: str,
+        namespace: str | None,
     ) -> None:
         async def scenario() -> None:
-            async with native_management(runtime) as management:
+            async with runtime.client() as (ledger, transport):
+                await transport.reset()
+
+                if namespace is not None:
+                    await transport.bootstrap(
+                        BootstrapConfiguration(
+                            namespace='synthetic-management',
+                            quotas=(),
+                            attribution_ms=RETENTION_MS,
+                        )
+                    )
+
+                management = NativeManagement(ledger)
                 target = RuntimeTarget(
                     name='production',
                     manifest_path=tmp_path / 'wrangler.toml',
@@ -64,7 +96,9 @@ class TestConnection:
                     account_id='synthetic-account',
                     database_id='synthetic-database',
                     profile=Profile(
-                        namespace='different-valid-namespace',
+                        namespace='synthetic-management'
+                        if namespace == 'same'
+                        else 'different-valid-namespace',
                         app_origin='https://app.example',
                         render_origin='https://render.example',
                     ),
@@ -82,13 +116,29 @@ class TestConnection:
                 monkeypatch.setattr(commands, 'load_target', selected)
                 monkeypatch.setattr(commands, 'connect', connection)
 
-                result = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['status', 'production', 'writing']
-                )
+                arguments = [operation, 'production']
 
-                assert result.exit_code == 1
-                assert 'does not match the selected target' in result.output
-                assert [row.operation for row in management.operations] == ['status']
+                if operation == 'status':
+                    arguments.append('writing')
+
+                result = await asyncio.to_thread(runner.invoke, commands.app, arguments)
+
+                if namespace == 'same':
+                    assert result.exit_code == 0, result.output
+                    assert (
+                        result.output.strip()
+                        == 'The arena has no overdue network associations.'
+                    )
+                    assert [row.operation for row in management.operations] == [
+                        'status',
+                        'status',
+                    ]
+                else:
+                    assert result.exit_code == 1
+                    assert 'does not match the selected target' in result.output
+                    assert [row.operation for row in management.operations] == [
+                        'status'
+                    ]
 
         asyncio.run(scenario())
 
@@ -212,6 +262,57 @@ class TestExportEvidence:
                 assert 'Sampling points activated at revision' in refreshed.output
                 assert 'fitted sampling points are already active' in repeated.output
                 assert capture.header.id in status.output
+
+        asyncio.run(scenario())
+
+
+class TestHealth:
+    @pytest.mark.parametrize('overdue', [False, True], ids=['current', 'overdue'])
+    def test_fails_only_when_native_network_associations_are_overdue(
+        self,
+        runtime: D1Runtime,
+        monkeypatch: pytest.MonkeyPatch,
+        overdue: bool,
+    ) -> None:
+        async def scenario() -> None:
+            async with native_management(runtime) as management:
+                use_management(monkeypatch, management)
+                release = make_release(cases=2, policy=load_policy())
+                await publish_release(management, release)
+                await vote_capture(management, release)
+
+                if overdue:
+                    management.now = BASE_MS + RETENTION_MS + 2 + 1_234
+
+                result = await asyncio.to_thread(
+                    runner.invoke, commands.app, ['health', 'production']
+                )
+
+                assert result.exit_code == (1 if overdue else 0), result.output
+                assert result.output.strip() == (
+                    'The arena has expired network associations awaiting cleanup.'
+                    if overdue
+                    else 'The arena has no overdue network associations.'
+                )
+
+        asyncio.run(scenario())
+
+    def test_refuses_uninitialized_native_management_status(
+        self, runtime: D1Runtime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def scenario() -> None:
+            async with runtime.client() as (ledger, transport):
+                await transport.reset()
+                use_management(monkeypatch, NativeManagement(ledger))
+
+                result = await asyncio.to_thread(
+                    runner.invoke, commands.app, ['health', 'production']
+                )
+
+                assert result.exit_code == 1
+                assert (
+                    result.output.strip() == 'The arena deployment is not initialized.'
+                )
 
         asyncio.run(scenario())
 
