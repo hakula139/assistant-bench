@@ -38,12 +38,13 @@ from assistant_bench_arena.ledger_models import (
     Session,
     Statement,
     Target,
+    VoteMeaning,
 )
 from assistant_bench_arena.releases import Release
 from assistant_bench_arena.serialization import digest, source_identity
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
-from ledger_support import D1Runtime, D1Transport
+from ledger_support import D1Runtime, D1Transport, publish_presentation, publish_release
 
 
 RETENTION_MS = 60 * 86_400_000
@@ -258,37 +259,8 @@ async def publish(
     release = make_release(
         mode=mode, family=family, suffix=suffix, cases=cases, failing_case=failing_case
     )
-    evaluation = release.evaluation
-    await ledger.stage_policy(evaluation.policy_id, release.policy)
-    await ledger.stage_evaluation(evaluation)
-
-    for system in release.systems:
-        await ledger.stage_system(evaluation.id, system)
-
-    for case in release.cases:
-        await ledger.stage_case(evaluation.id, case)
-
-    for output in release.outputs:
-        await ledger.stage_output(evaluation.id, output)
-
-    for numeric in release.numerics:
-        await ledger.stage_numerical(evaluation.id, numeric)
-
-    if seal:
-        await ledger.seal_evaluation(evaluation.id, 0)
-        await publish_presentation(ledger, release)
-
+    await publish_release(ledger, release, seal=seal)
     return release
-
-
-async def publish_presentation(ledger: Ledger, release: Release) -> None:
-    await ledger.stage_publication(release.publication)
-
-    for rendered in release.rendered:
-        await ledger.stage_rendered(release.publication.id, rendered)
-
-    await ledger.seal_publication(release.publication.id, 0)
-    await ledger.stage_points(release.points, 0)
 
 
 async def prepare(
@@ -304,6 +276,7 @@ async def prepare(
         mode,
         quotas,
         attribution_ms=RETENTION_MS if mode == 'public' else None,
+        local_key_id='synthetic-key-id' if mode == 'local' else None,
     )
     release = await publish(ledger, mode=mode)
     await ledger.activate(
@@ -343,15 +316,21 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize('deployment', 'local', ())
+                    assert await ledger.status() is None
+                    await ledger.initialize(
+                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    )
 
-                    await ledger.initialize('deployment', 'local', ())
+                    await ledger.initialize(
+                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    )
 
                     assert await transport.rows('SELECT * FROM deployment') == [
                         {
                             'id': 1,
                             'namespace': 'deployment',
                             'mode': 'local',
+                            'local_key_id': 'synthetic-key-id',
                             'quota_body': '[]',
                             'attribution_ms': 0,
                             'schema_version': 1,
@@ -359,7 +338,108 @@ class TestLedger:
                     ]
 
                     with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.initialize('different', 'local', ())
+                        await ledger.initialize(
+                            'different', 'local', (), local_key_id='synthetic-key-id'
+                        )
+
+                    with pytest.raises(CommandRejected, match='^conflict$'):
+                        await ledger.initialize(
+                            'deployment', 'local', (), local_key_id='different-key-id'
+                        )
+
+                    status = await ledger.status()
+                    assert status is not None
+                    assert status.model_dump() == {
+                        'namespace': 'deployment',
+                        'mode': 'local',
+                        'local_key_id': 'synthetic-key-id',
+                        'schema_version': 1,
+                    }
+
+            asyncio.run(scenario())
+
+        @pytest.mark.parametrize(
+            ('mode', 'lifetime', 'key', 'duplicate'),
+            [
+                ('local', None, None, False),
+                ('public', None, None, False),
+                ('public', RETENTION_MS + 1, None, False),
+                ('public', RETENTION_MS, 'local-key', False),
+                ('local', None, 'local-key', True),
+            ],
+            ids=[
+                'missing-key',
+                'missing-lifetime',
+                'over-60-days',
+                'public-key',
+                'quota',
+            ],
+        )
+        def test_invalid_profile_leaves_no_bootstrap_or_quota_state(
+            self,
+            d1_runtime: D1Runtime,
+            mode: Mode,
+            lifetime: int | None,
+            key: str | None,
+            duplicate: bool,
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    quota = Quota(
+                        operation='accept', scope='actor', window_ms=1_000, limit=10
+                    )
+
+                    with pytest.raises(ValidationError):
+                        await ledger.initialize(
+                            'deployment',
+                            mode,
+                            (quota, quota) if duplicate else (),
+                            attribution_ms=lifetime,
+                            local_key_id=key,
+                        )
+
+                    assert await ledger.status() is None
+                    assert await transport.rows('SELECT * FROM quota_policies') == []
+
+            asyncio.run(scenario())
+
+        @pytest.mark.parametrize(
+            ('table', 'sql'),
+            [
+                ('actors', "INSERT INTO actors(id, created_at) VALUES ('actor', 1)"),
+                ('policies', "INSERT INTO policies(id, body) VALUES ('policy', '{}')"),
+                (
+                    'evidence_events',
+                    'INSERT INTO evidence_events(command_id, kind, family, principal, '
+                    "request_hash, created_at, data) VALUES ('command', 'activate', "
+                    "'writing', 'admin', 'hash', 1, '{}')",
+                ),
+                (
+                    'moderation_batches',
+                    'INSERT INTO moderation_batches(id, family, principal, action, '
+                    'reason, target_count, target_digest, created_at) '
+                    "VALUES ('batch', 'writing', 'admin', 'exclude', 'Review.', "
+                    "1, 'hash', 1)",
+                ),
+            ],
+            ids=['actor', 'policy', 'event', 'moderation'],
+        )
+        def test_domain_roots_require_the_bootstrap_marker(
+            self, d1_runtime: D1Runtime, table: str, sql: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+
+                    with pytest.raises(
+                        RuntimeError, match='FOREIGN KEY constraint failed'
+                    ):
+                        await transport.execute(Statement(sql=sql))
+
+                    assert await ledger.status() is None
+                    assert await transport.rows(f'SELECT * FROM {table}') == []
+                    assert await transport.rows('SELECT * FROM actor_expiry') == []
 
             asyncio.run(scenario())
 
@@ -532,7 +612,9 @@ class TestLedger:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
                     await transport.reset()
-                    await ledger.initialize('large-release', 'local', ())
+                    await ledger.initialize(
+                        'large-release', 'local', (), local_key_id='synthetic-key-id'
+                    )
                     release = await publish(ledger, cases=60)
 
                     evaluation = await ledger.read.evaluation(release.evaluation.id)
@@ -1823,7 +1905,7 @@ class TestLedger:
                         assert receipt['recorded_at'] == LEGACY_MS
                         assert receipt['legacy_duration_sec'] == 1.5
                         assert all(
-                            receipt[field] is None
+                            field not in receipt
                             for field in (
                                 'lease_id',
                                 'claim_version',
@@ -2272,6 +2354,250 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestMaintenance:
+        @pytest.mark.parametrize(
+            'activation', [False, True], ids=['expiry', 'activation']
+        )
+        def test_abandoned_browsing_state_expires_without_erasing_audit_targets(
+            self, d1_runtime: D1Runtime, activation: bool
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    lease = await ledger.issue(
+                        Context(command_id='issue', principal='actor', now=10), issue()
+                    )
+                    targets = []
+
+                    if activation:
+                        changed = await publish(ledger, failing_case=0)
+                        state = await ledger.read.family('writing')
+                        assert state is not None
+                        await ledger.activate(
+                            Context(command_id='change', principal='admin', now=20),
+                            'writing',
+                            state.revision,
+                            changed.evaluation.id,
+                            changed.publication.id,
+                            changed.points.id,
+                        )
+                        targets = await transport.rows('SELECT * FROM event_targets')
+                        assert targets[0]['claim_id'] == lease.claim_id
+                        assert targets[0]['lease_id'] == lease.id
+                    else:
+                        await ledger.maintenance.expire(lease.expires_at - 1)
+                        assert await ledger.resume('actor', 'session', 9_999) == lease
+
+                    await ledger.maintenance.expire(lease.expires_at)
+
+                    assert await ledger.resume('actor', 'session', 10_000) is None
+                    assert await transport.rows('SELECT status FROM pair_leases') == [
+                        {'status': 'revoked'}
+                    ]
+                    assert await transport.rows(
+                        'SELECT version, current_lease FROM claims'
+                    ) == [{'version': 2, 'current_lease': None}]
+                    owned = await ledger.read.session('actor', 'session')
+                    assert owned is not None
+                    assert owned.version == 2 and owned.current_lease is None
+
+                    prune_at = lease.expires_at + 7 * 86_400_000
+                    await ledger.maintenance.expire(prune_at - 1)
+                    assert await transport.rows('SELECT id FROM pair_leases') == [
+                        {'id': lease.id}
+                    ]
+                    await ledger.maintenance.expire(prune_at)
+
+                    assert await transport.rows('SELECT * FROM pair_leases') == []
+                    assert await transport.rows('SELECT * FROM claims') == []
+                    assert (
+                        await transport.rows('SELECT * FROM event_targets') == targets
+                    )
+
+                    await ledger.maintenance.expire(2 + 30 * 86_400_000 - 1)
+                    assert await ledger.read.session('actor', 'session') is not None
+                    await ledger.maintenance.expire(2 + 30 * 86_400_000)
+
+                    assert await ledger.read.session('actor', 'session') is None
+                    assert await transport.rows('SELECT * FROM actors') == []
+                    assert await transport.rows('SELECT * FROM actor_resolution') == []
+                    assert (
+                        await transport.rows('SELECT * FROM event_targets') == targets
+                    )
+
+            asyncio.run(scenario())
+
+        def test_sixty_day_tag_expiry_preserves_receipt_replay_and_numerical_evidence(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(
+                        ledger,
+                        transport,
+                        mode='public',
+                        quotas=tuple(
+                            Quota(
+                                operation=operation,
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=10,
+                            )
+                            for operation in ('issue', 'accept')
+                        ),
+                    )
+                    lease = await ledger.issue(
+                        Context(command_id='issue', principal='actor', now=10), issue()
+                    )
+                    context = Context(command_id='accept', principal='actor', now=20)
+                    request = Accept(
+                        lease_id=lease.id,
+                        acknowledgment='ack',
+                        choice='a',
+                        attribution=attribution(context.now),
+                    )
+                    receipt = await ledger.accept(context, request)
+                    frozen = await ledger.freeze('before-expiry', 'writing', 21)
+                    before = await export_rows(ledger, frozen.id, limit=2)
+                    expiry = context.now + RETENTION_MS
+
+                    await ledger.maintenance.expire(expiry - 1)
+
+                    assert await transport.rows(
+                        'SELECT tag_kind AS kind, tag, expires_at '
+                        'FROM network_attribution ORDER BY tag_kind'
+                    ) == [
+                        {
+                            'kind': kind,
+                            'tag': f'attribution:{kind}',
+                            'expires_at': expiry,
+                        }
+                        for kind in ('exact', 'prefix')
+                    ]
+                    assert await ledger.maintenance.attribution_lag(expiry + 5) == 5
+                    assert await transport.rows('SELECT * FROM pair_leases') == []
+
+                    await ledger.maintenance.expire(expiry)
+                    replay = await ledger.accept(
+                        context.model_copy(update={'now': expiry + 1}), request
+                    )
+                    resolved = await ledger.resolve_receipt(
+                        context.model_copy(update={'now': expiry + 2}),
+                        VoteMeaning(lease_id=lease.id, choice='a'),
+                    )
+
+                    assert replay == resolved == receipt
+                    assert (
+                        await transport.rows('SELECT * FROM network_attribution') == []
+                    )
+                    assert await ledger.maintenance.attribution_lag(expiry + 5) == 0
+                    assert await transport.rows('SELECT * FROM quota_windows') == []
+                    assert await ledger.read.session('actor', 'session') is not None
+                    assert await transport.rows('SELECT id FROM actors') == [
+                        {'id': 'actor'}
+                    ]
+                    assert await export_rows(ledger, frozen.id, limit=1) == before
+                    current = await ledger.freeze('after-expiry', 'writing', expiry + 3)
+                    after = await export_rows(ledger, current.id, limit=3)
+                    assert after['observations'] == before['observations']
+                    assert after['events'] == before['events']
+                    assert 'attribution:exact' not in json.dumps(after)
+                    assert 'attribution:prefix' not in json.dumps(after)
+
+            asyncio.run(scenario())
+
+        def test_cleanup_is_bounded_and_preserves_fresh_anonymous_actors(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await ledger.initialize(
+                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    )
+
+                    for index in range(251):
+                        await ledger.register_actor(
+                            Actor(id=f'expired:{index:03}', created_at=0)
+                        )
+
+                    await ledger.register_actor(Actor(id='fresh', created_at=1))
+
+                    await ledger.maintenance.expire(30 * 86_400_000)
+
+                    assert await transport.rows(
+                        'SELECT id FROM actors ORDER BY id'
+                    ) == [
+                        {'id': 'expired:250'},
+                        {'id': 'fresh'},
+                    ]
+
+                    await ledger.maintenance.expire(30 * 86_400_000)
+
+                    assert await transport.rows('SELECT id FROM actors') == [
+                        {'id': 'fresh'}
+                    ]
+                    assert await transport.rows('SELECT * FROM actor_expiry') == [
+                        {'actor_id': 'fresh', 'expires_at': 30 * 86_400_000 + 1}
+                    ]
+
+            asyncio.run(scenario())
+
+        def test_imported_sessions_and_reviewed_owner_attribution_remain_auditable(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    imported = await legacy_plan(ledger, transport, receipts=1)
+                    await ledger.stage_import(imported)
+                    await ledger.seal_import(imported.id, IMPORT_MS)
+                    await ledger.apply_import(
+                        Context(command_id='import', principal='admin', now=IMPORT_MS),
+                        imported.id,
+                    )
+                    plan = await ledger.prepare_attribution(
+                        'attribution', 'writing', 'actor', 'owner'
+                    )
+                    await ledger.stage_attribution(plan)
+                    await ledger.seal_attribution(plan.id, IMPORT_MS + 1)
+                    await ledger.attribute(
+                        Context(
+                            command_id='attribute', principal='admin', now=IMPORT_MS + 2
+                        ),
+                        plan.id,
+                    )
+                    events = await transport.rows('SELECT * FROM evidence_events')
+
+                    await ledger.maintenance.expire(IMPORT_MS + 60 * 86_400_000)
+
+                    assert await transport.rows(
+                        'SELECT id FROM actors ORDER BY id'
+                    ) == [
+                        {'id': 'actor'},
+                        {'id': 'owner'},
+                    ]
+                    assert (
+                        await ledger.read.session('owner', 'imported-session')
+                        is not None
+                    )
+                    assert await ledger.read.session('actor', 'session') is None
+                    assert await transport.rows('SELECT * FROM actor_expiry') == []
+                    assert (
+                        await transport.rows('SELECT * FROM evidence_events') == events
+                    )
+                    assert await transport.rows(
+                        'SELECT origin, import_source, original_id FROM vote_receipts'
+                    ) == [
+                        {
+                            'origin': 'legacy',
+                            'import_source': 'source',
+                            'original_id': '1',
+                        }
+                    ]
+
+            asyncio.run(scenario())
+
     class TestModerate:
         def test_restoring_historical_exclusion_preserves_the_newer_selected_vote(
             self, d1_runtime: D1Runtime
@@ -2474,7 +2800,8 @@ class TestLedger:
                 "UPDATE moderation_batches SET reason = 'changed' WHERE id = 'sealed'",
                 "DELETE FROM moderation_batches WHERE id = 'sealed'",
                 """
-                INSERT OR REPLACE INTO moderation_batches
+                INSERT OR REPLACE INTO moderation_batches(id, family, principal,
+                    action, reason, target_count, target_digest, created_at, sealed_at)
                 SELECT id, family, principal, action, 'changed', target_count,
                     target_digest, created_at, sealed_at
                 FROM moderation_batches WHERE id = 'sealed'
