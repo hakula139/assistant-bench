@@ -1,6 +1,7 @@
 """Same-origin browser operations with safe errors and receipt-first recovery."""
 
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from textwrap import dedent
 from uuid import UUID, uuid4
@@ -58,8 +59,41 @@ class BrowserApi:
     def __init__(self, authentication: Authentication, voting: Voting) -> None:
         self.authentication = authentication
         self.voting = voting
+        self.ingress: ContextVar[Ingress] = ContextVar('arena_ingress')
 
-    async def ingress(self, request: Request) -> Ingress:
+    async def middleware(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        try:
+            token = self.ingress.set(await self.prepare(request))
+
+            try:
+                return await call_next(request)
+            finally:
+                self.ingress.reset(token)
+        except ApiError as error:
+            return JSONResponse(
+                ErrorView(error=error.code).model_dump(), status_code=error.status
+            )
+        except ValidationError, RequestValidationError:
+            return JSONResponse({'error': 'invalid_request'}, status_code=400)
+        except RateLimited:
+            return JSONResponse({'error': 'rate_limited'}, status_code=429)
+        except ChallengeRejected:
+            return JSONResponse({'error': 'challenge_rejected'}, status_code=400)
+        except CommandRejected as error:
+            if error.reason in {'quota_exhausted', 'pending_limit'}:
+                code, status = 'rate_limited', 429
+            elif error.reason in {'session_stale', 'lease_stale', 'family_missing'}:
+                code, status = 'not_found', 404
+            else:
+                code, status = 'conflict', 409
+
+            return JSONResponse({'error': code}, status_code=status)
+        except Exception:
+            return JSONResponse({'error': 'unavailable'}, status_code=503)
+
+    async def prepare(self, request: Request) -> Ingress:
         now = time.time_ns() // 1_000_000
         if 'CF-Worker' in request.headers:
             raise ApiError(400, 'invalid_request')
@@ -68,16 +102,15 @@ class BrowserApi:
         network = await self.authentication.preflight(address, now)
         return Ingress(now, network, request.headers.get('Cookie', ''))
 
-    async def status(self, request: Request) -> StatusView:
-        ingress = await self.ingress(request)
+    async def status(self) -> StatusView:
+        ingress = self.ingress.get()
         return await self.authentication.status(ingress.cookies, ingress.now)
 
-    async def families(self, request: Request) -> list[FamilyView]:
-        await self.ingress(request)
+    async def families(self) -> list[FamilyView]:
         return list(self.voting.catalog.values())
 
     async def admission_document(self, request: Request) -> Response:
-        ingress = await self.ingress(request)
+        ingress = self.ingress.get()
         family = request.query_params.get('family')
 
         if family is not None and family not in self.voting.catalog:
@@ -127,8 +160,8 @@ class BrowserApi:
         )
         return response
 
-    async def admission(self, command: AdmissionRequest, request: Request) -> Response:
-        ingress = await self.ingress(request)
+    async def admission(self, command: AdmissionRequest) -> Response:
+        ingress = self.ingress.get()
         result = await self.authentication.admit(
             ingress.cookies,
             command.command_id,
@@ -140,10 +173,8 @@ class BrowserApi:
             result_cookie=self.authentication.issued_cookie(result, ingress.now)
         )
 
-    async def admission_replay(
-        self, command: AdmissionReplay, request: Request
-    ) -> Response:
-        ingress = await self.ingress(request)
+    async def admission_replay(self, command: AdmissionReplay) -> Response:
+        ingress = self.ingress.get()
         result = await self.authentication.admit(
             ingress.cookies,
             command.command_id,
@@ -161,24 +192,24 @@ class BrowserApi:
         response.headers['Set-Cookie'] = result_cookie
         return response
 
-    async def start(self, command: StartSession, request: Request) -> SessionView:
-        ingress, credential = await self._owner(request)
+    async def start(self, command: StartSession) -> SessionView:
+        ingress, credential = await self._owner()
         return await self.voting.start(
             self._context(ingress, credential, command.command_id),
             command.family,
             self.authentication.network(ingress.network, 'issue', ingress.now),
         )
 
-    async def resume(self, command: ResumeSession, request: Request) -> SessionView:
-        ingress, credential = await self._owner(request)
+    async def resume(self, command: ResumeSession) -> SessionView:
+        ingress, credential = await self._owner()
         return await self.voting.resume(
             self._context(ingress, credential, command.command_id),
             command.session_id,
             self.authentication.network(ingress.network, 'issue', ingress.now),
         )
 
-    async def vote(self, command: VoteRequest, request: Request) -> VoteAcknowledgment:
-        ingress = await self.ingress(request)
+    async def vote(self, command: VoteRequest) -> VoteAcknowledgment:
+        ingress = self.ingress.get()
 
         try:
             pair = self.voting.pairs.decode(
@@ -223,10 +254,8 @@ class BrowserApi:
         )
         return self._acknowledgment(receipt)
 
-    async def resolve(
-        self, command: ReceiptQuery, request: Request
-    ) -> VoteAcknowledgment:
-        ingress, credential = await self._owner(request, grant=False)
+    async def resolve(self, command: ReceiptQuery) -> VoteAcknowledgment:
+        ingress, credential = await self._owner(grant=False)
         receipt = await self.voting.ledger.resolve_receipt(
             self._context(ingress, credential, command.command_id),
             self._meaning(command),
@@ -237,8 +266,8 @@ class BrowserApi:
 
         return self._acknowledgment(receipt)
 
-    async def withdraw(self, command: WithdrawRequest, request: Request) -> Response:
-        ingress, credential = await self._owner(request)
+    async def withdraw(self, command: WithdrawRequest) -> Response:
+        ingress, credential = await self._owner()
         await self.voting.ledger.withdraw_ack(
             self._context(ingress, credential, command.command_id),
             command.session_id,
@@ -246,18 +275,13 @@ class BrowserApi:
         )
         return Response(status_code=204)
 
-    async def freshness(
-        self, command: FreshnessRequest, request: Request
-    ) -> FreshnessView:
-        await self.ingress(request)
+    async def freshness(self, command: FreshnessRequest) -> FreshnessView:
         return FreshnessView(
             status=await self.voting.ledger.freshness(command.export_id)
         )
 
-    async def _owner(
-        self, request: Request, *, grant: bool = True
-    ) -> tuple[Ingress, Credential]:
-        ingress = await self.ingress(request)
+    async def _owner(self, *, grant: bool = True) -> tuple[Ingress, Credential]:
+        ingress = self.ingress.get()
         return ingress, await self.authentication.owner(
             ingress.cookies, ingress.now, grant=grant
         )
@@ -281,38 +305,6 @@ class BrowserApi:
         )
 
 
-async def safe_response(
-    request: Request, call_next: RequestResponseEndpoint
-) -> Response:
-    try:
-        return await call_next(request)
-    except ApiError as error:
-        return JSONResponse(
-            ErrorView(error=error.code).model_dump(), status_code=error.status
-        )
-    except ValidationError, RequestValidationError:
-        return JSONResponse({'error': 'invalid_request'}, status_code=400)
-    except RateLimited:
-        return JSONResponse({'error': 'rate_limited'}, status_code=429)
-    except ChallengeRejected:
-        return JSONResponse({'error': 'challenge_rejected'}, status_code=400)
-    except CommandRejected as error:
-        if error.reason in {'quota_exhausted', 'pending_limit'}:
-            code, status = 'rate_limited', 429
-        elif error.reason in {
-            'session_stale',
-            'lease_stale',
-            'family_missing',
-        }:
-            code, status = 'not_found', 404
-        else:
-            code, status = 'conflict', 409
-
-        return JSONResponse({'error': code}, status_code=status)
-    except Exception:
-        return JSONResponse({'error': 'unavailable'}, status_code=503)
-
-
 async def invalid_request(request: Request, error: Exception) -> Response:
     return JSONResponse({'error': 'invalid_request'}, status_code=400)
 
@@ -325,7 +317,7 @@ def application(api: BrowserApi) -> FastAPI:
     app = FastAPI(
         docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False
     )
-    app.middleware('http')(safe_response)
+    app.middleware('http')(api.middleware)
     app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(HTTPException, missing_route)
     app.add_api_route('/api/status', api.status, methods=['GET'])
