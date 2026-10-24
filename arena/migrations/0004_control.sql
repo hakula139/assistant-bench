@@ -33,7 +33,7 @@ BEGIN
                     AND newer.receipt_cutoff >= older.receipt_cutoff
                     AND newer.import_cutoff >= older.import_cutoff
                     AND newer.import_source_cutoff >= older.import_source_cutoff
-                    AND newer.analysis_sequence >= older.analysis_sequence)))
+                    AND newer.analysis_sequence >= older.analysis_sequence))
     ) THEN RAISE(ABORT, 'point_downgrade') END;
 
     INSERT INTO evidence_events(command_id, kind, family, principal, request_hash, created_at, data)
