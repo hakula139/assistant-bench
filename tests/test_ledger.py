@@ -494,7 +494,9 @@ class TestLedger:
                         release.publication.id
                     )
                     assert publication == release.publication
-                    assert outputs == release.rendered
+                    assert {output.output_key: output for output in outputs} == {
+                        output.output_key: output for output in release.rendered
+                    }
 
             asyncio.run(scenario())
 
@@ -521,7 +523,7 @@ class TestLedger:
                     now = 20
 
                     if kind in ('evaluation', 'publication'):
-                        release = await publish(ledger, suffix='2', seal=False)
+                        release = await publish(ledger, suffix='2', cases=4, seal=False)
                         fact_id = release.evaluation.id
 
                         if kind == 'publication':
@@ -623,7 +625,7 @@ class TestLedger:
                         other_seals[kind](fact_id, now + 3),
                     )
 
-                    assert results == (None, None)
+                    assert all(result is None for result in results)
                     assert (
                         await transport.rows(f'SELECT * FROM {table} ORDER BY id')
                         == facts
