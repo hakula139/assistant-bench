@@ -1721,6 +1721,126 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestIssue:
+        @pytest.mark.parametrize('fill_actor', ['actor', 'owner'])
+        def test_pending_limit_uses_the_global_owner_group_in_both_directions(
+            self, d1_runtime: D1Runtime, fill_actor: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(
+                        ledger,
+                        transport,
+                        quotas=(
+                            Quota(
+                                operation='issue',
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=100,
+                            ),
+                        ),
+                    )
+                    await ledger.register_actor(
+                        Actor(id='owner', created_at=2, owner_namespace='owner')
+                    )
+                    plan = await ledger.prepare_attribution(
+                        'link', 'writing', 'actor', 'owner'
+                    )
+                    await ledger.stage_attribution(plan)
+                    await ledger.seal_attribution(plan.id, 3)
+                    await ledger.attribute(
+                        Context(command_id='link', principal='admin', now=3), plan.id
+                    )
+                    attempt_actor = 'owner' if fill_actor == 'actor' else 'actor'
+
+                    for index in range(5):
+                        family = f'family-{index}'
+                        release = await publish(ledger, family=family)
+                        await ledger.activate(
+                            Context(
+                                command_id=f'activate:{index}',
+                                principal='admin',
+                                now=4,
+                            ),
+                            family,
+                            0,
+                            release.evaluation.id,
+                            release.publication.id,
+                            release.points.id,
+                        )
+                        actor = fill_actor if index < 4 else attempt_actor
+                        await ledger.start_session(
+                            Session(
+                                id=f'session:{index}',
+                                actor_id=actor,
+                                family=family,
+                                created_at=5,
+                            )
+                        )
+
+                        if index < 4:
+                            await ledger.issue(
+                                Context(
+                                    command_id=f'draw:{index}',
+                                    principal=actor,
+                                    now=10,
+                                ),
+                                issue(
+                                    session=f'session:{index}', lease=f'lease:{index}'
+                                ).model_copy(
+                                    update={'expires_at': 100 if index == 0 else 10_000}
+                                ),
+                            )
+
+                    tables = (
+                        'claims',
+                        'evidence_events',
+                        'lease_idempotency',
+                        'pair_leases',
+                        'quota_windows',
+                        'sessions',
+                    )
+                    before = {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    }
+                    assert (
+                        sum(
+                            TypeAdapter(int).validate_python(row['count'])
+                            for row in before['quota_windows']
+                        )
+                        == 4
+                    )
+                    proposed = issue(session='session:4', lease='fifth')
+
+                    with pytest.raises(CommandRejected, match='^pending_limit$'):
+                        await ledger.issue(
+                            Context(
+                                command_id='fifth', principal=attempt_actor, now=20
+                            ),
+                            proposed,
+                        )
+
+                    assert {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    } == before
+
+                    accepted = await ledger.issue(
+                        Context(
+                            command_id='after-expiry', principal=attempt_actor, now=100
+                        ),
+                        proposed,
+                    )
+
+                    assert accepted.id == 'fifth'
+                    assert accepted.actor_id == attempt_actor
+                    assert await transport.rows(
+                        'SELECT count(*) AS live FROM pair_leases '
+                        "WHERE status = 'pending' AND expires_at > 100"
+                    ) == [{'live': 4}]
+
+            asyncio.run(scenario())
+
         def test_expired_displaced_lease_clears_both_old_pointers_atomically(
             self, d1_runtime: D1Runtime
         ) -> None:
