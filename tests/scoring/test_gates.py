@@ -30,6 +30,7 @@ EN = VotesSettings(
     language='en',
     gates=Gates(),
 )
+GUIDE_URL = 'https://example.com/docs/release/notes/install/upgrade/guide'
 ZH_REPLY = '我把 `widget` 升到了 2.0.1，并更新了锁文件。Windows 版本还没有测试。'
 
 
@@ -69,6 +70,16 @@ class TestFailedGates:
 
         assert failed_gates(ZH, text, 'stop', '') == [Gate.LANGUAGE]
 
+    @pytest.mark.parametrize(
+        'tag', [None, 'p', 'div'], ids=['plain', 'paragraph', 'block']
+    )
+    def test_rejects_another_language_in_visible_html(self, tag: str | None) -> None:
+        settings = EN.model_copy(update={'gates': Gates(min_chars=80)})
+        prose = '构建已经通过，部署前还需要检查服务状态和配置文件。' * 4
+        text = prose if tag is None else f'<{tag}>{prose}</{tag}>'
+
+        assert failed_gates(settings, text, 'stop', '') == [Gate.LANGUAGE]
+
     def test_rejects_traditional_characters_absent_from_the_instruction(
         self,
     ) -> None:
@@ -99,17 +110,199 @@ class TestDetectLanguage:
     @pytest.mark.parametrize(
         'text',
         [
-            '构建通过，详见 https://example.com/docs/release/notes/install/upgrade/guide',
+            f'构建通过，详见 {GUIDE_URL}',
             '构建通过，运行 `cargo test --workspace --all-features --release --locked '
             '--offline --quiet` 即可',
-            '```text\n构建通过，详见 '
-            'https://example.com/docs/release/notes/install/upgrade/guide\n```\n',
+            textwrap.dedent(
+                f"""\
+                ```text
+                构建通过，详见 {GUIDE_URL}
+                ```
+                """
+            ),
             'Docs at https://example.com/a，安装方法和迁移说明都在发布页里，旧配置仍可读取',
+            textwrap.dedent(
+                f"""\
+                ```python
+                # 构建通过，详见 {GUIDE_URL}
+                ```
+                """
+            ),
+            textwrap.dedent(
+                f"""\
+                ```javascript
+                // 构建通过，详见 {GUIDE_URL}
+                ```
+                """
+            ),
+            textwrap.dedent(
+                f"""\
+                ```javascript
+                /* 构建通过，详见 {GUIDE_URL} */
+                ```
+                """
+            ),
+            textwrap.dedent(
+                f'''\
+                ```python
+                """构建通过，详见 {GUIDE_URL}"""
+                ```
+                '''
+            ),
         ],
-        ids=['url', 'inline-code', 'prose-fence', 'url-ending-at-chinese-text'],
+        ids=[
+            'url',
+            'inline-code',
+            'prose-fence',
+            'url-ending-at-chinese-text',
+            'python-line-comment',
+            'javascript-line-comment',
+            'block-comment',
+            'docstring',
+        ],
     )
     def test_ignores_urls_and_inline_code_in_prose(self, text: str) -> None:
         assert detect_language(text) == 'zh'
+
+    @pytest.mark.parametrize(
+        ('text', 'language'),
+        [
+            ('<div><p>构建通过，<span>部署说明已更新</span>。</p></div>', 'zh'),
+            ('<p>&#x6784;&#x5efa;&#x901a;&#x8fc7;</p>', 'zh'),
+            (
+                '<p>构建通过，详见 https://example.com/release/notes/install/guide</p>',
+                'zh',
+            ),
+            ('<p>The build passed and the deployment guide is current.</p>', 'en'),
+            (
+                '<div>构建通过<script>English words in hidden script content</script>'
+                '<style>English words in hidden style content</style></div>',
+                'zh',
+            ),
+            (
+                '构建通过 <script>English words in hidden script content</script> '
+                '<style>English words in hidden style content</style>',
+                'zh',
+            ),
+            (
+                '构建 <span>通过</span> '
+                '<code>English identifiers are excluded from prose counts</code>',
+                'zh',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    <pre><code>
+                    English identifiers are excluded from prose counts
+                    </code> more code identifiers remain excluded here</pre>
+                    <p>构建通过</p>
+                    """
+                ),
+                'zh',
+            ),
+            ('<!-- English words inside a markup comment --><p>构建通过</p>', 'zh'),
+            ('<p>&lt;widget&gt; 构建通过</p>', 'zh'),
+            (
+                '构建通过 &lt;script&gt;English visible words in escaped markup'
+                '&lt;/script&gt;',
+                'en',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    构建通过 <code>English identifiers
+
+                    more English words in code
+
+                    </code>
+                    """
+                ),
+                'zh',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    <div><code>English identifiers
+
+                    more English words in code
+
+                    </code></div>
+
+                    构建通过
+                    """
+                ),
+                'zh',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    构建通过 <code>
+
+                    ```python
+                    # English words inside a fenced code comment
+                    ```
+
+                    </code>
+                    """
+                ),
+                'zh',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    构建通过 <code>
+
+                    ```text
+                    English words inside a prose fence
+                    ```
+
+                    </code>
+                    """
+                ),
+                'zh',
+            ),
+            (
+                textwrap.dedent(
+                    """\
+                    ```markdown
+                    <code>English identifiers
+                    ```
+
+                    构建通过
+                    """
+                ),
+                'zh',
+            ),
+        ],
+        ids=[
+            'nested-block',
+            'character-references',
+            'url',
+            'english',
+            'hidden-block-content',
+            'hidden-inline-content',
+            'inline-code',
+            'block-code',
+            'markup-comment',
+            'escaped-markup',
+            'escaped-inline-markup',
+            'code-across-inline-groups',
+            'code-across-block-groups',
+            'code-containing-fenced-comment',
+            'code-containing-prose-fence',
+            'isolated-prose-fence-state',
+        ],
+    )
+    def test_reads_visible_html_prose(self, text: str, language: str) -> None:
+        assert detect_language(text) == language
+
+    def test_does_not_reuse_html_state_across_outputs(self) -> None:
+        hidden = '<code>English words inside an unclosed code element'
+        visible = 'English words in a separate output'
+
+        languages = [detect_language(hidden), detect_language(visible)]
+
+        assert languages == [None, 'en']
 
     def test_reads_english_prose_quoting_chinese(self) -> None:
         text = 'The error message 文件不存在 means the file does not exist yet.'
@@ -203,8 +396,12 @@ class TestDetectLanguage:
 
     @pytest.mark.parametrize(
         'text',
-        ['```\nx = 1\n```\n`y` 42', '你好 hello there'],
-        ids=['code-and-numbers', 'even-split'],
+        [
+            '```\nx = 1\n```\n`y` 42',
+            '<pre><code>Only code identifiers</code></pre>',
+            '你好 hello there',
+        ],
+        ids=['code-and-numbers', 'html-code', 'even-split'],
     )
     def test_returns_none_without_a_majority(self, text: str) -> None:
         assert detect_language(text) is None
