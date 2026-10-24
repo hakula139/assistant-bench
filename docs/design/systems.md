@@ -12,7 +12,11 @@ A system specifies either a catalog model with `model` or a bare `route`. A cata
 
 A system's fingerprint hashes its resolved route, effort, harness, and the SHA-256 of its prompt text. Because the table name and the display name are excluded, renaming either preserves the fingerprint, whereas modifying what the system sends changes it. A task family runs each system under its own `harness`, so one table carries one fingerprint on the case families, under `generate`, and another on a task family, while every fingerprint the case families record stays as it was.
 
-Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool. On every PR and push to `main`, the [fingerprint check](../conventions/ci.md#checks) resolves each table at the base and head, each against its own nixos-config export, and fails when a table keeps its name but not its fingerprint, which stops a dependency bump from changing a system under its old name. A local `bench run` refuses each selected system whose earlier trials recorded a fingerprint other than its fingerprint under the family's harness, naming both and pointing at [Authoring](../guide/authoring.md#systems), so the same drift fails before Harbor starts. Every output also records the nixos-config rev it ran under.
+Votes and scores pool only within one fingerprint. Altering a system's route, effort, or prompt therefore requires a new table name, preserving the old name's frozen results. Bumping the nixos-config input changes a fingerprint only when it alters a system's resolved route, effort, or prompt, so a bump that leaves a system untouched keeps its pool.
+
+On every PR and push to `main`, the [fingerprint check](../conventions/ci.md#checks) resolves each table at the base and head, each against its own nixos-config export, and fails when a table keeps its name but not its fingerprint, which stops a dependency bump from changing a system under its old name.
+
+A local `bench run` refuses each selected system whose earlier trials recorded a fingerprint other than its fingerprint under the family's harness, naming both and pointing at [Authoring](../guide/authoring.md#systems), so the same drift fails before Harbor starts. Every output also records the nixos-config rev it ran under.
 
 ## Harnesses
 
@@ -27,7 +31,11 @@ Harbor gives every trial of a job the same environment. A job whose harnesses ar
 
 `systems.toml` has no `harness` key, so a case family runs every system as `generate`, the single-call agent, while a task family runs every system it lists under the family's `harness`, which must be an agent that acts in the task's environment, so `terminus-2` is the one a task family takes today. A harness that cannot send a system's prompt, which `terminus-2` cannot, makes `bench check` and `bench run` refuse the family while it lists a system with one. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry.
 
-`terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its prompt and loop ship inside Harbor, so a Harbor upgrade can change them under the same agent config, and each output records the Harbor version that ran it as `harness_version`, which the collection summary reports when a family's outputs span several. The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`. `bench` loads the first `.env` in the working directory or a parent, then sets `LITELLM_MODE=PRODUCTION`, which Harbor inherits, so LiteLLM never loads a `.env` of its own.
+`terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its prompt and loop ship inside Harbor, so a Harbor upgrade can change them under the same agent config, and each output records the Harbor version that ran it as `harness_version`, which the collection summary reports when a family's outputs span several.
+
+The `openai/` prefix pins LiteLLM to its OpenAI-compatible provider, and `harnesses/endpoint.py` builds the chat-completions client from the endpoint variables, which `Terminus` passes to LiteLLM as it constructs it. The key file, the CA bundle, the extra headers, and the local address therefore behave as they do for `Generate`, while the key never enters a job's `kwargs`, `env`, or `config.json`.
+
+`bench` loads the first `.env` in the working directory or a parent, then sets `LITELLM_MODE=PRODUCTION`, which Harbor inherits, so LiteLLM never loads a `.env` of its own.
 
 Harbor records each trial's agent and environment import paths in the job's `config.json`, and `harbor job resume` imports them from there, so an import path must never change once a job uses it.
 
@@ -38,7 +46,7 @@ The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `
 | Field          | Content                                                                                               |
 | -------------- | ----------------------------------------------------------------------------------------------------- |
 | `rev`          | The input's commit, recorded on every output                                                          |
-| `catalog`      | The model catalog: channels and routes, prices, effort rules, and display names                       |
+| `catalog`      | The model catalog: vendors, channels and routes, prices, effort rules, and display names              |
 | `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, `omp`, and `opencode` |
 
 ## Concurrency

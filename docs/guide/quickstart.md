@@ -28,10 +28,12 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 
 ```bash
 uv run bench check smoke                        # Run the reference solution and a do-nothing agent on the smoke task, which needs no endpoint
-uv run bench run smoke-text --system <name>     # Send each smoke case to one listed system
+uv run bench run smoke-text --system <first> --system <second>  # Generate both sides of a pair
 uv run bench serve                              # Vote on the outputs the run collected
 ```
 
-Pick `<name>` from `systems` in [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml). Each committed system resolves to a model ID from the nixos-config catalog, so on an endpoint that names models differently, add a `route` table to `systems.toml` as [Authoring](authoring.md#systems) describes and list it in the family.
+Pick two different names from `systems` in [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml). Each committed system resolves to a model ID from the nixos-config catalog, so on an endpoint that names models differently, add a `route` table to `systems.toml` as [Authoring](authoring.md#systems) describes and list it in the family.
 
-`bench run smoke-text --system <name>` makes one request per case for that system, which shows whether it answers and reports usage, then collects the replies into `outputs/smoke-text.jsonl`. A second run sends nothing until a case or system is added, though it retries every trial that errored.
+The run makes one request per case and selected system, then collects the replies into `outputs/smoke-text.jsonl`. Repeating it sends nothing until a case or system is added, though it retries every trial that errored.
+
+Voting needs two systems with passing, different replies on the same case. Failed gates or identical replies can leave no eligible pair even after both systems run. The collection summary reports gate failures, and [Voting](voting.md) explains the vote page.
