@@ -121,7 +121,22 @@ class PointSnapshot(Record):
     evaluation_id: Identifier
     policy_id: Identifier
     source_export_id: Identifier | None = None
+    source_export_digest: Identifier | None = None
+    weighted_evidence_digest: Identifier | None = None
     points: dict[str, Point]
+
+    @model_validator(mode='after')
+    def provenance(self) -> Self:
+        supplied = (
+            self.source_export_id is not None,
+            self.source_export_digest is not None,
+            self.weighted_evidence_digest is not None,
+        )
+
+        if any(supplied) and not all(supplied):
+            raise ValueError('Fitted points require their complete source provenance.')
+
+        return self
 
 
 class Actor(Record):
@@ -139,6 +154,7 @@ class Session(Record):
     family: Identifier
     created_at: Milliseconds
     import_source: Identifier | None = None
+    original_id: Identifier | None = None
 
 
 class Context(Record):
@@ -334,6 +350,22 @@ class Target(Record):
     exclusion_seq: NonNegativeInt | None = None
 
 
+class ReceiptAnnotation(Record):
+    kind: Literal['receipt']
+    receipt_seq: Annotated[int, Field(strict=True, gt=0)]
+
+
+class ImportAnnotation(Record):
+    kind: Literal['import']
+    source_id: Identifier
+    original_id: Identifier
+
+
+type AnnotationTarget = Annotated[
+    ReceiptAnnotation | ImportAnnotation, Field(discriminator='kind')
+]
+
+
 class AttributionTarget(Record):
     claim_id: Identifier
     version: NonNegativeInt
@@ -422,14 +454,10 @@ class ImportRow(Record):
     raw: LegacySession | LegacyVote | LegacyWithdrawal
     """The v2 source fields, with notes in the separate erasable channel."""
 
-    linkage: Literal['unresolved', 'incompatible', 'linked'] = 'unresolved'
-    target_id: Identifier | None = None
+    initial_disposition: Literal['unresolved', 'incompatible'] = 'unresolved'
 
     @model_validator(mode='after')
-    def linked(self) -> Self:
-        if (self.linkage == 'linked') != (self.target_id is not None):
-            raise ValueError('Only a linked source row names a target identity.')
-
+    def source_row(self) -> Self:
         expected = {
             'session': LegacySession,
             'receipt': LegacyVote,
@@ -446,6 +474,89 @@ class ImportRow(Record):
         if self.original_id != str(original) or self.source_hash != digest(self.raw):
             raise ValueError(
                 'An import row must retain its original identity and hash.'
+            )
+
+        return self
+
+
+class ImportSession(Record):
+    original_id: Identifier
+    session_id: Identifier
+    created_at: Milliseconds
+
+
+class ImportObservation(Record):
+    raw_seq: Annotated[int, Field(strict=True, gt=0)]
+    raw_hash: Identifier
+    command_id: Identifier
+    acknowledgment: Identifier
+    claim_id: Identifier
+    proof_evaluation_id: Identifier
+    case_key: Identifier
+    a_output: Identifier
+    b_output: Identifier
+    a_source_digest: Identifier
+    b_source_digest: Identifier
+    recorded_at: Milliseconds
+
+
+class ImportSelection(Record):
+    claim_id: Identifier
+    expected_version: NonNegativeInt
+    expected_receipt: NonNegativeInt | None
+    selected_acknowledgment: Identifier | None
+    """An explicit winner, including preservation of an existing served choice."""
+
+
+class ImportDisposition(Record):
+    raw_seq: Annotated[int, Field(strict=True, gt=0)]
+    state: Literal['linked', 'unresolved', 'incompatible']
+    reason: Annotated[
+        str, Field(min_length=1, max_length=64, pattern='^[a-z][a-z0-9_]*$')
+    ]
+
+
+class ImportPlan(Record):
+    id: Identifier
+    source_id: Identifier
+    revision: NonNegativeInt
+    initial: bool
+    sessions: tuple[ImportSession, ...]
+    observations: Annotated[tuple[ImportObservation, ...], Field(max_length=250)]
+    selections: Annotated[tuple[ImportSelection, ...], Field(max_length=250)]
+    dispositions: tuple[ImportDisposition, ...]
+
+    @model_validator(mode='after')
+    def unique_rows(self) -> Self:
+        for rows, keys in (
+            (self.sessions, [row.original_id for row in self.sessions]),
+            (self.observations, [row.raw_seq for row in self.observations]),
+            (self.selections, [row.claim_id for row in self.selections]),
+            (self.dispositions, [row.raw_seq for row in self.dispositions]),
+        ):
+            if len(rows) != len(set(keys)):
+                raise ValueError('An import plan must name each source identity once.')
+
+        linked = {row.raw_seq for row in self.dispositions if row.state == 'linked'}
+
+        if {row.claim_id for row in self.selections} != {
+            row.claim_id for row in self.observations
+        }:
+            raise ValueError('An import plan must review exactly its affected claims.')
+
+        if len({row.command_id for row in self.observations}) != len(self.observations):
+            raise ValueError(
+                'Imported observations require distinct command identities.'
+            )
+
+        if len({row.acknowledgment for row in self.observations}) != len(
+            self.observations
+        ):
+            raise ValueError('Imported observations require distinct acknowledgments.')
+
+        if linked != {row.raw_seq for row in self.observations}:
+            raise ValueError(
+                'Every linked disposition requires one proved observation.'
             )
 
         return self

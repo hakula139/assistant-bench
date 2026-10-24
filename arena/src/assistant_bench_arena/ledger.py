@@ -1,6 +1,7 @@
 """Prepared domain commands for the application's single D1 owner."""
 
 import json
+from datetime import datetime
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, JsonValue
@@ -10,6 +11,7 @@ from assistant_bench_arena.ledger_models import (
     Actor,
     Admission,
     AdmissionResult,
+    AnnotationTarget,
     AttributionClaim,
     AttributionPlan,
     AttributionTarget,
@@ -21,10 +23,13 @@ from assistant_bench_arena.ledger_models import (
     Event,
     Export,
     ExportSection,
+    ImportPlan,
     ImportRow,
     ImportSource,
     Issue,
     Lease,
+    LegacySession,
+    LegacyVote,
     Mode,
     Moderation,
     NumericalInput,
@@ -41,10 +46,13 @@ from assistant_bench_arena.ledger_models import (
     Statement,
     System,
 )
-from assistant_bench_arena.serialization import canonical, digest
+from assistant_bench_arena.models import Defects
+from assistant_bench_arena.serialization import canonical, digest, source_identity
 
 
 type Rejection = Literal[
+    'annotation_invalid',
+    'annotation_target',
     'attribution_context',
     'attribution_stale',
     'attribution_expiry',
@@ -546,7 +554,7 @@ class Ledger:
             Statement(
                 sql="""
                     INSERT INTO sessions(id, actor_id, family, created_at,
-                    import_source) VALUES (?, ?, ?, ?, ?)
+                    import_source, original_id) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                 params=(
                     session.id,
@@ -554,6 +562,7 @@ class Ledger:
                     session.family,
                     session.created_at,
                     session.import_source,
+                    session.original_id,
                 ),
             ),
             session.model_dump(mode='json'),
@@ -1120,6 +1129,33 @@ class Ledger:
 
         return _decode(Export, rows[0], 'policy')
 
+    async def freshness(self, export_id: str) -> Literal['current', 'stale', 'unknown']:
+        rows = await self._rows(
+            """
+            SELECT CASE WHEN x.namespace != d.namespace OR x.schema_version != 1
+                OR f.family IS NULL THEN 'unknown'
+                WHEN x.evaluation_id != f.evaluation_id OR x.policy_id != f.policy_id
+                    OR x.analysis_sequence != f.last_evidence_seq THEN 'stale'
+                ELSE 'current' END AS status
+            FROM analysis_exports x JOIN deployment d ON d.id = 1
+            LEFT JOIN family_state f ON f.family = x.family WHERE x.id = ?
+            """,
+            export_id,
+        )
+
+        if not rows:
+            return 'unknown'
+
+        match rows[0]['status']:
+            case 'current':
+                return 'current'
+            case 'stale':
+                return 'stale'
+            case 'unknown':
+                return 'unknown'
+            case _:
+                raise TypeError('An export has an invalid freshness status.')
+
     async def page(
         self,
         export_id: str,
@@ -1242,15 +1278,14 @@ class Ledger:
     async def preserve_import(self, source_id: str, row: ImportRow) -> None:
         """Retain raw lineage without asserting an unproved contemporary output."""
         expected: Row = {
-            'target_id': row.target_id,
             'row_hash': row.source_hash,
             'raw': canonical(row.raw),
-            'linkage': row.linkage,
+            'initial_disposition': row.initial_disposition,
         }
         await self._fact(
             Statement(
                 sql="""
-                    SELECT target_id, row_hash, raw, linkage FROM import_rows
+                    SELECT row_hash, raw, initial_disposition FROM import_rows
                     WHERE source_id = ? AND row_kind = ? AND original_id = ?
                     """,
                 params=(source_id, row.kind, row.original_id),
@@ -1258,20 +1293,189 @@ class Ledger:
             Statement(
                 sql="""
                     INSERT INTO import_rows(source_id, row_kind, original_id,
-                    target_id, row_hash, raw, linkage) VALUES (?, ?, ?, ?, ?, ?,
-                    ?)
+                    row_hash, raw, initial_disposition) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                 params=(
                     source_id,
                     row.kind,
                     row.original_id,
-                    row.target_id,
                     row.source_hash,
                     canonical(row.raw),
-                    row.linkage,
+                    row.initial_disposition,
                 ),
             ),
             expected,
+        )
+
+    async def _annotation_target(
+        self, actor_id: str, target: AnnotationTarget
+    ) -> tuple[SqlValue, SqlValue, SqlValue]:
+        if target.kind == 'import':
+            return None, target.source_id, target.original_id
+
+        rows = await self._rows(
+            """
+            SELECT origin, import_source, original_id FROM vote_receipts
+            WHERE seq = ? AND actor_id = ?
+            """,
+            target.receipt_seq,
+            actor_id,
+        )
+
+        if rows and rows[0]['origin'] == 'legacy':
+            source, original = rows[0]['import_source'], rows[0]['original_id']
+
+            if not isinstance(source, str) or not isinstance(original, str):
+                raise TypeError('A legacy annotation has no source identity.')
+
+            return None, source, original
+
+        return target.receipt_seq, None, None
+
+    async def annotate(
+        self, actor_id: str, target: AnnotationTarget, note: str
+    ) -> None:
+        receipt, source, original = await self._annotation_target(actor_id, target)
+        await self._execute(
+            """
+            INSERT INTO deliver_annotation(actor_id, receipt_seq, source_id,
+                original_id, note) VALUES (?, ?, ?, ?, ?)
+            """,
+            actor_id,
+            receipt,
+            source,
+            original,
+            note,
+        )
+
+    async def redact_annotation(
+        self, actor_id: str, target: AnnotationTarget, now: int
+    ) -> None:
+        receipt, source, original = await self._annotation_target(actor_id, target)
+        await self._execute(
+            """
+            INSERT INTO redact_annotation(actor_id, receipt_seq, source_id,
+                original_id, now_ms) VALUES (?, ?, ?, ?, ?)
+            """,
+            actor_id,
+            receipt,
+            source,
+            original,
+            now,
+        )
+
+    async def stage_import(self, plan: ImportPlan) -> None:
+        """Validate immutable v2 provenance before sealing a reviewed numerical plan."""
+        body = canonical(plan)
+
+        if len(body.encode()) > 524_288:
+            raise ValueError('An import plan exceeds its 512 KiB atomic boundary.')
+
+        for session in plan.sessions:
+            rows = await self._rows(
+                """
+                SELECT raw FROM import_rows WHERE source_id = ?
+                    AND row_kind = 'session' AND original_id = ?
+                """,
+                plan.source_id,
+                session.original_id,
+            )
+
+            if not rows or not isinstance(rows[0]['raw'], str):
+                raise CommandRejected('import_invalid')
+
+            raw_session = LegacySession.model_validate_json(rows[0]['raw'])
+
+            if _milliseconds(raw_session.started_at) != session.created_at:
+                raise CommandRejected('import_invalid')
+
+        for observation in plan.observations:
+            rows = await self._rows(
+                """
+                SELECT raw, row_hash FROM import_rows WHERE seq = ?
+                    AND source_id = ? AND row_kind = 'receipt'
+                """,
+                observation.raw_seq,
+                plan.source_id,
+            )
+
+            if not rows or not isinstance(rows[0]['raw'], str):
+                raise CommandRejected('import_invalid')
+
+            raw = LegacyVote.model_validate_json(rows[0]['raw'])
+
+            if (
+                rows[0]['row_hash'] != observation.raw_hash
+                or _milliseconds(raw.recorded_at) != observation.recorded_at
+                or raw.a_fingerprint is None
+                or raw.b_fingerprint is None
+            ):
+                raise CommandRejected('import_invalid')
+
+            Defects.model_validate(
+                {
+                    'a': json.loads(raw.a_defects),
+                    'b': json.loads(raw.b_defects),
+                }
+            )
+            expected_a = source_identity(
+                observation.case_key,
+                raw.a_system,
+                raw.a_fingerprint,
+                raw.a_job,
+                raw.a_trial,
+            )
+            expected_b = source_identity(
+                observation.case_key,
+                raw.b_system,
+                raw.b_fingerprint,
+                raw.b_job,
+                raw.b_trial,
+            )
+
+            if (
+                expected_a != observation.a_source_digest
+                or expected_b != observation.b_source_digest
+            ):
+                raise CommandRejected('import_invalid')
+
+        await self._fact(
+            Statement(
+                sql='SELECT body FROM import_plans WHERE id = ?', params=(plan.id,)
+            ),
+            Statement(
+                sql="""
+                    INSERT INTO import_plans(id, source_id, body, body_hash)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                params=(plan.id, plan.source_id, body, digest(plan)),
+            ),
+            {'body': body},
+        )
+
+    async def seal_import(self, plan_id: str, now: int) -> None:
+        await self._execute(
+            'INSERT INTO seal_import(plan_id, now_ms) VALUES (?, ?)', plan_id, now
+        )
+
+    async def apply_import(self, context: Context, plan_id: str) -> Event:
+        request_hash = digest({'kind': 'import', 'plan_id': plan_id})
+        return await self._command(
+            context,
+            request_hash,
+            Statement(
+                sql="""
+                INSERT INTO apply_import(command_id, request_hash, principal, now_ms,
+                    plan_id) VALUES (?, ?, ?, ?, ?)
+                """,
+                params=(
+                    context.command_id,
+                    request_hash,
+                    context.principal,
+                    context.now,
+                    plan_id,
+                ),
+            ),
         )
 
 
@@ -1291,3 +1495,12 @@ def _lease(row: Row, actor_id: str, request_hash: str) -> Lease:
         raise CommandRejected('conflict')
 
     return Lease.model_validate(row)
+
+
+def _milliseconds(value: str) -> int:
+    timestamp = datetime.fromisoformat(value)
+
+    if timestamp.utcoffset() is None:
+        raise ValueError('A legacy timestamp must include its UTC offset.')
+
+    return int(timestamp.timestamp() * 1000)

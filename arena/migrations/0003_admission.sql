@@ -75,10 +75,16 @@ CREATE INDEX attribution_tag ON network_attribution(key_version, tag_kind, tag, 
 CREATE INDEX attribution_expiry ON network_attribution(expires_at);
 
 CREATE TABLE private_annotations (
-    receipt_seq INTEGER PRIMARY KEY REFERENCES vote_receipts(seq),
+    id INTEGER PRIMARY KEY,
+    receipt_seq INTEGER UNIQUE REFERENCES vote_receipts(seq),
+    source_id TEXT REFERENCES import_sources(id),
+    original_id TEXT,
     note TEXT CHECK (length(note) <= 500),
     redacted_at INTEGER CHECK (redacted_at >= 0),
-    CHECK (redacted_at IS NULL OR note IS NULL)
+    CHECK (redacted_at IS NULL OR note IS NULL),
+    CHECK ((receipt_seq IS NOT NULL AND source_id IS NULL AND original_id IS NULL)
+        OR (receipt_seq IS NULL AND source_id IS NOT NULL AND original_id IS NOT NULL)),
+    UNIQUE (source_id, original_id)
 ) STRICT;
 
 CREATE TRIGGER annotations_local BEFORE INSERT ON private_annotations
@@ -86,11 +92,14 @@ WHEN (SELECT mode FROM deployment WHERE id = 1) != 'local'
 BEGIN SELECT RAISE(ABORT, 'private_material'); END;
 
 CREATE TRIGGER annotations_no_recreation BEFORE UPDATE ON private_annotations
-WHEN OLD.redacted_at IS NOT NULL AND (NEW.note IS NOT NULL OR NEW.redacted_at IS NULL)
+WHEN OLD.redacted_at IS NOT NULL OR NEW.note IS NOT NULL OR NEW.redacted_at IS NULL
+    OR NEW.id != OLD.id OR NEW.receipt_seq IS NOT OLD.receipt_seq
+    OR NEW.source_id IS NOT OLD.source_id OR NEW.original_id IS NOT OLD.original_id
 BEGIN SELECT RAISE(ABORT, 'redacted'); END;
 
 CREATE TRIGGER annotations_no_replace BEFORE INSERT ON private_annotations
-WHEN EXISTS (SELECT 1 FROM private_annotations WHERE receipt_seq = NEW.receipt_seq)
+WHEN EXISTS (SELECT 1 FROM private_annotations WHERE id = NEW.id OR receipt_seq = NEW.receipt_seq
+    OR (source_id = NEW.source_id AND original_id = NEW.original_id))
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE TRIGGER annotations_no_delete BEFORE DELETE ON private_annotations

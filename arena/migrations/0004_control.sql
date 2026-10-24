@@ -433,11 +433,9 @@ CREATE TABLE import_rows (
     source_id TEXT NOT NULL REFERENCES import_sources(id),
     row_kind TEXT NOT NULL CHECK (row_kind IN ('session', 'receipt', 'withdrawal')),
     original_id TEXT NOT NULL,
-    target_id TEXT,
     row_hash TEXT NOT NULL,
     raw TEXT NOT NULL CHECK (json_valid(raw)),
-    linkage TEXT NOT NULL CHECK (linkage IN ('unresolved', 'incompatible', 'linked')),
-    CHECK ((linkage = 'linked') = (target_id IS NOT NULL)),
+    initial_disposition TEXT NOT NULL CHECK (initial_disposition IN ('unresolved', 'incompatible')),
     UNIQUE (source_id, row_kind, original_id)
 ) STRICT;
 
@@ -543,7 +541,7 @@ SELECT x.id, 'targets', printf('%020d/%020d', t.event_seq, t.ordinal), json_obje
     'event_seq', t.event_seq, 'ordinal', t.ordinal, 'receipt_seq', t.receipt_seq,
     'claim_id', t.claim_id, 'expected_version', t.expected_version,
     'transition', t.transition, 'reference_seq', t.reference_seq, 'lease_id', t.lease_id,
-    'target_claim', t.target_claim, 'target_actor', t.target_actor)
+    'target_claim', t.target_claim, 'target_actor', t.target_actor, 'source_row', t.source_row)
 FROM analysis_exports x JOIN evidence_events e ON e.family = x.family AND e.seq <= x.event_cutoff
 JOIN event_targets t ON t.event_seq = e.seq;
 
@@ -554,7 +552,8 @@ FROM analysis_exports x JOIN actors a ON a.id IN (
     UNION SELECT json_extract(data, '$.actor_id') FROM evidence_events
         WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute'
     UNION SELECT json_extract(data, '$.canonical_actor') FROM evidence_events
-        WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute');
+        WHERE family = x.family AND seq <= x.event_cutoff AND kind = 'attribute'
+    UNION SELECT owner_id FROM import_sources WHERE family = x.family AND seq <= x.import_source_cutoff);
 
 CREATE VIEW export_sessions(export_id, section, row_key, body) AS
 SELECT x.id, 'sessions', s.id, json_object('id', s.id, 'actor_id', s.actor_id,
@@ -571,7 +570,7 @@ FROM analysis_exports x JOIN import_sources i ON i.family = x.family AND i.seq <
 CREATE VIEW export_import_rows(export_id, section, row_key, body) AS
 SELECT x.id, 'import_rows', json_array(i.source_id, i.row_kind, i.original_id), json_object(
     'source_id', i.source_id, 'row_kind', i.row_kind, 'original_id', i.original_id,
-    'seq', i.seq, 'target_id', i.target_id, 'row_hash', i.row_hash, 'linkage', i.linkage,
+    'seq', i.seq, 'row_hash', i.row_hash, 'initial_disposition', i.initial_disposition,
     'repeat_of', json_extract(i.raw, '$.repeat_of'))
 FROM analysis_exports x JOIN import_sources s ON s.family = x.family AND s.seq <= x.import_source_cutoff
 JOIN import_rows i ON i.source_id = s.id AND i.seq <= x.import_cutoff;

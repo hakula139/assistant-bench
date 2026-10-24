@@ -10,7 +10,10 @@ CREATE TABLE sessions (
     actor_id TEXT NOT NULL REFERENCES actors(id),
     family TEXT NOT NULL,
     created_at INTEGER NOT NULL CHECK (created_at >= 0),
-    import_source TEXT REFERENCES import_sources(id)
+    import_source TEXT REFERENCES import_sources(id),
+    original_id TEXT,
+    CHECK ((import_source IS NULL) = (original_id IS NULL)),
+    UNIQUE (import_source, original_id)
 ) STRICT;
 
 CREATE TABLE session_state (
@@ -178,6 +181,7 @@ CREATE TABLE event_targets (
     lease_id TEXT,
     target_claim TEXT REFERENCES claims(id),
     target_actor TEXT REFERENCES actors(id),
+    source_row INTEGER REFERENCES import_rows(seq),
     PRIMARY KEY (event_seq, ordinal)
 ) STRICT;
 
@@ -282,7 +286,8 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER sessions_no_delete BEFORE DELETE ON sessions
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER sessions_no_replace BEFORE INSERT ON sessions
-WHEN EXISTS (SELECT 1 FROM sessions WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM sessions WHERE id = NEW.id
+    OR (import_source = NEW.import_source AND original_id = NEW.original_id))
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
 CREATE TRIGGER event_targets_no_update BEFORE UPDATE ON event_targets
