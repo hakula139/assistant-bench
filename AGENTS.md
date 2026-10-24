@@ -89,4 +89,4 @@ Beyond the general review, check in particular:
 - Data hygiene: nothing private reaches a committed file, a fixture, or a log line.
 - Blinding: nothing the vote page receives identifies a system, including timing and error text, as [Arena](docs/design/arena.md#blinding) describes.
 - Scorer coverage: a new scorer covers collection, closing, its report variant, and its board on the site.
-- Reruns: a change to rendered tasks, agent configs, or `systems.toml` keeps Harbor's reuse and the fingerprint rule intact, as [Architecture](docs/design/architecture.md#reruns) and [Systems](docs/design/systems.md#fingerprints) describe.
+- Reruns: a change to rendered tasks, agent configs, a job's environment, or `systems.toml` keeps Harbor's reuse and the fingerprint rule intact, as [Architecture](docs/design/architecture.md#reruns) and [Systems](docs/design/systems.md#fingerprints) describe.

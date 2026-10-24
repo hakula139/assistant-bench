@@ -13,6 +13,7 @@ from uuid import UUID
 import semver
 from harbor.job_diff import SourceTrial, load_source_trials
 from harbor.models.agent.context import AgentContext
+from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.artifacts import source_host_path
@@ -37,7 +38,7 @@ from assistant_bench.families import (
     task_location,
     tasks_dir,
 )
-from assistant_bench.harnesses import HARNESSES
+from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
@@ -45,7 +46,6 @@ from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
 
-STOCK_IMAGE = 'debian:trixie-slim'
 # Collection matches each trial's version exactly, while Harbor reuses a trial whose
 # patch differs, so this base stays fixed.
 TASK_VERSION = '1.0.0'
@@ -77,7 +77,6 @@ def render_task_config(name: str, instruction: str) -> task_config.TaskConfig:
     config = task_config.TaskConfig(
         task=package,
         agent=task_config.AgentConfig(timeout_sec=AGENT_TIMEOUT_SEC),
-        environment=task_config.EnvironmentConfig(docker_image=STOCK_IMAGE),
     )
     settings = config.model_dump_json(exclude_unset=True)
     digest = hashlib.sha256(f'{instruction}\0{settings}'.encode()).hexdigest()
@@ -90,10 +89,10 @@ def render_task_config(name: str, instruction: str) -> task_config.TaskConfig:
 def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
     """Write one Harbor task per case under the data directory and return their paths.
 
-    Each task names a stock image that idles while the agent calls the endpoint from
-    the host. It has no tests, which Harbor accepts while the verifier is disabled.
-    A task's version follows its content. Directories of cases the family no longer
-    has are removed.
+    A task names no image, since its trial starts no container while the agent calls
+    the endpoint from the host. It has no tests, which Harbor accepts while the
+    verifier is disabled. A task's version follows its content. Directories of cases
+    the family no longer has are removed.
     """
     directory = tasks_dir(family)
     directory.mkdir(parents=True, exist_ok=True)
@@ -228,7 +227,9 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     family's earlier jobs, so Harbor runs only the trials that none of them
     completed with the same task version and agent config. A task's tests grade
     its trials whatever the scorer, while a rendered case has no tests, so the
-    verifier runs only for a task family, which also runs fewer trials at once.
+    verifier runs only for a task family, which also runs fewer trials at once. A
+    job whose harnesses are all single-call runs in the host environment, which
+    starts no container, and any other job runs in Harbor's Docker environment.
     """
     agents = [_agent_config(family, system) for system in systems]
     sources = [source for source, _ in _sources(family)]
@@ -239,10 +240,17 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
         agents,
         tasks,
         sources,
+        environment=_environment(systems),
         n_attempts=family.settings.samples,
         n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
         verify=tasks_source,
     )
+
+
+def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
+    if all(HARNESSES[system.harness].single_call for system in systems):
+        return trial_config.EnvironmentConfig(import_path=HOST_ENVIRONMENT)
+    return trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER)
 
 
 def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
@@ -375,6 +383,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
         [trial_config.AgentConfig(name=agent) for agent in ('oracle', 'nop')],
         tasks,
         [],
+        environment=trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER),
         n_attempts=CHECK_ATTEMPTS,
         n_concurrent=N_CONCURRENT_CONTAINERS,
         verify=True,
@@ -406,6 +415,7 @@ def _job(
     tasks: list[Path],
     sources: list[SourceJobConfig],
     *,
+    environment: trial_config.EnvironmentConfig,
     n_attempts: int,
     n_concurrent: int,
     verify: bool,
@@ -416,6 +426,7 @@ def _job(
         n_concurrent_trials=n_concurrent,
         quiet=True,
         retry=RetryConfig(max_retries=1),
+        environment=environment,
         verifier=trial_config.VerifierConfig(disable=not verify),
         agents=agents,
         tasks=[trial_config.TaskConfig(path=path) for path in tasks],

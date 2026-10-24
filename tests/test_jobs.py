@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import shutil
 import subprocess
 import sys
@@ -14,10 +13,11 @@ import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
+from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
-from harbor.models.trial.config import AgentConfig
+from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TimingInfo
 
 from assistant_bench import jobs
@@ -32,7 +32,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
-from assistant_bench.harnesses import options
+from assistant_bench.harnesses import HOST_ENVIRONMENT, options
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR
 from support import finish_job, make_system, write_task_family, write_trial
@@ -86,30 +86,13 @@ class TestRenderTaskConfig:
     def test_pins_the_version_of_a_known_task(self) -> None:
         config = jobs.render_task_config('smoke-text/en-greeting', 'Hi.')
 
-        assert version(config) == '1.0.0+2fe836d90551'
+        assert version(config) == '1.0.0+79766602577d'
 
-    @pytest.mark.parametrize(
-        ('target', 'attribute', 'value'),
-        [
-            pytest.param(jobs, 'STOCK_IMAGE', 'debian:forky-slim', id='stock-image'),
-            pytest.param(jobs, 'AGENT_TIMEOUT_SEC', 60.0, id='agent-timeout'),
-            pytest.param(
-                task_config,
-                'EnvironmentConfig',
-                functools.partial(task_config.EnvironmentConfig, cpus=2),
-                id='another-environment-setting',
-            ),
-        ],
-    )
-    def test_changes_the_version_with_each_setting_it_renders(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        target: object,
-        attribute: str,
-        value: Any,
+    def test_changes_the_version_with_the_agent_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         before = version(jobs.render_task_config('f/a', 'Hi.'))
-        monkeypatch.setattr(target, attribute, value)
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 60.0)
 
         after = version(jobs.render_task_config('f/a', 'Hi.'))
 
@@ -117,7 +100,7 @@ class TestRenderTaskConfig:
 
 
 class TestRenderTasks:
-    def test_writes_a_versioned_task_on_the_stock_image(self, data_dir: Path) -> None:
+    def test_writes_a_versioned_task(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
 
@@ -127,9 +110,7 @@ class TestRenderTasks:
         assert installed_version(path) == version(
             jobs.render_task_config('smoke-text/en-greeting', case.instruction)
         )
-        task = Task(path, disable_verification=True)
-        assert task.config.environment.docker_image == jobs.STOCK_IMAGE
-        assert task.instruction == case.instruction
+        assert Task(path, disable_verification=True).instruction == case.instruction
 
     def test_reruns_an_edited_case_and_reuses_an_unedited_one(
         self, data_dir: Path
@@ -285,7 +266,7 @@ class TestDriftedSystems:
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs=kwargs),
+            trial_config.AgentConfig(import_path='x:Y', kwargs=kwargs),
             task='f/a',
         )
 
@@ -306,7 +287,7 @@ class TestDriftedSystems:
             write_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 trial,
-                AgentConfig(
+                trial_config.AgentConfig(
                     import_path='x:Y',
                     kwargs={'system': system.name, 'fingerprint': 'fp-old'},
                 ),
@@ -349,6 +330,9 @@ class TestJob:
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_TRIALS
         assert job.retry.max_retries == 1
         assert job.verifier.disable
+        assert job.environment == trial_config.EnvironmentConfig(
+            import_path=HOST_ENVIRONMENT
+        )
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
@@ -378,6 +362,9 @@ class TestJob:
         }
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert not job.verifier.disable
+        assert job.environment == trial_config.EnvironmentConfig(
+            type=EnvironmentType.DOCKER
+        )
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
@@ -649,6 +636,9 @@ class TestCheckJob:
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert [t.path for t in job.tasks] == [task]
         assert not job.verifier.disable
+        assert job.environment == trial_config.EnvironmentConfig(
+            type=EnvironmentType.DOCKER
+        )
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
 
@@ -740,7 +730,7 @@ class TestCollect:
         family = load_family('smoke-text')
         job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
         agents = {
-            side: AgentConfig(
+            side: trial_config.AgentConfig(
                 import_path='x:Y', kwargs={'system': side, 'fingerprint': f'fp-{side}'}
             )
             for side in ('a', 'b')
@@ -789,7 +779,7 @@ class TestCollect:
             write_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 f'{path.name}__1',
-                AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+                trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
                 task=f'f/{path.name}',
                 output='你好。',
                 instruction=None,
@@ -815,7 +805,7 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'smoke-text' / 'job-1',
             'en-greeting__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='smoke-text/en-greeting',
             output='Hi.',
             instruction=None,
@@ -834,13 +824,13 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'smoke-text' / 'job-1',
             'en-greeting__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='smoke-text/en-greeting',
             output='Hi.',
             instruction=None,
             context=AgentContext(metadata={'finish_reason': 'stop'}),
         )
-        monkeypatch.setattr(jobs, 'STOCK_IMAGE', 'debian:forky-slim')
+        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 60.0)
 
         (output,) = jobs.collect(family, {})
 
@@ -849,7 +839,7 @@ class TestCollect:
     def test_collects_generations_and_errors(self, data_dir: Path) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
         system = make_system()
-        generate = AgentConfig(
+        generate = trial_config.AgentConfig(
             import_path='assistant_bench.harnesses.generate:Generate',
             kwargs={'system': system.name, 'fingerprint': system.fingerprint},
         )
@@ -918,7 +908,9 @@ class TestCollect:
             write_trial(
                 jobs_dir / job,
                 'a__1',
-                AgentConfig(import_path='x:Y', kwargs=request(system, tokens)),
+                trial_config.AgentConfig(
+                    import_path='x:Y', kwargs=request(system, tokens)
+                ),
                 task='f/a',
                 output=output,
                 context=AgentContext(
@@ -945,7 +937,7 @@ class TestCollect:
             write_trial(
                 jobs_dir / job,
                 'a__1',
-                AgentConfig(import_path='x:Y', kwargs=request(system)),
+                trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
                 task='f/a',
                 output=output,
                 context=AgentContext(metadata={'finish_reason': 'stop'}),
@@ -964,7 +956,7 @@ class TestCollect:
         write_trial(
             jobs_dir / '2026-10-20__10-00-00',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
             task='f/a',
             output='kept',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
@@ -972,7 +964,7 @@ class TestCollect:
         write_trial(
             jobs_dir / '2026-10-21__10-00-00',
             'a__2',
-            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
             task='f/a',
             error='TimeoutError',
         )
@@ -992,14 +984,14 @@ class TestCollect:
         write_trial(
             jobs_dir / '2026-10-20__10-00-00',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs=request(system)),
+            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system)),
             task='f/a',
             error='TimeoutError',
         )
         write_trial(
             jobs_dir / '2026-10-21__10-00-00',
             'a__2',
-            AgentConfig(import_path='x:Y', kwargs=request(system, 600)),
+            trial_config.AgentConfig(import_path='x:Y', kwargs=request(system, 600)),
             task='f/a',
             output='old request',
             context=AgentContext(metadata={'finish_reason': 'stop'}),
@@ -1015,7 +1007,7 @@ class TestCollect:
         self, data_dir: Path
     ) -> None:
         system = make_system()
-        generate = AgentConfig(
+        generate = trial_config.AgentConfig(
             import_path='assistant_bench.harnesses.generate:Generate',
             kwargs={'system': system.name, 'fingerprint': system.fingerprint},
         )
@@ -1047,7 +1039,7 @@ class TestCollect:
         jobs_dir = data_dir / 'jobs' / 'f'
         samples = list(zip(('job-1', 'job-2'), names, fingerprints, strict=True))
         for job, name, fingerprint in samples:
-            agent = AgentConfig(
+            agent = trial_config.AgentConfig(
                 import_path='assistant_bench.harnesses.generate:Generate',
                 kwargs={'system': name, 'fingerprint': fingerprint},
             )
@@ -1063,7 +1055,7 @@ class TestCollect:
         self, data_dir: Path
     ) -> None:
         family = votes_family(samples=1, language='zh', gates=Gates(script='hans'))
-        generate = AgentConfig(import_path='x:Y', kwargs={'system': 's'})
+        generate = trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'})
         stop = AgentContext(metadata={'finish_reason': 'stop'})
         for case, output in (('a', '臺北今天很热。'), ('b', '臺北今天很熱。')):
             write_trial(
@@ -1092,7 +1084,7 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
             output='Hi.',
             instruction=None,
@@ -1107,7 +1099,7 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir, 'a', name='g')
-        oracle = AgentConfig(name='oracle')
+        oracle = trial_config.AgentConfig(name='oracle')
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1', 'a__1', oracle, task='f/a', reward=1.0
         )
@@ -1150,7 +1142,9 @@ class TestCollect:
             write_trial(
                 data_dir / 'jobs' / 'f' / 'job-1',
                 f'{task}__1',
-                AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'}),
+                trial_config.AgentConfig(
+                    import_path='x:Y', kwargs={'system': 'acme-large'}
+                ),
                 task=f'f/{task}',
                 reward=1.0,
                 instruction=None,
@@ -1187,7 +1181,9 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'}),
+            trial_config.AgentConfig(
+                import_path='x:Y', kwargs={'system': 'acme-large'}
+            ),
             task='f/echo',
             reward=reward,
             error=error,
@@ -1222,7 +1218,7 @@ class TestCollect:
         rewards = [0.0, 1.0, 0.5]
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
-        agent = AgentConfig(
+        agent = trial_config.AgentConfig(
             import_path='x:Y', kwargs={'system': system.name, 'fingerprint': 'fp'}
         )
         origin = data_dir / 'jobs' / 'f' / 'job-1'
@@ -1314,7 +1310,9 @@ class TestCollect:
         expected: tuple[str, str, str, float | None, list[Gate] | None],
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
-        agent = AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'})
+        agent = trial_config.AgentConfig(
+            import_path='x:Y', kwargs={'system': 'acme-large'}
+        )
         source = write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__origin',
@@ -1352,7 +1350,9 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         family = with_settings(voted_tasks(families_dir, 'echo'), samples=2)
-        agent = AgentConfig(import_path='x:Y', kwargs={'system': 'acme-large'})
+        agent = trial_config.AgentConfig(
+            import_path='x:Y', kwargs={'system': 'acme-large'}
+        )
         origin = write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'echo__origin',
@@ -1395,7 +1395,7 @@ class TestCollect:
             write_trial(
                 data_dir / 'jobs' / 'f' / job,
                 'echo__1',
-                AgentConfig(import_path='x:Y', kwargs=kwargs),
+                trial_config.AgentConfig(import_path='x:Y', kwargs=kwargs),
                 task='f/echo',
                 reward=1.0,
                 instruction=None,
@@ -1415,7 +1415,9 @@ class TestCollect:
             write_trial(
                 data_dir / 'jobs' / 'f' / job,
                 'c__1',
-                AgentConfig(import_path='x:Y', kwargs=request(system, bound)),
+                trial_config.AgentConfig(
+                    import_path='x:Y', kwargs=request(system, bound)
+                ),
                 task='f/c',
                 output=f'reply at {bound}',
             )
@@ -1455,7 +1457,7 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
             context=AgentContext(metadata=metadata),
             agent_execution=timing,
@@ -1482,7 +1484,7 @@ class TestCollect:
         write_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 'retired'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 'retired'}),
             task='f/a',
             context=AgentContext(n_input_tokens=10, n_output_tokens=5),
         )
@@ -1497,7 +1499,7 @@ class TestCollect:
         write_trial(
             trial.parent,
             trial.name,
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
         )
         result = trial / 'result.json'
@@ -1517,7 +1519,7 @@ class TestReadTrials:
         write_trial(
             job,
             'a__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
+            trial_config.AgentConfig(import_path='x:Y', kwargs={'system': 's'}),
             task='f/a',
             output='Hi.',
         )
