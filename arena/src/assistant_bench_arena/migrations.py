@@ -1,5 +1,6 @@
 """Inspect the native owner's migration journal before domain initialization."""
 
+from textwrap import dedent
 from typing import Annotated, Self
 
 from pydantic import Field, model_validator
@@ -7,6 +8,20 @@ from pydantic import Field, model_validator
 from assistant_bench_arena.ledger_models import Statement
 from assistant_bench_arena.models import Record
 from assistant_bench_arena.transport import Transport
+
+
+JOURNAL_TABLE = 'd1_migrations'
+JOURNAL_DDL = dedent(
+    f"""
+    CREATE TABLE IF NOT EXISTS {JOURNAL_TABLE} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        digest TEXT NOT NULL CHECK (
+            length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')
+    ) STRICT;
+    """
+).strip()
 
 
 class AppliedMigration(Record):
@@ -49,18 +64,20 @@ async def inspect_migrations(transport: Transport) -> MigrationStatus:
                 """
         )
     )
-    journal = [row for row in objects if row['name'] == 'd1_migrations']
-    schema_empty = all(row['name'] == 'd1_migrations' for row in objects)
+    journal = [row for row in objects if row['name'] == JOURNAL_TABLE]
+    schema_empty = all(row['name'] == JOURNAL_TABLE for row in objects)
 
     if not journal:
         return MigrationStatus(
             journal_present=False, schema_empty=schema_empty, applied=()
         )
 
-    if journal != [{'name': 'd1_migrations', 'type': 'table'}]:
+    if journal != [{'name': JOURNAL_TABLE, 'type': 'table'}]:
         raise ValueError('The migration journal must be a native table.')
 
-    columns = await transport.query(Statement(sql='PRAGMA table_info(d1_migrations)'))
+    columns = await transport.query(
+        Statement(sql=f'PRAGMA table_info({JOURNAL_TABLE})')
+    )
     shape = {
         str(column['name']): (column['type'], column['notnull'], column['pk'])
         for column in columns
@@ -75,7 +92,7 @@ async def inspect_migrations(transport: Transport) -> MigrationStatus:
         raise ValueError('The migration journal has an unsupported schema.')
 
     rows = await transport.query(
-        Statement(sql='SELECT id, name, digest FROM d1_migrations ORDER BY id')
+        Statement(sql=f'SELECT id, name, digest FROM {JOURNAL_TABLE} ORDER BY id')
     )
     return MigrationStatus(
         journal_present=True,
