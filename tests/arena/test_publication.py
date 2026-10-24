@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -9,7 +10,7 @@ from assistant_bench.arena.publication import (
     output_key,
     prepare,
 )
-from assistant_bench.families import Case, Family, Gate, VotesSettings
+from assistant_bench.families import Case, Family, Gate, VotesSettings, load_family
 from assistant_bench.outputs import Output
 from assistant_bench_arena.releases import Release
 from assistant_bench_arena.serialization import digest
@@ -20,7 +21,7 @@ from assistant_bench_arena.snapshots import (
     PublicApproval,
     Settlement,
 )
-from support import make_output
+from support import make_output, write_task_family
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,22 @@ def inputs() -> Inputs:
 
 
 class TestPrepare:
+    @pytest.mark.parametrize(
+        'systems', [(), ('acme-large', 'acme-small')], ids=['tests', 'votes']
+    )
+    def test_rejects_authored_families_before_preparing_the_public_inventory(
+        self, inputs: Inputs, families_dir: Path, systems: tuple[str, ...]
+    ) -> None:
+        approval = inputs.approve()
+        write_task_family(families_dir, 'echo', systems=systems)
+        authored = replace(inputs, family=load_family('f'))
+
+        with pytest.raises(
+            ValueError,
+            match=r'^Public preparation supports rendered case families only\.$',
+        ):
+            authored.prepare(approval)
+
     def test_retains_identical_duplicate_solution_facts_only_once(
         self, inputs: Inputs
     ) -> None:

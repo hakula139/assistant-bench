@@ -31,6 +31,9 @@ class TestProveTask:
         before = prove_task(task, native_digest(task))
         (task / 'tests/test.sh').write_text('test -s /app/greeting.txt\n')
 
+        with pytest.raises(ValueError, match='recorded Harbor digest'):
+            prove_task(task, before.task_digest)
+
         after = prove_task(task, native_digest(task))
 
         assert after.task_digest != before.task_digest

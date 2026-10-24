@@ -188,8 +188,11 @@ function guide(html: string): string {
 
 /** Every root-relative page link, leaving out the home page, its anchors, and the methodology. */
 function boardLinks(html: string): string[] {
-  return [...html.matchAll(/href="(\/[^"#]+)"/g)]
-    .map(([, href]) => href)
+  const document = new JSDOM(html).window.document;
+
+  return [...document.querySelectorAll<HTMLAnchorElement>('a[href^="/"]')]
+    .filter((link) => link.closest('nav') === null)
+    .map((link) => link.getAttribute('href') ?? '')
     .filter((href) => !href.startsWith('/methodology/') && !/\.\w+$/.test(href));
 }
 
@@ -803,6 +806,7 @@ describe('header', () => {
     expect(navLinks(html, 'Main')).toEqual([
       ['/', 'Leaderboards', 'page'],
       ['/methodology/', 'Methodology', null],
+      ['/vote/', 'Vote', null],
     ]);
   });
 
@@ -822,18 +826,23 @@ describe('header', () => {
       expect(navLinks(html, 'Main')).toEqual([
         ['/', 'Leaderboards', 'true'],
         ['/methodology/', 'Methodology', null],
+        ['/vote/', 'Vote', null],
       ]);
     }
   });
 
-  test('marks the link to the page itself as the current page', async () => {
-    const html = await render(Header, { section: 'methodology' }, '/methodology/');
+  test.each(['methodology', 'vote'] as const)(
+    'marks the %s link as the current page',
+    async (section) => {
+      const html = await render(Header, { section }, `/${section}/`);
 
-    expect(navLinks(html, 'Main')).toEqual([
-      ['/', 'Leaderboards', null],
-      ['/methodology/', 'Methodology', 'page'],
-    ]);
-  });
+      expect(navLinks(html, 'Main')).toEqual([
+        ['/', 'Leaderboards', null],
+        ['/methodology/', 'Methodology', section === 'methodology' ? 'page' : null],
+        ['/vote/', 'Vote', section === 'vote' ? 'page' : null],
+      ]);
+    },
+  );
 });
 
 describe('board switcher', () => {

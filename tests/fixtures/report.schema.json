@@ -873,7 +873,7 @@
           "type": "array"
         },
         "unranked": {
-          "description": "Entrants with current outputs outside the selected comparison component.",
+          "description": "Entrants in the frozen evaluation outside the comparison component.",
           "items": {
             "type": "string"
           },

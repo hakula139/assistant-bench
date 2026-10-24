@@ -8,7 +8,13 @@ from stat import S_IMODE
 import pytest
 from typer.testing import CliRunner
 
-from arena_support import NativeManagement, native_management, vote_capture
+from arena_support import (
+    BASE_MS,
+    RETENTION_MS,
+    NativeManagement,
+    native_management,
+    vote_capture,
+)
 from assistant_bench.arena import commands
 from assistant_bench.arena.exports import read_export
 from assistant_bench.arena.management import Management
@@ -206,6 +212,37 @@ class TestExportEvidence:
                 assert 'Sampling points activated at revision' in refreshed.output
                 assert 'fitted sampling points are already active' in repeated.output
                 assert capture.header.id in status.output
+
+        asyncio.run(scenario())
+
+
+class TestStatus:
+    def test_reports_aggregate_expiry_lag_with_the_active_family_status(
+        self, runtime: D1Runtime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def scenario() -> None:
+            async with native_management(runtime) as management:
+                use_management(monkeypatch, management)
+                release = make_release(cases=2, policy=load_policy())
+                await publish_release(management, release)
+                await vote_capture(management, release)
+                management.now = BASE_MS + RETENTION_MS + 2 + 1_234
+                deployment = await management.ledger.status()
+                family = await management.ledger.investigation.status('writing')
+                assert deployment is not None and family is not None
+
+                result = await asyncio.to_thread(
+                    runner.invoke, commands.app, ['status', 'production', 'writing']
+                )
+                assert result.exit_code == 0, result.output
+
+                assert json.loads(result.output) == {
+                    'deployment': {
+                        **deployment.model_dump(mode='json'),
+                        'expiry_lag_ms': 1_234,
+                    },
+                    'family': family.model_dump(mode='json'),
+                }
 
         asyncio.run(scenario())
 

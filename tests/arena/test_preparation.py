@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.lock import TrialLock
+from harbor.models.task.config import TaskConfig
 from harbor.models.trial.result import TrialResult
 from pydantic import ValidationError
 
@@ -26,7 +28,7 @@ from assistant_bench_arena.snapshots import (
     PresentedCase,
     PublicApproval,
 )
-from support import finish_job, write_votes_family
+from support import finish_job, write_task_family, write_votes_family
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,32 @@ def selection(
 
 class TestPrepareSelection:
     @pytest.mark.parametrize(
+        'systems', [(), ('acme-large', 'acme-small')], ids=['tests', 'votes']
+    )
+    def test_rejects_authored_families_before_reading_cases_or_collecting_trials(
+        self,
+        selection: Selection,
+        families_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        systems: tuple[str, ...],
+    ) -> None:
+        write_task_family(families_dir, 'echo', name='authored', systems=systems)
+        request = selection.request.model_copy(update={'family': 'authored'})
+        read_cases = Mock(side_effect=AssertionError('Authored cases were read.'))
+        collect = Mock(side_effect=AssertionError('Authored trials were collected.'))
+        monkeypatch.setattr(preparation, 'load_cases', read_cases)
+        monkeypatch.setattr(jobs, 'collect', collect)
+
+        with pytest.raises(
+            ValueError,
+            match=r'^Public preparation supports rendered case families only\.$',
+        ):
+            prepare_selection(request)
+
+        read_cases.assert_not_called()
+        collect.assert_not_called()
+
+    @pytest.mark.parametrize(
         'family', ['../outside', '/outside', 'family\n', 'Uppercase']
     )
     def test_rejects_unsafe_family_names_before_selection(
@@ -150,16 +178,27 @@ class TestPrepareSelection:
             for output in release.outputs
         )
 
-    @pytest.mark.parametrize('changed', ['instruction', 'workspace'])
+    @pytest.mark.parametrize(
+        'changed', ['instruction', 'workspace', 'verifier', 'verifier-settings']
+    )
     def test_refuses_selected_trials_whose_recorded_task_bytes_changed(
         self, selection: Selection, changed: str
     ) -> None:
         if changed == 'instruction':
             (selection.task / 'instruction.md').write_text('Another instruction.')
-        else:
+        elif changed == 'workspace':
             environment = selection.task / 'environment'
             environment.mkdir()
             (environment / 'Dockerfile').write_text('FROM scratch\n')
+        elif changed == 'verifier':
+            tests = selection.task / 'tests'
+            tests.mkdir()
+            (tests / 'test.sh').write_text('exit 0\n')
+        else:
+            path = selection.task / 'task.toml'
+            config = TaskConfig.model_validate_toml(path.read_text())
+            config.verifier.timeout_sec = 30
+            path.write_text(config.model_dump_toml())
 
         with pytest.raises(ValueError, match='recorded Harbor digest'):
             prepare_selection(selection.request)
