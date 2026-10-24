@@ -1,5 +1,6 @@
 acompletion
 asciinema
+asgi
 Atoi
 basedpyright
 BFGS
@@ -75,6 +76,7 @@ pytest
 PYTHONDONTWRITEBYTECODE
 pywrangler
 redoc
+remoteip
 rstrip
 Sarasa
 scipy

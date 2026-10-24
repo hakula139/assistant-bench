@@ -131,6 +131,7 @@ typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
+executionEnvironments = [{ root = "arena/src", reportMissingModuleSource = false }, { root = "." }]
 
 [tool.mypy]
 files = ["src", "tests", "arena/src"]
