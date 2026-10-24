@@ -6,12 +6,16 @@ from typing import TypedDict, TypeGuard
 
 class Success(TypedDict):
     ok: str
+    """The returned object's repr, preserving record and decimal formatting."""
 
 
 class Failure(TypedDict):
     error: str
     message: str
+
     attrs: list[object]
+    """Exception kind, line and reason, with None for absent attributes."""
+
     is_value_error: bool
 
 
