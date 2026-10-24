@@ -164,12 +164,22 @@
             enable = true;
             package = null;
             entry = "${uvExe} run --locked ruff check --fix";
+            types = [ "file" ];
+            types_or = [
+              "python"
+              "pyi"
+            ];
           };
 
           ruff-format = {
             enable = true;
             package = null;
             entry = "${uvExe} run --locked ruff format";
+            types = [ "file" ];
+            types_or = [
+              "python"
+              "pyi"
+            ];
           };
         };
 

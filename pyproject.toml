@@ -121,7 +121,7 @@ source = ["assistant_bench", "assistant_bench_arena"]
 exclude_also = ['case _:\n\s*assert_never\(']
 
 [tool.basedpyright]
-include = ["src", "tests", "typings/src"]
+include = ["src", "tests", "typings"]
 extraPaths = ["src", "tests"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"

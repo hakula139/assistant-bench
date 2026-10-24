@@ -152,6 +152,9 @@ jobs:
           uv run python -m mypy.stubtest --mypy-config-file pyproject.toml
           --ignore-missing-stub statsmodels.discrete.discrete_model
 
+      - name: Check registered controller contract
+        run: uv run python typings/checks/controllers.py
+
       - name: Test
         run: uv run pytest
 
