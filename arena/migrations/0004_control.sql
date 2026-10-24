@@ -60,6 +60,7 @@ BEGIN
 END;
 
 CREATE TABLE moderation_batches (
+    deployment_id INTEGER NOT NULL DEFAULT 1 CHECK (deployment_id = 1) REFERENCES deployment(id),
     id TEXT PRIMARY KEY,
     family TEXT NOT NULL,
     principal TEXT NOT NULL,

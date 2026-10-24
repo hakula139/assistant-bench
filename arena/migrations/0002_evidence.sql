@@ -1,4 +1,5 @@
 CREATE TABLE actors (
+    deployment_id INTEGER NOT NULL DEFAULT 1 CHECK (deployment_id = 1) REFERENCES deployment(id),
     id TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL CHECK (created_at >= 0),
     owner_namespace TEXT UNIQUE,
@@ -45,6 +46,7 @@ BEGIN
 END;
 
 CREATE TABLE evidence_events (
+    deployment_id INTEGER NOT NULL DEFAULT 1 CHECK (deployment_id = 1) REFERENCES deployment(id),
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     command_id TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL CHECK (kind IN ('activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute', 'import')),

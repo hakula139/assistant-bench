@@ -39,6 +39,13 @@ class Statement(Record):
     params: tuple[SqlValue, ...] = ()
 
 
+class DeploymentStatus(Record):
+    namespace: str
+    mode: Mode
+    local_key_id: str | None
+    schema_version: Literal[1]
+
+
 class Case(Record):
     key: Identifier
     category: str | None = None

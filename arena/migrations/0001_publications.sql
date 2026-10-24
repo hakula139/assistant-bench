@@ -4,12 +4,16 @@ CREATE TABLE deployment (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     namespace TEXT NOT NULL UNIQUE,
     mode TEXT NOT NULL CHECK (mode IN ('local', 'public')),
+    local_key_id TEXT,
     quota_body TEXT NOT NULL CHECK (json_valid(quota_body) AND json_type(quota_body) = 'array'),
     attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 0 AND 7776000000),
-    schema_version INTEGER NOT NULL CHECK (schema_version = 1)
+    schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+    CHECK ((mode = 'local' AND local_key_id IS NOT NULL AND length(local_key_id) > 0)
+        OR (mode = 'public' AND local_key_id IS NULL))
 ) STRICT;
 
 CREATE TABLE quota_policies (
+    deployment_id INTEGER NOT NULL DEFAULT 1 CHECK (deployment_id = 1) REFERENCES deployment(id),
     operation TEXT NOT NULL CHECK (operation IN ('admit', 'renew', 'issue', 'accept')),
     scope TEXT NOT NULL CHECK (scope IN ('actor', 'exact', 'prefix', 'deployment')),
     window_ms INTEGER NOT NULL CHECK (window_ms > 0),
@@ -18,6 +22,7 @@ CREATE TABLE quota_policies (
 ) STRICT;
 
 CREATE TABLE policies (
+    deployment_id INTEGER NOT NULL DEFAULT 1 CHECK (deployment_id = 1) REFERENCES deployment(id),
     id TEXT PRIMARY KEY,
     body TEXT NOT NULL CHECK (json_valid(body))
 ) STRICT;

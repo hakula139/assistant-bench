@@ -19,6 +19,7 @@ from assistant_bench_arena.ledger_models import (
     Context,
     Credential,
     Cursor,
+    DeploymentStatus,
     Evaluation,
     Event,
     Export,
@@ -117,12 +118,18 @@ class Ledger:
         quotas: tuple[Quota, ...],
         *,
         attribution_ms: int | None = None,
+        local_key_id: str | None = None,
     ) -> None:
         """Initialize an empty database before any serving command is exposed."""
         if mode == 'public' and (attribution_ms is None or attribution_ms <= 0):
             raise ValueError(
                 'A public profile requires an explicit attribution lifetime.'
             )
+
+        if (mode == 'local' and not local_key_id) or (
+            mode == 'public' and local_key_id is not None
+        ):
+            raise ValueError('Only a local profile requires a keyring identity.')
 
         lifetime = attribution_ms or 0
         quota_body = canonical(
@@ -137,24 +144,36 @@ class Ledger:
         await self._fact(
             Statement(
                 sql="""
-                    SELECT namespace, mode, quota_body, attribution_ms
+                    SELECT namespace, mode, quota_body, attribution_ms, local_key_id
                     FROM deployment WHERE id = 1
                     """
             ),
             Statement(
                 sql="""
                     INSERT INTO deployment(id, namespace, mode, quota_body,
-                        attribution_ms, schema_version) VALUES (1, ?, ?, ?, ?, 1)
+                        attribution_ms, local_key_id, schema_version)
+                        VALUES (1, ?, ?, ?, ?, ?, 1)
                     """,
-                params=(namespace, mode, quota_body, lifetime),
+                params=(namespace, mode, quota_body, lifetime, local_key_id),
             ),
             {
                 'namespace': namespace,
                 'mode': mode,
+                'local_key_id': local_key_id,
                 'quota_body': quota_body,
                 'attribution_ms': lifetime,
             },
         )
+
+    async def status(self) -> DeploymentStatus | None:
+        """Read the initialization marker after migrations, without domain writes."""
+        rows = await self._rows(
+            """
+                SELECT namespace, mode, local_key_id, schema_version
+                FROM deployment WHERE id = 1
+                """
+        )
+        return DeploymentStatus.model_validate(rows[0]) if rows else None
 
     async def stage_policy(self, policy_id: str, policy: AnalysisPolicy) -> None:
         if policy_id != digest(policy):
@@ -430,7 +449,13 @@ class Ledger:
     async def register_actor(self, actor: Actor) -> None:
         expected = actor.model_dump(mode='json')
         await self._fact(
-            Statement(sql='SELECT * FROM actors WHERE id = ?', params=(actor.id,)),
+            Statement(
+                sql="""
+                    SELECT id, created_at, owner_namespace, rate_subject
+                    FROM actors WHERE id = ?
+                    """,
+                params=(actor.id,),
+            ),
             Statement(
                 sql="""
                     INSERT INTO actors(id, created_at, owner_namespace, rate_subject)
@@ -600,7 +625,11 @@ class Ledger:
 
     async def _event(self, context: Context, request_hash: str) -> Event | None:
         rows = await self._rows(
-            'SELECT * FROM evidence_events WHERE command_id = ?', context.command_id
+            """
+                SELECT seq, command_id, kind, family, principal, request_hash,
+                    created_at, data FROM evidence_events WHERE command_id = ?
+                """,
+            context.command_id,
         )
 
         if not rows:
