@@ -24,13 +24,11 @@ from assistant_bench_arena.ledger_models import (
     ExportSection,
     Issue,
     Lease,
-    Mode,
     Moderation,
     Network,
     NetworkTag,
     Quota,
     Receipt,
-    ReceiptAnnotation,
     RenderedOutput,
     Row,
     Session,
@@ -53,6 +51,10 @@ from ledger_support import (
 
 
 RETENTION_MS = 60 * 86_400_000
+QUOTAS = tuple(
+    Quota(operation=operation, scope='actor', window_ms=1_000, limit=10_000)
+    for operation in ('admit', 'renew', 'issue', 'accept')
+)
 SECTIONS = TypeAdapter(tuple[ExportSection, ...]).validate_python(
     get_args(ExportSection.__value__)
 )
@@ -108,12 +110,11 @@ async def publish(
     suffix: str = '1',
     family: str = 'writing',
     cases: int = 3,
-    mode: Mode = 'local',
     failing_case: int | None = None,
     seal: bool = True,
 ) -> Release:
     release = make_release(
-        mode=mode, family=family, suffix=suffix, cases=cases, failing_case=failing_case
+        family=family, suffix=suffix, cases=cases, failing_case=failing_case
     )
     await publish_release(ledger, release, seal=seal)
     return release
@@ -123,20 +124,17 @@ async def prepare(
     ledger: Ledger,
     transport: D1Transport,
     *,
-    mode: Mode = 'local',
-    quotas: tuple[Quota, ...] = (),
+    quotas: tuple[Quota, ...] = QUOTAS,
 ) -> Release:
     await transport.reset()
     await transport.bootstrap(
         BootstrapConfiguration(
             namespace='test-deployment',
-            mode=mode,
             quotas=quotas,
-            attribution_ms=RETENTION_MS if mode == 'public' else None,
-            local_key_id='synthetic-key-id' if mode == 'local' else None,
+            attribution_ms=RETENTION_MS,
         )
     )
-    release = await publish(ledger, mode=mode)
+    release = await publish(ledger)
     await ledger.activate(
         Context(command_id='activate:1', principal='admin', now=1),
         'writing',
@@ -225,9 +223,8 @@ class TestParseSchema:
 
 class TestLedger:
     class TestBootstrap:
-        @pytest.mark.parametrize('mode', ['local', 'public'])
         def test_atomic_profile_installs_exact_quotas_and_immutable_identity(
-            self, d1_runtime: D1Runtime, mode: Mode
+            self, d1_runtime: D1Runtime
         ) -> None:
             async def scenario() -> None:
                 async with d1_runtime.client() as (ledger, transport):
@@ -235,7 +232,6 @@ class TestLedger:
                     assert await ledger.status() is None
                     config = BootstrapConfiguration(
                         namespace='deployment',
-                        mode=mode,
                         quotas=(
                             Quota(
                                 operation='issue',
@@ -250,8 +246,7 @@ class TestLedger:
                                 limit=10,
                             ),
                         ),
-                        attribution_ms=RETENTION_MS if mode == 'public' else None,
-                        local_key_id='synthetic-key-id' if mode == 'local' else None,
+                        attribution_ms=RETENTION_MS,
                     )
 
                     await transport.bootstrap(config)
@@ -282,7 +277,7 @@ class TestLedger:
 
                     for sql in (
                         "UPDATE deployment SET namespace = 'different'",
-                        "UPDATE deployment SET local_key_id = 'different'",
+                        'UPDATE deployment SET attribution_ms = attribution_ms - 1',
                         'DELETE FROM deployment',
                         'INSERT OR REPLACE INTO deployment SELECT * FROM deployment',
                     ):
@@ -295,28 +290,24 @@ class TestLedger:
             asyncio.run(scenario())
 
         @pytest.mark.parametrize(
-            ('mode', 'lifetime', 'key', 'duplicate'),
+            ('lifetime', 'duplicate'),
             [
-                ('local', None, None, False),
-                ('public', None, None, False),
-                ('public', RETENTION_MS + 1, None, False),
-                ('public', RETENTION_MS, 'local-key', False),
-                ('local', None, 'local-key', True),
+                (None, False),
+                (0, False),
+                (RETENTION_MS + 1, False),
+                (RETENTION_MS, True),
             ],
             ids=[
-                'missing-key',
                 'missing-lifetime',
+                'zero-lifetime',
                 'over-60-days',
-                'public-key',
                 'quota',
             ],
         )
         def test_invalid_profile_leaves_the_database_empty(
             self,
             d1_runtime: D1Runtime,
-            mode: Mode,
             lifetime: int | None,
-            key: str | None,
             duplicate: bool,
         ) -> None:
             async def scenario() -> None:
@@ -328,12 +319,12 @@ class TestLedger:
 
                     with pytest.raises(ValidationError):
                         await transport.bootstrap(
-                            BootstrapConfiguration(
-                                namespace='deployment',
-                                mode=mode,
-                                quotas=(quota, quota) if duplicate else (),
-                                attribution_ms=lifetime,
-                                local_key_id=key,
+                            BootstrapConfiguration.model_validate(
+                                {
+                                    'namespace': 'deployment',
+                                    'quotas': (quota, quota) if duplicate else (),
+                                    'attribution_ms': lifetime,
+                                }
                             )
                         )
 
@@ -350,7 +341,6 @@ class TestLedger:
                     await transport.reset()
                     config = BootstrapConfiguration(
                         namespace='deployment',
-                        mode='local',
                         quotas=(
                             Quota(
                                 operation='accept',
@@ -359,8 +349,7 @@ class TestLedger:
                                 limit=10,
                             ),
                         ),
-                        attribution_ms=None,
-                        local_key_id='synthetic-key-id',
+                        attribution_ms=RETENTION_MS,
                     )
                     marker = bootstrap_statements(config)[0]
                     statements = schema_statements()
@@ -368,7 +357,7 @@ class TestLedger:
                     if failure == 'marker':
                         statements.append(
                             marker.model_copy(
-                                update={'params': (*marker.params[:-1], None)}
+                                update={'params': (*marker.params[:-1], 0)}
                             )
                         )
                     else:
@@ -476,7 +465,12 @@ class TestLedger:
                         )
                         receipt = await ledger.accept(
                             Context(command_id='vote', principal='actor', now=6),
-                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                            Accept(
+                                lease_id=lease.id,
+                                acknowledgment='ack',
+                                choice='a',
+                                attribution=attribution(6),
+                            ),
                         )
                         await ledger.stage_moderation(
                             Moderation(
@@ -588,10 +582,8 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            mode='local',
                             quotas=(),
-                            local_key_id='synthetic-key-id',
-                            attribution_ms=None,
+                            attribution_ms=RETENTION_MS,
                         )
                     )
                     release = make_release(cases=1)
@@ -665,13 +657,11 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='public',
-                            mode='public',
                             quotas=(),
                             attribution_ms=RETENTION_MS,
-                            local_key_id=None,
                         )
                     )
-                    release = make_release(mode='public')
+                    release = make_release()
                     evaluation = release.evaluation
 
                     if target == 'policy':
@@ -771,13 +761,11 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='public',
-                            mode='public',
                             quotas=(),
                             attribution_ms=RETENTION_MS,
-                            local_key_id=None,
                         )
                     )
-                    release = await publish(ledger, mode='public', seal=False)
+                    release = await publish(ledger, seal=False)
                     await ledger.seal_evaluation(release.evaluation.id, 0)
                     publication = release.publication
 
@@ -928,6 +916,7 @@ class TestLedger:
                                     lease_id=lease.id,
                                     acknowledgment=f'ack:{index}',
                                     choice='a',
+                                    attribution=attribution(11 + index * 10),
                                 ),
                             )
                         )
@@ -1000,10 +989,8 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='large-release',
-                            mode='local',
                             quotas=(),
-                            local_key_id='synthetic-key-id',
-                            attribution_ms=None,
+                            attribution_ms=RETENTION_MS,
                         )
                     )
                     release = await publish(ledger, cases=60)
@@ -1052,7 +1039,6 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            mode='public',
                             quotas=tuple(
                                 Quota(
                                     operation=operation,
@@ -1063,11 +1049,9 @@ class TestLedger:
                                 for operation in ('issue', 'accept')
                             ),
                             attribution_ms=RETENTION_MS,
-                            local_key_id=None,
                         )
                     )
                     release = make_release(
-                        mode='public',
                         family=identifier('family'),
                         systems=(identifier('large', 244), identifier('small', 244)),
                         cases=1,
@@ -1293,7 +1277,12 @@ class TestLedger:
 
                     accepted = await ledger.accept(
                         Context(command_id='accept', principal='actor', now=60),
-                        Accept(lease_id=lease.id, acknowledgment='ack', choice='b'),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='ack',
+                            choice='b',
+                            attribution=attribution(60),
+                        ),
                     )
 
                     assert accepted.publication_id == make_release().publication.id
@@ -1354,7 +1343,12 @@ class TestLedger:
                     )
                     receipt = await ledger.accept(
                         Context(command_id='vote', principal='actor', now=20),
-                        Accept(lease_id=first.id, acknowledgment='ack', choice='a'),
+                        Accept(
+                            lease_id=first.id,
+                            acknowledgment='ack',
+                            choice='a',
+                            attribution=attribution(20),
+                        ),
                     )
                     pending = await ledger.issue(
                         Context(command_id='draw:1', principal='actor', now=21),
@@ -1417,6 +1411,7 @@ class TestLedger:
                                     lease_id=pending.id,
                                     acknowledgment='stale',
                                     choice='a',
+                                    attribution=attribution(42),
                                 ),
                             )
 
@@ -1437,7 +1432,6 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            mode='public',
                             quotas=tuple(
                                 Quota(
                                     operation=operation,
@@ -1448,7 +1442,6 @@ class TestLedger:
                                 for operation in ('admit', 'renew')
                             ),
                             attribution_ms=RETENTION_MS,
-                            local_key_id=None,
                         )
                     )
                     await ledger.admit(
@@ -1583,7 +1576,6 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            mode='public',
                             quotas=(
                                 Quota(
                                     operation='admit',
@@ -1599,7 +1591,6 @@ class TestLedger:
                                 ),
                             ),
                             attribution_ms=RETENTION_MS,
-                            local_key_id=None,
                         )
                     )
                     await ledger.register_actor(
@@ -1607,7 +1598,7 @@ class TestLedger:
                     )
 
                     for index, family in enumerate(('writing', 'other')):
-                        release = make_release(mode='public', family=family)
+                        release = make_release(family=family)
                         await publish_release(ledger, release)
                         await ledger.activate(
                             Context(
@@ -1719,7 +1710,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=(
                             Quota(
                                 operation='issue',
@@ -1744,7 +1734,7 @@ class TestLedger:
 
                     for index in range(5):
                         family = f'family-{index}'
-                        release = await publish(ledger, family=family, mode='public')
+                        release = await publish(ledger, family=family)
                         await ledger.activate(
                             Context(
                                 command_id=f'activate:{family}',
@@ -1841,7 +1831,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=tuple(
                             Quota(
                                 operation=operation,
@@ -1997,6 +1986,7 @@ class TestLedger:
                             lease_id=primary_lease.id,
                             acknowledgment='primary',
                             choice='a',
+                            attribution=attribution(20),
                         ),
                     )
 
@@ -2049,6 +2039,7 @@ class TestLedger:
                                 lease_id=repeated.id,
                                 acknowledgment='repeat',
                                 choice='b',
+                                attribution=attribution(now + 1),
                             ),
                         )
 
@@ -2085,7 +2076,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=tuple(
                             Quota(
                                 operation='issue',
@@ -2144,6 +2134,111 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestAccept:
+        @pytest.mark.parametrize(
+            ('mutation', 'rejection'),
+            [
+                ('missing', 'attribution_context'),
+                ('missing-prefix', 'attribution_context'),
+                ('duplicate-exact', 'attribution_context'),
+                ('mixed-versions', 'attribution_context'),
+                ('wrong-expiry', 'attribution_expiry'),
+            ],
+            ids=lambda value: value,
+        )
+        def test_invalid_attribution_rolls_back_before_the_valid_vote(
+            self, d1_runtime: D1Runtime, mutation: str, rejection: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(
+                        ledger,
+                        transport,
+                        quotas=tuple(
+                            Quota(
+                                operation=operation,
+                                scope='actor',
+                                window_ms=1_000,
+                                limit=1,
+                            )
+                            for operation in ('issue', 'accept')
+                        ),
+                    )
+                    lease = await ledger.issue(
+                        Context(command_id='issue', principal='actor', now=10), issue()
+                    )
+                    tags = attribution(20)
+                    invalid: tuple[Attribution, ...]
+
+                    match mutation:
+                        case 'missing':
+                            invalid = ()
+                        case 'missing-prefix':
+                            invalid = tags[:1]
+                        case 'duplicate-exact':
+                            invalid = (tags[0], tags[0])
+                        case 'mixed-versions':
+                            invalid = (
+                                tags[0],
+                                tags[1].model_copy(update={'version': 'other-key'}),
+                            )
+                        case 'wrong-expiry':
+                            invalid = (
+                                tags[0],
+                                tags[1].model_copy(
+                                    update={'expires_at': tags[1].expires_at + 1}
+                                ),
+                            )
+                        case _:
+                            raise AssertionError(mutation)
+
+                    tables = (
+                        'evidence_events',
+                        'vote_receipts',
+                        'claims',
+                        'pair_leases',
+                        'session_state',
+                        'coverage',
+                        'quota_windows',
+                        'network_attribution',
+                    )
+                    before = {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    }
+                    context = Context(command_id='vote', principal='actor', now=20)
+                    request = Accept(
+                        lease_id=lease.id,
+                        acknowledgment='ack',
+                        choice='a',
+                        attribution=invalid,
+                    )
+
+                    with pytest.raises(CommandRejected, match=f'^{rejection}$'):
+                        await ledger.accept(context, request)
+
+                    assert {
+                        table: await transport.rows(f'SELECT * FROM {table}')
+                        for table in tables
+                    } == before
+
+                    receipt = await ledger.accept(
+                        context, request.model_copy(update={'attribution': tags})
+                    )
+
+                    assert receipt.acknowledgment == 'ack'
+                    assert await transport.rows(
+                        'SELECT operation, consumed FROM quota_windows '
+                        'ORDER BY operation'
+                    ) == [
+                        {'operation': 'accept', 'consumed': 1},
+                        {'operation': 'issue', 'consumed': 1},
+                    ]
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 1}
+                    ]
+
+            asyncio.run(scenario())
+
         def test_conflicting_concurrent_meanings_keep_the_winning_receipt(
             self, d1_runtime: D1Runtime
         ) -> None:
@@ -2161,11 +2256,21 @@ class TestLedger:
                     results = await asyncio.gather(
                         ledger.accept(
                             context,
-                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                            Accept(
+                                lease_id=lease.id,
+                                acknowledgment='ack',
+                                choice='a',
+                                attribution=attribution(context.now),
+                            ),
                         ),
                         other.accept(
                             context,
-                            Accept(lease_id=lease.id, acknowledgment='ack', choice='b'),
+                            Accept(
+                                lease_id=lease.id,
+                                acknowledgment='ack',
+                                choice='b',
+                                attribution=attribution(context.now),
+                            ),
                         ),
                         return_exceptions=True,
                     )
@@ -2210,21 +2315,15 @@ class TestLedger:
                             limit=1 if operation == 'accept' else 100,
                         ),
                     )
-                    await prepare(ledger, transport, mode='public', quotas=quotas)
-                    await publish(ledger, suffix='other', family='other', mode='public')
+                    await prepare(ledger, transport, quotas=quotas)
+                    await publish(ledger, suffix='other', family='other')
                     await ledger.activate(
                         Context(command_id='activate:other', principal='admin', now=2),
                         'other',
                         0,
-                        make_release(
-                            mode='public', family='other', suffix='other'
-                        ).evaluation.id,
-                        make_release(
-                            mode='public', family='other', suffix='other'
-                        ).publication.id,
-                        make_release(
-                            mode='public', family='other', suffix='other'
-                        ).points.id,
+                        make_release(family='other', suffix='other').evaluation.id,
+                        make_release(family='other', suffix='other').publication.id,
+                        make_release(family='other', suffix='other').points.id,
                     )
                     await ledger.register_actor(
                         Actor(id='owner', created_at=2, owner_namespace='owner-source')
@@ -2329,7 +2428,10 @@ class TestLedger:
                         Context(command_id='issue', principal='actor', now=10), issue()
                     )
                     request = Accept(
-                        lease_id=lease.id, acknowledgment='ack', choice='a'
+                        lease_id=lease.id,
+                        acknowledgment='ack',
+                        choice='a',
+                        attribution=attribution(20),
                     )
                     context = Context(command_id='accept', principal='actor', now=20)
 
@@ -2361,7 +2463,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=(
                             Quota(
                                 operation='issue',
@@ -2458,7 +2559,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=tuple(
                             Quota(
                                 operation=operation,
@@ -2554,7 +2654,7 @@ class TestLedger:
                             ),
                         )
                     )
-                    await prepare(ledger, transport, mode='public', quotas=quotas)
+                    await prepare(ledger, transport, quotas=quotas)
                     lease = await ledger.issue(
                         Context(command_id='issue:1', principal='actor', now=10),
                         issue(),
@@ -2626,7 +2726,10 @@ class TestLedger:
                         Context(command_id='issue', principal='actor', now=10), issue()
                     )
                     request = Accept(
-                        lease_id=lease.id, acknowledgment='ack', choice='a'
+                        lease_id=lease.id,
+                        acknowledgment='ack',
+                        choice='a',
+                        attribution=attribution(20),
                     )
 
                     accepted = await ledger.accept(
@@ -2707,7 +2810,12 @@ class TestLedger:
                     )
                     receipt = await ledger.accept(
                         Context(command_id='vote', principal='actor', now=20),
-                        Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='ack',
+                            choice='a',
+                            attribution=attribution(20),
+                        ),
                     )
                     tables = (
                         'vote_receipts',
@@ -2730,7 +2838,12 @@ class TestLedger:
                     assert (
                         await ledger.accept(
                             Context(command_id='vote', principal='actor', now=21),
-                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                            Accept(
+                                lease_id=lease.id,
+                                acknowledgment='ack',
+                                choice='a',
+                                attribution=attribution(21),
+                            ),
                         )
                         == receipt
                     )
@@ -2756,6 +2869,7 @@ class TestLedger:
                             lease_id=primary_lease.id,
                             acknowledgment='primary',
                             choice='a',
+                            attribution=attribution(20),
                         ),
                     )
                     now = 86_400_020
@@ -2797,6 +2911,7 @@ class TestLedger:
                                 lease_id=repeated.id,
                                 acknowledgment='repeat',
                                 choice='b',
+                                attribution=attribution(now + 1),
                             ),
                         ),
                         return_exceptions=True,
@@ -2939,6 +3054,7 @@ class TestLedger:
                                     lease_id=lease.id,
                                     acknowledgment=f'ack:{actor}',
                                     choice='a',
+                                    attribution=attribution(now + 1),
                                 ),
                             )
                         )
@@ -3034,6 +3150,7 @@ class TestLedger:
                                 lease_id=repeated.id,
                                 acknowledgment='repeat-ack',
                                 choice='b',
+                                attribution=attribution(now + 4),
                             ),
                         )
 
@@ -3076,7 +3193,10 @@ class TestLedger:
                     receipt = await ledger.accept(
                         Context(command_id='owner-vote', principal='owner', now=22),
                         Accept(
-                            lease_id=lease.id, acknowledgment='owner-ack', choice='a'
+                            lease_id=lease.id,
+                            acknowledgment='owner-ack',
+                            choice='a',
+                            attribution=attribution(22),
                         ),
                     )
                     assert receipt.lease_id == lease.id
@@ -3116,6 +3236,7 @@ class TestLedger:
                             lease_id=owner_lease.id,
                             acknowledgment='owner-ack',
                             choice='a',
+                            attribution=attribution(20),
                         ),
                     )
                     source_lease = await ledger.issue(
@@ -3128,6 +3249,7 @@ class TestLedger:
                             lease_id=source_lease.id,
                             acknowledgment='source-ack',
                             choice='b',
+                            attribution=attribution(40),
                         ),
                     )
                     plan = await ledger.prepare_attribution(
@@ -3229,136 +3351,6 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-    class TestAnnotate:
-        def test_opaque_acknowledgments_preserve_note_authority_and_redaction(
-            self, d1_runtime: D1Runtime
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(ledger, transport)
-                    await ledger.register_actor(Actor(id='other', created_at=2))
-                    lease = await ledger.issue(
-                        Context(command_id='draw', principal='actor', now=10), issue()
-                    )
-                    receipt = await ledger.accept(
-                        Context(command_id='vote', principal='actor', now=20),
-                        Accept(
-                            lease_id=lease.id, acknowledgment='opaque-ack', choice='a'
-                        ),
-                    )
-
-                    for actor, acknowledgment in (
-                        ('other', 'opaque-ack'),
-                        ('actor', 'unknown'),
-                    ):
-                        with pytest.raises(
-                            CommandRejected, match='^annotation_target$'
-                        ):
-                            await ledger.annotate_ack(
-                                actor, acknowledgment, 'Synthetic private note.', 21
-                            )
-
-                    assert (
-                        await transport.rows('SELECT * FROM private_annotations') == []
-                    )
-                    await ledger.annotate_ack(
-                        'actor', 'opaque-ack', 'Synthetic private note.', 22
-                    )
-                    assert await transport.rows(
-                        'SELECT receipt_seq, note, redacted_at FROM private_annotations'
-                    ) == [
-                        {
-                            'receipt_seq': receipt.seq,
-                            'note': 'Synthetic private note.',
-                            'redacted_at': None,
-                        }
-                    ]
-
-                    await ledger.annotate_ack('actor', 'opaque-ack', None, 23)
-                    await ledger.annotate_ack(
-                        'actor', 'opaque-ack', 'Another delivered note.', 24
-                    )
-                    await ledger.annotate_ack('actor', 'opaque-ack', None, 25)
-
-                    assert await transport.rows(
-                        'SELECT receipt_seq, note, redacted_at FROM private_annotations'
-                    ) == [{'receipt_seq': receipt.seq, 'note': None, 'redacted_at': 23}]
-                    assert (
-                        await ledger.resolve_receipt(
-                            Context(command_id='vote', principal='actor', now=26),
-                            VoteMeaning(lease_id=lease.id, choice='a'),
-                        )
-                        == receipt
-                    )
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-
-            asyncio.run(scenario())
-
-        @pytest.mark.parametrize(
-            ('mode', 'principal', 'rejection'),
-            [
-                ('local', 'other', 'annotation_target'),
-                ('public', 'actor', 'private_material'),
-            ],
-            ids=['wrong-actor', 'public-deployment'],
-        )
-        def test_rejects_notes_without_local_receipt_authority(
-            self, d1_runtime: D1Runtime, mode: Mode, principal: str, rejection: str
-        ) -> None:
-            async def scenario() -> None:
-                async with d1_runtime.client() as (ledger, transport):
-                    await prepare(
-                        ledger,
-                        transport,
-                        mode=mode,
-                        quotas=tuple(
-                            Quota(
-                                operation=operation,
-                                scope='actor',
-                                window_ms=1_000,
-                                limit=100,
-                            )
-                            for operation in ('issue', 'accept')
-                        ),
-                    )
-                    lease = await ledger.issue(
-                        Context(command_id='draw', principal='actor', now=10), issue()
-                    )
-                    receipt = await ledger.accept(
-                        Context(command_id='vote', principal='actor', now=20),
-                        Accept(
-                            lease_id=lease.id,
-                            acknowledgment='ack',
-                            choice='a',
-                            attribution=attribution(20) if mode == 'public' else (),
-                        ),
-                    )
-
-                    with pytest.raises(CommandRejected, match=f'^{rejection}$'):
-                        await ledger.annotate(
-                            principal,
-                            ReceiptAnnotation(receipt_seq=receipt.seq),
-                            'Synthetic private note.',
-                        )
-
-                    assert (
-                        await transport.rows('SELECT * FROM private_annotations') == []
-                    )
-                    assert await transport.rows('SELECT count FROM coverage') == [
-                        {'count': 1}
-                    ]
-                    assert (
-                        await ledger.accept(
-                            Context(command_id='vote', principal='actor', now=21),
-                            Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
-                        )
-                        == receipt
-                    )
-
-            asyncio.run(scenario())
-
     class TestFreeze:
         def test_frozen_pages_preserve_receipt_cutoff_and_inventory_after_later_changes(
             self, d1_runtime: D1Runtime
@@ -3372,10 +3364,12 @@ class TestLedger:
                     )
                     first = await ledger.accept(
                         Context(command_id='first-vote', principal='actor', now=11),
-                        Accept(lease_id=lease.id, acknowledgment='first', choice='a'),
-                    )
-                    await ledger.annotate_ack(
-                        'actor', first.acknowledgment, 'Private note.', 12
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='first',
+                            choice='a',
+                            attribution=attribution(11),
+                        ),
                     )
                     frozen = await ledger.freeze('frozen', 'writing', 20)
                     before = await export_rows(ledger, frozen.id, limit=1)
@@ -3389,7 +3383,10 @@ class TestLedger:
                     later = await ledger.accept(
                         Context(command_id='later-vote', principal='actor', now=22),
                         Accept(
-                            lease_id=later_lease.id, acknowledgment='later', choice='b'
+                            lease_id=later_lease.id,
+                            acknowledgment='later',
+                            choice='b',
+                            attribution=attribution(22),
                         ),
                     )
                     refreshed = await publish(ledger, suffix='next', cases=4)
@@ -3422,8 +3419,6 @@ class TestLedger:
                         first.seq,
                         later.seq,
                     ]
-                    assert 'Private note.' not in json.dumps(before)
-                    assert 'Private note.' not in json.dumps(current_rows)
                     assert (
                         len(before['outputs']) == 6
                         and len(current_rows['outputs']) == 8
@@ -3512,7 +3507,6 @@ class TestLedger:
                     await prepare(
                         ledger,
                         transport,
-                        mode='public',
                         quotas=tuple(
                             Quota(
                                 operation=operation,
@@ -3636,10 +3630,8 @@ class TestLedger:
                     await transport.bootstrap(
                         BootstrapConfiguration(
                             namespace='deployment',
-                            mode='local',
                             quotas=(),
-                            local_key_id='synthetic-key-id',
-                            attribution_ms=None,
+                            attribution_ms=RETENTION_MS,
                         )
                     )
 
@@ -3716,7 +3708,12 @@ class TestLedger:
                     )
                     old = await ledger.accept(
                         Context(command_id='vote:old', principal='actor', now=20),
-                        Accept(lease_id=lease.id, acknowledgment='old', choice='a'),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='old',
+                            choice='a',
+                            attribution=attribution(20),
+                        ),
                     )
                     await ledger.stage_moderation(
                         Moderation(
@@ -3752,7 +3749,10 @@ class TestLedger:
                     latest = await ledger.accept(
                         Context(command_id='vote:new', principal='actor', now=50),
                         Accept(
-                            lease_id=replacement.id, acknowledgment='latest', choice='b'
+                            lease_id=replacement.id,
+                            acknowledgment='latest',
+                            choice='b',
+                            attribution=attribution(50),
                         ),
                     )
 
@@ -3858,6 +3858,7 @@ class TestLedger:
                                 lease_id=lease.id,
                                 acknowledgment=f'ack:{index}',
                                 choice='a',
+                                attribution=attribution(now + 1),
                             ),
                         )
                         receipts.append(receipt)
@@ -3975,7 +3976,12 @@ class TestLedger:
                     )
                     receipt = await ledger.accept(
                         Context(command_id='accept', principal='actor', now=20),
-                        Accept(lease_id=lease.id, acknowledgment='ack', choice='a'),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='ack',
+                            choice='a',
+                            attribution=attribution(20),
+                        ),
                     )
 
                     for name in ('sealed', 'unsealed'):
