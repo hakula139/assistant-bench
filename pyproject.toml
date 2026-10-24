@@ -202,6 +202,11 @@ extraPaths = [
 ]
 pythonVersion = "3.13"
 
+[[tool.basedpyright.executionEnvironments]]
+root = "families/coding-repo/tasks"
+extraPaths = ["families/coding-repo/shared/tests"]
+pythonVersion = "3.13"
+
 [tool.mypy]
 files = ["src", "tests", "arena/src"]
 exclude_gitignore = true
