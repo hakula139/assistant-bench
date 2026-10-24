@@ -41,7 +41,7 @@ class CommandRejected(Exception):
     """A transport maps only an exact, enumerated database guard to this error."""
 
     def __init__(self, reason: Rejection) -> None:
-        self.reason = reason
+        self.reason: Rejection = reason
         super().__init__(reason)
 
 
