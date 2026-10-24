@@ -7,13 +7,14 @@ from typing import Any, assert_never, override
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-from openai import APIError, AsyncOpenAI
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from assistant_bench.catalog import Api, load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.responses import ResponseResult
 
 
 OUTPUT_FILE = 'output.txt'
@@ -151,57 +152,19 @@ class Generate(BaseAgent):
             store=False,
             extra_body=extra_body,
         )
-        response = raw.parse()
+        result = ResponseResult(raw.parse(), raw.headers.get('x-request-id'))
+        response = result.response
         (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
-        refusals = [
-            content.refusal
-            for item in response.output
-            if item.type == 'message'
-            for content in item.content
-            if content.type == 'refusal'
-        ]
-        incomplete_reason = (
-            response.incomplete_details.reason if response.incomplete_details else None
-        )
-        if refusals:
-            finish_reason = 'refusal'
-        elif response.status == 'completed':
-            finish_reason = 'stop'
-        elif incomplete_reason == 'max_output_tokens':
-            finish_reason = 'length'
-        elif response.status != 'incomplete':
-            finish_reason = response.status or 'unknown'
-        else:
-            finish_reason = incomplete_reason or 'incomplete'
 
         usage = response.usage
-        reasoning_tokens = None
         if usage is not None:
             context.n_input_tokens = usage.input_tokens
             context.n_cache_tokens = usage.input_tokens_details.cached_tokens
             context.n_output_tokens = usage.output_tokens
-            reasoning_tokens = usage.output_tokens_details.reasoning_tokens
 
-        details = {
-            'reasoning_tokens': reasoning_tokens,
-            'finish_reason': finish_reason,
-            'response_status': response.status,
-            'incomplete_reason': incomplete_reason,
-            'refusals': refusals,
-            'response_model': response.model,
-            'request_id': raw.headers.get('x-request-id'),
-        }
-        if response.error is not None or response.status not in (
-            'completed',
-            'incomplete',
-        ):
-            context.metadata = details
-            raise APIError(
-                'The Responses API did not return a finished response.',
-                request=raw.http_response.request,
-                body=response.error.model_dump() if response.error else None,
-            )
-        return details
+        context.metadata = result.details
+        result.check(raw.http_response.request, complete=False)
+        return result.details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:
         assert isinstance(self.options, GenerateOptions)

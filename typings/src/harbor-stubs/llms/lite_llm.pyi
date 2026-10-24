@@ -31,11 +31,3 @@ class LiteLLM(BaseLLM):
         logging_path: Path | None = ...,
         **kwargs: Any,
     ) -> LLMResponse: ...
-    async def _call_responses(
-        self,
-        prompt: str,
-        message_history: list[dict[str, Any] | Message] = ...,
-        response_format: dict[str, Any] | type[BaseModel] | None = ...,
-        logging_path: Path | None = ...,
-        **kwargs: Any,
-    ) -> LLMResponse: ...

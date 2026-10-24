@@ -3,10 +3,9 @@
 import os
 import ssl
 from collections.abc import Callable, Generator, Mapping
-from typing import Any, override
+from typing import override
 
 import httpx
-from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from openai import AsyncOpenAI
 from pydantic import (
     BaseModel,
@@ -76,10 +75,6 @@ class Endpoint(BaseModel):
             http_client=self.http_client(),
         )
 
-    def litellm_client(self) -> AsyncHTTPHandler:
-        """Build LiteLLM's native Responses transport with endpoint-owned auth."""
-        return _EndpointHTTPHandler(self)
-
     def http_client(self) -> httpx.AsyncClient:
         """Authenticate only the configured origin and refuse automatic redirects."""
         verify = self.verify()
@@ -116,16 +111,6 @@ class _EndpointAuth(httpx.Auth):
         request.headers.update(self._endpoint.headers or {})
         request.headers['Authorization'] = f'Bearer {self._endpoint.api_key()}'
         yield request
-
-
-class _EndpointHTTPHandler(AsyncHTTPHandler):
-    def __init__(self, endpoint: Endpoint) -> None:
-        self._endpoint = endpoint
-        super().__init__()
-
-    @override
-    def create_client(self, *args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        return self._endpoint.http_client()
 
 
 def preflight(env: Mapping[str, str] | None = None) -> None:

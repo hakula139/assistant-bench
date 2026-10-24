@@ -2,24 +2,28 @@
 
 from collections.abc import Mapping
 from importlib import metadata
-from pathlib import Path
 from typing import Any, ClassVar, Self, override
 
 from harbor.agents.terminus_2.terminus_2 import Terminus2, Terminus2Options
+from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
 from harbor.llms.base import BaseLLM, LLMBackend, LLMResponse
+from harbor.llms.chat import Chat
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
-from litellm import Message
-from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
-from pydantic import BaseModel
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.responses import (
+    ResponsesChat,
+    ResponsesLLM,
+    attach_items,
+)
 
 
 class TerminusOptions(Labels, Terminus2Options):
@@ -49,31 +53,17 @@ class _ConfiguredLiteLLM(LiteLLM):
     def get_model_output_limit(self) -> int:
         return self._output_limit
 
-    @override
-    async def _call_responses(
-        self,
-        prompt: str,
-        message_history: list[dict[str, Any] | Message] | None = None,
-        response_format: dict[str, Any] | type[BaseModel] | None = None,
-        logging_path: Path | None = None,
-        **kwargs: Any,
-    ) -> LLMResponse:
-        kwargs['store'] = False
-        kwargs['previous_response_id'] = None
-        return await super()._call_responses(
-            prompt, message_history or [], response_format, logging_path, **kwargs
-        )
-
 
 class Terminus(Terminus2):
-    """Harbor's `Terminus2`, whose LiteLLM client comes from the bench's endpoint.
+    """Harbor's `Terminus2` through the bench's endpoint-bound native clients.
 
     The client carries the key file, the CA bundle, the extra headers, and the
     local address, so none of them enters the job's `kwargs`, `env`, or config.
     """
 
     options_model: ClassVar[type[Terminus2Options]] = TerminusOptions
-    _endpoint_client: AsyncOpenAI | AsyncHTTPHandler
+    _endpoint_client: AsyncOpenAI
+    _responses_summaries: dict[str, LLMResponse]
 
     @override
     def version(self) -> str:
@@ -110,9 +100,19 @@ class Terminus(Terminus2):
             raise ValueError('Terminus requires resolved model capacities.')
 
         endpoint = Endpoint.read(self._get_env)
-        self._endpoint_client = (
-            endpoint.litellm_client() if use_responses_api else endpoint.client()
-        )
+        self._endpoint_client = endpoint.client()
+        if use_responses_api:
+            assert isinstance(self.options, TerminusOptions)
+            return ResponsesLLM(
+                client=self._endpoint_client,
+                model_name=model_name,
+                context_limit=model_info['max_input_tokens'],
+                output_limit=model_info['max_output_tokens'],
+                effort=reasoning_effort,
+                temperature=temperature,
+                logs_dir=self.logs_dir,
+            )
+
         constructor_kwargs: dict[str, Any] = {
             **(llm_kwargs or {}),
             'client': self._endpoint_client,
@@ -135,6 +135,61 @@ class Terminus(Terminus2):
         )
 
     @override
+    async def _run_agent_loop(
+        self, initial_prompt: str, chat: Chat, original_instruction: str = ''
+    ) -> None:
+        if isinstance(self._llm, ResponsesLLM):
+            responses_chat = ResponsesChat(
+                self._llm, interleaved_thinking=self.options.interleaved_thinking
+            )
+            responses_chat.messages.extend(chat.messages)
+            chat = responses_chat
+            self._chat = chat
+        await super()._run_agent_loop(initial_prompt, chat, original_instruction)
+
+    @override
+    async def _run_subagent(
+        self,
+        prompt: str,
+        message_history: list[dict[str, Any]],
+        steps: list[Step],
+        session_id: str,
+        agent_name: str,
+        filename_suffix: str,
+        summary_text: str,
+        subagent_name_for_logging: str = 'subagent',
+    ) -> tuple[LLMResponse, SubagentTrajectoryRef]:
+        """Retain SDK items when Harbor builds the answers branch from its summary."""
+        if isinstance(self._llm, ResponsesLLM) and filename_suffix == 'answers':
+            attach_items(message_history[-1], self._responses_summaries['summary'])
+        response, trajectory = await super()._run_subagent(
+            prompt,
+            message_history,
+            steps,
+            session_id,
+            agent_name,
+            filename_suffix,
+            summary_text,
+            subagent_name_for_logging,
+        )
+        if isinstance(self._llm, ResponsesLLM):
+            self._responses_summaries[filename_suffix] = response
+        return response, trajectory
+
+    @override
+    async def _summarize(
+        self, chat: Chat, original_instruction: str, session: TmuxSession
+    ) -> tuple[str, list[SubagentTrajectoryRef] | None]:
+        self._responses_summaries = {}
+        try:
+            result = await super()._summarize(chat, original_instruction, session)
+            if isinstance(self._llm, ResponsesLLM) and result[1] is not None:
+                attach_items(chat.messages[-1], self._responses_summaries['questions'])
+            return result
+        finally:
+            self._responses_summaries = {}
+
+    @override
     async def run(
         self,
         instruction: str,
@@ -152,3 +207,21 @@ class Terminus(Terminus2):
                 'nixos_config_rev': nixos_config_rev,
                 'harbor_version': harbor_version,
             }
+            if isinstance(self._llm, ResponsesLLM):
+                context.metadata['responses'] = self._llm.results
+                results = self._llm.results
+                if results and all('input_tokens' in result for result in results):
+                    context.n_input_tokens = sum(
+                        result['input_tokens'] for result in results
+                    )
+                    context.n_cache_tokens = sum(
+                        result['cache_tokens'] for result in results
+                    )
+                    context.n_output_tokens = sum(
+                        result['output_tokens'] for result in results
+                    )
+                else:
+                    context.n_input_tokens = None
+                    context.n_cache_tokens = None
+                    context.n_output_tokens = None
+                context.cost_usd = None

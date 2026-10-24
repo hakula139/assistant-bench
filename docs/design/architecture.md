@@ -25,6 +25,7 @@ src/assistant_bench/
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
 │   ├── options.py                          # The kwargs each harness builds from its resolved system
+│   ├── responses.py                        # Native SDK results and stateless conversation items
 │   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
