@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Literal
 
 from pydantic import BaseModel, JsonValue
 
@@ -45,63 +45,14 @@ from assistant_bench_arena.ledger_models import (
     SqlValue,
     Statement,
     System,
+    VoteMeaning,
 )
 from assistant_bench_arena.models import Defects
+from assistant_bench_arena.reads import LedgerReads
+from assistant_bench_arena.releases import validate_publication
 from assistant_bench_arena.serialization import canonical, digest, source_identity
 from assistant_bench_arena.snapshots import AnalysisPolicy
-
-
-type Rejection = Literal[
-    'annotation_invalid',
-    'annotation_target',
-    'attribution_context',
-    'attribution_stale',
-    'attribution_expiry',
-    'candidate_stale',
-    'claim_stale',
-    'command_exists',
-    'conflict',
-    'credential_context',
-    'defects_invalid',
-    'family_missing',
-    'family_stale',
-    'immutable',
-    'invalid_release',
-    'import_invalid',
-    'lease_expiry',
-    'lease_stale',
-    'moderation_stale',
-    'moderation_unsealed',
-    'network_context',
-    'pending_exists',
-    'pending_limit',
-    'private_material',
-    'publication_unsealed',
-    'proof_consumed',
-    'quota_exhausted',
-    'quota_policy',
-    'redacted',
-    'repeat_ineligible',
-    'session_stale',
-]
-
-
-class CommandRejected(Exception):
-    """A transport maps only an exact, enumerated database guard to this error."""
-
-    def __init__(self, reason: Rejection) -> None:
-        self.reason = reason
-        super().__init__(reason)
-
-
-class Transport(Protocol):
-    async def execute(self, statement: Statement) -> None:
-        """Execute one statement atomically, preserving trigger aborts."""
-        ...
-
-    async def query(self, statement: Statement) -> list[Row]:
-        """Return JSON-compatible rows without interpreting mutation metadata."""
-        ...
+from assistant_bench_arena.transport import CommandRejected, Transport
 
 
 _PAGE_ROWS = 250
@@ -128,6 +79,7 @@ _EXPORT_VIEWS: dict[ExportSection, str] = {
 class Ledger:
     def __init__(self, transport: Transport) -> None:
         self.transport = transport
+        self.read = LedgerReads(transport)
 
     async def _rows(self, sql: str, *params: SqlValue) -> list[Row]:
         return await self.transport.query(Statement(sql=sql, params=params))
@@ -198,6 +150,9 @@ class Ledger:
         )
 
     async def stage_policy(self, policy_id: str, policy: AnalysisPolicy) -> None:
+        if policy_id != digest(policy):
+            raise ValueError('A policy identity must bind its complete definition.')
+
         body = canonical(policy)
         await self._fact(
             Statement(
@@ -342,6 +297,7 @@ class Ledger:
         )
 
     async def seal_evaluation(self, evaluation_id: str, now: int) -> None:
+        await self.read.evaluation(evaluation_id)
         await self._execute(
             'INSERT INTO seal_evaluation(evaluation_id, now_ms) VALUES (?, ?)',
             evaluation_id,
@@ -400,6 +356,10 @@ class Ledger:
         )
 
     async def seal_publication(self, publication_id: str, now: int) -> None:
+        publication, rendered = await self.read.publication(publication_id)
+        bundle = await self.read.evaluation(publication.evaluation_id)
+        validate_publication(bundle, publication, rendered)
+
         await self._execute(
             'INSERT INTO seal_publication(publication_id, now_ms) VALUES (?, ?)',
             publication_id,
@@ -743,19 +703,7 @@ class Ledger:
         return _lease(rows[0], context.principal, request_hash)
 
     async def accept(self, context: Context, vote: Accept) -> Receipt:
-        defects: dict[str, JsonValue] = {
-            'a': [str(value) for value in sorted(vote.defects.a)],
-            'b': [str(value) for value in sorted(vote.defects.b)],
-        }
-        request_hash = digest(
-            {
-                'kind': 'accept',
-                'actor_id': context.principal,
-                'lease_id': vote.lease_id,
-                'choice': vote.choice,
-                'defects': defects,
-            }
-        )
+        request_hash = _vote_hash(context.principal, vote)
         event = await self._command(
             context,
             request_hash,
@@ -772,7 +720,7 @@ class Ledger:
                     vote.lease_id,
                     vote.acknowledgment,
                     vote.choice,
-                    canonical(defects),
+                    canonical(_defects(vote)),
                     context.now,
                     canonical(vote.network.model_dump(mode='json')['tags']),
                     canonical(
@@ -781,7 +729,17 @@ class Ledger:
                 ),
             ),
         )
-        rows = await self._rows('SELECT * FROM vote_receipts WHERE seq = ?', event.seq)
+        return await self._receipt(event.seq)
+
+    async def resolve_receipt(
+        self, context: Context, vote: VoteMeaning
+    ) -> Receipt | None:
+        """Resolve an authenticated command before mutable admission checks."""
+        event = await self._event(context, _vote_hash(context.principal, vote))
+        return await self._receipt(event.seq) if event is not None else None
+
+    async def _receipt(self, seq: int) -> Receipt:
+        rows = await self._rows('SELECT * FROM vote_receipts WHERE seq = ?', seq)
 
         if not rows:
             raise RuntimeError('An acceptance event has no receipt.')
@@ -1478,6 +1436,25 @@ class Ledger:
                 ),
             ),
         )
+
+
+def _defects(vote: VoteMeaning) -> dict[str, JsonValue]:
+    return {
+        'a': [str(value) for value in sorted(vote.defects.a)],
+        'b': [str(value) for value in sorted(vote.defects.b)],
+    }
+
+
+def _vote_hash(actor_id: str, vote: VoteMeaning) -> str:
+    return digest(
+        {
+            'kind': 'accept',
+            'actor_id': actor_id,
+            'lease_id': vote.lease_id,
+            'choice': vote.choice,
+            'defects': _defects(vote),
+        }
+    )
 
 
 def _decode[Record: BaseModel](model: type[Record], row: Row, field: str) -> Record:

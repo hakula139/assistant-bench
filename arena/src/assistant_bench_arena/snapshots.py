@@ -4,24 +4,12 @@ from typing import Annotated, Literal, Self
 
 from pydantic import (
     AwareDatetime,
-    BaseModel,
-    ConfigDict,
     Field,
     field_validator,
     model_validator,
 )
 
-from assistant_bench_arena.models import Defect
-
-
-class Record(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-        frozen=True,
-        strict=True,
-        allow_inf_nan=False,
-        use_attribute_docstrings=True,
-    )
+from assistant_bench_arena.models import Defect, Record
 
 
 class UnitHumanWeights(Record):

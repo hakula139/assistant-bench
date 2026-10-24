@@ -5,6 +5,19 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# ── Records ──
+
+
+class Record(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+        frozen=True,
+        strict=True,
+        allow_inf_nan=False,
+        use_attribute_docstrings=True,
+    )
+
+
 # ── Choices ──
 
 

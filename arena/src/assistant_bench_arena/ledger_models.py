@@ -3,8 +3,6 @@
 from typing import Annotated, Literal, Self
 
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     Field,
     JsonValue,
     NonNegativeInt,
@@ -14,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench_arena.models import Choice, Defects
+from assistant_bench_arena.models import Choice, Defects, Record
 from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
@@ -34,16 +32,6 @@ type Mode = Literal['local', 'public']
 type EventKind = Literal[
     'activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute', 'import'
 ]
-
-
-class Record(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-        frozen=True,
-        strict=True,
-        allow_inf_nan=False,
-        use_attribute_docstrings=True,
-    )
 
 
 class Statement(Record):
@@ -261,11 +249,14 @@ class Issue(Record):
     network: Network = Network()
 
 
-class Accept(Record):
+class VoteMeaning(Record):
     lease_id: Identifier
-    acknowledgment: Identifier
     choice: Choice
     defects: Defects = Defects()
+
+
+class Accept(VoteMeaning):
+    acknowledgment: Identifier
     network: Network = Network()
     attribution: Annotated[tuple[Attribution, ...], Field(max_length=2)] = ()
 
@@ -420,7 +411,7 @@ class LegacySession(Record):
 
 
 class LegacyVote(Record):
-    id: Annotated[int, Field(strict=True, gt=0)]
+    id: StrictInt
     session: Identifier
     case_id: Identifier
     a_system: Identifier
@@ -434,13 +425,13 @@ class LegacyVote(Record):
     choice: Choice
     a_defects: str
     b_defects: str
-    duration_sec: Annotated[float, Field(ge=0)]
-    repeat_of: Annotated[int, Field(strict=True, gt=0)] | None
+    duration_sec: float
+    repeat_of: StrictInt | None
     recorded_at: str
 
 
 class LegacyWithdrawal(Record):
-    vote: Annotated[int, Field(strict=True, gt=0)]
+    vote: StrictInt
     undone_at: str
 
 
