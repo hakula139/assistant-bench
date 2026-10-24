@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from assistant_bench_arena.ledger_models import (
     Case,
     Evaluation,
-    Mode,
     NumericalInput,
     Output,
     PointSnapshot,
@@ -134,24 +133,7 @@ class LedgerReads:
     async def evaluation(self, identity: str) -> EvaluationBundle:
         """Read staged or sealed facts for validation and immutable-ID caching."""
         evaluation = await self._one('evaluations', identity, Evaluation)
-        deployment = await self.transport.query(
-            Statement(sql='SELECT mode FROM deployment WHERE id = 1')
-        )
-
-        if not deployment:
-            raise CommandRejected('invalid_release')
-
-        mode: Mode
-
-        if deployment[0]['mode'] == 'local':
-            mode = 'local'
-        elif deployment[0]['mode'] == 'public':
-            mode = 'public'
-        else:
-            raise TypeError('The deployment must have a supported mode.')
-
         return EvaluationBundle(
-            mode=mode,
             policy=await self._one('policies', evaluation.policy_id, AnalysisPolicy),
             evaluation=evaluation,
             cases=await self._records(

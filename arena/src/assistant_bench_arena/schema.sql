@@ -1,13 +1,9 @@
 CREATE TABLE deployment (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     namespace TEXT NOT NULL UNIQUE,
-    mode TEXT NOT NULL CHECK (mode IN ('local', 'public')),
-    local_key_id TEXT,
     quota_body TEXT NOT NULL CHECK (json_valid(quota_body) AND json_type(quota_body) = 'array'),
-    attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 0 AND 5184000000),
-    schema_id TEXT NOT NULL CHECK (schema_id = 'arena-v1'),
-    CHECK ((mode = 'local' AND local_key_id IS NOT NULL AND length(local_key_id) > 0)
-        OR (mode = 'public' AND local_key_id IS NULL))
+    attribution_ms INTEGER NOT NULL CHECK (attribution_ms BETWEEN 1 AND 5184000000),
+    schema_id TEXT NOT NULL CHECK (schema_id = 'arena-v1')
 ) STRICT;
 
 CREATE TABLE quota_policies (
@@ -320,13 +316,6 @@ CREATE TABLE network_attribution (
     created_at INTEGER NOT NULL CHECK (created_at >= 0),
     expires_at INTEGER NOT NULL CHECK (expires_at > created_at),
     PRIMARY KEY (receipt_seq, key_version, tag_kind)
-) STRICT;
-
-CREATE TABLE private_annotations (
-    receipt_seq INTEGER PRIMARY KEY REFERENCES vote_receipts(seq),
-    note TEXT CHECK (length(note) <= 500),
-    redacted_at INTEGER CHECK (redacted_at >= 0),
-    CHECK (redacted_at IS NULL OR note IS NULL)
 ) STRICT;
 
 CREATE TABLE moderation_batches (
@@ -692,15 +681,6 @@ FROM analysis_exports x JOIN sessions s ON s.id IN (
     SELECT session_id FROM vote_receipts
     WHERE family = x.family AND seq <= x.receipt_cutoff);
 
-CREATE VIEW annotation_authority AS
-SELECT actor_id, seq AS receipt_seq FROM vote_receipts;
-
-CREATE VIEW deliver_annotation AS
-SELECT NULL AS actor_id, NULL AS receipt_seq, NULL AS note WHERE 0;
-
-CREATE VIEW redact_annotation AS
-SELECT NULL AS actor_id, NULL AS receipt_seq, NULL AS now_ms WHERE 0;
-
 CREATE VIEW expire_leases AS SELECT NULL AS now_ms WHERE 0;
 
 CREATE TRIGGER deployment_initialize AFTER INSERT ON deployment
@@ -731,7 +711,7 @@ BEGIN
             )
     ) THEN RAISE(ABORT, 'invalid_release') END;
 
-    SELECT CASE WHEN (SELECT mode FROM deployment) = 'public' AND (
+    SELECT CASE WHEN (
         EXISTS (SELECT 1 FROM evaluation_cases
                 WHERE evaluation_id = NEW.evaluation_id AND source = 'private')
         OR EXISTS (SELECT 1 FROM evaluation_outputs
@@ -760,7 +740,7 @@ BEGIN
             )
     ) THEN RAISE(ABORT, 'invalid_release') END;
 
-    SELECT CASE WHEN (SELECT mode FROM deployment) = 'public' AND EXISTS (
+    SELECT CASE WHEN EXISTS (
         SELECT 1 FROM rendered_outputs
         WHERE publication_id = NEW.publication_id AND approved_public = 0
     ) THEN RAISE(ABORT, 'private_material') END;
@@ -1012,24 +992,7 @@ WHEN NEW.id != OLD.id OR NEW.actor_id != OLD.actor_id OR NEW.rate_subject != OLD
     OR NEW.revoked_at IS NULL
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 
-CREATE TRIGGER annotations_local BEFORE INSERT ON private_annotations
-WHEN (SELECT mode FROM deployment WHERE id = 1) != 'local'
-BEGIN SELECT RAISE(ABORT, 'private_material'); END;
-
-CREATE TRIGGER annotations_no_recreation BEFORE UPDATE ON private_annotations
-WHEN OLD.redacted_at IS NOT NULL OR NEW.note IS NOT NULL OR NEW.redacted_at IS NULL
-    OR NEW.receipt_seq != OLD.receipt_seq
-BEGIN SELECT RAISE(ABORT, 'redacted'); END;
-
-CREATE TRIGGER annotations_no_replace BEFORE INSERT ON private_annotations
-WHEN EXISTS (SELECT 1 FROM private_annotations WHERE receipt_seq = NEW.receipt_seq)
-BEGIN SELECT RAISE(ABORT, 'immutable'); END;
-
-CREATE TRIGGER annotations_no_delete BEFORE DELETE ON private_annotations
-BEGIN SELECT RAISE(ABORT, 'immutable'); END;
-
 CREATE TRIGGER spend_quotas_insert INSTEAD OF INSERT ON spend_quotas
-WHEN (SELECT mode FROM deployment WHERE id = 1) = 'public'
 BEGIN
     SELECT CASE WHEN NOT EXISTS (
         SELECT 1 FROM quota_policies WHERE operation = NEW.operation
@@ -1088,8 +1051,7 @@ BEGIN
         THEN RAISE(ABORT, 'command_exists') END;
     SELECT CASE WHEN EXISTS (SELECT 1 FROM admission_results WHERE proof_digest = NEW.proof_digest)
         THEN RAISE(ABORT, 'proof_consumed') END;
-    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) != 'public'
-        OR NEW.expires_at <= NEW.now_ms OR NEW.expires_at > NEW.now_ms + 2592000000
+    SELECT CASE WHEN NEW.expires_at <= NEW.now_ms OR NEW.expires_at > NEW.now_ms + 2592000000
         OR NEW.challenge_until < NEW.now_ms OR NEW.challenge_until > NEW.now_ms + 86400000
         OR NEW.challenge_until > NEW.expires_at
         THEN RAISE(ABORT, 'credential_context') END;
@@ -1252,10 +1214,9 @@ BEGIN
     ) THEN RAISE(ABORT, 'defects_invalid') END;
 
     SELECT CASE WHEN EXISTS (SELECT 1 FROM json_each(NEW.attribution) a
-        WHERE (SELECT attribution_ms FROM deployment WHERE id = 1) = 0
-            OR json_extract(a.value, '$.expires_at') != NEW.now_ms + (SELECT attribution_ms FROM deployment WHERE id = 1))
+        WHERE json_extract(a.value, '$.expires_at') != NEW.now_ms + (SELECT attribution_ms FROM deployment WHERE id = 1))
         THEN RAISE(ABORT, 'attribution_expiry') END;
-    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) = 'public' AND (
+    SELECT CASE WHEN (
         (SELECT count(*) FROM json_each(NEW.attribution)) != 2
         OR (SELECT count(*) FROM json_each(NEW.attribution) WHERE json_extract(value, '$.kind') = 'exact') != 1
         OR (SELECT count(*) FROM json_each(NEW.attribution) WHERE json_extract(value, '$.kind') = 'prefix') != 1
@@ -1717,37 +1678,6 @@ BEGIN SELECT RAISE(ABORT, 'immutable'); END;
 CREATE TRIGGER analysis_exports_no_replace BEFORE INSERT ON analysis_exports
 WHEN EXISTS (SELECT 1 FROM analysis_exports WHERE id = NEW.id)
 BEGIN SELECT RAISE(ABORT, 'immutable'); END;
-
-CREATE TRIGGER deliver_annotation_insert INSTEAD OF INSERT ON deliver_annotation
-BEGIN
-    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) != 'local'
-        THEN RAISE(ABORT, 'private_material') END;
-    SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM annotation_authority
-        WHERE actor_id = NEW.actor_id AND receipt_seq = NEW.receipt_seq)
-        THEN RAISE(ABORT, 'annotation_target') END;
-    SELECT CASE WHEN NEW.note IS NULL OR length(NEW.note) > 500
-        THEN RAISE(ABORT, 'annotation_invalid') END;
-    SELECT CASE WHEN EXISTS (SELECT 1 FROM private_annotations
-        WHERE receipt_seq = NEW.receipt_seq AND redacted_at IS NULL AND note IS NOT NEW.note)
-        THEN RAISE(ABORT, 'conflict') END;
-    INSERT INTO private_annotations(receipt_seq, note)
-    SELECT NEW.receipt_seq, NEW.note
-    WHERE NOT EXISTS (SELECT 1 FROM private_annotations WHERE receipt_seq = NEW.receipt_seq);
-END;
-
-CREATE TRIGGER redact_annotation_insert INSTEAD OF INSERT ON redact_annotation
-BEGIN
-    SELECT CASE WHEN (SELECT mode FROM deployment WHERE id = 1) != 'local'
-        THEN RAISE(ABORT, 'private_material') END;
-    SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM annotation_authority
-        WHERE actor_id = NEW.actor_id AND receipt_seq = NEW.receipt_seq)
-        THEN RAISE(ABORT, 'annotation_target') END;
-    INSERT INTO private_annotations(receipt_seq, redacted_at)
-    SELECT NEW.receipt_seq, NEW.now_ms
-    WHERE NOT EXISTS (SELECT 1 FROM private_annotations WHERE receipt_seq = NEW.receipt_seq);
-    UPDATE private_annotations SET note = NULL, redacted_at = NEW.now_ms
-    WHERE receipt_seq = NEW.receipt_seq AND redacted_at IS NULL;
-END;
 
 CREATE TRIGGER expire_leases_insert INSTEAD OF INSERT ON expire_leases
 BEGIN

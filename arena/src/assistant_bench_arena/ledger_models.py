@@ -32,7 +32,6 @@ type SqlValue = StrictStr | StrictInt | StrictFloat | None
 type Row = dict[str, JsonValue]
 type Identifier = Annotated[str, Field(min_length=1, max_length=256)]
 type Milliseconds = NonNegativeInt
-type Mode = Literal['local', 'public']
 type EventKind = Literal[
     'activate', 'accept', 'withdraw', 'exclude', 'restore', 'attribute'
 ]
@@ -172,12 +171,9 @@ class Quota(Record):
 
 class BootstrapConfiguration(Record):
     namespace: Identifier
-    mode: Mode
     quotas: tuple[Quota, ...]
-    attribution_ms: Annotated[int, Field(strict=True, ge=0, le=5_184_000_000)] | None
+    attribution_ms: Annotated[int, Field(strict=True, gt=0, le=5_184_000_000)]
     """Live keyed association lifetime, at most 60 days."""
-
-    local_key_id: Identifier | None
 
     @field_validator('quotas')
     @classmethod
@@ -186,23 +182,8 @@ class BootstrapConfiguration(Record):
             sorted(quotas, key=lambda row: (row.operation, row.scope, row.window_ms))
         )
 
-    @field_validator('attribution_ms')
-    @classmethod
-    def optional_attribution(cls, value: int | None) -> int | None:
-        return value or None
-
     @model_validator(mode='after')
     def profile(self) -> Self:
-        if self.mode == 'public' and not self.attribution_ms:
-            raise ValueError(
-                'A public profile requires an explicit attribution lifetime.'
-            )
-
-        if (self.mode == 'local' and self.local_key_id is None) or (
-            self.mode == 'public' and self.local_key_id is not None
-        ):
-            raise ValueError('Only a local profile requires a keyring identity.')
-
         keys = {
             (quota.operation, quota.scope, quota.window_ms) for quota in self.quotas
         }
@@ -408,10 +389,6 @@ class Target(Record):
     receipt_seq: Annotated[int, Field(strict=True, gt=0)]
     claim_version: NonNegativeInt
     exclusion_seq: NonNegativeInt | None = None
-
-
-class ReceiptAnnotation(Record):
-    receipt_seq: Annotated[int, Field(strict=True, gt=0)]
 
 
 class AttributionTarget(Record):

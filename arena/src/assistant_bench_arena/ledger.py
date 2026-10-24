@@ -32,7 +32,6 @@ from assistant_bench_arena.ledger_models import (
     PointSnapshot,
     Publication,
     Receipt,
-    ReceiptAnnotation,
     RenderedOutput,
     Row,
     Session,
@@ -1340,58 +1339,6 @@ class Ledger:
             else None
         )
         return Page(rows=rows, cursor=next_cursor)
-
-    async def annotate(
-        self, actor_id: str, target: ReceiptAnnotation, note: str
-    ) -> None:
-        await self._execute(
-            """
-            INSERT INTO deliver_annotation(actor_id, receipt_seq, note) VALUES (?, ?, ?)
-            """,
-            actor_id,
-            target.receipt_seq,
-            note,
-        )
-
-    async def annotate_ack(
-        self, actor_id: str, acknowledgment: str, note: str | None, now: int
-    ) -> None:
-        """Resolve local annotation authority from an opaque browser acknowledgment."""
-        rows = await self._rows(
-            'SELECT seq FROM vote_receipts WHERE acknowledgment = ? AND actor_id = ?',
-            acknowledgment,
-            actor_id,
-        )
-
-        if not rows:
-            raise CommandRejected('annotation_target')
-
-        seq = rows[0]['seq']
-
-        if not isinstance(seq, int):
-            raise TypeError(
-                'An annotation acknowledgment must resolve a receipt sequence.'
-            )
-
-        target = ReceiptAnnotation(receipt_seq=seq)
-
-        if note is None:
-            await self.redact_annotation(actor_id, target, now)
-        else:
-            await self.annotate(actor_id, target, note)
-
-    async def redact_annotation(
-        self, actor_id: str, target: ReceiptAnnotation, now: int
-    ) -> None:
-        await self._execute(
-            """
-            INSERT INTO redact_annotation(actor_id, receipt_seq, now_ms)
-            VALUES (?, ?, ?)
-            """,
-            actor_id,
-            target.receipt_seq,
-            now,
-        )
 
 
 def _defects(vote: VoteMeaning) -> dict[str, JsonValue]:

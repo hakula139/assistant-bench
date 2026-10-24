@@ -37,16 +37,14 @@ def bootstrap_statements(config: BootstrapConfiguration) -> tuple[Statement, ...
     return (
         Statement(
             sql="""
-                INSERT INTO deployment(id, schema_id, namespace, mode, quota_body,
-                    attribution_ms, local_key_id) VALUES (1, ?, ?, ?, ?, ?, ?)
+                INSERT INTO deployment(id, schema_id, namespace, quota_body,
+                    attribution_ms) VALUES (1, ?, ?, ?, ?)
                 """,
             params=(
                 SCHEMA_ID,
                 config.namespace,
-                config.mode,
                 canonical([row.model_dump(mode='json') for row in config.quotas]),
-                config.attribution_ms or 0,
-                config.local_key_id,
+                config.attribution_ms,
             ),
         ),
     )
@@ -78,10 +76,8 @@ async def inspect_schema(transport: Transport) -> DeploymentStatus | None:
         'id',
         'schema_id',
         'namespace',
-        'mode',
         'quota_body',
         'attribution_ms',
-        'local_key_id',
     }:
         raise ValueError('The database has an incompatible schema marker.')
 
@@ -89,9 +85,8 @@ async def inspect_schema(transport: Transport) -> DeploymentStatus | None:
         Statement(
             sql="""
                 SELECT json_object('schema_id', schema_id, 'namespace', namespace,
-                    'mode', mode, 'quotas', json(quota_body),
-                    'attribution_ms', nullif(attribution_ms, 0),
-                    'local_key_id', local_key_id) AS body FROM deployment
+                    'quotas', json(quota_body),
+                    'attribution_ms', attribution_ms) AS body FROM deployment
                 """
         )
     )

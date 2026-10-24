@@ -6,8 +6,6 @@ from assistant_bench_arena.ledger_models import Row, Statement
 
 
 type Rejection = Literal[
-    'annotation_invalid',
-    'annotation_target',
     'attribution_context',
     'attribution_stale',
     'attribution_expiry',
@@ -34,7 +32,6 @@ type Rejection = Literal[
     'proof_consumed',
     'quota_exhausted',
     'quota_policy',
-    'redacted',
     'repeat_ineligible',
     'session_stale',
 ]

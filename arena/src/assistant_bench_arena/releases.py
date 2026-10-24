@@ -10,7 +10,6 @@ from pydantic import JsonValue, model_validator
 from assistant_bench_arena.ledger_models import (
     Case,
     Evaluation,
-    Mode,
     NumericalInput,
     Output,
     Point,
@@ -31,7 +30,6 @@ from assistant_bench_arena.snapshots import (
 
 
 class EvaluationBundle(Record):
-    mode: Mode
     policy: AnalysisPolicy
     evaluation: Evaluation
     cases: tuple[Case, ...]
@@ -233,10 +231,10 @@ def validate_evaluation(bundle: EvaluationBundle) -> None:
         raise ValueError('The evaluation identity and frozen policy must agree.')
 
     for case in bundle.cases:
-        validate_case(case, bundle.mode)
+        validate_case(case)
 
     for output in bundle.outputs:
-        validate_output(output, bundle.mode)
+        validate_output(output)
 
         if output.case_key not in cases or output.system_id not in systems:
             raise ValueError('Every output must belong to its frozen case and system.')
@@ -258,10 +256,10 @@ def validate_evaluation(bundle: EvaluationBundle) -> None:
         raise ValueError('Settlements must use the complete frozen output inventory.')
 
 
-def validate_case(case: Case, mode: Mode) -> None:
+def validate_case(case: Case) -> None:
     approval = case.metadata.approval
 
-    if mode == 'public' and (
+    if (
         case.source == 'private'
         or approval is None
         or approval.case_key != case.key
@@ -273,10 +271,10 @@ def validate_case(case: Case, mode: Mode) -> None:
         )
 
 
-def validate_output(output: Output, mode: Mode) -> None:
+def validate_output(output: Output) -> None:
     approval = output.metadata.approval
 
-    if mode == 'public' and (
+    if (
         not output.approved_public
         or approval is None
         or approval.output_key != output.key
@@ -296,16 +294,14 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
         or presentation.family != bundle.evaluation.family
         or set(presentation.cases) != set(cases)
         or set(presentation.systems) != {system.id for system in bundle.systems}
-        or (bundle.mode == 'public') != (approval is not None)
+        or approval is None
     ):
         raise ValueError('The publication identity and complete sections must agree.')
 
-    case_approvals = {row.case_key: row for row in approval.cases} if approval else {}
-    output_approvals = (
-        {row.output_key: row for row in approval.outputs} if approval else {}
-    )
+    case_approvals = {row.case_key: row for row in approval.cases}
+    output_approvals = {row.output_key: row for row in approval.outputs}
 
-    if approval is not None and (
+    if (
         approval.family != bundle.evaluation.family
         or set(case_approvals) != set(cases)
         or set(output_approvals) != set(outputs)
@@ -326,33 +322,28 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
                 'A presented case must match its frozen source and instruction.'
             )
 
-        if approval is not None:
-            consent = case_approvals[key]
+        consent = case_approvals[key]
 
-            if (
-                consent.source != case.source
-                or consent.instruction_digest != case.instruction_digest
-                or consent.presentation_digest != digest(document)
-            ):
-                raise ValueError(
-                    'Every public case presentation needs current approval.'
-                )
+        if (
+            consent.source != case.source
+            or consent.instruction_digest != case.instruction_digest
+            or consent.presentation_digest != digest(document)
+        ):
+            raise ValueError('Every public case presentation needs current approval.')
 
-    if approval is not None and any(
+    if any(
         output_approvals[key].content_digest != output.content_digest
         for key, output in outputs.items()
     ):
         raise ValueError('Every public output needs its exact approved content digest.')
 
 
-def validate_rendered(
-    publication: Publication, output: RenderedOutput, mode: Mode
-) -> None:
+def validate_rendered(publication: Publication, output: RenderedOutput) -> None:
     if (
         output.render != publication.presentation.render
         or digest(output.content) != output.content_digest
-        or (mode == 'public' and not output.approved_public)
-        or (mode == 'public' and publication.approval is None)
+        or not output.approved_public
+        or publication.approval is None
     ):
         raise ValueError('A rendered output must match its approved presentation.')
 
@@ -365,7 +356,7 @@ def validate_render_approval(
     approval = publication.approval
 
     if approval is None:
-        return
+        raise ValueError('Every public publication needs explicit approval.')
 
     consent = next(
         (row for row in approval.outputs if row.output_key == output_key), None
@@ -415,7 +406,7 @@ def validate_publication(
             raise ValueError('Every output document must match its frozen content.')
 
         if rendered_output is not None:
-            validate_rendered(publication, rendered_output, bundle.mode)
+            validate_rendered(publication, rendered_output)
         else:
             validate_render_approval(publication, key, None)
 
