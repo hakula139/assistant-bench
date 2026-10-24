@@ -37,6 +37,7 @@ jitless
 jnoortheen
 journalctl
 katex
+killpg
 kimi
 kwarg
 kwargs
@@ -66,11 +67,13 @@ pkgs
 pycache
 pydantic
 pydocstyle
+pyodide
 pypi
 pyproject
 pyrightconfig
 pytest
 PYTHONDONTWRITEBYTECODE
+pywrangler
 redoc
 rstrip
 Sarasa
