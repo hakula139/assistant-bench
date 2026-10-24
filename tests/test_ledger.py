@@ -8,10 +8,12 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from assistant_bench_arena.investigation import (
+    ImportRowPage,
     InvestigatedReceipt,
     InvestigationPage,
     NetworkLookup,
     ReceiptFilter,
+    StoredImportRow,
 )
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
@@ -48,7 +50,7 @@ from assistant_bench_arena.ledger_models import (
     Target,
     VoteMeaning,
 )
-from assistant_bench_arena.releases import Release
+from assistant_bench_arena.releases import Release, evaluation_identity, settlements
 from assistant_bench_arena.serialization import digest, source_identity
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
@@ -452,6 +454,77 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestSealEvaluation:
+        @pytest.mark.parametrize('failure', ['absent', 'errored'])
+        def test_authoritative_seal_rejects_a_passing_unusable_output(
+            self, d1_runtime: D1Runtime, failure: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await ledger.initialize(
+                        'deployment', 'local', (), local_key_id='synthetic-key-id'
+                    )
+                    release = make_release(cases=1)
+                    original = release.outputs[0]
+                    content_digest = (
+                        digest(None) if failure == 'absent' else original.content_digest
+                    )
+                    changed = original.model_copy(
+                        update={
+                            'key': digest(
+                                {
+                                    'source_digest': original.metadata.source_digest,
+                                    'content_digest': content_digest,
+                                }
+                            ),
+                            'content_digest': content_digest,
+                            'metadata': original.metadata.model_copy(
+                                update={'errored': failure == 'errored'}
+                            ),
+                        }
+                    )
+                    outputs = (changed, *release.outputs[1:])
+                    numerics = settlements(outputs)
+                    evaluation = release.evaluation.model_copy(
+                        update={
+                            'id': evaluation_identity(
+                                release.evaluation.manifest,
+                                release.cases,
+                                release.systems,
+                                outputs,
+                                numerics,
+                            ),
+                            'numerics': len(numerics),
+                        }
+                    )
+                    await ledger.stage_policy(evaluation.policy_id, release.policy)
+                    await ledger.stage_evaluation(evaluation)
+
+                    for system in release.systems:
+                        await ledger.stage_system(evaluation.id, system)
+
+                    for case in release.cases:
+                        await ledger.stage_case(evaluation.id, case)
+
+                    for output in outputs:
+                        await ledger.stage_output(evaluation.id, output)
+
+                    for row in numerics:
+                        await ledger.stage_numerical(evaluation.id, row)
+
+                    with pytest.raises(
+                        ValueError,
+                        match='An absent or errored output cannot pass its gate',
+                    ):
+                        await ledger.seal_evaluation(evaluation.id, 1)
+
+                    assert await transport.rows(
+                        'SELECT sealed_at FROM evaluations'
+                    ) == [{'sealed_at': None}]
+                    assert await transport.rows('SELECT * FROM family_state') == []
+
+            asyncio.run(scenario())
+
         @pytest.mark.parametrize('target', ['case', 'output', 'policy'])
         def test_public_seal_rejects_unknown_persisted_metadata(
             self, d1_runtime: D1Runtime, target: str
@@ -613,7 +686,177 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestOpenSession:
+        def test_concurrent_replay_preserves_first_clock_and_exact_owner_family(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with (
+                    d1_runtime.client() as (ledger, transport),
+                    d1_runtime.client() as (other, _),
+                ):
+                    await prepare(ledger, transport)
+                    await ledger.register_actor(Actor(id='other', created_at=2))
+                    context = Context(
+                        command_id='opaque-session', principal='actor', now=20
+                    )
+
+                    results = await asyncio.gather(
+                        ledger.open_session(context, 'writing'),
+                        other.open_session(
+                            context.model_copy(update={'now': 30}), 'writing'
+                        ),
+                    )
+
+                    assert results[0] == results[1]
+                    assert results[0].id == context.command_id
+                    assert results[0].eligible_votes == 0
+                    assert results[0].undo_acknowledgment is None
+                    original = await transport.rows(
+                        'SELECT actor_id, family, created_at, '
+                        'import_source, original_id FROM sessions WHERE id = ?',
+                        context.command_id,
+                    )
+                    assert original == [
+                        {
+                            'actor_id': 'actor',
+                            'family': 'writing',
+                            'created_at': original[0]['created_at'],
+                            'import_source': None,
+                            'original_id': None,
+                        }
+                    ]
+                    assert original[0]['created_at'] in (20, 30)
+                    assert (
+                        await ledger.open_session(
+                            context.model_copy(update={'now': 40}), 'writing'
+                        )
+                        == results[0]
+                    )
+
+                    with pytest.raises(CommandRejected, match='^conflict$'):
+                        await ledger.open_session(
+                            context.model_copy(update={'principal': 'other'}), 'writing'
+                        )
+
+                    with pytest.raises(CommandRejected, match='^conflict$'):
+                        await ledger.open_session(context, 'other-family')
+
+                    assert (
+                        await transport.rows(
+                            'SELECT actor_id, family, created_at, '
+                            'import_source, original_id FROM sessions WHERE id = ?',
+                            context.command_id,
+                        )
+                        == original
+                    )
+
+            asyncio.run(scenario())
+
     class TestRead:
+        def test_session_progress_and_family_status_track_undo_and_moderation(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    empty = await ledger.read.session('actor', 'session')
+                    initial = await ledger.investigation.status('writing')
+                    assert empty is not None and initial is not None
+                    assert empty.eligible_votes == initial.eligible_votes == 0
+                    assert empty.undo_acknowledgment is None
+                    assert initial.sampling_source is None
+                    assert initial.receipt_cutoff == 0
+                    assert await ledger.investigation.status('unknown') is None
+                    assert await ledger.read.session('other', 'session') is None
+
+                    receipts: list[Receipt] = []
+
+                    for index in range(2):
+                        lease = await ledger.issue(
+                            Context(
+                                command_id=f'draw:{index}',
+                                principal='actor',
+                                now=10 + index * 10,
+                            ),
+                            issue(lease=f'lease:{index}', case=index).model_copy(
+                                update={'session_version': index * 2}
+                            ),
+                        )
+                        receipts.append(
+                            await ledger.accept(
+                                Context(
+                                    command_id=f'vote:{index}',
+                                    principal='actor',
+                                    now=11 + index * 10,
+                                ),
+                                Accept(
+                                    lease_id=lease.id,
+                                    acknowledgment=f'ack:{index}',
+                                    choice='a',
+                                ),
+                            )
+                        )
+
+                    voted = await ledger.read.session('actor', 'session')
+                    assert voted is not None
+                    assert voted.eligible_votes == 2
+                    assert voted.undo_acknowledgment == receipts[-1].acknowledgment
+                    withdrawn = await ledger.withdraw(
+                        Context(command_id='undo-latest', principal='actor', now=30),
+                        'session',
+                        voted.version,
+                        receipts[-1].seq,
+                    )
+                    remaining = await ledger.read.session('actor', 'session')
+                    status = await ledger.investigation.status('writing')
+                    assert remaining is not None and status is not None
+                    assert remaining.eligible_votes == status.eligible_votes == 1
+                    assert remaining.undo_acknowledgment == receipts[0].acknowledgment
+                    assert status.event_cutoff == withdrawn.seq > status.receipt_cutoff
+                    assert status.receipt_cutoff == receipts[-1].seq
+                    assert status.state.last_evidence_seq == withdrawn.seq
+
+                    await ledger.stage_moderation(
+                        Moderation(
+                            id='exclude',
+                            family='writing',
+                            principal='admin',
+                            action='exclude',
+                            reason='Reviewed synthetic exclusion.',
+                            created_at=40,
+                            targets=(
+                                Target(receipt_seq=receipts[0].seq, claim_version=2),
+                            ),
+                        )
+                    )
+                    await ledger.seal_moderation('exclude', 40)
+                    excluded = await ledger.moderate(
+                        Context(command_id='exclude', principal='admin', now=40),
+                        'exclude',
+                        0,
+                    )
+                    moderated = await ledger.read.session('actor', 'session')
+                    status = await ledger.investigation.status('writing')
+                    assert moderated is not None and status is not None
+                    assert moderated.eligible_votes == status.eligible_votes == 0
+                    assert moderated.undo_acknowledgment == receipts[0].acknowledgment
+                    assert status.event_cutoff == excluded.seq
+                    assert status.receipt_cutoff == receipts[-1].seq
+                    await ledger.withdraw(
+                        Context(command_id='undo-excluded', principal='actor', now=50),
+                        'session',
+                        moderated.version,
+                        receipts[0].seq,
+                    )
+
+                    finished = await ledger.read.session('actor', 'session')
+                    assert finished is not None
+                    assert finished.eligible_votes == 0
+                    assert finished.undo_acknowledgment is None
+
+            asyncio.run(scenario())
+
         def test_large_release_round_trips_exactly_across_bounded_native_pages(
             self, d1_runtime: D1Runtime
         ) -> None:
@@ -628,6 +871,10 @@ class TestLedger:
                     evaluation = await ledger.read.evaluation(release.evaluation.id)
                     publication, rendered = await ledger.read.publication(
                         release.publication.id
+                    )
+                    assert (
+                        await ledger.read.publication_metadata(release.publication.id)
+                        == publication
                     )
 
                     assert evaluation.evaluation == release.evaluation
@@ -648,6 +895,173 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestInvestigation:
+        @pytest.mark.parametrize(
+            ('receipts', 'defect_count'),
+            [(80, 0), (3, 40_000), (1, 140_000)],
+            ids=['row-limit', 'byte-limit', 'oversized-record'],
+        )
+        def test_preserved_import_pages_retain_exact_rows_and_exclude_private_notes(
+            self, d1_runtime: D1Runtime, receipts: int, defect_count: int
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    await ledger.register_actor(
+                        Actor(id='owner', created_at=2, owner_namespace='owner-source')
+                    )
+                    assert await ledger.investigation.import_source('unknown') is None
+                    assert (
+                        await ledger.investigation.import_rows('unknown')
+                    ).rows == ()
+                    source = ImportSource(
+                        id='source',
+                        family='writing',
+                        owner_id='owner',
+                        source_schema='2',
+                        file_digest=digest('synthetic-source'),
+                        sessions=1,
+                        receipts=receipts,
+                        withdrawals=0,
+                    )
+                    await ledger.register_import(source)
+                    empty = await ledger.investigation.import_source(source.id)
+                    assert empty is not None
+                    assert empty.source == source
+                    assert (empty.sessions, empty.receipts, empty.withdrawals) == (
+                        0,
+                        0,
+                        0,
+                    )
+                    assert empty.completed_at is None
+                    raw_session = LegacySession(
+                        id='legacy-session', family='writing', started_at=LEGACY_TIME
+                    )
+                    session_row = ImportRow(
+                        kind='session',
+                        original_id=raw_session.id,
+                        source_hash=digest(raw_session),
+                        raw=raw_session,
+                    )
+                    await ledger.preserve_import(source.id, session_row)
+                    other_source = source.model_copy(
+                        update={
+                            'id': 'other-source',
+                            'receipts': 0,
+                            'file_digest': digest('other'),
+                        }
+                    )
+                    await ledger.register_import(other_source)
+                    await ledger.preserve_import(other_source.id, session_row)
+                    expected = [session_row]
+
+                    for index in range(1, receipts + 1):
+                        raw = legacy_vote(index).model_copy(
+                            update={'a_defects': json.dumps(['tone'] * defect_count)}
+                        )
+                        row = ImportRow(
+                            kind='receipt',
+                            original_id=str(index),
+                            source_hash=digest(raw),
+                            raw=raw,
+                        )
+                        await ledger.preserve_import(source.id, row)
+                        expected.append(row)
+
+                        if index == 1:
+                            partial = await ledger.investigation.import_source(
+                                source.id
+                            )
+                            assert partial is not None
+                            assert partial.source.receipts == receipts
+                            assert partial.sessions == partial.receipts == 1
+
+                    await ledger.annotate(
+                        'owner',
+                        ImportAnnotation(
+                            kind='import', source_id=source.id, original_id='1'
+                        ),
+                        'Synthetic private note.',
+                    )
+                    stored = await ledger.investigation.import_source(source.id)
+                    assert stored is not None
+                    assert (stored.sessions, stored.receipts, stored.withdrawals) == (
+                        1,
+                        receipts,
+                        0,
+                    )
+                    assert stored.completed_at is None
+                    first = await ledger.investigation.import_rows(source.id)
+
+                    if defect_count == 140_000:
+                        assert tuple(row.row for row in first.rows) == (session_row,)
+                        assert first.after == first.rows[0].seq
+
+                        with pytest.raises(
+                            ValueError,
+                            match='record exceeds the transport limit',
+                        ):
+                            await ledger.investigation.import_rows(
+                                source.id, first.rows[0].seq
+                            )
+
+                        assert (
+                            await ledger.investigation.import_source(source.id)
+                            == stored
+                        )
+                        return
+
+                    pages: list[ImportRowPage] = [first]
+                    observed: list[StoredImportRow] = list(first.rows)
+                    page = first
+
+                    while page.after is not None:
+                        previous = page.after
+                        page = await ledger.investigation.import_rows(
+                            source.id, previous
+                        )
+                        assert page.rows[0].seq > previous
+                        pages.append(page)
+                        observed.extend(page.rows)
+
+                    assert tuple(row.row for row in observed) == tuple(expected)
+                    assert [row.seq for row in observed] == [
+                        value['seq']
+                        for value in await transport.rows(
+                            'SELECT seq FROM import_rows '
+                            'WHERE source_id = ? ORDER BY seq',
+                            source.id,
+                        )
+                    ]
+                    assert all(row.source_id == source.id for row in observed)
+                    assert all(
+                        sum(len(row.model_dump_json().encode()) for row in page.rows)
+                        <= 1_048_576
+                        for page in pages
+                    )
+                    assert all(
+                        'Synthetic private note.' not in page.model_dump_json()
+                        for page in pages
+                    )
+                    assert await transport.rows('SELECT * FROM vote_receipts') == []
+
+                    if defect_count:
+                        assert tuple(row.row for row in first.rows) == tuple(
+                            expected[:3]
+                        )
+                        assert (
+                            sum(
+                                len(row.model_dump_json().encode())
+                                for row in (*first.rows, pages[1].rows[0])
+                            )
+                            > 1_048_576
+                        )
+                    else:
+                        assert tuple(row.row for row in first.rows) == tuple(
+                            expected[:75]
+                        )
+
+            asyncio.run(scenario())
+
         @pytest.mark.parametrize(
             'wide', [False, True], ids=['row-limit', 'utf8-byte-limit']
         )
@@ -872,6 +1286,8 @@ class TestLedger:
                         Context(command_id='issue', principal='actor', now=10), issue()
                     )
                     before = await ledger.freeze('before', 'writing', 20)
+                    assert await ledger.freshness(before.id) == 'current'
+                    assert await ledger.freshness('unknown-export') == 'unknown'
                     refreshed = make_release(suffix='next')
                     await publish_presentation(ledger, refreshed)
 
@@ -891,6 +1307,7 @@ class TestLedger:
                     assert after.policy == before.policy
                     assert after.publication_id == refreshed.publication.id
                     assert after.point_id == before.point_id
+                    assert await ledger.freshness(before.id) == 'current'
                     assert await ledger.resume('actor', 'session', 41) == lease
                     assert await ledger.freeze('before', 'writing', 50) == before
                     assert (
@@ -908,6 +1325,42 @@ class TestLedger:
                     assert (
                         await ledger.freeze('voted', 'writing', 70)
                     ).analysis_sequence > after.analysis_sequence
+                    assert await ledger.freshness(before.id) == 'stale'
+                    assert await ledger.freshness(after.id) == 'stale'
+                    assert await ledger.freshness('voted') == 'current'
+
+            asyncio.run(scenario())
+
+        def test_policy_activation_marks_the_previous_analysis_stale(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    original = await prepare(ledger, transport)
+                    before = await ledger.freeze('before-policy', 'writing', 20)
+                    policy = original.policy.model_copy(
+                        update={
+                            'method': original.policy.method.model_copy(
+                                update={'l2_penalty': 0.02}
+                            )
+                        }
+                    )
+                    changed = make_release(policy=policy)
+                    await publish_release(ledger, changed)
+
+                    await ledger.activate(
+                        Context(command_id='policy-change', principal='admin', now=30),
+                        'writing',
+                        before.family_revision,
+                        changed.evaluation.id,
+                        changed.publication.id,
+                        changed.points.id,
+                    )
+
+                    assert await ledger.freshness(before.id) == 'stale'
+                    current = await ledger.freeze('after-policy', 'writing', 31)
+                    assert current.policy_id != before.policy_id
+                    assert await ledger.freshness(current.id) == 'current'
 
             asyncio.run(scenario())
 
@@ -2846,6 +3299,72 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestAnnotate:
+        def test_opaque_acknowledgments_preserve_note_authority_and_redaction(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    await ledger.register_actor(Actor(id='other', created_at=2))
+                    lease = await ledger.issue(
+                        Context(command_id='draw', principal='actor', now=10), issue()
+                    )
+                    receipt = await ledger.accept(
+                        Context(command_id='vote', principal='actor', now=20),
+                        Accept(
+                            lease_id=lease.id, acknowledgment='opaque-ack', choice='a'
+                        ),
+                    )
+
+                    for actor, acknowledgment in (
+                        ('other', 'opaque-ack'),
+                        ('actor', 'unknown'),
+                    ):
+                        with pytest.raises(
+                            CommandRejected, match='^annotation_target$'
+                        ):
+                            await ledger.annotate_ack(
+                                actor, acknowledgment, 'Synthetic private note.', 21
+                            )
+
+                    assert (
+                        await transport.rows('SELECT * FROM private_annotations') == []
+                    )
+                    await ledger.annotate_ack(
+                        'actor', 'opaque-ack', 'Synthetic private note.', 22
+                    )
+                    assert await transport.rows(
+                        'SELECT receipt_seq, note, redacted_at FROM private_annotations'
+                    ) == [
+                        {
+                            'receipt_seq': receipt.seq,
+                            'note': 'Synthetic private note.',
+                            'redacted_at': None,
+                        }
+                    ]
+
+                    await ledger.annotate_ack('actor', 'opaque-ack', None, 23)
+                    await ledger.annotate_ack(
+                        'actor', 'opaque-ack', 'Another delivered note.', 24
+                    )
+                    await ledger.annotate_ack('actor', 'opaque-ack', None, 25)
+
+                    assert await transport.rows(
+                        'SELECT receipt_seq, note, redacted_at FROM private_annotations'
+                    ) == [{'receipt_seq': receipt.seq, 'note': None, 'redacted_at': 23}]
+                    assert (
+                        await ledger.resolve_receipt(
+                            Context(command_id='vote', principal='actor', now=26),
+                            VoteMeaning(lease_id=lease.id, choice='a'),
+                        )
+                        == receipt
+                    )
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 1}
+                    ]
+
+            asyncio.run(scenario())
+
         @pytest.mark.parametrize(
             ('mode', 'principal', 'rejection'),
             [
