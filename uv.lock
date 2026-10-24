@@ -250,6 +250,7 @@ name = "assistant-bench-arena"
 version = "0.1.0"
 source = { editable = "arena" }
 dependencies = [
+    { name = "fastapi" },
     { name = "itsdangerous" },
     { name = "pydantic" },
 ]
@@ -262,6 +263,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.156.4" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "pydantic", specifier = ">=2.14.1" },
 ]

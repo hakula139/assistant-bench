@@ -6,6 +6,7 @@ import voting from './src/integrations/voting';
 
 export default defineConfig({
   site: 'https://bench.hakula.xyz',
+  security: { csp: true },
   integrations: [react(), voting()],
   vite: {
     plugins: [tailwindcss()],

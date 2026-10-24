@@ -97,6 +97,17 @@ jobs:
       - name: Build site
         run: pnpm build
 
+      - name: Install Worker tooling
+        run: uv sync --locked
+
+      - name: Bundle the voting Worker
+        run: >-
+          uv run --directory arena pywrangler deploy --dry-run --env staging
+          --env-file /dev/null --outdir /tmp/assistant-bench-worker
+
+      - name: Check native dependency lock
+        run: git diff --exit-code -- arena/pylock.toml
+
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -108,7 +119,7 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: nix develop .#python -c bash -eo pipefail {0}
@@ -366,7 +377,7 @@ jobs:
             [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
   deploy:
-    name: Deploy Site
+    name: Deploy Voting
     if: github.ref == 'refs/heads/main'
     needs: result
     runs-on: ubuntu-latest
@@ -407,7 +418,9 @@ jobs:
 
       - name: Install dependencies
         if: steps.head.outputs.current
-        run: pnpm install
+        run: |
+          pnpm install
+          uv sync --locked
 
       - name: Download site artifact
         if: steps.head.outputs.current
@@ -421,4 +434,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm --filter web exec wrangler deploy
+        run: uv run bench arena deploy production
