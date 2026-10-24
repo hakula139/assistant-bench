@@ -44,7 +44,10 @@ def main() -> None:
     stale = sync(REPO_ROOT, check=args.check)
 
     for path in stale:
-        print(f'{"Stale" if args.check else "Updated"}: {path.relative_to(REPO_ROOT)}')
+        print(
+            f'{"Stale" if args.check else "Updated"} artifact '
+            f'`{path.relative_to(REPO_ROOT)}`.'
+        )
 
     if args.check and stale:
         raise SystemExit(1)
