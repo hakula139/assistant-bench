@@ -3,6 +3,8 @@
 import argparse
 from pathlib import Path
 
+from assistant_bench.paths import REPO_ROOT
+
 
 ASSETS = ('environment/Dockerfile', 'tests/test.sh', 'tests/verify_lib.py')
 
@@ -32,11 +34,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2]
-    stale = sync(root, check=args.check)
+    stale = sync(REPO_ROOT, check=args.check)
 
     for path in stale:
-        print(f'{"Stale" if args.check else "Updated"}: {path.relative_to(root)}')
+        print(f'{"Stale" if args.check else "Updated"}: {path.relative_to(REPO_ROOT)}')
 
     if args.check and stale:
         raise SystemExit(1)
