@@ -4,7 +4,9 @@ Learn how to vote on pairs by keyboard, read outputs as Markdown, and keep HTML 
 
 ## Opening the Vote Page
 
-`bench serve` builds the site. Open `http://127.0.0.1:8790/vote/`, or follow the Vote link in the header of the local site, and pick a family, listed under its aspect, to start a session. The session runs until every case has your vote, and the browser keeps one per family, so picking the family again or reloading the page resumes where you left off. Each vote saves as you submit it. Tap the vote count in the Prompt bar to see how many pairs remain.
+`bench serve` builds the site. Open `http://127.0.0.1:8790/vote/`, or follow the Vote link in the local site's header, and pick a family under its aspect.
+
+A session records one active vote per eligible case and ends when none remain. Cases need passing, different outputs from two systems to be eligible. The browser keeps one session per family, so picking the family again or reloading resumes where you left off. Each vote saves as you submit it. Tap the vote count in the Prompt bar to see how many pairs remain.
 
 ## Casting a Vote
 
