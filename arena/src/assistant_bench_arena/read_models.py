@@ -29,6 +29,12 @@ class OwnedSession(Record):
     version: NonNegativeInt
     current_lease: str | None
 
+    eligible_votes: NonNegativeInt
+    """Ordinary selected coverage members accepted in this session."""
+
+    undo_acknowledgment: str | None
+    """Latest unwithdrawn receipt, including independently moderated choices."""
+
 
 class ClaimState(Record):
     id: str

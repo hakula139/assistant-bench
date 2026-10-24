@@ -211,7 +211,15 @@ class LedgerReads:
             Statement(
                 sql="""
                     SELECT s.id, s.actor_id, s.family, r.canonical_actor,
-                        t.version, t.current_lease FROM sessions s
+                        t.version, t.current_lease,
+                        (SELECT count(*) FROM vote_receipts v
+                            JOIN coverage_members m ON m.receipt_seq = v.seq
+                            WHERE v.session_id = s.id) AS eligible_votes,
+                        (SELECT v.acknowledgment FROM vote_receipts v
+                            JOIN receipt_state state ON state.receipt_seq = v.seq
+                            WHERE v.session_id = s.id AND state.withdrawn IS NULL
+                            ORDER BY v.seq DESC LIMIT 1) AS undo_acknowledgment
+                    FROM sessions s
                     JOIN session_state t ON t.session_id = s.id
                     JOIN actor_resolution r ON r.family = s.family
                         AND r.actor_id = s.actor_id

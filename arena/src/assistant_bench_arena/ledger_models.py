@@ -542,7 +542,7 @@ class ImportRow(Record):
             'withdrawal': LegacyWithdrawal,
         }[self.kind]
 
-        if not isinstance(self.raw, expected):
+        if type(self.raw) is not expected:
             raise ValueError('An import row must match its declared source table.')
 
         original = (
