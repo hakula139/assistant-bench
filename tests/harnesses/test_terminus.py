@@ -40,16 +40,19 @@ class TestTerminus:
     class TestRun:
         def test_keeps_its_metadata_when_the_parent_raises(
             self,
+            agent_export: tuple[dict[str, str], NixosConfigExport],
             endpoint: StubEndpoint,
-            export: NixosConfigExport,
             monkeypatch: pytest.MonkeyPatch,
             tmp_path: Path,
         ) -> None:
+            env, export = agent_export
+            kwargs = options.terminus(make_system(harness='terminus-2'), TASK_SETTINGS)
+            Terminus.preflight(kwargs, endpoint.env | env)
             agent = Terminus(
                 logs_dir=tmp_path,
                 model_name='openai/acme/large',
-                extra_env=endpoint.env,
-                **options.terminus(make_system(harness='terminus-2'), TASK_SETTINGS),
+                extra_env=endpoint.env | env,
+                **kwargs,
             )
             context = AgentContext()
 

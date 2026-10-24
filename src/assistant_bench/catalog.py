@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Self
 
@@ -67,15 +68,17 @@ class NixosConfigExport(BaseModel):
     instructions: dict[str, str]
 
 
-def load_export() -> NixosConfigExport:
-    """Read the export that the dev shell names in `BENCH_NIXOS_CONFIG`.
+def load_export(
+    env: Callable[[str], str | None] = os.environ.get,
+) -> NixosConfigExport:
+    """Read the export `env` names in `BENCH_NIXOS_CONFIG`.
 
     Raises
     ------
     RuntimeError
-        The variable is unset outside the dev shell.
+        The variable is unset.
     """
-    path = os.environ.get(EXPORT_VAR)
+    path = env(EXPORT_VAR)
     if not path:
         raise RuntimeError(
             f'`{EXPORT_VAR}` is unset. Run `bench` inside `nix develop`.'

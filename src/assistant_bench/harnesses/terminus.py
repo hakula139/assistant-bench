@@ -53,7 +53,7 @@ class Terminus(Terminus2):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        nixos_config_rev = load_export().rev
+        nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
         try:
             await super().run(instruction, environment, context)
