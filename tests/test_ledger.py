@@ -697,25 +697,21 @@ class TestLedger:
                 ):
                     await prepare(ledger, transport)
                     await ledger.register_actor(Actor(id='other', created_at=2))
-                    context = Context(
-                        command_id='opaque-session', principal='actor', now=20
-                    )
+                    session_id = 'opaque-session'
 
                     results = await asyncio.gather(
-                        ledger.open_session(context, 'writing'),
-                        other.open_session(
-                            context.model_copy(update={'now': 30}), 'writing'
-                        ),
+                        ledger.open_session('actor', session_id, 'writing', 20),
+                        other.open_session('actor', session_id, 'writing', 30),
                     )
 
                     assert results[0] == results[1]
-                    assert results[0].id == context.command_id
+                    assert results[0].id == session_id
                     assert results[0].eligible_votes == 0
                     assert results[0].undo_acknowledgment is None
                     original = await transport.rows(
                         'SELECT actor_id, family, created_at, '
                         'import_source, original_id FROM sessions WHERE id = ?',
-                        context.command_id,
+                        session_id,
                     )
                     assert original == [
                         {
@@ -728,25 +724,23 @@ class TestLedger:
                     ]
                     assert original[0]['created_at'] in (20, 30)
                     assert (
-                        await ledger.open_session(
-                            context.model_copy(update={'now': 40}), 'writing'
-                        )
+                        await ledger.open_session('actor', session_id, 'writing', 40)
                         == results[0]
                     )
 
                     with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.open_session(
-                            context.model_copy(update={'principal': 'other'}), 'writing'
-                        )
+                        await ledger.open_session('other', session_id, 'writing', 40)
 
                     with pytest.raises(CommandRejected, match='^conflict$'):
-                        await ledger.open_session(context, 'other-family')
+                        await ledger.open_session(
+                            'actor', session_id, 'other-family', 40
+                        )
 
                     assert (
                         await transport.rows(
                             'SELECT actor_id, family, created_at, '
                             'import_source, original_id FROM sessions WHERE id = ?',
-                            context.command_id,
+                            session_id,
                         )
                         == original
                     )
