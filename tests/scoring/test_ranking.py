@@ -1,11 +1,13 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
 import pytest
 from scipy import optimize
 from statsmodels.discrete.discrete_model import Logit
-from threadpoolctl import threadpool_info, threadpool_limits
 
+from assistant_bench.scoring import ranking
 from assistant_bench.scoring.ranking import (
     ANCHOR,
     ELO_PER_LOGIT,
@@ -39,12 +41,6 @@ def simulate(
         case = f'case-{rng.integers(cases)}'
         comparisons.append(Comparison(str(left), str(right), score, case))
     return comparisons
-
-
-def blas_threads() -> set[int]:
-    return {
-        lib['num_threads'] for lib in threadpool_info() if lib['user_api'] == 'blas'
-    }
 
 
 class TestMatchups:
@@ -246,21 +242,34 @@ class TestRate:
     def test_fits_on_one_blas_thread_and_restores_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        threads: list[set[int]] = []
+        thread_limit = 8
+        threads: list[int] = []
         minimize = optimize.minimize
 
+        @contextmanager
+        def limit_threads(*, limits: int, user_api: str) -> Iterator[None]:
+            nonlocal thread_limit
+            assert user_api == 'blas'
+            previous, thread_limit = thread_limit, limits
+            try:
+                yield
+            finally:
+                thread_limit = previous
+
         def recording(*args: Any, **kwargs: Any) -> Any:
-            threads.append(blas_threads())
+            threads.append(thread_limit)
             return minimize(*args, **kwargs)
 
+        monkeypatch.setattr(ranking, 'threadpool_limits', limit_threads)
         monkeypatch.setattr(optimize, 'minimize', recording)
 
-        with threadpool_limits(limits=2, user_api='blas'):
+        with limit_threads(limits=2, user_api='blas'):
             rate(Matchups.build(simulate(60)), 'large', resamples=3)
-            after = blas_threads()
+            after = thread_limit
 
-        assert threads == [{1}] * 5
-        assert after == {2}
+        assert threads and all(limit == 1 for limit in threads)
+        assert after == 2
+        assert thread_limit == 8
 
 
 class TestTies:
