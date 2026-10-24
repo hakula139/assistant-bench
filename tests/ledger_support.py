@@ -20,8 +20,9 @@ from uuid import uuid4
 import httpx
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
-from assistant_bench_arena.ledger import CommandRejected, Ledger, Rejection
+from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import Row, SqlValue, Statement
+from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -317,6 +318,7 @@ class D1Runtime:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=errors,
+                limit=4_194_304,
             )
             transport = D1Transport(process)
 

@@ -5,16 +5,14 @@ from datetime import datetime
 from typing import get_args
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
-from assistant_bench_arena.ledger import CommandRejected, Ledger
+from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
     Accept,
     Actor,
     Attribution,
-    Case,
     Context,
-    Evaluation,
     ExportSection,
     ImportAnnotation,
     ImportDisposition,
@@ -33,73 +31,25 @@ from assistant_bench_arena.ledger_models import (
     Moderation,
     Network,
     NetworkTag,
-    Output,
-    Point,
-    PointSnapshot,
-    Publication,
     Quota,
     ReceiptAnnotation,
     RenderedOutput,
     Row,
     Session,
     Statement,
-    System,
     Target,
 )
+from assistant_bench_arena.releases import Release
 from assistant_bench_arena.serialization import digest, source_identity
-from assistant_bench_arena.snapshots import (
-    AnalysisPolicy,
-    CappedHumanWeights,
-    CaseApproval,
-    CaseContentApproval,
-    CaseMetadata,
-    EvaluationManifest,
-    FamilyDefinition,
-    OutputApproval,
-    OutputContentApproval,
-    OutputMetadata,
-    Presentation,
-    PresentedCase,
-    PublicApproval,
-    SettledWeights,
-    UnavailableInference,
-    VotesMethod,
-    VotesRules,
-)
+from assistant_bench_arena.transport import CommandRejected
+from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import D1Runtime, D1Transport
 
 
-RETENTION_MS = 90 * 86_400_000
+RETENTION_MS = 60 * 86_400_000
 LEGACY_TIME = '2026-01-01T00:00:00+00:00'
 LEGACY_MS = int(datetime.fromisoformat(LEGACY_TIME).timestamp() * 1_000)
 IMPORT_MS = LEGACY_MS + 86_400_000
-POLICY = AnalysisPolicy(
-    method=VotesMethod(
-        name='bradley-terry',
-        version=1,
-        l2_penalty=0.01,
-        points_per_logit=100.0,
-        anchor_score=1_000.0,
-        human_weights=CappedHumanWeights(
-            name='actor-proportional-cap',
-            version=1,
-            cap=100,
-            scope='family-evaluation',
-            repeat_handling='excluded',
-        ),
-        settled_weights=SettledWeights(name='sample-pair-share', version=1),
-    ),
-    rules=VotesRules(
-        preliminary_decisive_votes=10,
-        preliminary_decisive_vote_unit='raw-votes',
-        rater_agreement_floor=0.5,
-    ),
-    inference=UnavailableInference(
-        status='unavailable',
-        target='new-cases-and-voters',
-        reason='population-method-not-validated',
-    ),
-)
 SECTIONS = TypeAdapter(tuple[ExportSection, ...]).validate_python(
     get_args(ExportSection.__value__)
 )
@@ -212,15 +162,15 @@ async def legacy_plan(
                 command_id=f'legacy:{original_id}',
                 acknowledgment=f'legacy-ack:{original_id}',
                 claim_id='legacy-claim',
-                proof_evaluation_id='evaluation:1',
-                case_key='case:0',
-                a_output='case:0:large',
-                b_output='case:0:small',
+                proof_evaluation_id=make_release().evaluation.id,
+                case_key=case_key(0),
+                a_output=output_key(0, 'large'),
+                b_output=output_key(0, 'small'),
                 a_source_digest=source_identity(
-                    'case:0', 'large', 'fingerprint:large', raw.a_job, raw.a_trial
+                    case_key(0), 'large', 'fingerprint:large', raw.a_job, raw.a_trial
                 ),
                 b_source_digest=source_identity(
-                    'case:0', 'small', 'fingerprint:small', raw.b_job, raw.b_trial
+                    case_key(0), 'small', 'fingerprint:small', raw.b_job, raw.b_trial
                 ),
                 recorded_at=LEGACY_MS,
             )
@@ -301,183 +251,44 @@ async def publish(
     suffix: str = '1',
     family: str = 'writing',
     cases: int = 3,
-) -> None:
-    await ledger.stage_policy('policy', POLICY)
-    await ledger.stage_evaluation(
-        Evaluation(
-            id=f'evaluation:{suffix}',
-            family=family,
-            policy_id='policy',
-            manifest=EvaluationManifest(
-                family=FamilyDefinition(
-                    name=family,
-                    reference='large',
-                    systems=('large', 'small'),
-                    categories=(),
-                    defects=('tone',),
-                ),
-                policy=POLICY,
-            ),
-            cases=cases,
-            systems=2,
-            outputs=cases * 2,
-            numerics=0,
-        )
+    mode: Mode = 'local',
+    failing_case: int | None = None,
+    seal: bool = True,
+) -> Release:
+    release = make_release(
+        mode=mode, family=family, suffix=suffix, cases=cases, failing_case=failing_case
     )
+    evaluation = release.evaluation
+    await ledger.stage_policy(evaluation.policy_id, release.policy)
+    await ledger.stage_evaluation(evaluation)
 
-    for index, name in enumerate(('large', 'small')):
-        await ledger.stage_system(
-            f'evaluation:{suffix}',
-            System(id=name, fingerprint=f'fingerprint:{name}', order=index),
-        )
+    for system in release.systems:
+        await ledger.stage_system(evaluation.id, system)
 
-    for index in range(cases):
-        case = f'case:{index}'
-        document = case_document(index)
-        await ledger.stage_case(
-            f'evaluation:{suffix}',
-            Case(
-                key=case,
-                source='synthetic',
-                instruction_digest=digest(document.instruction),
-                metadata=CaseMetadata(
-                    source_digest=digest({'instruction': document.instruction}),
-                    approval=CaseContentApproval(
-                        case_key=case,
-                        source='synthetic',
-                        attestation='Synthetic fixture content.',
-                        instruction_digest=digest(document.instruction),
-                    ),
-                ),
-            ),
-        )
+    for case in release.cases:
+        await ledger.stage_case(evaluation.id, case)
 
-        for name in ('large', 'small'):
-            content = output_content(index, name)
-            await ledger.stage_output(
-                f'evaluation:{suffix}',
-                Output(
-                    key=f'{case}:{name}',
-                    case_key=case,
-                    system_id=name,
-                    content_digest=digest(content),
-                    verdict='pass',
-                    length=len(content),
-                    approved_public=True,
-                    metadata=OutputMetadata(
-                        source_digest=source_identity(
-                            case,
-                            name,
-                            f'fingerprint:{name}',
-                            'synthetic-private-job',
-                            f'original-{name}-trial',
-                        ),
-                        errored=False,
-                        reward=1.0,
-                        cost_usd=None,
-                        latency_sec=None,
-                        output_tokens=None,
-                        approval=OutputContentApproval(
-                            output_key=f'{case}:{name}', content_digest=digest(content)
-                        ),
-                    ),
-                ),
-            )
+    for output in release.outputs:
+        await ledger.stage_output(evaluation.id, output)
 
-    await ledger.seal_evaluation(f'evaluation:{suffix}', 0)
-    await publish_presentation(
-        ledger,
-        suffix=suffix,
-        evaluation_id=f'evaluation:{suffix}',
-        cases=cases,
-        family=family,
-    )
+    for numeric in release.numerics:
+        await ledger.stage_numerical(evaluation.id, numeric)
+
+    if seal:
+        await ledger.seal_evaluation(evaluation.id, 0)
+        await publish_presentation(ledger, release)
+
+    return release
 
 
-def case_document(index: int) -> PresentedCase:
-    return PresentedCase(
-        instruction=f'Synthetic instruction for case {index}.',
-        checklist=('Use the requested tone.',),
-    )
+async def publish_presentation(ledger: Ledger, release: Release) -> None:
+    await ledger.stage_publication(release.publication)
 
+    for rendered in release.rendered:
+        await ledger.stage_rendered(release.publication.id, rendered)
 
-def output_content(index: int, name: str) -> str:
-    return f'Output for case {index} from {name}.'
-
-
-async def publish_presentation(
-    ledger: Ledger,
-    *,
-    suffix: str,
-    evaluation_id: str,
-    cases: int = 3,
-    family: str = 'writing',
-) -> None:
-    await ledger.stage_publication(
-        Publication(
-            id=f'publication:{suffix}',
-            evaluation_id=evaluation_id,
-            presentation=Presentation(
-                family=family,
-                aspect=None,
-                display_name=family,
-                render='text',
-                systems={'large': 'Large', 'small': 'Small'},
-                cases={f'case:{index}': case_document(index) for index in range(cases)},
-            ),
-            approval=PublicApproval(
-                family=family,
-                cases=tuple(
-                    CaseApproval(
-                        case_key=f'case:{index}',
-                        source='synthetic',
-                        attestation='Synthetic fixture content.',
-                        instruction_digest=digest(case_document(index).instruction),
-                        presentation_digest=digest(case_document(index)),
-                    )
-                    for index in range(cases)
-                ),
-                outputs=tuple(
-                    OutputApproval(
-                        output_key=f'case:{index}:{name}',
-                        content_digest=digest(output_content(index, name)),
-                        render_digest=digest(
-                            {'render': 'text', 'content': output_content(index, name)}
-                        ),
-                    )
-                    for index in range(cases)
-                    for name in ('large', 'small')
-                ),
-            ),
-            outputs=cases * 2,
-        )
-    )
-
-    for index in range(cases):
-        for name in ('large', 'small'):
-            await ledger.stage_rendered(
-                f'publication:{suffix}',
-                RenderedOutput(
-                    output_key=f'case:{index}:{name}',
-                    render='text',
-                    content=output_content(index, name),
-                    content_digest=digest(output_content(index, name)),
-                    approved_public=True,
-                ),
-            )
-
-    await ledger.seal_publication(f'publication:{suffix}', 0)
-    await ledger.stage_points(
-        PointSnapshot(
-            id=f'points:{suffix}',
-            evaluation_id=evaluation_id,
-            policy_id='policy',
-            points={
-                name: Point(score=None, component=None) for name in ('large', 'small')
-            },
-        ),
-        0,
-    )
+    await ledger.seal_publication(release.publication.id, 0)
+    await ledger.stage_points(release.points, 0)
 
 
 async def prepare(
@@ -486,7 +297,7 @@ async def prepare(
     *,
     mode: Mode = 'local',
     quotas: tuple[Quota, ...] = (),
-) -> None:
+) -> Release:
     await transport.reset()
     await ledger.initialize(
         'test-deployment',
@@ -494,19 +305,20 @@ async def prepare(
         quotas,
         attribution_ms=RETENTION_MS if mode == 'public' else None,
     )
-    await publish(ledger)
+    release = await publish(ledger, mode=mode)
     await ledger.activate(
         Context(command_id='activate:1', principal='admin', now=1),
         'writing',
         0,
-        'evaluation:1',
-        'publication:1',
-        'points:1',
+        release.evaluation.id,
+        release.publication.id,
+        release.points.id,
     )
     await ledger.register_actor(Actor(id='actor', created_at=2))
     await ledger.start_session(
         Session(id='session', actor_id='actor', family='writing', created_at=2)
     )
+    return release
 
 
 def issue(*, session: str = 'session', lease: str = 'lease', case: int = 0) -> Issue:
@@ -516,9 +328,9 @@ def issue(*, session: str = 'session', lease: str = 'lease', case: int = 0) -> I
         session_version=0,
         claim_id=f'claim:{session}:{case}',
         claim_version=0,
-        case_key=f'case:{case}',
-        a_output=f'case:{case}:large',
-        b_output=f'case:{case}:small',
+        case_key=case_key(case),
+        a_output=output_key(case, 'large'),
+        b_output=output_key(case, 'small'),
         expires_at=10_000,
     )
 
@@ -551,6 +363,200 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+    class TestSealEvaluation:
+        @pytest.mark.parametrize('target', ['case', 'output', 'policy'])
+        def test_public_seal_rejects_unknown_persisted_metadata(
+            self, d1_runtime: D1Runtime, target: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await ledger.initialize(
+                        'public', 'public', (), attribution_ms=RETENTION_MS
+                    )
+                    release = make_release(mode='public')
+                    evaluation = release.evaluation
+
+                    if target == 'policy':
+                        await transport.execute(
+                            Statement(
+                                sql="""
+                                INSERT INTO policies(id, body) VALUES (?,
+                                    json_set(?, '$.private_endpoint', ?))
+                            """,
+                                params=(
+                                    evaluation.policy_id,
+                                    release.policy.model_dump_json(),
+                                    'Synthetic private marker.',
+                                ),
+                            )
+                        )
+                    else:
+                        await ledger.stage_policy(evaluation.policy_id, release.policy)
+
+                    await ledger.stage_evaluation(evaluation)
+
+                    for system in release.systems:
+                        await ledger.stage_system(evaluation.id, system)
+
+                    for case in release.cases:
+                        if target == 'case':
+                            await transport.execute(
+                                Statement(
+                                    sql="""
+                                    INSERT INTO evaluation_cases(evaluation_id,
+                                        case_key, category, source, instruction_digest,
+                                        body) VALUES (?, ?, ?, ?, ?, json_set(?,
+                                        '$.metadata.private_endpoint', ?))
+                                """,
+                                    params=(
+                                        evaluation.id,
+                                        case.key,
+                                        case.category,
+                                        case.source,
+                                        case.instruction_digest,
+                                        case.model_dump_json(),
+                                        'Synthetic private marker.',
+                                    ),
+                                )
+                            )
+                        else:
+                            await ledger.stage_case(evaluation.id, case)
+
+                    for output in release.outputs:
+                        if target == 'output':
+                            await transport.execute(
+                                Statement(
+                                    sql="""
+                                    INSERT INTO evaluation_outputs(evaluation_id,
+                                        output_key, case_key, system_id, content_digest,
+                                        verdict, output_length, approved_public, body)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, json_set(?,
+                                        '$.metadata.private_endpoint', ?))
+                                """,
+                                    params=(
+                                        evaluation.id,
+                                        output.key,
+                                        output.case_key,
+                                        output.system_id,
+                                        output.content_digest,
+                                        output.verdict,
+                                        output.length,
+                                        int(output.approved_public),
+                                        output.model_dump_json(),
+                                        'Synthetic private marker.',
+                                    ),
+                                )
+                            )
+                        else:
+                            await ledger.stage_output(evaluation.id, output)
+
+                    with pytest.raises(ValidationError, match='extra_forbidden'):
+                        await ledger.seal_evaluation(evaluation.id, 1)
+
+                    assert await transport.rows(
+                        'SELECT sealed_at FROM evaluations'
+                    ) == [{'sealed_at': None}]
+                    assert await transport.rows('SELECT * FROM family_state') == []
+
+            asyncio.run(scenario())
+
+    class TestSealPublication:
+        @pytest.mark.parametrize(
+            'mutation', ['missing-approval', 'unknown-presentation', 'changed-render']
+        )
+        def test_public_seal_rejects_changed_or_unapproved_presentation(
+            self, d1_runtime: D1Runtime, mutation: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await ledger.initialize(
+                        'public', 'public', (), attribution_ms=RETENTION_MS
+                    )
+                    release = await publish(ledger, mode='public', seal=False)
+                    await ledger.seal_evaluation(release.evaluation.id, 0)
+                    publication = release.publication
+
+                    if mutation == 'changed-render':
+                        await ledger.stage_publication(publication)
+                    else:
+                        path, value = (
+                            ('$.approval', None)
+                            if mutation == 'missing-approval'
+                            else ('$.presentation.private_endpoint', 'private')
+                        )
+                        await transport.execute(
+                            Statement(
+                                sql="""
+                                INSERT INTO publications(id, evaluation_id, body,
+                                    output_count) VALUES (?, ?, json_set(?, ?, ?), ?)
+                            """,
+                                params=(
+                                    publication.id,
+                                    publication.evaluation_id,
+                                    publication.model_dump_json(),
+                                    path,
+                                    value,
+                                    publication.outputs,
+                                ),
+                            )
+                        )
+
+                    for index, rendered in enumerate(release.rendered):
+                        if mutation == 'changed-render' and index == 0:
+                            rendered = RenderedOutput(
+                                output_key=rendered.output_key,
+                                render=rendered.render,
+                                content='Unapproved replacement.',
+                                content_digest=rendered.content_digest,
+                                approved_public=rendered.approved_public,
+                            )
+
+                        await ledger.stage_rendered(publication.id, rendered)
+
+                    with pytest.raises(ValueError):
+                        await ledger.seal_publication(publication.id, 1)
+
+                    assert await transport.rows(
+                        'SELECT sealed_at FROM publications'
+                    ) == [{'sealed_at': None}]
+                    assert await transport.rows('SELECT * FROM family_state') == []
+
+            asyncio.run(scenario())
+
+    class TestRead:
+        def test_large_release_round_trips_exactly_across_bounded_native_pages(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await transport.reset()
+                    await ledger.initialize('large-release', 'local', ())
+                    release = await publish(ledger, cases=60)
+
+                    evaluation = await ledger.read.evaluation(release.evaluation.id)
+                    publication, rendered = await ledger.read.publication(
+                        release.publication.id
+                    )
+
+                    assert evaluation.evaluation == release.evaluation
+                    assert evaluation.policy == release.policy
+                    assert {row.key: row for row in evaluation.cases} == {
+                        row.key: row for row in release.cases
+                    }
+                    assert {row.key: row for row in evaluation.outputs} == {
+                        row.key: row for row in release.outputs
+                    }
+                    assert evaluation.systems == release.systems
+                    assert publication == release.publication
+                    assert {row.output_key: row for row in rendered} == {
+                        row.output_key: row for row in release.rendered
+                    }
+                    assert await ledger.read.points(release.points.id) == release.points
+
+            asyncio.run(scenario())
+
     class TestActivate:
         def test_presentation_refresh_preserves_numerical_freshness_and_pending_lease(
             self, d1_runtime: D1Runtime
@@ -562,17 +568,16 @@ class TestLedger:
                         Context(command_id='issue', principal='actor', now=10), issue()
                     )
                     before = await ledger.freeze('before', 'writing', 20)
-                    await publish_presentation(
-                        ledger, suffix='next', evaluation_id='evaluation:1'
-                    )
+                    refreshed = make_release(suffix='next')
+                    await publish_presentation(ledger, refreshed)
 
                     await ledger.activate(
                         Context(command_id='activate:next', principal='admin', now=30),
                         'writing',
                         before.family_revision,
-                        'evaluation:1',
-                        'publication:next',
-                        'points:next',
+                        refreshed.evaluation.id,
+                        refreshed.publication.id,
+                        refreshed.points.id,
                     )
                     after = await ledger.freeze('after', 'writing', 40)
 
@@ -580,8 +585,8 @@ class TestLedger:
                     assert after.family_revision > before.family_revision
                     assert after.evaluation_id == before.evaluation_id
                     assert after.policy == before.policy
-                    assert after.publication_id == 'publication:next'
-                    assert after.point_id == 'points:next'
+                    assert after.publication_id == refreshed.publication.id
+                    assert after.point_id == before.point_id
                     assert await ledger.resume('actor', 'session', 41) == lease
                     assert await ledger.freeze('before', 'writing', 50) == before
                     assert (
@@ -594,11 +599,97 @@ class TestLedger:
                         Accept(lease_id=lease.id, acknowledgment='ack', choice='b'),
                     )
 
-                    assert accepted.publication_id == 'publication:1'
-                    assert accepted.point_id == 'points:1'
+                    assert accepted.publication_id == make_release().publication.id
+                    assert accepted.point_id == make_release().points.id
                     assert (
                         await ledger.freeze('voted', 'writing', 70)
                     ).analysis_sequence > after.analysis_sequence
+
+            asyncio.run(scenario())
+
+        @pytest.mark.parametrize(
+            'failing_case', [0, 1], ids=['accepted-case', 'pending-case']
+        )
+        def test_gate_refresh_updates_eligibility_and_permanently_revokes_stale_leases(
+            self, d1_runtime: D1Runtime, failing_case: int
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    original = await prepare(ledger, transport)
+                    first = await ledger.issue(
+                        Context(command_id='draw:0', principal='actor', now=10), issue()
+                    )
+                    receipt = await ledger.accept(
+                        Context(command_id='vote', principal='actor', now=20),
+                        Accept(lease_id=first.id, acknowledgment='ack', choice='a'),
+                    )
+                    pending = await ledger.issue(
+                        Context(command_id='draw:1', principal='actor', now=21),
+                        issue(lease='pending', case=1).model_copy(
+                            update={'session_version': 2}
+                        ),
+                    )
+                    before = await ledger.freeze('before-gate', 'writing', 22)
+                    gated = await publish(
+                        ledger, suffix='gated', failing_case=failing_case
+                    )
+
+                    changed = await ledger.activate(
+                        Context(command_id='gate', principal='admin', now=30),
+                        'writing',
+                        before.family_revision,
+                        gated.evaluation.id,
+                        gated.publication.id,
+                        gated.points.id,
+                    )
+
+                    assert await transport.rows(
+                        'SELECT receipt_seq FROM eligible_claims'
+                    ) == ([] if failing_case == 0 else [{'receipt_seq': receipt.seq}])
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 0 if failing_case == 0 else 1}
+                    ]
+                    assert await ledger.resume('actor', 'session', 31) == (
+                        pending if failing_case == 0 else None
+                    )
+
+                    await ledger.activate(
+                        Context(
+                            command_id='restore-evaluation', principal='admin', now=40
+                        ),
+                        'writing',
+                        changed.seq,
+                        original.evaluation.id,
+                        original.publication.id,
+                        original.points.id,
+                    )
+
+                    assert await transport.rows(
+                        'SELECT receipt_seq FROM eligible_claims'
+                    ) == [{'receipt_seq': receipt.seq}]
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 1}
+                    ]
+                    assert await ledger.resume('actor', 'session', 41) == (
+                        pending if failing_case == 0 else None
+                    )
+
+                    if failing_case == 1:
+                        with pytest.raises(CommandRejected, match='^lease_stale$'):
+                            await ledger.accept(
+                                Context(
+                                    command_id='stale-vote', principal='actor', now=42
+                                ),
+                                Accept(
+                                    lease_id=pending.id,
+                                    acknowledgment='stale',
+                                    choice='a',
+                                ),
+                            )
+
+                        assert await transport.rows(
+                            "SELECT status FROM pair_leases WHERE id = 'pending'"
+                        ) == [{'status': 'revoked'}]
 
             asyncio.run(scenario())
 
@@ -706,8 +797,12 @@ class TestLedger:
                     ).model_copy(
                         update={
                             'claim_id': 'repeat-claim',
-                            'a_output': 'case:0:small' if swapped else 'case:0:large',
-                            'b_output': 'case:0:large' if swapped else 'case:0:small',
+                            'a_output': output_key(0, 'small')
+                            if swapped
+                            else output_key(0, 'large'),
+                            'b_output': output_key(0, 'large')
+                            if swapped
+                            else output_key(0, 'small'),
                             'expires_at': now + 10_000,
                             'repeat_of': primary.seq,
                         }
@@ -880,14 +975,20 @@ class TestLedger:
                         ),
                     )
                     await prepare(ledger, transport, mode='public', quotas=quotas)
-                    await publish(ledger, suffix='other', family='other')
+                    await publish(ledger, suffix='other', family='other', mode='public')
                     await ledger.activate(
                         Context(command_id='activate:other', principal='admin', now=2),
                         'other',
                         0,
-                        'evaluation:other',
-                        'publication:other',
-                        'points:other',
+                        make_release(
+                            mode='public', family='other', suffix='other'
+                        ).evaluation.id,
+                        make_release(
+                            mode='public', family='other', suffix='other'
+                        ).publication.id,
+                        make_release(
+                            mode='public', family='other', suffix='other'
+                        ).points.id,
                     )
                     await ledger.register_actor(
                         Actor(id='owner', created_at=2, owner_namespace='owner-source')
@@ -1715,7 +1816,10 @@ class TestLedger:
                     for receipt in rows['receipts']:
                         assert receipt['origin'] == 'legacy'
                         assert receipt['import_source'] == 'source'
-                        assert receipt['proof_evaluation_id'] == 'evaluation:1'
+                        assert (
+                            receipt['proof_evaluation_id']
+                            == make_release().evaluation.id
+                        )
                         assert receipt['recorded_at'] == LEGACY_MS
                         assert receipt['legacy_duration_sec'] == 1.5
                         assert all(
@@ -2120,14 +2224,14 @@ class TestLedger:
                             raw=later,
                         ),
                     )
-                    await publish(ledger, suffix='next', cases=4)
+                    refreshed = await publish(ledger, suffix='next', cases=4)
                     await ledger.activate(
                         Context(command_id='activate:next', principal='admin', now=30),
                         'writing',
                         frozen.family_revision,
-                        'evaluation:next',
-                        'publication:next',
-                        'points:next',
+                        refreshed.evaluation.id,
+                        refreshed.publication.id,
+                        refreshed.points.id,
                     )
                     after = await export_rows(ledger, frozen.id, limit=3)
                     current = await ledger.freeze('current', 'writing', 40)
@@ -2169,6 +2273,98 @@ class TestLedger:
             asyncio.run(scenario())
 
     class TestModerate:
+        def test_restoring_historical_exclusion_preserves_the_newer_selected_vote(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    lease = await ledger.issue(
+                        Context(command_id='draw', principal='actor', now=10), issue()
+                    )
+                    old = await ledger.accept(
+                        Context(command_id='vote:old', principal='actor', now=20),
+                        Accept(lease_id=lease.id, acknowledgment='old', choice='a'),
+                    )
+                    await ledger.stage_moderation(
+                        Moderation(
+                            id='exclude',
+                            family='writing',
+                            principal='admin',
+                            action='exclude',
+                            reason='Reviewed synthetic exclusion.',
+                            created_at=30,
+                            targets=(Target(receipt_seq=old.seq, claim_version=2),),
+                        )
+                    )
+                    await ledger.seal_moderation('exclude', 30)
+                    excluded = await ledger.moderate(
+                        Context(command_id='exclude', principal='admin', now=30),
+                        'exclude',
+                        0,
+                    )
+                    await ledger.start_session(
+                        Session(
+                            id='next-session',
+                            actor_id='actor',
+                            family='writing',
+                            created_at=40,
+                        )
+                    )
+                    replacement = await ledger.issue(
+                        Context(command_id='next-draw', principal='actor', now=40),
+                        issue(session='next-session', lease='replacement').model_copy(
+                            update={'claim_id': old.claim_id, 'claim_version': 3}
+                        ),
+                    )
+                    latest = await ledger.accept(
+                        Context(command_id='vote:new', principal='actor', now=50),
+                        Accept(
+                            lease_id=replacement.id, acknowledgment='latest', choice='b'
+                        ),
+                    )
+                    await ledger.stage_moderation(
+                        Moderation(
+                            id='restore',
+                            family='writing',
+                            principal='admin',
+                            action='restore',
+                            reason='Reviewed historical correction.',
+                            created_at=60,
+                            targets=(
+                                Target(
+                                    receipt_seq=old.seq,
+                                    claim_version=5,
+                                    exclusion_seq=excluded.seq,
+                                ),
+                            ),
+                        )
+                    )
+                    await ledger.seal_moderation('restore', 60)
+
+                    await ledger.moderate(
+                        Context(command_id='restore', principal='admin', now=60),
+                        'restore',
+                        0,
+                    )
+
+                    assert await transport.rows(
+                        'SELECT receipt_seq FROM eligible_claims'
+                    ) == [{'receipt_seq': latest.seq}]
+                    assert await transport.rows('SELECT count FROM coverage') == [
+                        {'count': 1}
+                    ]
+                    assert await transport.rows(
+                        'SELECT excluded, superseded FROM receipt_state '
+                        'WHERE receipt_seq = ?',
+                        old.seq,
+                    ) == [{'excluded': None, 'superseded': latest.seq}]
+                    assert await transport.rows(
+                        'SELECT choice FROM vote_receipts WHERE seq = ?', old.seq
+                    ) == [{'choice': 'a'}]
+
+            asyncio.run(scenario())
+
         def test_applies_later_chunks_for_the_same_reviewed_historical_claim(
             self, d1_runtime: D1Runtime
         ) -> None:
