@@ -1,6 +1,7 @@
 """Systems as committed at another Git revision, for comparing fingerprints."""
 
 import subprocess
+import tomllib
 from pathlib import Path
 
 from assistant_bench.catalog import (
@@ -9,10 +10,24 @@ from assistant_bench.catalog import (
     System,
     parse_systems,
 )
+from assistant_bench.families import family_names, load_family
+from assistant_bench.generation import parse_generation
+from assistant_bench.jobs import family_systems
 from assistant_bench.paths import REPO_ROOT
 
 
-def systems_at(revision: str) -> dict[str, System]:
+def current_systems(systems: dict[str, System]) -> dict[str, System]:
+    """Capture each currently runnable family and system's generation identity."""
+    resolved: dict[str, System] = {}
+    for name in family_names():
+        family = load_family(name)
+        listed = [systems[name] for name in family.settings.systems]
+        for system in family_systems(family, listed):
+            resolved[f'{name}/{system.name}'] = system
+    return resolved
+
+
+def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
     """Resolve the revision's `systems.toml` against the revision's own export.
 
     Raises
@@ -22,6 +37,34 @@ def systems_at(revision: str) -> dict[str, System]:
         build its export.
     """
     commit = _output('git', 'rev-parse', '--verify', f'{revision}^{{commit}}')
+    selections: dict[str, tuple[str, list[str]]] = {}
+    paths = _output('git', 'ls-tree', '-r', '--name-only', commit, 'families')
+    for path in paths.splitlines():
+        if not path.endswith('/family.toml'):
+            continue
+        family = Path(path).parent.name
+        settings = tomllib.loads(_output('git', 'show', f'{commit}:{path}'))
+        names = [
+            name
+            for name in settings.get('systems', [])
+            if f'{family}/{name}' in selected
+        ]
+        if names:
+            selections[family] = (settings.get('harness', 'generate'), names)
+    if not selections:
+        return {}
+
+    try:
+        generation = parse_generation(
+            _output('git', 'show', f'{commit}:pyproject.toml'),
+            _output('git', 'show', f'{commit}:uv.lock'),
+        )
+    except KeyError as error:
+        raise ValueError(
+            f'Revision `{revision}` has no declared generation protocol for '
+            'its shared runnable systems. Give those systems new names.'
+        ) from error
+
     systems = _output('git', 'show', f'{commit}:{SYSTEMS_FILE}')
 
     export_path = _output(
@@ -34,7 +77,12 @@ def systems_at(revision: str) -> dict[str, System]:
 
     export = NixosConfigExport.model_validate_json(Path(export_path).read_bytes())
 
-    return parse_systems(export, systems)
+    resolved = parse_systems(export, systems, generation)
+    return {
+        f'{family}/{name}': resolved[name].model_copy(update={'harness': harness})
+        for family, (harness, names) in selections.items()
+        for name in names
+    }
 
 
 def changed_fingerprints(base: dict[str, System], head: dict[str, System]) -> list[str]:

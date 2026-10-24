@@ -125,13 +125,12 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
-Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints). Give the changed system a new table name and leave the old one for its frozen results, unless the recipe below cannot pin its `prompt`. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
+Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints). Give the changed system a new table name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 
-When the catalog moves a model key to a new snapshot, keep the old name on its old resolution:
+When changing a model snapshot, effort, capacities, or generation protocol:
 
-1. Run `uv run bench fingerprints <base>`, which names each system whose fingerprint changed and prints the `route` table that `<base>` resolved it to from that revision's catalog. A system with a `prompt` cannot be pinned this way, so the command prints only a notice for it.
-2. For a system without a `prompt`, replace the old name's table with the printed table, which pins its route, capacities, vendor, effort, price, and display name and sets no `model`.
-3. Add the new snapshot in a table whose key ends in the snapshot, as `deepseek-v4.1-flash-1017` does, and set a `display_name` that tells it apart from the pinned table.
-4. Replace the old name with the new one in each family's `systems` list, including `reference` where it named the old one. `bench close` anchors the board at the new snapshot once it ranks, through its votes or the results its gates and tests settle, and until then anchors it at the most-voted system and records that system as the round's `anchor`.
-5. Before removing a runnable table, close a valid report while its public metadata is available. Retired outputs can enter a later report only when their known fingerprint matches that ID's latest prior report. A system with a `prompt` cannot be pinned by this recipe, so retire it after closing.
-6. Run `uv run bench fingerprints <base>` again to confirm that no system keeps a name under another fingerprint.
+1. Run `uv run bench fingerprints <base>` to identify runnable systems whose generation identity changed.
+2. Give each changed configuration a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
+3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
+4. Preserve valid closed reports for retired systems. Remove their runnable tables when nothing else, such as authored-task provenance, references them.
+5. Run `uv run bench fingerprints <base>` again to confirm that no runnable name retains a changed fingerprint.

@@ -9,7 +9,8 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai.types.chat import ChatCompletionMessageParam
 
-from assistant_bench.catalog import generation_version, load_export
+from assistant_bench.catalog import load_export
+from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 

@@ -646,7 +646,7 @@ def _inputs(
 def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
-    """Return one output per finished trial of a job.
+    """Return one output per finished trial whose case is still current.
 
     Raises
     ------
@@ -657,6 +657,7 @@ def read_trials(
     return [
         _output(family, candidate, systems, cases[candidate.case].instruction)
         for candidate in _read_trials(family, [_source(job_dir)])
+        if candidate.case in cases
     ]
 
 

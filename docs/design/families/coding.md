@@ -4,7 +4,7 @@
 
 ## Systems and Samples
 
-Every system that [`family.toml`](../../../families/coding-repo/family.toml) lists runs under `terminus-2`, Harbor's terminal agent, as [Systems](../systems.md#harnesses) describes, so a system keeps the name it has on the writing boards while its fingerprint hashes the family's harness. Each system has the same budget: 40 agent turns and 32,000 output tokens per model call, reasoning included. A task's 1,800-second agent timeout is only a safety net, since Harbor reruns a timed-out trial on every later run. Each task and system pair runs once, and `gemini-3.8-flash` is the reference that anchors the board at 1,000 when a round ranks it.
+Every system that [`family.toml`](../../../families/coding-repo/family.toml) lists runs under `terminus-2`, Harbor's terminal agent, as [Systems](../systems.md#harnesses) describes. Its fingerprint binds the family's harness and the locked Harbor version. Each system uses its resolved completion allowance and strongest supported effort, with native context management and no family turn cutoff. A task's 1,800-second agent timeout remains an operational watchdog. Each task and system pair runs once, and `gemini-3.8-flash-high` is the reference that anchors the board at 1,000 when a round ranks it.
 
 ## Categories
 

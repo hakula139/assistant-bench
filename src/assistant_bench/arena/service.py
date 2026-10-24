@@ -20,7 +20,6 @@ from assistant_bench.arena.store import (
 from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
-    case_task,
     family_names,
     load_cases,
     load_family,
@@ -72,7 +71,7 @@ class ArenaFamily:
     render: Literal['text', 'html', 'diff']
     defects: list[Defect]
     instructions: dict[str, str]
-    """Rendered task instructions used by the trials."""
+    """Current source instructions matching collected trials."""
 
     checklists: dict[str, list[str]]
     pool: Pool
@@ -107,9 +106,7 @@ def load_families() -> dict[str, ArenaFamily]:
                         render=family.settings.render,
                         defects=family.settings.defects,
                         instructions={
-                            case: (
-                                case_task(family, case) / 'instruction.md'
-                            ).read_text()
+                            case: cases[case].instruction
                             for case in pool.outputs_by_case
                         },
                         checklists={

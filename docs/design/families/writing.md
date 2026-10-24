@@ -4,7 +4,7 @@
 
 ## Systems and Samples
 
-Both families send every case to the systems each [`family.toml`](../../../families/writing-zh/family.toml) lists, each at the effort it resolves to, so a model without `requiresEffort` receives no `reasoning_effort`, as [Systems](../systems.md#resolution) describes. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash` is the reference whose score anchors both boards at 1,000 when a round ranks it.
+Both families send every case to the systems each [`family.toml`](../../../families/writing-zh/family.toml) lists, with the strongest effort their shared catalog supports explicitly selected in `systems.toml`. [Systems](../systems.md#resolution) defines their completion and context allowances. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash-high` is the reference whose score anchors both boards at 1,000 when a round ranks it.
 
 ## Categories
 

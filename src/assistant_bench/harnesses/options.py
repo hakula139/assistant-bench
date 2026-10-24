@@ -1,4 +1,4 @@
-"""The kwargs each system harness builds from a system and the family's settings."""
+"""The kwargs each harness builds from its resolved system."""
 
 from typing import Any
 

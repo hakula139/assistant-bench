@@ -4,7 +4,7 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 
 ## Blinding
 
-The vote page receives an opaque pair token, the case's checklist and the instruction its trials ran, read from the rendered task, and the two outputs, while the server keeps the mapping from each token to its systems, fingerprints, and trials. Nothing the page receives identifies a system: no name, fingerprint, timing, token count, or error text, and every unknown session, pair, or output answers with the same `not found`. Votes record their duration from the server's clock, from serving the pair to receiving the vote.
+The vote page receives an opaque pair token, the current case's checklist and instruction, and the two outputs. Collection admits only trials matching that source. The server keeps the mapping from each token to its systems, fingerprints, and trials. Nothing the page receives identifies a system: no name, fingerprint, timing, token count, or error text, and every unknown session, pair, or output answers with the same `not found`. Votes record their duration from the server's clock, from serving the pair to receiving the vote.
 
 A task family with `render = "diff"` sends each solution as the diff of its `/app` against the task's repository. Collection excludes `.git` and Python tool caches. Every system runs under the same agent, and the page receives no commit metadata, trajectory, command, turn count, test output or reward. Paths are sorted and context is fixed.
 

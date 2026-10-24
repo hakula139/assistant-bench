@@ -24,13 +24,14 @@ src/assistant_bench/
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
-│   ├── options.py                          # The kwargs each harness builds from a system and settings
+│   ├── options.py                          # The kwargs each harness builds from its resolved system
 │   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   └── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 ├── families.py                             # family.toml, gate, and case models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
+├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
 ├── diffs.py                                # Git-style diffs of a task's workspace against its repository
 └── paths.py                                # Repo and data directory locations, and atomic file writes
@@ -60,12 +61,13 @@ arena/src/assistant_bench_arena/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`
-2. `jobs`, `revisions`, and `report`
-3. `arena`
-4. `outputs`, `harnesses`, and `scoring`
-5. `families` and `catalog`
-6. `messages`, `paths`, and `diffs`
-7. `assistant_bench_arena`
+2. `revisions`
+3. `jobs` and `report`
+4. `arena`
+5. `outputs`, `harnesses`, and `scoring`
+6. `families` and `catalog`
+7. `generation`, `messages`, `paths`, and `diffs`
+8. `assistant_bench_arena`
 
 `families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 

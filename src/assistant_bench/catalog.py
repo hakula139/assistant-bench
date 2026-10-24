@@ -6,7 +6,6 @@ import json
 import os
 import tomllib
 from collections.abc import Callable
-from importlib import metadata
 from pathlib import Path
 from typing import Self
 
@@ -19,22 +18,14 @@ from pydantic import (
     model_validator,
 )
 
+from assistant_bench.generation import Generation, load_generation
 from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import REPO_ROOT
 
 
 EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
-GENERATION_PROTOCOL = 1
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
-
-
-def generation_version(harness: str) -> str:
-    """Version of generation behavior, including Harbor's native agent prompts."""
-    protocol = str(GENERATION_PROTOCOL)
-    if harness == 'terminus-2':
-        return f'{metadata.version("harbor")}+bench.{protocol}'
-    return protocol
 
 
 # ── nixos-config Export ──
@@ -174,6 +165,9 @@ class System(BaseModel):
     effort: str | None
     prompt: str | None
     harness: str = 'generate'
+    generation: Generation = Field(default_factory=load_generation)
+    """Captured revision metadata, unchanged when another runtime resolves systems."""
+
     display_name: str
     """Public label, excluded from the fingerprint."""
 
@@ -190,7 +184,7 @@ class System(BaseModel):
         """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
-            'version': generation_version(self.harness),
+            'version': self.generation.version(self.harness),
             'route': self.route,
             'effort': self.effort,
             'harness': self.harness,
@@ -213,7 +207,11 @@ def load_systems(
     return parse_systems(export, path.read_text())
 
 
-def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]:
+def parse_systems(
+    export: NixosConfigExport,
+    document: str,
+    generation: Generation | None = None,
+) -> dict[str, System]:
     """Resolve every table of a `systems.toml` document.
 
     Raises
@@ -232,7 +230,8 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
         raise ValueError(error_lines(error, f'`{SYSTEMS_FILE}`')) from error
 
     systems = {
-        name: resolve_system(name, config, export) for name, config in configs.items()
+        name: resolve_system(name, config, export, generation)
+        for name, config in configs.items()
     }
 
     owners: dict[str, str] = {}
@@ -248,7 +247,10 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
 
 
 def resolve_system(
-    name: str, config: SystemConfig, export: NixosConfigExport
+    name: str,
+    config: SystemConfig,
+    export: NixosConfigExport,
+    generation: Generation | None = None,
 ) -> System:
     """Resolve a system, defaulting effort from the catalog where it is required.
 
@@ -258,12 +260,14 @@ def resolve_system(
         The model, its channel, the effort, or the prompt is unknown or ambiguous.
     """
     prompt = _prompt(name, config.prompt, export)
+    generation = generation or load_generation()
     if config.route is not None:
         assert config.display_name is not None
         assert config.max_output_tokens is not None
         assert config.context_window is not None
         return System(
             name=name,
+            generation=generation,
             route=config.route,
             max_output_tokens=config.max_output_tokens,
             context_window=config.context_window,
@@ -296,6 +300,7 @@ def resolve_system(
     ((channel, route),) = entry.channel_id.items()
     return System(
         name=name,
+        generation=generation,
         route=route,
         max_output_tokens=entry.max_output_tokens,
         context_window=entry.context_window,
@@ -304,29 +309,6 @@ def resolve_system(
         effort=_resolve_effort(name, config.effort, entry.thinking),
         prompt=prompt,
         display_name=config.display_name or entry.name,
-    )
-
-
-def pin(system: System) -> SystemConfig:
-    """Return the `route` table that resolves to `system`, keeping its fingerprint.
-
-    Raises
-    ------
-    ValueError
-        The system has a prompt, which a `route` table cannot pin.
-    """
-    if system.prompt is not None:
-        raise ValueError(
-            f'System `{system.name}`: a `route` table cannot pin its prompt.'
-        )
-    return SystemConfig(
-        route=system.route,
-        max_output_tokens=system.max_output_tokens,
-        context_window=system.context_window,
-        vendor=system.vendor,
-        price=system.price,
-        effort=system.effort,
-        display_name=system.display_name,
     )
 
 
