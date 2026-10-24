@@ -4,7 +4,7 @@ Learn how to point the bench at a model endpoint, check and run a family, collec
 
 ## The Model Endpoint
 
-Every system sends OpenAI chat-completions requests to an endpoint configured in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
+Every system uses its configured OpenAI-compatible Chat Completions or Responses API at the endpoint in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
 
 | Variable                  | Value                                                                                                                                                                  |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -16,7 +16,7 @@ Every system sends OpenAI chat-completions requests to an endpoint configured in
 
 Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 
-Each system's route is the model ID the endpoint expects. Every request uses its resolved completion allowance as `max_completion_tokens`, including reasoning, and its effort when one is selected. A case trial sends the instruction as the user message and the optional system prompt. A task trial uses the family's harness to drive the task's container.
+Each system's route is the model ID the endpoint expects. Requests use the system's resolved completion allowance, including reasoning, and its selected effort through the configured API. A case trial sends the instruction as the user message and the optional system prompt. A task trial uses the family's harness to drive the task's container.
 
 ## Checking a Family
 
