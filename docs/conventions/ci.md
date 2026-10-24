@@ -45,6 +45,8 @@ Static PR previews use `web/wrangler.toml`. Both deploy jobs consume the `site-d
 
 Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. Production preserves the purpose-specific encrypted Worker secrets provisioned during setup. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
 
+Arena Health uses the same credentials to check production through its private Management Service every 15 minutes. It also supports manual runs on `main` and fails on an identity mismatch or expired network associations awaiting cleanup. The Worker checks cleanup every minute and reports a failed cron invocation while that backlog remains.
+
 ## Workflow Steps
 
 Each job that needs the dev shell sets `defaults.run.shell` to run bash inside `nix develop`, or `nix develop .#python` for the Python jobs, so its `run:` steps hold bare commands.
