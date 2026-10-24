@@ -67,7 +67,7 @@ class Generate(BaseAgent):
     ) -> None:
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
-        nixos_config_rev = load_export().rev
+        nixos_config_rev = load_export(self._get_env).rev
         extra_body = (
             {'reasoning_effort': self.options.effort} if self.options.effort else None
         )

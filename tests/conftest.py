@@ -97,6 +97,24 @@ def export(monkeypatch: pytest.MonkeyPatch) -> NixosConfigExport:
     return NixosConfigExport.model_validate_json(EXPORT_FILE.read_bytes())
 
 
+@pytest.fixture(params=[False, True], ids=['agent-only', 'conflicting-process'])
+def agent_export(
+    request: pytest.FixtureRequest,
+    export: NixosConfigExport,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> tuple[dict[str, str], NixosConfigExport]:
+    overridden = export.model_copy(
+        update={'rev': 'fedcba9876543210fedcba9876543210fedcba98'}
+    )
+    path = tmp_path / 'agent-export.json'
+    path.write_text(overridden.model_dump_json(by_alias=True))
+    if not request.param:
+        monkeypatch.delenv(EXPORT_VAR)
+
+    return {EXPORT_VAR: str(path)}, overridden
+
+
 @pytest.fixture
 def endpoint(tmp_path: Path) -> Iterator[StubEndpoint]:
     yield from serve_stub(tmp_path)

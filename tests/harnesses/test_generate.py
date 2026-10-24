@@ -9,7 +9,7 @@ import pytest
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from assistant_bench.catalog import EXPORT_VAR
+from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from support import StubEndpoint, completion
@@ -66,6 +66,22 @@ class TestGenerate:
                 Generate.preflight(OPTIONS, {})
 
     class TestRun:
+        def test_uses_the_same_agent_export_for_preflight_and_metadata(
+            self,
+            agent_export: tuple[dict[str, str], NixosConfigExport],
+            endpoint: StubEndpoint,
+            tmp_path: Path,
+        ) -> None:
+            env, export = agent_export
+            Generate.preflight(OPTIONS, endpoint.env | env)
+
+            context, output = run_agent(endpoint, tmp_path, env=env)
+
+            assert output.read_text() == 'Hello there.'
+            assert len(endpoint.requests) == 1
+            assert context.metadata is not None
+            assert context.metadata['nixos_config_rev'] == export.rev
+
         def test_sends_one_request_and_records_the_reply(
             self, endpoint: StubEndpoint, tmp_path: Path
         ) -> None:
