@@ -8,6 +8,7 @@ cat >notify/channels/matrix.py <<'PY'
 
 import json
 import logging
+from urllib.parse import urlsplit
 
 from notify.base import Channel, Message
 from notify.errors import ConfigError, DeliveryError
@@ -22,7 +23,16 @@ class MatrixChannel(Channel):
         homeserver = self.config.get("homeserver")
         room_id = self.config.get("room_id")
         token = self.config.get("access_token")
-        if not isinstance(homeserver, str) or not homeserver.startswith("https://"):
+        if not isinstance(homeserver, str):
+            raise ConfigError("matrix: homeserver must be an https:// URL")
+        try:
+            parsed = urlsplit(homeserver)
+            hostname = parsed.hostname
+            # Reading port validates its syntax and range.
+            _ = parsed.port
+        except ValueError:
+            raise ConfigError("matrix: homeserver must be an https:// URL") from None
+        if parsed.scheme != "https" or not hostname:
             raise ConfigError("matrix: homeserver must be an https:// URL")
         if not isinstance(room_id, str) or not room_id.startswith("!"):
             raise ConfigError("matrix: room_id must start with !")

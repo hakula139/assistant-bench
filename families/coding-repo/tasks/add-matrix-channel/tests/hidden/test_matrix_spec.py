@@ -38,10 +38,17 @@ class MatrixSpecTest(unittest.TestCase):
         self.assertEqual(transport.posts[0][0], URL)
 
     def test_invalid_config(self):
+        homeserver = CONFIG["homeserver"].rstrip("/")
         cases = [
             {k: v for k, v in CONFIG.items() if k != "homeserver"},
             {**CONFIG, "homeserver": "http://matrix.example.org"},
             {**CONFIG, "homeserver": ""},
+            {**CONFIG, "homeserver": "https://"},
+            {**CONFIG, "homeserver": "https:///missing-host"},
+            {**CONFIG, "homeserver": "https://?q=1"},
+            {**CONFIG, "homeserver": "https://["},
+            {**CONFIG, "homeserver": f"{homeserver}:not-a-port"},
+            {**CONFIG, "homeserver": f"{homeserver}:65536"},
             {k: v for k, v in CONFIG.items() if k != "room_id"},
             {**CONFIG, "room_id": "ops:example.org"},
             {k: v for k, v in CONFIG.items() if k != "access_token"},
