@@ -38,6 +38,7 @@ function FramedOutput({
       setScale(Math.min(1, entry.contentRect.width / viewport));
     });
     observer.observe(element);
+
     return () => {
       observer.disconnect();
     };

@@ -47,6 +47,7 @@ function islandLabels(html: string): string[] {
   for (const [, props] of html.matchAll(/<astro-island\b[^>]*\bprops="([^"]*)"/g)) {
     walk(JSON.parse(unescapeAttribute(props)));
   }
+
   return labels;
 }
 

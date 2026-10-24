@@ -169,6 +169,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
       {families &&
         groupByAspect(families).map(({ aspect, members }) => {
           const id = `aspect-${aspect ?? 'unlisted'}`;
+
           return (
             <section key={id} className="flex flex-col gap-3" aria-labelledby={id}>
               <h2 id={id} className={cn(sectionTitle, 'flex items-center gap-2')}>
@@ -300,6 +301,7 @@ export function VoteApp() {
   const show = (next: SessionView) => {
     localStorage.setItem(sessionKey(next.family.name), next.id);
     history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
+
     setSession(next);
     setChoice(null);
     setTagged(UNTAGGED);
@@ -381,6 +383,7 @@ export function VoteApp() {
 
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
+
     return () => {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
@@ -479,6 +482,7 @@ export function VoteApp() {
 
   useEffect(() => {
     window.addEventListener('keydown', onKey);
+
     return () => {
       window.removeEventListener('keydown', onKey);
     };

@@ -5,6 +5,7 @@ const CHANGE = 'bench:search-change';
 function subscribe(onChange: () => void) {
   window.addEventListener('popstate', onChange);
   window.addEventListener(CHANGE, onChange);
+
   return () => {
     window.removeEventListener('popstate', onChange);
     window.removeEventListener(CHANGE, onChange);

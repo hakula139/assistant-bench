@@ -49,9 +49,11 @@ export function PlotFigure({ plot, height, label }: PlotFigureProps) {
       setWidth(Math.floor(entry.contentRect.width));
     });
     observer.observe(element);
+
     void document.fonts.ready.then(() => {
       setFontsReady(true);
     });
+
     return () => {
       observer.disconnect();
     };
@@ -75,6 +77,7 @@ export function PlotFigure({ plot, height, label }: PlotFigureProps) {
     });
     figure.setAttribute('aria-hidden', 'true');
     element.replaceChildren(figure);
+
     return () => {
       figure.remove();
     };

@@ -209,6 +209,7 @@ def parse_systems(export: NixosConfigExport, document: str) -> dict[str, System]
                 f'Systems `{owner}` and `{name}` share the display name '
                 f'`{system.display_name}`. Set a distinct `display_name`.'
             )
+
     return systems
 
 

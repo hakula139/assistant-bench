@@ -127,6 +127,7 @@ class Board:
             matchups = Matchups.build([m.vote.comparison() for m in votes] + settled)
             self._ratings = rate_point(matchups, matchups.root(self._order))
             self._fitted = current
+
         return self._ratings
 
 
@@ -215,6 +216,7 @@ def _seed_pair(
     short = [pair for pair in open_cases if counts[pair] < SEED_VOTES_PER_SIDE]
     if not short:
         return None
+
     fewest = min(counts[pair] for pair in short)
     pairs = [pair for pair in short if counts[pair] == fewest]
     return pairs[rng.integers(len(pairs))]

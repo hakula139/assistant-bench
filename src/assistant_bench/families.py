@@ -480,6 +480,7 @@ def case_task(family: Family, case_id: str) -> Path:
     """
     if family.source == 'cases':
         return tasks_dir(family) / case_id
+
     (committed, _), (local, _) = _task_roots(family)
     if (committed / case_id).is_dir():
         return committed / case_id

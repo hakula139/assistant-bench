@@ -48,6 +48,7 @@ def _entries(root: Path) -> dict[str, Entry]:
     """Return the mode and content of each file and symlink under `root`."""
     if not root.is_dir():
         return {}
+
     entries = {}
     for path in root.rglob('*'):
         relative = path.relative_to(root)
@@ -64,6 +65,7 @@ def _entries(root: Path) -> dict[str, Entry]:
                 EXECUTABLE_MODE if executable else FILE_MODE,
                 path.read_bytes(),
             )
+
     return entries
 
 

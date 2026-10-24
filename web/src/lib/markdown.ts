@@ -28,6 +28,7 @@ function keepTail(state: StateCore, children: Token[]) {
   if (start === undefined || !tail.fits) {
     return;
   }
+
   let index = start.index;
   if (start.at > 0) {
     const text = children[index];
