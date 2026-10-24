@@ -26,7 +26,7 @@ function unescapeAttribute(value: string): string {
   return value.replace(/&(?:amp|lt|gt|#39|quot);/g, (entity) => ENTITIES[entity]);
 }
 
-/** Collects every `label` an island's serialized props hold, which charts draw client-side. */
+/** Chart labels render client-side, so inspect their serialized props. */
 function islandLabels(html: string): string[] {
   const labels: string[] = [];
   const walk = (value: unknown) => {
@@ -43,6 +43,7 @@ function islandLabels(html: string): string[] {
       }
     }
   };
+
   for (const [, props] of html.matchAll(/<astro-island\b[^>]*\bprops="([^"]*)"/g)) {
     walk(JSON.parse(unescapeAttribute(props)));
   }
@@ -70,11 +71,7 @@ const fixtures = import.meta.glob<Record<string, unknown>>(
   { import: 'default' },
 );
 
-/**
- * Reads a committed fixture as raw JSON, so each test can alter its own copy: `report` after ten
- * simulated sessions, `report-early` after the first, which has no decision, or `report.schema`.
- * The pydantic models write all three, and a pytest fails when one drifts from them.
- */
+/** Each result is an independent mutable copy. */
 export async function readFixture(
   name: 'report' | 'report-early' | 'report.schema' = 'report',
 ): Promise<Record<string, unknown>> {

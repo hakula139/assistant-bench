@@ -73,6 +73,7 @@ async function request<T>(
   }).catch((reason: unknown) => {
     throw new NetworkError(`no response from ${path}`, { cause: reason });
   });
+
   if (!response.ok) {
     const detail = z
       .object({ detail: z.string() })
@@ -82,6 +83,7 @@ async function request<T>(
       response.status,
     );
   }
+
   return schema.parse(await response.json());
 }
 

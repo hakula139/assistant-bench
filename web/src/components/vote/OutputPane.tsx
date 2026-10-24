@@ -13,7 +13,6 @@ interface OutputPaneProps {
   asMarkdown: boolean;
   /** The width an HTML output lays out at, scaled down to fit the pane, in CSS pixels. */
   viewport: number;
-  /** Controls shown at the end of the title band, such as the output's Issues button. */
   controls: ReactNode;
 }
 
@@ -34,6 +33,7 @@ function FramedOutput({
     if (!element) {
       return;
     }
+
     const observer = new ResizeObserver(([entry]) => {
       setScale(Math.min(1, entry.contentRect.width / viewport));
     });
@@ -78,6 +78,7 @@ const diffLineClasses: Record<DiffLine, string> = {
  */
 function classifyDiff(text: string): { line: string; kind: DiffLine; start: boolean }[] {
   let inHunk = false;
+
   return text
     .replace(/\n$/, '')
     .split('\n')
@@ -89,19 +90,17 @@ function classifyDiff(text: string): { line: string; kind: DiffLine; start: bool
         inHunk = true;
         return { line, kind: 'hunk', start };
       }
+
       if (!inHunk) {
         return { line, kind: 'file', start };
       }
+
       const kind = line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : 'context';
       return { line, kind, start };
     });
 }
 
-/**
- * A unified diff in monospace, each line styled as a file header, hunk header, or change. Long
- * lines break at the pane edge whatever the character there, so a hyphen gets no early break, and
- * hang past the change marker, while ligatures stay off so `==` and `->` read as typed.
- */
+/** Uses `break-all` to avoid early hyphen breaks. Ligatures are disabled so operators read literally. */
 function Diff({ text }: { text: string }) {
   return (
     <div className="font-mono text-sm leading-relaxed break-all whitespace-pre-wrap [font-variant-ligatures:none]">
@@ -122,7 +121,6 @@ function Diff({ text }: { text: string }) {
   );
 }
 
-/** One side of a pair, shown exactly as written unless the Markdown view is on. */
 export function OutputPane({ side, pane, asMarkdown, viewport, controls }: OutputPaneProps) {
   return (
     <Card

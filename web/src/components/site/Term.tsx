@@ -13,9 +13,9 @@ import {
 import { terms, type Term } from '@/lib/glossary';
 import { splitTail, TAIL_CLASS } from '@/lib/tail';
 
-/** One line of text whose last words stay together, so no browser strands one on its own line. */
 export function KeptTail({ text }: { text: string }) {
   const [head, tail] = splitTail(text);
+
   return (
     <>
       {head}
@@ -24,7 +24,6 @@ export function KeptTail({ text }: { text: string }) {
   );
 }
 
-/** The marks a board puts beside a system's name, which the methodology glossary repeats. */
 export const statusIcons = { preliminary: Hourglass, anchor: Anchor } satisfies Partial<
   Record<keyof typeof terms, LucideIcon>
 >;
@@ -34,6 +33,7 @@ export type Status = keyof typeof statusIcons;
 function Definition({ term }: { term: Term }) {
   const title = useId();
   const description = useId();
+
   return (
     <PopoverContent
       side="top"
@@ -51,10 +51,7 @@ function Definition({ term }: { term: Term }) {
   );
 }
 
-/**
- * A term with a dotted underline that opens its definition on tap, click, or Enter, for hydrated
- * islands. `children` replaces the visible term, which still names the trigger.
- */
+/** Requires hydration. `children` overrides the visible label. */
 export function Hint({ term, children }: { term: Term; children?: ReactNode }) {
   return (
     <Popover>
@@ -66,13 +63,10 @@ export function Hint({ term, children }: { term: Term; children?: ReactNode }) {
   );
 }
 
-/**
- * A badge beside a system's name that opens the status's definition, or `term` when the round
- * gives it one. The preliminary badge shows its term, and the anchor one only its icon.
- */
 export function StatusMark({ status, term = terms[status] }: { status: Status; term?: Term }) {
   const Icon = statusIcons[status];
   const labelled = status === 'preliminary';
+
   return (
     <Popover>
       <Badge asChild variant="status" className={labelled ? undefined : 'px-1'}>

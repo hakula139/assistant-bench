@@ -9,18 +9,7 @@ from assistant_bench.paths import data_dir, write_atomically
 
 
 class Output(BaseModel):
-    """One trial of a family, as the arena and the reports read it.
-
-    `gate_failures` lists the gates a voted output fails, so an empty list admits
-    it to votes and any failure resolves its pairs automatically. It is `None` for
-    an output without a verdict and for a family whose scorer has no gates. A
-    rendered case has no verdict when its trial errored, and a task has none when
-    its tests recorded no reward.
-
-    On a task of a family scored by votes, `text` is the diff of the solution its
-    tests graded. `harness_version` is the Harbor version whose terminal agent
-    wrote a task's solution, which the single-call agent leaves unset.
-    """
+    """One trial of a family, as the arena and the reports read it."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 
@@ -32,8 +21,16 @@ class Output(BaseModel):
 
     error: str | None
     text: str | None
+    """For voted tasks, the diff of the solution the tests graded."""
+
     finish_reason: str | None
     gate_failures: list[Gate] | None
+    """An empty list admits votes, while failures settle pairs automatically.
+
+    Absent for scorers without gates or outputs without a verdict. Rendered cases
+    lack a verdict after a trial error, and tasks lack one without a test reward.
+    """
+
     reward: float | None
 
     input_tokens: int | None
@@ -47,6 +44,7 @@ class Output(BaseModel):
     request_id: str | None
     nixos_config_rev: str | None
     harness_version: str | None
+    """Harbor version that wrote a task's solution, absent for single-call agents."""
 
 
 def read_outputs(family: str) -> list[Output]:

@@ -33,6 +33,7 @@ export function useSearchParam<T extends string | null>(name: string, fallback: 
       } else {
         url.searchParams.set(name, next);
       }
+
       history.replaceState(history.state, '', url);
       window.dispatchEvent(new Event(CHANGE));
     },

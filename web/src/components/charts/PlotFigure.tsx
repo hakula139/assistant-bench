@@ -28,12 +28,12 @@ function labelMeasure(element: HTMLElement): (text: string) => number {
   if (context === null) {
     throw new Error('the browser offers no 2D canvas to measure labels with');
   }
+
   const style = getComputedStyle(element);
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
   return (text) => Math.ceil(context.measureText(text).width);
 }
 
-/** Renders an Observable Plot chart that fills its container's width. */
 export function PlotFigure({ plot, height, label }: PlotFigureProps) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number | null>(null);
@@ -44,6 +44,7 @@ export function PlotFigure({ plot, height, label }: PlotFigureProps) {
     if (!element) {
       return;
     }
+
     const observer = new ResizeObserver(([entry]) => {
       setWidth(Math.floor(entry.contentRect.width));
     });
@@ -61,6 +62,7 @@ export function PlotFigure({ plot, height, label }: PlotFigureProps) {
     if (!element || width === null || !fontsReady) {
       return;
     }
+
     const options = plot({ width, measure: labelMeasure(element) });
     // Plot's injected :where(.bench-plot) { --plot-background: white } sits outside any cascade
     // layer, so it beats every layered rule, Tailwind's utilities included.

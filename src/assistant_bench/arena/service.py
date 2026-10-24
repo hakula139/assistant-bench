@@ -77,12 +77,11 @@ type Pane = Annotated[TextPane | HtmlPane | DiffPane, Field(discriminator='rende
 
 
 class PairView(BaseModel):
-    """A pair as the vote page receives it, identifying no system.
-
-    `token` is opaque and valid until the pair is voted on or undone.
-    """
+    """A pair as the vote page receives it, identifying no system."""
 
     token: str
+    """Opaque and valid until the pair is voted on or undone."""
+
     instruction: str
     checklist: list[str]
     a: Pane
@@ -90,30 +89,29 @@ class PairView(BaseModel):
 
 
 class FamilyView(BaseModel):
-    """A family the vote page can start a session on, where `name` is its ID.
-
-    The vote page composes the family's full name from `aspect` and `display_name`,
-    and offers `defects` to tag each output with, in the family's order.
-    """
+    """A family the vote page can start a session on."""
 
     name: str
+    """Stable family ID."""
+
     aspect: str | None
     display_name: str
+
     defects: list[Defect]
+    """Available output tags, in the family's order."""
 
 
 class SessionView(BaseModel):
-    """A session's votes and the pair to show, absent once no case remains.
-
-    `remaining` counts the cases the session has yet to vote on, including the
-    open pair's.
-    """
+    """A session's votes and the pair to show."""
 
     id: str
     family: FamilyView
     votes: int
     remaining: int
+    """Cases still eligible for this session, including the open pair's."""
+
     pair: PairView | None
+    """Absent once no eligible case remains."""
 
 
 # ── Arena ──
@@ -121,10 +119,7 @@ class SessionView(BaseModel):
 
 @dataclass(frozen=True)
 class ArenaFamily:
-    """A family being voted on, with each voted case's instruction and checklist.
-
-    `instructions` holds the rendered task's instruction, which the trials ran.
-    """
+    """A family being voted on, with each voted case's instruction and checklist."""
 
     name: str
     aspect: str | None
@@ -132,6 +127,8 @@ class ArenaFamily:
     render: Literal['text', 'html', 'diff']
     defects: list[Defect]
     instructions: dict[str, str]
+    """Rendered task instructions used by the trials."""
+
     checklists: dict[str, list[str]]
     pool: Pool
 
@@ -179,6 +176,7 @@ def load_families() -> dict[str, ArenaFamily]:
                 pass
             case _:
                 assert_never(family.settings)
+
     return families
 
 
@@ -202,9 +200,11 @@ class Arena:
         self._render_origin = render_origin
         self._clock = clock
         self._rng = rng or np.random.default_rng()
+
         self._boards = {
             name: Board(family.pool.systems) for name, family in families.items()
         }
+
         self._pairs: dict[str, _Issued] = {}
         self._current: dict[str, str] = {}
         self._documents: dict[str, str] = {}
@@ -246,6 +246,7 @@ class Arena:
             raise UnlistedDefects(
                 f'issues the family does not list: {", ".join(unlisted)}'
             )
+
         self._store.record(
             Ballot(
                 session=issued.session,
@@ -260,6 +261,7 @@ class Arena:
             ),
             self._clock(),
         )
+
         self._retire(token)
         return self._view(session, tuple(self._store.votes(session.family)))
 
@@ -274,6 +276,7 @@ class Arena:
         session_votes = [vote for vote in votes if vote.session == session.id]
         if not session_votes:
             raise NothingToUndo(session_id)
+
         last = session_votes[-1]
         matched = reconcile([last], self._families[session.family].pool.outputs)
         self._store.undo(last.id, self._clock())
@@ -281,6 +284,7 @@ class Arena:
             self._retire(self._current[session.id])
         for vote, a, b in matched:
             self._serve(session, Draw(vote.case, a, b, repeat_of=vote.repeat_of))
+
         return self._view(session, tuple(vote for vote in votes if vote.id != last.id))
 
     def document(self, token: str) -> str:
@@ -334,6 +338,7 @@ class Arena:
         (a, a_document), (b, b_document) = (
             self._pane(family, output) for output in (picked.a, picked.b)
         )
+
         self._pairs[token] = _Issued(
             session=session.id,
             draw=picked,
@@ -349,6 +354,7 @@ class Arena:
             ),
             served_at=self._clock(),
         )
+
         self._current[session.id] = token
 
     def _pane(self, family: ArenaFamily, output: Output) -> tuple[Pane, str | None]:

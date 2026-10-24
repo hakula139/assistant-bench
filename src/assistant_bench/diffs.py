@@ -78,6 +78,7 @@ def _file_diff(path: str, before: Entry | None, after: Entry | None) -> str:
         header += f'deleted file mode {before[0]}\n'
     elif before[0] != after[0]:
         header += f'old mode {before[0]}\nnew mode {after[0]}\n'
+
     old_content = before[1] if before else b''
     new_content = after[1] if after else b''
     if old_content == new_content:
@@ -94,9 +95,11 @@ def _file_diff(path: str, before: Entry | None, after: Entry | None) -> str:
             f'{header}index {old_hash}..{new_hash}\n'
             f'Binary files {old} and {new} differ\n'
         )
+
     lines = difflib.unified_diff(
         old_lines, new_lines, fromfile=old, tofile=new, n=CONTEXT_LINES
     )
+
     return header + ''.join(
         line if line.endswith('\n') else f'{line}\n{NO_NEWLINE}' for line in lines
     )

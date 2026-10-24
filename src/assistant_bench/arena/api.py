@@ -122,6 +122,7 @@ def create_app(arena: Arena, site: Path | None = None) -> FastAPI:
     app.include_router(router)
     if site is not None:
         app.mount('/', SiteFiles(directory=site, html=True))
+
     return app
 
 

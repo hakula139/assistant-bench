@@ -24,6 +24,7 @@ function keepTail(state: StateCore, children: Token[]) {
       start = depth === 0 ? { index: i, at: 0 } : start;
     }
   }
+
   if (start === undefined || !tail.fits) {
     return;
   }
@@ -36,11 +37,11 @@ function keepTail(state: StateCore, children: Token[]) {
     children.splice(index, 0, head);
     index += 1;
   }
+
   children.splice(index, 0, new state.Token('tail_open', 'span', 1));
   children.push(new state.Token('tail_close', 'span', -1));
 }
 
-/** Keeps the end of every paragraph, list item, heading, and table cell on one line. */
 function keepTails(state: StateCore) {
   for (const token of state.tokens) {
     if (token.type === 'inline' && token.children) {
@@ -49,10 +50,7 @@ function keepTails(state: StateCore) {
   }
 }
 
-/**
- * Markdown for case and output text, with raw HTML escaped and the image rule off, so the vote
- * page never loads a remote image.
- */
+/** Raw HTML is escaped and remote images are disabled. */
 export const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image');
 markdown.core.ruler.push('keep_tails', keepTails);
 markdown.renderer.rules.tail_open = () => `<span class="${TAIL_CLASS}">`;
