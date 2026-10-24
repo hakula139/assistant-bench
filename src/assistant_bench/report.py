@@ -120,7 +120,7 @@ class CategoryStanding(_Model):
 
 
 class CategoryBoard(_Model):
-    """A refit on one category's votes, anchored at the same system as the board.
+    """A refit on one category's comparisons, anchored like the full board.
 
     `unranked` lists the systems with outputs in the category that have no score
     there, for the same reasons as on the board.
@@ -314,22 +314,23 @@ def _votes_results(
     off the board, as the arena never pairs it.
     """
     recorded = store.votes(family.name)
-    if not recorded:
-        raise ValueError(
-            f'Family `{family.name}` has no votes yet. Vote with '
-            '`uv run bench serve`, then close the round.'
-        )
     voted = {system for vote in recorded for system in vote.systems}
     entrants = set(settings.systems) | voted
     outputs = [output for output in outputs if output.system in entrants]
+    fingerprints = _fingerprints(outputs)
     votes = reconcile(recorded, outputs)
-    if not votes:
+    human_votes = [m.vote for m in votes]
+    comparisons = [vote.comparison() for vote in human_votes] + settled(outputs)
+    if not comparisons:
+        if not recorded:
+            raise ValueError(
+                f'Family `{family.name}` has no votes yet. Vote with '
+                '`uv run bench serve`, then close the round.'
+            )
         raise ValueError(
             f'Family `{family.name}` has votes, but none compares two of its '
             'current outputs. Vote on the current outputs, then close the round.'
         )
-    fingerprints = _fingerprints(outputs)
-    comparisons = [m.vote.comparison() for m in votes] + settled(outputs)
     everything = ranking.Matchups.build(comparisons)
     root = everything.root(settings.systems)
 
@@ -357,14 +358,14 @@ def _votes_results(
             Interval(lower=float(ratings.lower[i]), upper=float(ratings.upper[i])),
             int((ratings.score > ratings.score[i]).sum()) + 1,
             (int(best[i]), int(worst[i])),
-            [m.vote for m in votes if system in m.vote.systems],
+            [vote for vote in human_votes if system in vote.systems],
             [output for output in outputs if output.system == system],
             settings.defects,
         )
         for i, system in enumerate(ratings.systems)
     ]
     standings.sort(key=lambda standing: (standing.rank, standing.system))
-    counted = {m.vote.session for m in votes}
+    counted = {vote.session for vote in human_votes}
     sessions = [s.id for s in store.sessions(family.name) if s.id in counted]
     return VotesResults(
         scorer='votes',
@@ -375,7 +376,7 @@ def _votes_results(
         sessions=len(sessions),
         standings=standings,
         unranked=sorted(fingerprints.keys() - ranked),
-        head_to_head=_head_to_head([m.vote for m in votes], sorted(voted)),
+        head_to_head=_head_to_head(human_votes, sorted(voted)),
         categories=_categories(
             categories, anchor, votes, comparisons, outputs, settings.systems
         ),
@@ -383,7 +384,7 @@ def _votes_results(
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
         separability=ranking.separability(ratings.lower, ratings.upper),
         split_half_tau=_split_half_tau(votes, sessions, root),
-        rater_agreement=_rater_agreement(recorded),
+        rater_agreement=_rater_agreement(human_votes),
         decision=decide(standings, ratings),
     )
 
@@ -469,18 +470,21 @@ def _categories(
     systems: list[str],
 ) -> list[CategoryBoard]:
     """Refit each category whose own root connects it to the board's anchor."""
-    by_category: defaultdict[str, list[MatchedVote]] = defaultdict(list)
+    category_votes: defaultdict[str, list[MatchedVote]] = defaultdict(list)
     for m in votes:
-        by_category[categories[m.vote.case]].append(m)
+        category_votes[categories[m.vote.case]].append(m)
+
+    by_category: defaultdict[str, list[ranking.Comparison]] = defaultdict(list)
+    for comparison in comparisons:
+        by_category[categories[comparison.case]].append(comparison)
+
     entrants: defaultdict[str, set[str]] = defaultdict(set)
     for output in outputs:
         entrants[categories[output.case]].add(output.system)
 
     boards = []
-    for name, category_votes in sorted(by_category.items()):
-        matchups = ranking.Matchups.build(
-            [c for c in comparisons if categories[c.case] == name]
-        )
+    for name, category_comparisons in sorted(by_category.items()):
+        matchups = ranking.Matchups.build(category_comparisons)
         if anchor not in matchups.systems:
             continue
         matchups = matchups.component(anchor)
@@ -490,7 +494,7 @@ def _categories(
         ratings = ratings.anchored(anchor)
         standings = []
         for i, system in enumerate(ratings.systems):
-            mine = [m.vote for m in category_votes if system in m.vote.systems]
+            mine = [m.vote for m in category_votes[name] if system in m.vote.systems]
             decisive = sum(vote.choice in ('a', 'b') for vote in mine)
             standings.append(
                 CategoryStanding(
@@ -506,7 +510,7 @@ def _categories(
         boards.append(
             CategoryBoard(
                 category=name,
-                votes=len(category_votes),
+                votes=len(category_votes[name]),
                 standings=standings,
                 unranked=sorted(entrants[name] - set(ratings.systems)),
             )

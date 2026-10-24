@@ -275,6 +275,104 @@ class TestClose:
         assert (after.votes, after.dropped_votes) == (6, 9)
         assert all('small' not in (r.system, r.opponent) for r in after.head_to_head)
 
+    @pytest.mark.parametrize(
+        ('failed', 'identical', 'winner'),
+        [
+            pytest.param({'b'}, False, 'a', id='one-passes'),
+            pytest.param({'a', 'b'}, False, None, id='both-fail'),
+            pytest.param(set(), True, None, id='identical-passing-outputs'),
+        ],
+    )
+    @pytest.mark.parametrize('historical', [False, True], ids=['fresh', 'regraded'])
+    def test_closes_fully_settled_rounds_without_counting_human_votes(
+        self,
+        families_dir: Path,
+        store: VoteStore,
+        failed: set[str],
+        identical: bool,
+        winner: str | None,
+        historical: bool,
+    ) -> None:
+        cases = {f'r{i}': 'reply' for i in range(2)} | {
+            f'd{i}': 'docs' for i in range(2)
+        }
+        write_votes_family(families_dir, 'f', ['a', 'b'], cases)
+        outputs = passing_outputs(cases, ['a', 'b'])
+        if historical:
+            session = store.start_session('f', AT)
+            for case in cases:
+                original = store.record(
+                    make_ballot(
+                        outputs[case, 'a'], outputs[case, 'b'], session=session.id
+                    ),
+                    AT,
+                )
+                store.record(
+                    make_ballot(
+                        outputs[case, 'b'],
+                        outputs[case, 'a'],
+                        session=session.id,
+                        repeat_of=original.id,
+                    ),
+                    AT,
+                )
+        write_outputs(
+            'f',
+            [
+                output.model_copy(
+                    update={
+                        'gate_failures': [Gate.TRUNCATED]
+                        if output.system in failed
+                        else [],
+                        'text': 'Same answer.' if identical else output.text,
+                    }
+                )
+                for output in outputs.values()
+            ],
+        )
+
+        results = close(load_family('f'), store, AT).results
+
+        assert results.scorer == 'votes'
+        assert (results.votes, results.dropped_votes, results.sessions) == (
+            0,
+            2 * len(cases) if historical else 0,
+            0,
+        )
+        assert results.head_to_head == []
+        assert results.split_half_tau is None
+        assert results.length is None
+        assert results.decision is None
+        assert results.rater_agreement.model_dump() == {
+            'repeats': 0,
+            'agreement': None,
+            'below_floor': False,
+        }
+        standings = {standing.system: standing for standing in results.standings}
+        assert standings.keys() == {'a', 'b'}
+        assert results.unranked == []
+        for standing in standings.values():
+            assert (standing.votes, standing.decisive_votes, standing.preliminary) == (
+                0,
+                0,
+                True,
+            )
+            assert standing.both_bad_rate is None
+            assert not any(standing.defects.values())
+        if winner is None:
+            assert standings['a'].score == standings['b'].score == 1000
+        else:
+            assert standings[winner].score > standings['b'].score
+        assert [board.category for board in results.categories] == ['docs', 'reply']
+        for board in results.categories:
+            assert board.votes == 0
+            assert board.unranked == []
+            assert {standing.system for standing in board.standings} == {'a', 'b'}
+            assert all(
+                standing.votes == 0 and standing.preliminary
+                for standing in board.standings
+            )
+
     def test_drops_the_votes_whose_outputs_left(
         self, families_dir: Path, store: VoteStore
     ) -> None:
@@ -750,9 +848,9 @@ class TestClose:
         write_outputs(
             'f',
             [
-                output
-                if output.system == 'large'
-                else output.model_copy(update={'gate_failures': [Gate.TRUNCATED]})
+                output.model_copy(
+                    update={'job': 'job-new', 'trial': f'new-{output.trial}'}
+                )
                 for output in read_outputs('f')
             ],
         )

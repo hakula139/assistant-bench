@@ -2,7 +2,7 @@
   "$defs": {
     "CategoryBoard": {
       "additionalProperties": false,
-      "description": "A refit on one category's votes, anchored at the same system as the board.\n\n`unranked` lists the systems with outputs in the category that have no score\nthere, for the same reasons as on the board.",
+      "description": "A refit on one category's comparisons, anchored like the full board.\n\n`unranked` lists the systems with outputs in the category that have no score\nthere, for the same reasons as on the board.",
       "properties": {
         "category": {
           "title": "Category",
