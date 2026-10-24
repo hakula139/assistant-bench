@@ -72,7 +72,7 @@ jobs:
           header: preview-url
           only_update: true
           message: |
-            ## Cloudflare Workers preview
+            ## ⚡ Cloudflare Workers preview
 
             This PR's preview was deleted when it closed.
 

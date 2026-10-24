@@ -308,14 +308,26 @@ jobs:
         with:
           header: preview-url
           message: |
-            ## Cloudflare Workers preview
+            ## ⚡ Cloudflare Workers preview
 
-            | | |
-            | --- | --- |
-            | Preview | ${{ steps.meta.outputs.preview_url }} |
-            | This commit | ${{ steps.meta.outputs.deployment_url }} |
-            | Commit | `${{ steps.meta.outputs.short_sha }}` |
-            | Updated | ${{ steps.meta.outputs.deploy_time }} |
+            <table>
+              <tr>
+                <td><strong>Preview</strong></td>
+                <td><a href="${{ steps.meta.outputs.preview_url }}">${{ steps.meta.outputs.preview_url }}</a></td>
+              </tr>
+              <tr>
+                <td><strong>This commit</strong></td>
+                <td><a href="${{ steps.meta.outputs.deployment_url }}">${{ steps.meta.outputs.deployment_url }}</a></td>
+              </tr>
+              <tr>
+                <td><strong>Commit</strong></td>
+                <td><code>${{ steps.meta.outputs.short_sha }}</code></td>
+              </tr>
+              <tr>
+                <td><strong>Updated</strong></td>
+                <td>${{ steps.meta.outputs.deploy_time }}</td>
+              </tr>
+            </table>
 
             [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
