@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import re
 import time
 import tomllib
@@ -7,11 +8,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+import pytest
 from pydantic import JsonValue, TypeAdapter
 
-from assistant_bench_arena.ledger_models import Statement
+from assistant_bench_arena.ledger_models import Point, Statement
 from assistant_bench_arena.policy import configuration
-from assistant_bench_arena.releases import Release, publication_identity
+from assistant_bench_arena.releases import Release, point_snapshot, publication_identity
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import publish_release
@@ -104,6 +106,44 @@ class TestNativeRuntime:
                     'actual_app': True,
                     'actual_renderer': 'assistant_bench_arena.rendering',
                 }
+                points = point_snapshot(
+                    'e' * 64,
+                    'p' * 64,
+                    {
+                        name: Point(score=score, component='connected')
+                        for name, score in (
+                            ('large', -1e308),
+                            ('medium', 0.0),
+                            ('small', 1e308),
+                        )
+                    },
+                )
+                for scale in (1.0, 100.0, math.ulp(0.0)):
+                    weighted = await transport.call(
+                        {
+                            'operation': 'pair_weights',
+                            'snapshot': points.model_dump(mode='json'),
+                            'pairs': [
+                                ['large', 'medium'],
+                                ['medium', 'small'],
+                                ['large', 'small'],
+                            ],
+                            'coverage': [
+                                {'a_system': a, 'b_system': b, 'count': count}
+                                for a, b, count in (
+                                    ('large', 'medium', 2),
+                                    ('medium', 'large', 2),
+                                    ('medium', 'small', 9),
+                                    ('small', 'medium', 9),
+                                    ('large', 'small', 2),
+                                    ('small', 'large', 2),
+                                )
+                            ],
+                            'scale': scale,
+                        }
+                    )
+
+                    assert weighted['weights'] == pytest.approx([1 / 5, 1 / 19, 0.0])
 
                 page = await transport.http('/')
                 assert page['status'] == 200

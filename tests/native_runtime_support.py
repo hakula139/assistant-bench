@@ -38,7 +38,10 @@ _CONTROL = """
     from test_coverage import report as coverage_report
     from test_coverage import start as coverage_start
 
+    coverage_start()
+
     import json
+    import math
     import sys
 
     import app
@@ -46,8 +49,12 @@ _CONTROL = """
     from app import Default as AppDefault
     from app import Management as AppManagement
     from app import RenderLookup as AppRenderLookup
+    from assistant_bench_arena.ledger_models import PointSnapshot
+    from assistant_bench_arena.scheduler import pair_log_weights
     from pyodide.ffi import JsException
     from workers import WorkerEntrypoint
+
+    coverage_finish()
 
 
     class Default(AppDefault):
@@ -109,6 +116,18 @@ _CONTROL = """
                 return json.dumps({'result': {'sqlite3': available}})
             if payload.get('operation') == 'coverage':
                 return coverage_report()
+            if payload.get('operation') == 'pair_weights':
+                snapshot = PointSnapshot.model_validate(payload['snapshot'])
+                counts = {
+                    (row['a_system'], row['b_system']): row['count']
+                    for row in payload['coverage']
+                }
+                values = pair_log_weights(
+                    snapshot, payload['pairs'], counts, payload['scale'],
+                )
+                return json.dumps({'result': {
+                    'weights': [math.exp(value) for value in values],
+                }})
             if payload.get('operation') == 'scheduled':
                 await Default(self.ctx, self.env).scheduled(None, None, None)
                 return json.dumps({'result': {'completed': True}})
@@ -324,8 +343,12 @@ class NativeRuntime:
             dedent("""
                 from test_coverage import finish, report, start
 
+                start()
+
                 from render import Default as RenderDefault
                 from workers import WorkerEntrypoint
+
+                finish()
 
 
                 class Default(RenderDefault):
