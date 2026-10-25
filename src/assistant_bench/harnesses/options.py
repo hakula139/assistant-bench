@@ -1,8 +1,21 @@
 """The kwargs each harness builds from its resolved system."""
 
-from typing import Any
+from typing import Any, Self
 
-from assistant_bench.catalog import System
+from pydantic import BaseModel, model_validator
+
+from assistant_bench.catalog import Api, System, ThinkingMode
+
+
+class ApiOptions(BaseModel):
+    api: Api = 'openai-chat-completions'
+    thinking_mode: ThinkingMode | None = None
+
+    @model_validator(mode='after')
+    def _check_thinking(self) -> Self:
+        if self.api == 'anthropic-messages' and self.thinking_mode is None:
+            raise ValueError('Native Messages requires a resolved thinking mode.')
+        return self
 
 
 def generate(system: System) -> dict[str, Any]:

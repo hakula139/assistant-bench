@@ -10,23 +10,22 @@ from harbor.models.agent.context import AgentContext
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from assistant_bench.catalog import Api, load_export
+from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
+from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
 
 
 OUTPUT_FILE = 'output.txt'
 
 
-class GenerateOptions(Labels):
-    api: Api = 'openai-chat-completions'
+class GenerateOptions(Labels, ApiOptions):
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int
-    thinking_mode: str | None = None
 
 
 class Generate(BaseAgent):
@@ -108,6 +107,7 @@ class Generate(BaseAgent):
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
         result = MessageResult()
+        assert self.options.thinking_mode is not None
         try:
             async with endpoint.messages_client() as client:
                 await request_messages(
@@ -117,6 +117,7 @@ class Generate(BaseAgent):
                     messages=[{'role': 'user', 'content': instruction}],
                     system=self.options.system_prompt,
                     max_tokens=self.options.max_output_tokens,
+                    thinking_mode=self.options.thinking_mode,
                     effort=self.options.effort,
                     artifact=self.logs_dir / 'message.json',
                 )

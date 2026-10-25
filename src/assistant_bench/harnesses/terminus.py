@@ -21,7 +21,7 @@ from openai.types.completion_usage import CompletionUsage
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from tenacity import retry_if_not_exception_type
 
-from assistant_bench.catalog import Api, load_export
+from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
@@ -31,6 +31,7 @@ from assistant_bench.harnesses.messages import (
     MessagesLLM,
     attach_content,
 )
+from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import (
     ResponseCompletionError,
     ResponsesChat,
@@ -44,9 +45,8 @@ _RESPONSE_METADATA = TypeAdapter(
 )
 
 
-class TerminusOptions(Labels, Terminus2Options):
-    api: Api = 'openai-chat-completions'
-    thinking_mode: str | None = None
+class TerminusOptions(Labels, ApiOptions, Terminus2Options):
+    pass
 
 
 class _ConfiguredLiteLLM(LiteLLM):
@@ -177,6 +177,7 @@ class Terminus(Terminus2):
         assert isinstance(self.options, TerminusOptions)
         endpoint = Endpoint.read(self._get_env, self.options.api)
         if self.options.api == 'anthropic-messages':
+            assert self.options.thinking_mode is not None
             self._endpoint_client = endpoint.messages_client()
             return MessagesLLM(
                 client=self._endpoint_client,
@@ -184,6 +185,7 @@ class Terminus(Terminus2):
                 context_limit=model_info['max_input_tokens'],
                 output_limit=model_info['max_output_tokens'],
                 effort=reasoning_effort,
+                thinking_mode=self.options.thinking_mode,
                 logs_dir=self.logs_dir,
             )
         self._endpoint_client = endpoint.client()

@@ -8,18 +8,27 @@ from pathlib import Path
 from typing import Any, override
 
 from anthropic import AsyncAnthropic, omit
-from anthropic.types import Message, MessageParam, OutputConfigParam
+from anthropic.types import (
+    Message,
+    MessageParam,
+    OutputConfigParam,
+    ThinkingConfigParam,
+)
 from harbor.llms.base import BaseLLM, LLMResponse, OutputLengthExceededError
 from harbor.llms.chat import Chat
 from harbor.models.metric import UsageInfo
 from pydantic import TypeAdapter
 
+from assistant_bench.catalog import ThinkingMode
 from assistant_bench.generation import load_generation
 
 
 ITEMS_KEY = 'message_content'
 _input = TypeAdapter(list[MessageParam])
 _effort = TypeAdapter(OutputConfigParam)
+_THINKING: dict[ThinkingMode, ThinkingConfigParam] = {
+    'anthropic-adaptive': {'type': 'adaptive'}
+}
 
 
 class MessageCompletionError(ValueError):
@@ -134,6 +143,7 @@ async def request_messages(
     messages: list[MessageParam],
     system: str | None,
     max_tokens: int,
+    thinking_mode: ThinkingMode,
     effort: str | None,
     artifact: Path,
 ) -> None:
@@ -145,7 +155,7 @@ async def request_messages(
             messages=messages,
             system=system if system is not None else omit,
             max_tokens=max_tokens,
-            thinking={'type': 'adaptive'},
+            thinking=_THINKING[thinking_mode],
             output_config=_effort.validate_python({'effort': effort})
             if effort
             else omit,
@@ -227,6 +237,7 @@ class MessagesLLM(BaseLLM):
         context_limit: int,
         output_limit: int,
         effort: str | None,
+        thinking_mode: ThinkingMode,
         logs_dir: Path,
     ) -> None:
         self.client = client
@@ -234,6 +245,7 @@ class MessagesLLM(BaseLLM):
         self.context_limit = context_limit
         self.output_limit = output_limit
         self.effort = effort
+        self.thinking_mode = thinking_mode
         self.logs_dir = logs_dir
         self.results: list[dict[str, Any]] = []
         self.attempts: list[dict[str, Any]] = []
@@ -263,6 +275,7 @@ class MessagesLLM(BaseLLM):
                 messages=message_input(message_history or [], prompt),
                 system=None,
                 max_tokens=self.output_limit,
+                thinking_mode=self.thinking_mode,
                 effort=self.effort,
                 artifact=self.logs_dir / f'message-{len(self.results) + 1}.json',
             )
