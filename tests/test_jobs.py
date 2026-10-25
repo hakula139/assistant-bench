@@ -131,9 +131,9 @@ def record_trial(
 
 
 def declare_cases(family: Family, cases: list[Case]) -> None:
-    path = bench_data_dir() / 'cases' / f'{family.name}.jsonl'
+    path = bench_data_dir() / 'cases' / f'{family.name}.toml'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(''.join(case.model_dump_json() + '\n' for case in cases))
+    path.write_text(tomli_w.dumps({'cases': [case.model_dump() for case in cases]}))
 
 
 def render_cases(family: Family, cases: list[Case]) -> list[Path]:
@@ -993,9 +993,9 @@ class TestCollect:
     @pytest.fixture(autouse=True)
     def current_sources(self, families_dir: Path, data_dir: Path) -> None:
         write_case_family(families_dir, ['acme-large'], name='smoke-text')
-        cases = data_dir / 'cases' / 'smoke-text.jsonl'
+        cases = data_dir / 'cases' / 'smoke-text.toml'
         cases.parent.mkdir(parents=True)
-        cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.jsonl').read_text())
+        cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.toml').read_text())
 
     @pytest.mark.parametrize('deleted', [False, True], ids=['edited', 'removed'])
     def test_excludes_stale_case_sources_without_rerendering_installed_tasks(

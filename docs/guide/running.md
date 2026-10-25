@@ -25,7 +25,7 @@ uv run bench check
 uv run bench check smoke-text
 ```
 
-`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.jsonl` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs each task's reference solution and a do-nothing agent, as [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.toml` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs each task's reference solution and a do-nothing agent, as [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
 
 ## Running a Family
 
@@ -55,7 +55,7 @@ Removing a system from the family's `systems` stops new trials and current colle
 
 A run refuses a system whose earlier trials recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
-Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their lines in `cases.jsonl`, then `uv run bench run`.
+Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their `[[cases]]` entries in `cases.toml`, then `uv run bench run`.
 
 ## Collecting Outputs
 
@@ -111,7 +111,7 @@ Everything a run produces stays out of Git in the data directory, which `BENCH_D
 
 ```text
 assistant-bench/
-├── cases/<family>.jsonl                    # Local cases, appended to the committed ones
+├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial

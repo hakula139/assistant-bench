@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
@@ -520,11 +521,21 @@ class TestCheck:
     def test_rejects_a_local_case_that_reuses_a_committed_id(
         self, data_dir: Path
     ) -> None:
-        local = data_dir / 'cases' / 'smoke-text.jsonl'
+        local = data_dir / 'cases' / 'smoke-text.toml'
         local.parent.mkdir(parents=True)
         local.write_text(
-            '{"id": "en-greeting", "category": "message", "source": "held-out", '
-            '"instruction": "Hi."}\n'
+            tomli_w.dumps(
+                {
+                    'cases': [
+                        {
+                            'id': 'en-greeting',
+                            'category': 'message',
+                            'source': 'held-out',
+                            'instruction': 'Hi.',
+                        }
+                    ]
+                }
+            )
         )
 
         result = invoke('check', 'smoke-text')
@@ -943,8 +954,18 @@ class TestRun:
         write_case_family(families_dir, ['opus-5.5-max'], name='f')
         cases = write_case_family(families_dir, ['opus-5.5-max'], name='g')
         cases.write_text(
-            '{"id": "c1", "category": "message", "source": "synthetic", '
-            '"instruction": "Hi."}\n'
+            tomli_w.dumps(
+                {
+                    'cases': [
+                        {
+                            'id': 'c1',
+                            'category': 'message',
+                            'source': 'synthetic',
+                            'instruction': 'Hi.',
+                        }
+                    ]
+                }
+            )
         )
         write_trial(
             data_dir / 'jobs' / 'g' / '2026-10-20__10-00-00',
