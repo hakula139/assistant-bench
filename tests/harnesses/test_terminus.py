@@ -1157,7 +1157,7 @@ class TestTerminus:
                 if step['source'] == 'agent'
             ] == ([] if prior_usage is None else [''])
             assert [sent.extensions['timeout'] for sent in model_requests] == [
-                {'connect': 5.0, 'read': None, 'write': 600.0, 'pool': 600.0}
+                {'connect': 30.0, 'read': None, 'write': 600.0, 'pool': 600.0}
             ] * (1 if prior_usage is None else 2)
             assert client.max_retries == 0
 
