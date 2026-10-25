@@ -199,35 +199,18 @@ class TestCandidatePool:
                     output_key(0, 'small'),
                 }
 
-        def test_seeds_the_least_covered_orientation_before_adaptive_sampling(
-            self,
+        @pytest.mark.parametrize(
+            ('forward_count', 'reverse_count'),
+            [(2, 1), (9, 2)],
+            ids=['seeding', 'adaptive'],
+        )
+        def test_uses_the_least_covered_orientation(
+            self, forward_count: int, reverse_count: int
         ) -> None:
             release = make_release(cases=1)
             coverage = (
-                Coverage(a_system='large', b_system='small', count=2),
-                Coverage(a_system='small', b_system='large', count=1),
-            )
-
-            pool = CandidatePool.build(release, (), (), ())
-
-            picked = pool.draw(
-                release.points,
-                coverage,
-                release.policy.method.points_per_logit,
-                random.Random(0),
-            )
-
-            assert picked is not None
-            assert picked.a_output == output_key(0, 'small')
-            assert picked.b_output == output_key(0, 'large')
-
-        def test_uses_the_least_covered_orientation_after_both_sides_are_seeded(
-            self,
-        ) -> None:
-            release = make_release(cases=1)
-            coverage = (
-                Coverage(a_system='large', b_system='small', count=9),
-                Coverage(a_system='small', b_system='large', count=2),
+                Coverage(a_system='large', b_system='small', count=forward_count),
+                Coverage(a_system='small', b_system='large', count=reverse_count),
             )
 
             pool = CandidatePool.build(release, (), (), ())
