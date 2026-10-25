@@ -3150,10 +3150,19 @@ class TestLedger:
                         )
                     )
 
-                    for index in range(251):
-                        await seed_actor(
-                            transport, Actor(id=f'expired:{index:03}', created_at=0)
+                    await transport.execute(
+                        Statement(
+                            sql="""
+                                INSERT INTO actors(id, created_at, rate_subject)
+                                SELECT value, 0, NULL FROM json_each(?) ORDER BY key
+                            """,
+                            params=(
+                                json.dumps(
+                                    [f'expired:{index:03}' for index in range(251)]
+                                ),
+                            ),
                         )
+                    )
 
                     await seed_actor(transport, Actor(id='fresh', created_at=1))
 

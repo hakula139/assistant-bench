@@ -406,28 +406,30 @@ class TestNativeRuntime:
                     'SELECT count(*) AS count FROM vote_receipts'
                 ) == [{'count': 1}]
 
-                for index in range(251):
-                    await transport.execute(
-                        Statement(
-                            sql="""
-                                INSERT INTO quota_windows(operation, scope, subject,
-                                    window_ms, window_start, consumed, expires_at)
-                                VALUES ('admit', 'exact', ?, 86400000, 0, 1, 1)
-                            """,
-                            params=(f'expired-{index}',),
-                        )
+                expired = json.dumps([f'expired-{index}' for index in range(251)])
+                await transport.execute(
+                    Statement(
+                        sql="""
+                            INSERT INTO quota_windows(operation, scope, subject,
+                                window_ms, window_start, consumed, expires_at)
+                            SELECT 'admit', 'exact', value, 86400000, 0, 1, 1
+                            FROM json_each(?) ORDER BY key
+                        """,
+                        params=(expired,),
                     )
-                    await transport.execute(
-                        Statement(
-                            sql="""
-                                INSERT INTO network_attribution(receipt_seq,
-                                    key_version, tag_kind, tag, created_at, expires_at)
-                                SELECT seq, ?, 'exact', 'synthetic', 0, 1
-                                FROM vote_receipts
-                            """,
-                            params=(f'expired-{index}',),
-                        )
+                )
+                await transport.execute(
+                    Statement(
+                        sql="""
+                            INSERT INTO network_attribution(receipt_seq,
+                                key_version, tag_kind, tag, created_at, expires_at)
+                            SELECT r.seq, e.value, 'exact', 'synthetic', 0, 1
+                            FROM vote_receipts r, json_each(?) e
+                            ORDER BY e.key, r.seq
+                        """,
+                        params=(expired,),
                     )
+                )
 
                 before_status = time.time_ns() // 1_000_000
                 lagging = await transport.call(
