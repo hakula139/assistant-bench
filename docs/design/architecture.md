@@ -81,11 +81,11 @@ Imports point downward through these layers, so a module never imports one above
 
 ## Families and Scorers
 
-A family directory holds only data: `family.toml` and either `cases.jsonl` or `tasks/`, with `load_family` inferring the source from whichever exists. The source decides how trials run and what grades them:
+A family directory holds only data: `family.toml` and either `cases.toml` or `tasks/`, with `load_family` inferring the source from whichever exists. The source decides how trials run and what grades them:
 
 | Source          | Agent                  | Verifier | Each output holds                                           |
 | --------------- | ---------------------- | -------- | ----------------------------------------------------------- |
-| `cases.jsonl`   | `generate`             | Disabled | The reply, which the family's gates check                   |
+| `cases.toml`    | `generate`             | Disabled | The reply, which the family's gates check                   |
 | `tasks/<task>/` | The family's `harness` | Enabled  | The task's `reward`, and the diff of its `/app` for `votes` |
 
 In `family.toml`, `scorer` discriminates the settings model, which decides how the outputs rank, and each place that depends on the scorer matches on that model and ends in `assert_never`, so mypy reports any scorer that a `match` misses:

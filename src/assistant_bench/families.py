@@ -156,7 +156,7 @@ type CaseSource = Literal['synthetic', 'public', 'transcript', 'held-out']
 
 
 class Family(BaseModel):
-    """A directory under `families/`, holding either `cases.jsonl` or `tasks/`."""
+    """A directory under `families/`, holding either `cases.toml` or `tasks/`."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -166,7 +166,7 @@ class Family(BaseModel):
 
 
 class Case(BaseModel):
-    """One line of a family's `cases.jsonl`."""
+    """One entry in a family's `cases.toml`."""
 
     model_config = ConfigDict(extra='forbid')
 
@@ -175,6 +175,14 @@ class Case(BaseModel):
     source: CaseSource
     instruction: str
     checklist: list[str] = []
+
+
+class _CaseManifest(BaseModel):
+    """The authored cases document, in evaluation order."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    cases: list[Case]
 
 
 class _TaskMetadata(BaseModel):
@@ -221,7 +229,7 @@ def load_family(name: str) -> Family:
     ------
     ValueError
         No family has the name, the family holds both or neither of
-        `cases.jsonl` and `tasks/`, `family.toml` does not parse or validate, a
+        `cases.toml` and `tasks/`, `family.toml` does not parse or validate, a
         public family sets no aspect or names itself without that aspect's
         prefix, or the settings do not fit the source. A case family is scored by
         `votes`, sets no `harness`, and renders no diffs. A task family sets no
@@ -234,10 +242,10 @@ def load_family(name: str) -> Family:
             f'No family named `{name}`. Choose among {code(family_names())}.'
         )
 
-    has_cases = (directory / 'cases.jsonl').is_file()
+    has_cases = (directory / 'cases.toml').is_file()
     if has_cases == (directory / 'tasks').is_dir():
         raise ValueError(
-            f'Family `{name}`: expected exactly one of `cases.jsonl` and `tasks/`.'
+            f'Family `{name}`: expected exactly one of `cases.toml` and `tasks/`.'
         )
 
     prefix = f'Family `{name}`: `family.toml`'
@@ -274,18 +282,18 @@ def _check_source_settings(family: Family) -> None:
     if family.source == 'cases':
         if not isinstance(settings, VotesSettings):
             raise ValueError(
-                f'{prefix}: score a `cases.jsonl` family by `votes`, since only '
+                f'{prefix}: score a `cases.toml` family by `votes`, since only '
                 'a `tasks/` family has tests.'
             )
         if settings.harness is not None:
             raise ValueError(
-                f'{prefix}: a `cases.jsonl` family runs every system as `generate`, '
+                f'{prefix}: a `cases.toml` family runs every system as `generate`, '
                 'so remove `harness`.'
             )
 
         if settings.render == 'diff':
             raise ValueError(
-                f'{prefix}: a `cases.jsonl` family yields replies, so set `render` '
+                f'{prefix}: a `cases.toml` family yields replies, so set `render` '
                 'to `"text"` or `"html"`.'
             )
         return
@@ -320,12 +328,14 @@ def load_cases(family: Family) -> list[Case]:
     Raises
     ------
     ValueError
-        A line is not a valid case, a task has no `task.toml` or `instruction.md`
-        or names itself apart from its directory, two cases share an ID, within
-        one source or across both, or a case's category is missing from the
-        family's `categories`.
+        A case document does not parse or validate, a task has no `task.toml` or
+        `instruction.md` or names itself apart from its directory, two cases share
+        an ID, within one source or across both, or a case's category is missing
+        from the family's `categories`.
     """
-    entries = _task_entries(family) if family.source == 'tasks' else _case_lines(family)
+    entries = (
+        _task_entries(family) if family.source == 'tasks' else _case_entries(family)
+    )
     cases: dict[str, Case] = {}
     locations: dict[str, str] = {}
     for location, case in entries:
@@ -346,26 +356,28 @@ def load_cases(family: Family) -> list[Case]:
     return list(cases.values())
 
 
-def _case_lines(family: Family) -> Iterator[tuple[str, Case]]:
+def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
     paths = [
-        FAMILIES_DIR / family.name / 'cases.jsonl',
-        data_dir() / 'cases' / f'{family.name}.jsonl',
+        FAMILIES_DIR / family.name / 'cases.toml',
+        data_dir() / 'cases' / f'{family.name}.toml',
     ]
 
     for path in paths:
         if not path.exists():
             continue
-        for number, line in enumerate(path.read_text().splitlines(), start=1):
-            if not line.strip():
-                continue
-            location = f'{path}:{number}'
-            try:
-                case = Case.model_validate_json(line)
-            except ValidationError as error:
-                raise ValueError(
-                    error_lines(error, f'Family `{family.name}`: `{location}`')
-                ) from error
-            yield location, case
+        prefix = f'Family `{family.name}`: `{path}`'
+        try:
+            with path.open('rb') as file:
+                manifest = _CaseManifest.model_validate(tomllib.load(file))
+        except tomllib.TOMLDecodeError as error:
+            raise ValueError(
+                sentence(f'{prefix} is not valid TOML: {error}')
+            ) from error
+        except ValidationError as error:
+            raise ValueError(error_lines(error, prefix)) from error
+
+        for index, case in enumerate(manifest.cases):
+            yield f'{path}:cases[{index}]', case
 
 
 def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:

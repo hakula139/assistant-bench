@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
+import tomli_w
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
@@ -98,8 +99,8 @@ def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -
             """
         )
     )
-    cases = directory / 'cases.jsonl'
-    cases.write_text('')
+    cases = directory / 'cases.toml'
+    cases.write_text('cases = []\n')
     return cases
 
 
@@ -605,18 +606,19 @@ def write_votes_family(
         (task / 'task.toml').write_text(
             render_task_config(f'{name}/{case}', instruction).model_dump_toml()
         )
-    (directory / 'cases.jsonl').write_text(
-        ''.join(
-            json.dumps(
-                {
-                    'id': case,
-                    'category': category,
-                    'source': 'synthetic',
-                    'instruction': f'Write about {case}.',
-                    'checklist': ['Stays on topic'],
-                }
-            )
-            + '\n'
-            for case, category in categories.items()
+    (directory / 'cases.toml').write_text(
+        tomli_w.dumps(
+            {
+                'cases': [
+                    {
+                        'id': case,
+                        'category': category,
+                        'source': 'synthetic',
+                        'instruction': f'Write about {case}.',
+                        'checklist': ['Stays on topic'],
+                    }
+                    for case, category in categories.items()
+                ]
+            }
         )
     )

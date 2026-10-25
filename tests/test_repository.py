@@ -55,11 +55,13 @@ class TestHosts:
 
 @pytest.mark.parametrize(
     'path',
-    sorted((REPO_ROOT / 'families').glob('*/cases.jsonl')),
+    sorted((REPO_ROOT / 'families').glob('*/cases.toml')),
     ids=lambda path: path.parent.name,
 )
 def test_committed_cases_hold_only_synthetic_or_public_sources(path: Path) -> None:
-    cases = [Case.model_validate_json(line) for line in path.read_text().splitlines()]
+    cases = [
+        Case.model_validate(case) for case in tomllib.loads(path.read_text())['cases']
+    ]
 
     assert {case.source for case in cases} <= COMMITTED_SOURCES
 
@@ -77,7 +79,7 @@ def test_committed_tasks_hold_only_synthetic_or_public_sources(path: Path) -> No
 
 @pytest.mark.parametrize(
     'name',
-    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/cases.jsonl')),
+    sorted(path.parent.name for path in (REPO_ROOT / 'families').glob('*/cases.toml')),
 )
 def test_committed_case_families_pass_check(name: str) -> None:
     result = CliRunner().invoke(app, ['check', name])
