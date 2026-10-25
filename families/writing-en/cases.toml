@@ -737,10 +737,10 @@ id = "attention"
 category = "essay"
 source = "synthetic"
 instruction = """
-Write a first-person argumentative personal essay of 600 to 800 words arguing that human attention is not a resource (unlike money, fuel, or raw materials).
+Write a first-person argumentative personal essay of 600 to 800 words in the voice of a fictional essayist, arguing that human attention is not a resource (unlike money, fuel, or raw materials).
 
 1. State this thesis explicitly in your opening paragraph.
-2. Support your argument with at least one concrete personal example from your own life.
+2. Support your argument with at least one concrete personal example from the narrator's invented life.
 3. Address one serious counterargument by engaging accurately with Herbert Simon's concept of attention as a scarce resource in an information-rich world, the idea later called the attention economy. Refer to his idea by paraphrase only. Do not quote him directly or put words in his mouth.
 4. Conclude by qualifying or complicating your original thesis. Do not simply restate it.
 
