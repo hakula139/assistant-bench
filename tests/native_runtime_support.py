@@ -420,8 +420,10 @@ class NativeRuntime:
 
     @contextmanager
     def _owner(self, endpoint: str) -> Generator[None]:
-        shutil.copytree(ROOT / 'arena' / 'src', self.directory / 'src')
-        for name in ('pyproject.toml', 'pylock.toml', 'rpc.ts', 'rpc-payload.ts'):
+        shutil.copytree(ROOT / 'src', self.directory / 'src')
+        for name in ('pyproject.toml', 'pylock.toml'):
+            shutil.copyfile(ROOT / name, self.directory / name)
+        for name in ('rpc.ts', 'rpc-payload.ts'):
             shutil.copyfile(ROOT / 'arena' / name, self.directory / name)
         (self.directory / 'node_modules').symlink_to(ROOT / 'node_modules')
         if self.coverage is not None:
@@ -504,7 +506,7 @@ class NativeRuntime:
             '<html><head></head><body>Vote</body></html>'
         )
         name = f'runtime-test-{uuid4().hex}'
-        manifest = tomllib.loads((ROOT / 'arena' / 'wrangler.toml').read_text())
+        manifest = tomllib.loads((ROOT / 'wrangler.toml').read_text())
         configuration = manifest['env']['staging']
         configuration.update(
             name=name,
@@ -849,7 +851,7 @@ class NativeRuntime:
                 Path('app.py'),
                 Path('render.py'),
             }
-            source = ROOT / 'arena' / 'src' / relative
+            source = ROOT / 'src' / relative
             assert hashlib.sha256(source.read_bytes()).hexdigest() == entry['sha256']
             lines[str(source)] = TypeAdapter(list[int]).validate_python(entry['lines'])
             arcs[str(source)] = TypeAdapter(list[tuple[int, int]]).validate_python(

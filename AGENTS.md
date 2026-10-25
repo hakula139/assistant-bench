@@ -23,6 +23,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
 ├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
+├── src/assistant_bench_arena/              # Voting contracts, ledger, and native Worker services
 ├── systems.toml                            # Systems under test, one table each
 └── web/                                    # The results site and public vote page, a pnpm workspace package
 ```

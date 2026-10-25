@@ -98,11 +98,11 @@ jobs:
         shell: bash
         run: |
           nix develop -c env -u _PYTHON_SYSCONFIGDATA_NAME -u _PYTHON_HOST_PLATFORM \
-            uv run --directory arena pywrangler deploy --dry-run --env staging \
+            uv run pywrangler deploy --dry-run --env staging \
             --env-file /dev/null --outdir /tmp/assistant-bench-worker
 
       - name: Check native dependency lock
-        run: git diff --exit-code -- arena/pylock.toml
+        run: git diff --exit-code -- pylock.toml
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

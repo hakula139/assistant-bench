@@ -45,10 +45,10 @@ class TestRendererConfig:
     def test_bundles_exact_locked_dependencies_from_the_generated_descriptor(
         self, tmp_path: Path
     ) -> None:
-        project = tmp_path / 'arena'
-        shutil.copytree(REPO_ROOT / 'arena' / 'src', project / 'src')
+        project = tmp_path / 'project'
+        shutil.copytree(REPO_ROOT / 'src', project / 'src')
         for name in ('pyproject.toml', 'pylock.toml', 'wrangler.toml'):
-            shutil.copyfile(REPO_ROOT / 'arena' / name, project / name)
+            shutil.copyfile(REPO_ROOT / name, project / name)
         (project / 'node_modules').symlink_to(REPO_ROOT / 'node_modules')
         preserved = {
             path: path.read_bytes()
@@ -131,7 +131,7 @@ class TestRendererConfig:
         self, tmp_path: Path
     ) -> None:
         manifest = tmp_path / 'wrangler.toml'
-        shutil.copyfile(REPO_ROOT / 'arena' / 'wrangler.toml', manifest)
+        shutil.copyfile(REPO_ROOT / 'wrangler.toml', manifest)
         target = load_target('staging', manifest_path=manifest)
 
         with (
@@ -141,7 +141,4 @@ class TestRendererConfig:
             raise RuntimeError('Synthetic deployment failure')
 
         assert not configuration.exists()
-        assert (
-            manifest.read_bytes()
-            == (REPO_ROOT / 'arena' / 'wrangler.toml').read_bytes()
-        )
+        assert manifest.read_bytes() == (REPO_ROOT / 'wrangler.toml').read_bytes()

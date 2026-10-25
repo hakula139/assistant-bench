@@ -4,7 +4,7 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 
 ## Publication and Evidence
 
-`bench arena` manages immutable releases through a named native Worker profile in `arena/wrangler.toml`. The private Service binding admits typed publication, export and moderation operations. A target must be explicitly configured before its commands can connect.
+`bench arena` manages immutable releases through a named native Worker profile in `wrangler.toml`. The private Service binding admits typed publication, export and moderation operations. A target must be explicitly configured before its commands can connect.
 
 ```bash
 uv run bench arena prepare selection.json release.json

@@ -13,14 +13,15 @@ class TestArenaDistribution:
     def test_built_artifacts_preserve_native_sources_and_exclude_generated_content(
         self, tmp_path: Path
     ) -> None:
-        package = tmp_path / 'arena'
-        source = REPO_ROOT / 'arena'
+        package = tmp_path / 'project'
+        source = REPO_ROOT
         shutil.copytree(
             source / 'src',
             package / 'src',
             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
         )
         shutil.copyfile(source / 'pyproject.toml', package / 'pyproject.toml')
+        shutil.copyfile(source / 'README.md', package / 'README.md')
         for name in (
             'python_modules/generated.py',
             '.venv/native.py',
@@ -53,6 +54,7 @@ class TestArenaDistribution:
             'worker/api.py',
             'worker/authentication.py',
             'worker/bindings.py',
+            'worker/diagnostics.py',
             'worker/http.py',
             'worker/owner.py',
             'worker/production.py',

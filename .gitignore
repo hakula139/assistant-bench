@@ -35,7 +35,7 @@ result-*
 .pytest_cache/
 .ruff_cache/
 .wrangler/
-/arena/.wrangler-render-*.toml
+/.wrangler-render-*.toml
 __pycache__/
 
 # OS files

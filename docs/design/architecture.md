@@ -47,10 +47,10 @@ src/assistant_bench/
 
 ## Import Layers
 
-`arena/src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports shared contracts for family validation, release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `arena/src/app.py` and `arena/src/render.py` entrypoints export the application and renderer's native SDK classes.
+`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports shared contracts for family validation, release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
 
 ```text
-arena/src/assistant_bench_arena/
+src/assistant_bench_arena/
 ├── admission.py              # Purpose-bound signatures and network identities
 ├── api_models.py             # Browser commands and safe acknowledgments
 ├── investigation.py          # Private receipt queries and expiring network associations
@@ -77,6 +77,7 @@ arena/src/assistant_bench_arena/
     ├── api.py                # Native request, response and ASGI adapters
     ├── authentication.py     # Cookie ownership, admission and network budgets
     ├── bindings.py           # Native D1, limiter, challenge and body adapters
+    ├── diagnostics.py        # Content-free failure stages and exception classes
     ├── http.py               # Browser routes and blinded response handling
     ├── owner.py              # The shared application and database owner
     ├── production.py         # Application HTTP and confined Service entrypoints

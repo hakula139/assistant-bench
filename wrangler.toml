@@ -27,7 +27,7 @@ TURNSTILE_SITEKEY = "0x4AAAAAAFk4uKFs7GuqFW55"
 
 [env.staging.assets]
 binding = "ASSETS"
-directory = "../web/dist"
+directory = "web/dist"
 run_worker_first = true
 not_found_handling = "404-page"
 

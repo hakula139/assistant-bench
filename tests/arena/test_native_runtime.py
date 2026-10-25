@@ -87,7 +87,7 @@ def html_release() -> Release:
 
 class TestNativeRuntime:
     def test_native_lock_uses_public_integrity_checked_wheels(self) -> None:
-        lock = tomllib.loads((ROOT / 'arena' / 'pylock.toml').read_text())
+        lock = tomllib.loads((ROOT / 'pylock.toml').read_text())
 
         for package in lock['packages']:
             assert package['wheels'], package['name']
@@ -471,7 +471,7 @@ class TestNativeRuntime:
             asyncio.run(scenario(runtime))
 
         assert (tmp_path / 'pylock.toml').read_bytes() == (
-            ROOT / 'arena' / 'pylock.toml'
+            ROOT / 'pylock.toml'
         ).read_bytes()
 
         if runtime.coverage is not None:
@@ -480,7 +480,7 @@ class TestNativeRuntime:
                 ('renderer_coverage.json', 'rendering'),
             ):
                 relative = Path('assistant_bench_arena/worker') / f'{name}.py'
-                source = ast.parse((ROOT / 'arena' / 'src' / relative).read_text())
+                source = ast.parse((ROOT / 'src' / relative).read_text())
                 fetch = next(
                     node
                     for node in ast.walk(source)

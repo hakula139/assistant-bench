@@ -28,9 +28,9 @@ class TestNativeTypePolicy:
         ]['basedpyright']
         probes = (
             'src/assistant_bench/probe.py',
-            'arena/src/probe.py',
-            'arena/src/assistant_bench_arena/probe.py',
-            'arena/src/assistant_bench_arena/worker/probe.py',
+            'src/probe.py',
+            'src/assistant_bench_arena/probe.py',
+            'src/assistant_bench_arena/worker/probe.py',
         )
         for name in probes:
             path = tmp_path / name
