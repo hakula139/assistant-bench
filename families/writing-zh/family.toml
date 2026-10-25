@@ -2,6 +2,7 @@ scorer = "votes"
 aspect = "writing"
 display_name = "Chinese"
 public = true
+public_voting = true
 systems = [
   "opus-5.5-high",
   "gpt-6-astra-high",
