@@ -25,7 +25,7 @@ Most instructions supply a list of facts and ask for those facts alone, so a vot
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review cases state their point of view, required beats, and length band in the instruction, so the checklist can judge the same things the brief asks for.
 
-A review case supplies a synopsis of its invented work, including the scene a close reading treats. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
+A review case supplies a synopsis of its invented work, with scene observations for an animation close reading. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
 
 A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
 
