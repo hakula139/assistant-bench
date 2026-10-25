@@ -94,6 +94,7 @@
               ];
             });
           };
+
           lychee.enable = true;
 
           sort-file-contents = {
