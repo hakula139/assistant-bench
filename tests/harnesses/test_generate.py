@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -7,18 +8,29 @@ from unittest.mock import MagicMock
 import httpx
 import openai
 import pytest
+from anthropic import AsyncAnthropic
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai.types.responses import Response
 
-from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
-from assistant_bench.families import Gate, VotesSettings
+from assistant_bench import jobs
+from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
+from assistant_bench.families import Gate, VotesSettings, load_cases, load_family
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
+from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.scoring.gates import failed_gates
-from support import StubEndpoint, completion, make_system, response
+from support import (
+    StubEndpoint,
+    completion,
+    make_system,
+    message,
+    message_stream,
+    response,
+    write_trial,
+)
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -74,10 +86,251 @@ class TestGenerate:
 
     class TestRun:
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+        @pytest.mark.parametrize(
+            ('writes', 'tokens', 'cost'),
+            [
+                (0, (120, 100, 40), 0.00046),
+                (10, (120, 100, 40), None),
+                (-1, (None, None, None), None),
+                (21, (None, None, None), None),
+            ],
+            ids=['zero', 'measured-unpriced', 'negative', 'cache-exceeds-input'],
+        )
+        def test_openai_cache_writes_survive_sdk_accounting_and_collection(
+            self,
+            endpoint: StubEndpoint,
+            tmp_path: Path,
+            data_dir: Path,
+            api: Api,
+            writes: int,
+            tokens: tuple[int | None, ...],
+            cost: float | None,
+        ) -> None:
+            endpoint.response = (
+                response() if api == 'openai-responses' else completion()
+            )
+            details = (
+                'input_tokens_details'
+                if api == 'openai-responses'
+                else 'prompt_tokens_details'
+            )
+            endpoint.response['usage'][details]['cache_write_tokens'] = writes
+            family = load_family('smoke-text')
+            system = make_system(
+                api=api,
+                price=Price(input=2.0, output=10.0, cache_read=0.2),
+            )
+            family = family.model_copy(
+                update={
+                    'settings': family.settings.model_copy(
+                        update={'systems': [system.name], 'reference': system.name}
+                    )
+                }
+            )
+            (task,) = jobs.render_tasks(family, load_cases(family)[:1])
+            config = jobs.job(family, jobs.family_systems(family, [system]), [task])
+
+            context, output = run_agent(
+                endpoint, tmp_path / 'agent', **options.generate(system)
+            )
+            write_trial(
+                data_dir / 'jobs' / family.name / 'job-1',
+                'en-greeting__1',
+                config.agents[0],
+                task=f'{family.name}/en-greeting',
+                output=output.read_text(),
+                context=context,
+                instruction=None,
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+            (collected,) = jobs.collect(family, {system.name: system})
+
+            assert collected.text == 'Hello there.'
+            assert (
+                collected.input_tokens,
+                collected.cached_tokens,
+                collected.output_tokens,
+            ) == tokens
+            assert collected.cache_write_tokens == (
+                writes if writes in (0, 10) else None
+            )
+            assert collected.cost_usd == (
+                pytest.approx(cost) if cost is not None else None
+            )
+            assert context.metadata is not None
+            assert context.metadata['reported_usage'] == endpoint.response['usage']
+            assert len(endpoint.requests) == 1
+
+        @pytest.mark.parametrize(
+            'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+        )
+        @pytest.mark.parametrize(
+            'scenario',
+            [
+                'zero',
+                'missing-input',
+                'missing-output',
+                'negative-input',
+                'negative-output',
+                'fractional-input',
+                'negative-cache',
+                'excess-reasoning',
+            ],
+        )
+        def test_accepts_the_answer_but_records_only_valid_measured_usage(
+            self, endpoint: StubEndpoint, tmp_path: Path, api: Api, scenario: str
+        ) -> None:
+            payload = (
+                message()
+                if api == 'anthropic-messages'
+                else response()
+                if api == 'openai-responses'
+                else completion()
+            )
+            usage = payload['usage']
+            input_key = (
+                'prompt_tokens' if api == 'openai-chat-completions' else 'input_tokens'
+            )
+            output_key = (
+                'completion_tokens'
+                if api == 'openai-chat-completions'
+                else 'output_tokens'
+            )
+            if scenario == 'zero':
+                usage[input_key] = usage[output_key] = 0
+                if api == 'anthropic-messages':
+                    usage['cache_read_input_tokens'] = usage[
+                        'cache_creation_input_tokens'
+                    ] = 0
+                else:
+                    usage['total_tokens'] = 0
+                    usage[
+                        'prompt_tokens_details'
+                        if api == 'openai-chat-completions'
+                        else 'input_tokens_details'
+                    ] = {'cached_tokens': 0}
+                    usage[
+                        'completion_tokens_details'
+                        if api == 'openai-chat-completions'
+                        else 'output_tokens_details'
+                    ] = {'reasoning_tokens': 0}
+            elif scenario.startswith('missing-'):
+                usage.pop(input_key if scenario == 'missing-input' else output_key)
+            elif scenario in ('negative-input', 'fractional-input'):
+                usage[input_key] = -1 if scenario == 'negative-input' else 1.5
+            elif scenario == 'negative-output':
+                usage[output_key] = -1
+            elif scenario == 'negative-cache':
+                if api == 'anthropic-messages':
+                    usage['cache_read_input_tokens'] = -1
+                else:
+                    usage[
+                        'prompt_tokens_details'
+                        if api == 'openai-chat-completions'
+                        else 'input_tokens_details'
+                    ] = {'cached_tokens': -1}
+            else:
+                usage[
+                    'completion_tokens_details'
+                    if api == 'openai-chat-completions'
+                    else 'output_tokens_details'
+                ] = {
+                    'thinking_tokens'
+                    if api == 'anthropic-messages'
+                    else 'reasoning_tokens': 41
+                }
+            if api == 'anthropic-messages':
+                endpoint.stream = message_stream(payload)
+            else:
+                endpoint.response = payload
+
+            context, output = run_agent(
+                endpoint,
+                tmp_path,
+                api=api,
+                effort='high',
+                thinking_mode='anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
+            )
+
+            assert output.read_text() == 'Hello there.'
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == ((0, 0, 0) if scenario == 'zero' else (None, None, None))
+            assert context.cost_usd is None
+            assert len(endpoint.requests) == 1
+
+        @pytest.mark.parametrize(
+            ('stop', 'finish'),
+            [('end_turn', 'stop'), ('max_tokens', 'length'), ('refusal', 'refusal')],
+        )
+        def test_records_terminal_native_text_and_measured_usage_without_regeneration(
+            self, endpoint: StubEndpoint, tmp_path: Path, stop: str, finish: str
+        ) -> None:
+            endpoint.stream = message_stream(message(stop_reason=stop))
+
+            context, output = run_agent(
+                endpoint,
+                tmp_path,
+                api='anthropic-messages',
+                effort='high',
+                thinking_mode='anthropic-adaptive',
+                max_output_tokens=128000,
+            )
+
+            assert output.read_text() == 'Hello there.'
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == (130, 100, 40)
+            assert context.metadata is not None
+            assert context.metadata['cache_write_tokens'] == 10
+            assert context.metadata['finish_reason'] == finish
+            assert context.metadata['native_stop_reason'] == stop
+            assert context.metadata['reasoning_tokens'] is None
+            assert (
+                json.loads((tmp_path / 'message.json').read_text())['content'][0][
+                    'signature'
+                ]
+                == 'signed-msg-1'
+            )
+            (sent,) = endpoint.requests
+            assert sent.path == '/anthropic/v1/messages'
+            assert sent.body['thinking'] == {'type': 'adaptive'}
+            assert sent.body['output_config'] == {'effort': 'high'}
+            assert sent.body['max_tokens'] == 128000
+
+        def test_never_publishes_a_clean_early_eof_as_an_answer(
+            self, endpoint: StubEndpoint, tmp_path: Path
+        ) -> None:
+            endpoint.stream = message_stream(message())[:-1]
+
+            with pytest.raises(MessageStreamError, match='message_stop'):
+                run_agent(
+                    endpoint,
+                    tmp_path,
+                    api='anthropic-messages',
+                    effort='high',
+                    thinking_mode='anthropic-adaptive',
+                )
+
+            assert not (tmp_path / OUTPUT_FILE).exists()
+            assert (tmp_path / 'message.json').exists()
+            assert len(endpoint.requests) == 1
+
+        @pytest.mark.parametrize(
+            'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+        )
         def test_cancels_the_pending_request_and_closes_without_fabricating_usage(
             self,
             endpoint: StubEndpoint,
             endpoint_clients: list[openai.AsyncOpenAI],
+            messages_clients: list[AsyncAnthropic],
             export: NixosConfigExport,
             model_requests: list[httpx.Request],
             tmp_path: Path,
@@ -89,6 +342,9 @@ class TestGenerate:
                 model_name='acme/large',
                 extra_env=endpoint.env,
                 api=api,
+                thinking_mode='anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
                 **OPTIONS,
             )
             context = AgentContext()
@@ -111,8 +367,13 @@ class TestGenerate:
             asyncio.run(cancel())
 
             (request,) = endpoint.requests
-            assert request.path == (
-                '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
+            assert (
+                request.path
+                == {
+                    'openai-responses': '/v1/responses',
+                    'openai-chat-completions': '/v1/chat/completions',
+                    'anthropic-messages': '/anthropic/v1/messages',
+                }[api]
             )
             (sent,) = model_requests
             assert sent.extensions['timeout'] == {
@@ -121,7 +382,9 @@ class TestGenerate:
                 'write': 600.0,
                 'pool': 600.0,
             }
-            (client,) = endpoint_clients
+            (client,) = (
+                messages_clients if api == 'anthropic-messages' else endpoint_clients
+            )
             assert client.max_retries == 0
             assert client.is_closed()
             assert not (tmp_path / OUTPUT_FILE).exists()
@@ -132,10 +395,15 @@ class TestGenerate:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
-            assert context.metadata == {
-                'latency_sec': context.metadata['latency_sec'],
-                'nixos_config_rev': export.rev,
-            }
+            assert context.metadata['nixos_config_rev'] == export.rev
+            if api == 'anthropic-messages':
+                assert context.metadata['response_status'] == 'incomplete'
+                assert context.metadata['native_usage'] is None
+            else:
+                assert context.metadata == {
+                    'latency_sec': context.metadata['latency_sec'],
+                    'nixos_config_rev': export.rev,
+                }
             assert context.metadata['latency_sec'] >= 0
 
         @pytest.mark.parametrize('effort', [None, 'high', 'max'])
@@ -177,7 +445,14 @@ class TestGenerate:
             assert isinstance(latency, float)
             assert latency >= 0
             assert context.metadata == {
+                'input_tokens': 120,
+                'cache_tokens': 100,
+                'cache_write_tokens': 0,
+                'cache_write_unpriced': False,
+                'output_tokens': 40,
                 'reasoning_tokens': 25,
+                'reported_usage': endpoint.response['usage'],
+                'usage_invalid': False,
                 'finish_reason': 'stop',
                 'response_status': 'completed',
                 'incomplete_reason': None,
@@ -457,7 +732,14 @@ class TestGenerate:
             assert isinstance(latency, float)
             assert latency >= 0
             assert context.metadata == {
+                'input_tokens': 120,
+                'cache_tokens': 100,
+                'cache_write_tokens': 0,
+                'cache_write_unpriced': False,
+                'output_tokens': 40,
                 'reasoning_tokens': 25,
+                'reported_usage': endpoint.response['usage'],
+                'usage_invalid': False,
                 'finish_reason': 'stop',
                 'refusal': None,
                 'response_model': 'large-2026',

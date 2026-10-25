@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,7 @@ class TestSystemsAt:
         monkeypatch: pytest.MonkeyPatch,
         project: str = PROJECT,
         systems: str = SYSTEMS,
+        export_path: Path = EXPORT_FILE,
     ) -> list[tuple[str, ...]]:
         documents = FAMILIES | {
             'pyproject.toml': project,
@@ -89,7 +91,7 @@ class TestSystemsAt:
                 case ('git', 'show'):
                     output = documents[args[2].removeprefix('abc123:')]
                 case ('nix', 'build'):
-                    output = str(EXPORT_FILE)
+                    output = str(export_path)
                 case _:
                     pytest.fail(f'Unexpected command {args}')
             return subprocess.CompletedProcess(args, 0, stdout=f'{output}\n')
@@ -107,12 +109,11 @@ class TestSystemsAt:
             'origin/main', {'writing/large', 'coding/large', 'new/large'}
         )
 
-        assert systems == {
-            'writing/large': make_system(name='large', generation=historical),
-            'coding/large': make_system(
-                name='large', generation=historical, harness='terminus-2'
-            ),
+        assert {name: system.fingerprint for name, system in systems.items()} == {
+            'writing/large': '46256f5027af8dc1',
+            'coding/large': 'c03b2010a1b02a22',
         }
+        assert all(system.generation == historical for system in systems.values())
         assert ('git', 'show', 'abc123:pyproject.toml') in calls
         assert ('git', 'show', 'abc123:uv.lock') in calls
         assert calls[-1] == (
@@ -122,6 +123,30 @@ class TestSystemsAt:
             '--print-out-paths',
             f'git+file:{REPO_ROOT}?rev=abc123#nixos-config',
         )
+
+    def test_ignores_unselected_retired_tables_and_current_admission_lists(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        document = json.loads(EXPORT_FILE.read_text())
+        for model in document['catalog']['models'].values():
+            model.pop('apis', None)
+            if thinking := model.get('thinking'):
+                thinking.pop('apiEfforts', None)
+        old_export = tmp_path / 'old-export.json'
+        old_export.write_text(json.dumps(document))
+        self.fake_git(
+            monkeypatch,
+            systems=SYSTEMS + '\n[retired]\nmodel = "missing-model"\n',
+            export_path=old_export,
+        )
+        current = make_system(
+            name='large', generation=Generation(protocol=1, harbor='0.23.0')
+        )
+
+        old = revisions.systems_at('origin/main', {'writing/large'})
+
+        assert revisions.changed_fingerprints(old, {'writing/large': current}) == []
+        assert old['writing/large'].fingerprint == '46256f5027af8dc1'
 
     def test_requires_no_historical_metadata_after_all_shared_names_are_replaced(
         self, monkeypatch: pytest.MonkeyPatch

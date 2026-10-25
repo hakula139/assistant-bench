@@ -35,6 +35,7 @@ class Output(BaseModel):
 
     input_tokens: int | None
     cached_tokens: int | None
+    cache_write_tokens: int | None = None
     output_tokens: int | None
     reasoning_tokens: int | None
     cost_usd: float | None

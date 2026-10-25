@@ -26,7 +26,8 @@ from assistant_bench.paths import REPO_ROOT
 EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
-Api = Literal['openai-chat-completions', 'openai-responses']
+Api = Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+ThinkingMode = Literal['anthropic-adaptive']
 
 
 # ── nixos-config Export ──
@@ -36,9 +37,11 @@ class ChannelCost(BaseModel):
     input: float
     output: float
     cache_read: float = Field(alias='cacheRead')
+    cache_write: float | None = Field(alias='cacheWrite', default=None)
 
 
 class Thinking(BaseModel):
+    mode: str | None = None
     efforts: list[str]
     api_efforts: dict[str, list[str]] = Field(alias='apiEfforts', default={})
     default_level: str = Field(alias='defaultLevel')
@@ -49,6 +52,7 @@ class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
     name: str
+    apis: list[Api] | None = None
     vendor: str | None = Field(default=None, min_length=1)
     max_output_tokens: int = Field(alias='maxTokens', gt=0)
     context_window: int = Field(alias='contextWindow', gt=0)
@@ -99,12 +103,22 @@ class Price(BaseModel):
     input: float
     output: float
     cache_read: float
+    cache_write: float | None = None
 
-    def cost(self, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
+    def cost(
+        self,
+        input_tokens: int,
+        cached_tokens: int,
+        output_tokens: int,
+        cache_write_tokens: int = 0,
+    ) -> float | None:
         """Return the USD cost of one call. `input_tokens` includes the cached ones."""
+        if cache_write_tokens and self.cache_write is None:
+            return None
         return (
-            (input_tokens - cached_tokens) * self.input
+            (input_tokens - cached_tokens - cache_write_tokens) * self.input
             + cached_tokens * self.cache_read
+            + cache_write_tokens * (self.cache_write or 0)
             + output_tokens * self.output
         ) / 1_000_000
 
@@ -122,6 +136,7 @@ class SystemConfig(BaseModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     context_window: int | None = Field(default=None, gt=0)
     effort: str | None = None
+    thinking_mode: ThinkingMode | None = None
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
 
@@ -136,6 +151,14 @@ class SystemConfig(BaseModel):
             raise ValueError('`price` applies only to a `route`')
         if self.model is not None and self.vendor is not None:
             raise ValueError('`vendor` applies only to a `route`')
+        if self.model is not None and self.thinking_mode is not None:
+            raise ValueError('`thinking_mode` applies only to a `route`')
+        if (
+            self.route is not None
+            and self.api == 'anthropic-messages'
+            and self.thinking_mode is None
+        ):
+            raise ValueError('native Messages requires `thinking_mode`')
         limits = (self.max_output_tokens, self.context_window)
         if self.model is not None and any(value is not None for value in limits):
             raise ValueError('capacity settings apply only to a `route`')
@@ -149,13 +172,10 @@ class SystemConfig(BaseModel):
 _CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems.toml'))
 
 
-class System(BaseModel):
-    """The resolved generation contract and public labels for a system."""
+class SystemIdentity(BaseModel):
+    """Immutable generation facts, independent of current capability admission."""
 
     model_config = ConfigDict(frozen=True)
-
-    name: str
-    """Table name used by data and URLs, excluded from the fingerprint."""
 
     route: str
     api: Api = 'openai-chat-completions'
@@ -165,22 +185,21 @@ class System(BaseModel):
     context_window: int = Field(gt=0)
     """Configured context capacity for the agent's native context management."""
 
-    price: Price | None
     effort: str | None
+    thinking_mode: ThinkingMode | None = None
     prompt: str | None
     harness: str = 'generate'
-    generation: Generation = Field(default_factory=load_generation)
+    generation: Generation
     """Captured revision metadata, unchanged when another runtime resolves systems."""
-
-    display_name: str
-    """Public label, excluded from the fingerprint."""
-
-    vendor: str | None = None
 
     @model_validator(mode='after')
     def _check_capacity(self) -> Self:
         if self.max_output_tokens >= self.context_window:
             raise ValueError('`max_output_tokens` must be less than `context_window`')
+        if self.api == 'anthropic-messages':
+            if self.thinking_mode is None:
+                raise ValueError('Native Messages identity requires its thinking mode.')
+            self.generation.version(self.harness, self.api)
         return self
 
     @property
@@ -188,7 +207,7 @@ class System(BaseModel):
         """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
-            'version': self.generation.version(self.harness),
+            'version': self.generation.version(self.harness, self.api),
             'api': self.api,
             'route': self.route,
             'effort': self.effort,
@@ -197,6 +216,8 @@ class System(BaseModel):
             'context_window': self.context_window,
             'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
         }
+        if self.api == 'anthropic-messages':
+            identity['thinking_mode'] = self.thinking_mode
 
         encoded = json.dumps(
             {key: value for key, value in identity.items() if value is not None},
@@ -204,6 +225,20 @@ class System(BaseModel):
         )
 
         return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+class System(SystemIdentity):
+    """An admitted runnable identity and its public labels and prices."""
+
+    name: str
+    """Table name used by data and URLs, excluded from the fingerprint."""
+
+    generation: Generation = Field(default_factory=load_generation)
+    display_name: str
+    """Public label, excluded from the fingerprint."""
+
+    price: Price | None
+    vendor: str | None = None
 
 
 def load_systems(
@@ -225,18 +260,9 @@ def parse_systems(
         The document does not parse or validate, a table fails to resolve, or
         two systems share a display name.
     """
-    try:
-        configs = _CONFIGS.validate_python(tomllib.loads(document))
-    except tomllib.TOMLDecodeError as error:
-        raise ValueError(
-            sentence(f'`{SYSTEMS_FILE}` is not valid TOML: {error}')
-        ) from error
-    except ValidationError as error:
-        raise ValueError(error_lines(error, f'`{SYSTEMS_FILE}`')) from error
-
     systems = {
         name: resolve_system(name, config, export, generation)
-        for name, config in configs.items()
+        for name, config in parse_system_configs(document).items()
     }
 
     owners: dict[str, str] = {}
@@ -249,6 +275,17 @@ def parse_systems(
             )
 
     return systems
+
+
+def parse_system_configs(document: str) -> dict[str, SystemConfig]:
+    try:
+        return _CONFIGS.validate_python(tomllib.loads(document))
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(
+            sentence(f'`{SYSTEMS_FILE}` is not valid TOML: {error}')
+        ) from error
+    except ValidationError as error:
+        raise ValueError(error_lines(error, f'`{SYSTEMS_FILE}`')) from error
 
 
 def resolve_system(
@@ -264,26 +301,48 @@ def resolve_system(
     ValueError
         The model, its channel, the effort, or the prompt is unknown or ambiguous.
     """
-    prompt = _prompt(name, config.prompt, export)
-    generation = generation or load_generation()
-    if config.route is not None:
+    entry = _catalog_model(name, config, export)
+    identity = _identity(name, config, entry, export, generation or load_generation())
+    if entry is not None:
+        if entry.apis is None:
+            raise ValueError(
+                f'System `{name}`: the catalog model declares no supported APIs.'
+            )
+        if config.api not in entry.apis:
+            raise ValueError(
+                f'System `{name}`: API `{config.api}` is not one of {code(entry.apis)}.'
+            )
+        _check_effort(name, identity.effort, entry.thinking, config.api)
+        channel = next(iter(entry.channel_id))
+        price = _price(entry.channel_cost.get(channel))
+        vendor = entry.vendor
+        display_name = config.display_name or entry.name
+    else:
         assert config.display_name is not None
-        assert config.max_output_tokens is not None
-        assert config.context_window is not None
-        return System(
-            name=name,
-            generation=generation,
-            route=config.route,
-            api=config.api,
-            max_output_tokens=config.max_output_tokens,
-            context_window=config.context_window,
-            vendor=config.vendor,
-            price=config.price,
-            effort=config.effort,
-            prompt=prompt,
-            display_name=config.display_name,
-        )
+        price, vendor, display_name = config.price, config.vendor, config.display_name
+    return System(
+        **identity.model_dump(),
+        name=name,
+        price=price,
+        vendor=vendor,
+        display_name=display_name,
+    )
 
+
+def resolve_identity(
+    name: str, config: SystemConfig, export: NixosConfigExport, generation: Generation
+) -> SystemIdentity:
+    """Project generation facts from explicitly supplied revision-owned inputs."""
+    return _identity(
+        name, config, _catalog_model(name, config, export), export, generation
+    )
+
+
+def _catalog_model(
+    name: str, config: SystemConfig, export: NixosConfigExport
+) -> CatalogModel | None:
+    if config.route is not None:
+        return None
     assert config.model is not None
     entry = export.catalog.models.get(config.model)
     if entry is None:
@@ -303,19 +362,52 @@ def resolve_system(
             f'System `{name}`: catalog model `{config.model}` has channels '
             f'{code(entry.channel_id)}. Set its `route` and `price` instead.'
         )
-    ((channel, route),) = entry.channel_id.items()
-    return System(
-        name=name,
+    return entry
+
+
+def _identity(
+    name: str,
+    config: SystemConfig,
+    entry: CatalogModel | None,
+    export: NixosConfigExport,
+    generation: Generation,
+) -> SystemIdentity:
+    if entry is None:
+        assert config.route is not None
+        assert config.max_output_tokens is not None
+        assert config.context_window is not None
+        route = config.route
+        max_output_tokens, context_window = (
+            config.max_output_tokens,
+            config.context_window,
+        )
+        thinking = None
+    else:
+        route = next(iter(entry.channel_id.values()))
+        max_output_tokens, context_window = (
+            entry.max_output_tokens,
+            entry.context_window,
+        )
+        thinking = entry.thinking
+    effort = config.effort
+    if effort is None and thinking is not None and thinking.requires_effort:
+        effort = thinking.default_level
+    thinking_mode = config.thinking_mode
+    if config.api == 'anthropic-messages' and entry is not None:
+        if thinking is None or thinking.mode != 'anthropic-adaptive':
+            raise ValueError(
+                f'System `{name}`: native Messages requires adaptive thinking metadata.'
+            )
+        thinking_mode = 'anthropic-adaptive'
+    return SystemIdentity(
         generation=generation,
         route=route,
         api=config.api,
-        max_output_tokens=entry.max_output_tokens,
-        context_window=entry.context_window,
-        vendor=entry.vendor,
-        price=_price(entry.channel_cost.get(channel)),
-        effort=_resolve_effort(name, config.effort, entry.thinking, config.api),
-        prompt=prompt,
-        display_name=config.display_name or entry.name,
+        max_output_tokens=max_output_tokens,
+        context_window=context_window,
+        effort=effort,
+        thinking_mode=thinking_mode,
+        prompt=_prompt(name, config.prompt, export),
     )
 
 
@@ -336,26 +428,31 @@ def _prompt(name: str, reference: str | None, export: NixosConfigExport) -> str 
     return export.instructions[client]
 
 
-def _resolve_effort(
-    name: str, effort: str | None, thinking: Thinking | None, api: Api
-) -> str | None:
+def _check_effort(
+    name: str,
+    effort: str | None,
+    thinking: Thinking | None,
+    api: Api,
+) -> None:
     if thinking is None:
         if effort is not None:
             raise ValueError(f'System `{name}`: the model takes no effort.')
-        return None
-    if effort is None:
-        effort = thinking.default_level if thinking.requires_effort else None
-    allowed = thinking.api_efforts.get(api, thinking.efforts)
+        return
+    allowed = thinking.api_efforts.get(api, [])
     if effort is not None and effort not in allowed:
         raise ValueError(
             f'System `{name}`: effort `{effort}` is not one of '
             f'{code(allowed)} for `{api}`.'
         )
-    return effort
 
 
 def _price(cost: ChannelCost | None) -> Price | None:
     # The catalog prices unbilled channels at zero, which report as unpriced.
     if cost is None or not (cost.input or cost.output or cost.cache_read):
         return None
-    return Price(input=cost.input, output=cost.output, cache_read=cost.cache_read)
+    return Price(
+        input=cost.input,
+        output=cost.output,
+        cache_read=cost.cache_read,
+        cache_write=cost.cache_write,
+    )

@@ -5,6 +5,7 @@
     "models": {
       "acme-large": {
         "name": "Acme Large",
+        "apis": ["openai-chat-completions", "openai-responses", "anthropic-messages"],
         "maxTokens": 64,
         "contextWindow": 8192,
         "vendor": "acme",
@@ -20,13 +21,20 @@
           }
         },
         "thinking": {
+          "mode": "anthropic-adaptive",
           "efforts": ["low", "medium", "high"],
+          "apiEfforts": {
+            "openai-chat-completions": ["low", "medium", "high"],
+            "openai-responses": ["low", "medium", "high"],
+            "anthropic-messages": ["low", "medium", "high"]
+          },
           "defaultLevel": "medium",
           "requiresEffort": true
         }
       },
       "acme-small": {
         "name": "Acme Small",
+        "apis": ["openai-chat-completions"],
         "maxTokens": 32,
         "contextWindow": 2048,
         "vendor": "acme",
@@ -43,12 +51,14 @@
         },
         "thinking": {
           "efforts": ["low", "high"],
+          "apiEfforts": { "openai-chat-completions": ["low", "high"] },
           "defaultLevel": "high",
           "requiresEffort": false
         }
       },
       "local-model": {
         "name": "Local Model",
+        "apis": ["openai-chat-completions"],
         "maxTokens": 64,
         "contextWindow": 8192,
         "vendor": "other",
@@ -66,6 +76,7 @@
       },
       "acme-routed": {
         "name": "Acme Routed",
+        "apis": ["openai-chat-completions"],
         "maxTokens": 64,
         "contextWindow": 8192,
         "vendor": "acme",
@@ -77,6 +88,7 @@
       },
       "acme-unrouted": {
         "name": "Acme Unrouted",
+        "apis": ["openai-chat-completions"],
         "maxTokens": 64,
         "contextWindow": 8192,
         "vendor": "acme",

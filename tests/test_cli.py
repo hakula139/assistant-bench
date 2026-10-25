@@ -105,8 +105,8 @@ class TestCheck:
     def test_checks_every_family_without_a_name(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        write_case_family(families_dir, ['opus-5.5-max'], name='g')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high'], name='g')
 
         result = invoke('check')
         assert result.exit_code == 0, result.output
@@ -117,7 +117,7 @@ class TestCheck:
         assert submitted == []
 
     def test_checks_a_named_family_once(self, families_dir: Path) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'])
+        write_case_family(families_dir, ['opus-5.5-high'])
 
         result = invoke('check', 'f', 'f')
         assert result.exit_code == 0, result.output
@@ -190,7 +190,7 @@ class TestCheck:
     ) -> None:
         write_task_family(families_dir, 'a', name='f')
         write_task_family(families_dir, 'a', name='g')
-        write_case_family(families_dir, ['opus-5.5-max'], name='cases')
+        write_case_family(families_dir, ['opus-5.5-high'], name='cases')
 
         result = invoke('check', *arguments)
         assert result.exit_code == 2, result.output
@@ -348,10 +348,7 @@ class TestCheck:
         result = invoke('check', 'f')
 
         assert result.exit_code == 1
-        assert (
-            '`tasks/echo/task.toml`: set `[metadata] author` to a system name.'
-            in result.output
-        )
+        assert '`tasks/echo/task.toml`: `author`: Field required.' in result.output
         assert submitted == []
 
     def test_fails_when_an_earlier_task_family_fails_and_a_later_one_passes(
@@ -491,7 +488,7 @@ class TestCheck:
         write_trial(
             job,
             'en-greeting__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-max'}),
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-high'}),
             task='smoke-text/en-greeting',
         )
         (job / 'en-greeting__1' / 'lock.json').unlink()
@@ -505,7 +502,7 @@ class TestCheck:
     def test_names_the_file_and_field_of_an_invalid_family(
         self, families_dir: Path
     ) -> None:
-        config = write_case_family(families_dir, ['opus-5.5-max']).with_name(
+        config = write_case_family(families_dir, ['opus-5.5-high']).with_name(
             'family.toml'
         )
         config.write_text(config.read_text().replace('samples = 1', 'samples = 0'))
@@ -546,7 +543,9 @@ class TestCheck:
     def test_rejects_a_family_whose_harness_cannot_run_a_listed_system(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_task_family(families_dir, 'echo', systems=('opus-5.5-max',))
+        write_task_family(
+            families_dir, 'echo', systems=('opus-5.5-high',), author_vendor='anthropic'
+        )
         config = families_dir / 'f' / 'family.toml'
         config.write_text(config.read_text().replace('terminus-2', 'claude-code'))
 
@@ -566,12 +565,14 @@ class TestCheck:
         monkeypatch: pytest.MonkeyPatch,
         submitted: list[JobConfig],
     ) -> None:
-        write_task_family(families_dir, 'echo', systems=('opus-5.5-max',))
+        write_task_family(
+            families_dir, 'echo', systems=('opus-5.5-high',), author_vendor='anthropic'
+        )
         systems = load_systems(load_export())
-        prompted = systems['opus-5.5-max'].model_copy(update={'prompt': 'Be brief.'})
+        prompted = systems['opus-5.5-high'].model_copy(update={'prompt': 'Be brief.'})
 
         def prompted_systems(export: NixosConfigExport) -> dict[str, System]:
-            return systems | {'opus-5.5-max': prompted}
+            return systems | {'opus-5.5-high': prompted}
 
         monkeypatch.setattr(cli, 'load_systems', prompted_systems)
 
@@ -580,7 +581,7 @@ class TestCheck:
         assert (result.exit_code, result.stdout, result.stderr) == (
             1,
             '',
-            'Family `f` lists `opus-5.5-max`, whose prompt the `terminus-2` harness '
+            'Family `f` lists `opus-5.5-high`, whose prompt the `terminus-2` harness '
             'cannot send. Remove them from `systems`.\n',
         )
         assert submitted == []
@@ -588,7 +589,7 @@ class TestCheck:
     def test_rejects_a_family_listing_an_unknown_system(
         self, families_dir: Path
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max', 'ghost'])
+        write_case_family(families_dir, ['opus-5.5-high', 'ghost'])
 
         result = invoke('check', 'f')
 
@@ -645,14 +646,14 @@ class TestRun:
     def test_rejects_repeated_systems_before_submitting_a_job(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max', 'opus-5.5-max'])
+        write_case_family(families_dir, ['opus-5.5-high', 'opus-5.5-high'])
 
         result = invoke('run', 'f')
 
         assert (result.exit_code, result.stdout, result.stderr) == (
             1,
             '',
-            'Family `f`: `family.toml`: `systems` repeats `opus-5.5-max`.\n',
+            'Family `f`: `family.toml`: `systems` repeats `opus-5.5-high`.\n',
         )
         assert submitted == []
 
@@ -675,28 +676,28 @@ class TestRun:
         self, submitted: list[JobConfig]
     ) -> None:
         result = invoke(
-            'run', 'smoke-text', '--system', 'kimi-k3-max', '--system', 'opus-5.5-max'
+            'run', 'smoke-text', '--system', 'kimi-k3-high', '--system', 'opus-5.5-high'
         )
         assert result.exit_code == 0, result.output
 
         (job,) = submitted
         assert [agent.kwargs['system'] for agent in job.agents] == [
-            'opus-5.5-max',
-            'kimi-k3-max',
+            'opus-5.5-high',
+            'kimi-k3-high',
         ]
 
     def test_rejects_a_named_system_the_family_does_not_list(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'])
+        write_case_family(families_dir, ['opus-5.5-high'])
 
         result = invoke(
-            'run', 'f', '--system', 'gpt-6-astra-max', '--system', 'opus-5.5-max'
+            'run', 'f', '--system', 'gpt-6-astra-high', '--system', 'opus-5.5-high'
         )
 
         assert result.exit_code == 2
         assert (
-            'Family `f` does not list `gpt-6-astra-max`. Choose among `opus-5.5-max`.'
+            'Family `f` does not list `gpt-6-astra-high`. Choose among `opus-5.5-high`.'
             in result.output
         )
         assert submitted == []
@@ -704,7 +705,7 @@ class TestRun:
     def test_generates_after_a_named_run_only_the_systems_it_left_out(
         self, submitted: list[JobConfig]
     ) -> None:
-        named = ['gpt-6.1-sol-max', 'kimi-k3-max']
+        named = ['gpt-6.1-sol-high', 'kimi-k3-high']
         args = [arg for name in named for arg in ('--system', name)]
         result = invoke('run', 'smoke-text', *args)
         assert result.exit_code == 0, result.output
@@ -729,23 +730,26 @@ class TestRun:
     def test_runs_a_task_family_under_its_harness(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_task_family(families_dir, 'echo', systems=('opus-5.5-max',))
+        write_task_family(
+            families_dir, 'echo', systems=('opus-5.5-high',), author_vendor='anthropic'
+        )
 
         result = invoke('run', 'f')
         assert result.exit_code == 0, result.output
 
         (job,) = submitted
         (agent,) = job.agents
-        opus = load_systems(load_export())['opus-5.5-max']
+        opus = load_systems(load_export())['opus-5.5-high']
         assert agent.import_path == 'assistant_bench.harnesses.terminus:Terminus'
         assert agent.model_name == f'openai/{opus.route}'
         assert agent.kwargs['fingerprint'] == (
             opus.model_copy(update={'harness': 'terminus-2'}).fingerprint
         )
         assert 'max_turns' not in agent.kwargs
-        assert agent.kwargs['llm_call_kwargs'] == {
-            'max_completion_tokens': opus.max_output_tokens
-        }
+        assert agent.kwargs['api'] == 'anthropic-messages'
+        assert agent.kwargs['thinking_mode'] == 'anthropic-adaptive'
+        assert agent.kwargs['reasoning_effort'] == 'high'
+        assert 'llm_call_kwargs' not in agent.kwargs
         assert agent.kwargs['model_info'] == {
             'max_input_tokens': opus.context_window - opus.max_output_tokens,
             'max_output_tokens': opus.max_output_tokens,
@@ -759,8 +763,13 @@ class TestRun:
     def test_runs_after_a_task_family_run_only_the_systems_it_left_out(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_task_family(families_dir, 'echo', systems=('opus-5.5-max', 'kimi-k3-max'))
-        result = invoke('run', 'f', '--system', 'opus-5.5-max')
+        write_task_family(
+            families_dir,
+            'echo',
+            systems=('opus-5.5-high', 'kimi-k3-high'),
+            author_vendor='anthropic',
+        )
+        result = invoke('run', 'f', '--system', 'opus-5.5-high')
         assert result.exit_code == 0, result.output
         first = finish_job(submitted[0])
 
@@ -775,7 +784,7 @@ class TestRun:
         assert {
             trial.agent.kwargs['system']: trial_diff.action
             for trial, trial_diff in zip(plan.trial_configs, diff.trials, strict=True)
-        } == {'opus-5.5-max': DiffAction.REUSE, 'kimi-k3-max': DiffAction.RERUN}
+        } == {'opus-5.5-high': DiffAction.REUSE, 'kimi-k3-high': DiffAction.RERUN}
 
     def test_rejects_a_named_family_without_systems(
         self, submitted: list[JobConfig]
@@ -792,8 +801,8 @@ class TestRun:
     def test_generates_every_family_that_lists_systems(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        write_case_family(families_dir, ['opus-5.5-max', 'kimi-k3-max'], name='g')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
         write_task_family(families_dir, name='z')
 
         result = invoke('run')
@@ -805,7 +814,7 @@ class TestRun:
     def test_generates_a_named_family_once(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'])
+        write_case_family(families_dir, ['opus-5.5-high'])
 
         result = invoke('run', 'f', 'f')
         assert result.exit_code == 0, result.output
@@ -816,26 +825,26 @@ class TestRun:
     def test_generates_a_named_system_on_every_family_that_lists_it(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        write_case_family(families_dir, ['opus-5.5-max', 'kimi-k3-max'], name='g')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
 
-        result = invoke('run', '--system', 'kimi-k3-max')
+        result = invoke('run', '--system', 'kimi-k3-high')
         assert result.exit_code == 0, result.output
 
         (job,) = submitted
         assert job.jobs_dir.name == 'g'
-        assert [agent.kwargs['system'] for agent in job.agents] == ['kimi-k3-max']
+        assert [agent.kwargs['system'] for agent in job.agents] == ['kimi-k3-high']
 
     def test_rejects_a_named_system_no_family_lists(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
 
-        result = invoke('run', '--system', 'gpt-6-astra-max')
+        result = invoke('run', '--system', 'gpt-6-astra-high')
 
         assert result.exit_code == 2
         assert (
-            'No family lists `gpt-6-astra-max` in its `systems`. Check the name '
+            'No family lists `gpt-6-astra-high` in its `systems`. Check the name '
             'against `systems.toml`.' in result.output
         )
         assert submitted == []
@@ -872,8 +881,8 @@ class TestRun:
         data_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        write_case_family(families_dir, ['opus-5.5-max'], name='g')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high'], name='g')
         submitted: list[JobConfig] = []
 
         def run_job(job: JobConfig) -> Path:
@@ -924,24 +933,24 @@ class TestRun:
     def test_rejects_a_system_whose_recorded_fingerprint_changed(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
         write_trial(
             data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
             'c1__1',
             AgentConfig(
                 import_path='x:Y',
-                kwargs={'system': 'opus-5.5-max', 'fingerprint': 'fp-old'},
+                kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
             ),
             task='f/c1',
         )
-        current = load_systems(load_export())['opus-5.5-max'].fingerprint
+        current = load_systems(load_export())['opus-5.5-high'].fingerprint
 
         result = invoke('run', 'f')
 
         assert (result.exit_code, result.output) == (
             1,
             'Family `f` has systems that changed their fingerprints:\n'
-            'System `opus-5.5-max` ran under fingerprint `fp-old` but now resolves '
+            'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves '
             f'to `{current}`.\nGive a changed system a new name, or keep its old '
             'resolution on a `route` table, as `docs/guide/authoring.md#systems` '
             'describes.\n',
@@ -951,8 +960,8 @@ class TestRun:
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        cases = write_case_family(families_dir, ['opus-5.5-max'], name='g')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        cases = write_case_family(families_dir, ['opus-5.5-high'], name='g')
         cases.write_text(
             tomli_w.dumps(
                 {
@@ -972,7 +981,7 @@ class TestRun:
             'old__1',
             AgentConfig(
                 import_path='x:Y',
-                kwargs={'system': 'opus-5.5-max', 'fingerprint': 'fp-old'},
+                kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
             ),
             task='g/old',
         )
@@ -980,15 +989,21 @@ class TestRun:
         result = invoke('run')
 
         assert result.exit_code == 1
-        assert 'System `opus-5.5-max` ran under fingerprint `fp-old`' in result.output
+        assert 'System `opus-5.5-high` ran under fingerprint `fp-old`' in result.output
         assert submitted == []
         assert not (data_dir / 'tasks' / 'g' / 'c1').exists()
 
     def test_refuses_a_task_edited_without_a_bump_before_running_any(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
-        write_task_family(families_dir, 'echo', name='z', systems=('opus-5.5-max',))
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_task_family(
+            families_dir,
+            'echo',
+            name='z',
+            systems=('opus-5.5-high',),
+            author_vendor='anthropic',
+        )
         result = invoke('run', 'z')
         assert result.exit_code == 0, result.output
         finish_job(submitted.pop())
@@ -1041,12 +1056,12 @@ class TestRun:
     def test_rejects_an_unreadable_trial_record(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'], name='f')
+        write_case_family(families_dir, ['opus-5.5-high'], name='f')
         job = data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00'
         write_trial(
             job,
             'c1__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-max'}),
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-high'}),
             task='f/c1',
         )
         (job / 'c1__1' / 'lock.json').unlink()
@@ -1059,13 +1074,15 @@ class TestRun:
 
 
 class TestCollect:
-    def test_reports_an_unknown_task_author_without_a_traceback(
+    def test_reports_an_unknown_task_author_vendor_without_a_traceback(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_task_family(families_dir, 'echo', systems=('large',))
         path = families_dir / 'f' / 'tasks' / 'echo' / 'task.toml'
         path.write_text(
-            path.read_text().replace('author = "large"', 'author = "unknown"')
+            path.read_text().replace(
+                'author_vendor = "acme"', 'author_vendor = "unknown"'
+            )
         )
         monkeypatch.setattr(
             cli, '_load_systems', lambda: {'large': make_system(name='large')}
@@ -1080,7 +1097,7 @@ class TestCollect:
 
         assert result.exit_code == 1
         assert (
-            '`tasks/echo/task.toml`: author `unknown` is not defined in `systems.toml`.'
+            '`tasks/echo/task.toml`: author vendor `unknown` is not one of '
         ) in result.stderr
         assert 'Traceback' not in result.output
 
@@ -1103,7 +1120,9 @@ class TestCollect:
         for name in ('other-a', 'other-b'):
             path = families_dir / 'f' / 'tasks' / name / 'task.toml'
             path.write_text(
-                path.read_text().replace('author = "large"', 'author = "writer"')
+                path.read_text()
+                .replace('author = "large"', 'author = "writer"')
+                .replace('author_vendor = "acme"', 'author_vendor = "other"')
             )
         outputs = [
             make_output(
@@ -1230,7 +1249,7 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         for name in ('f', 'g', 'h'):
-            write_case_family(families_dir, ['opus-5.5-max'], name=name)
+            write_case_family(families_dir, ['opus-5.5-high'], name=name)
         for name in ('f', 'g'):
             write_job(data_dir / 'jobs' / name / 'job-1')
 
@@ -1255,12 +1274,12 @@ class TestCollect:
     def test_reports_an_unreadable_trial_without_a_traceback(
         self, families_dir: Path, data_dir: Path
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-max'])
+        write_case_family(families_dir, ['opus-5.5-high'])
         trial = data_dir / 'jobs' / 'f' / 'job-1' / 'c1__1'
         write_trial(
             trial.parent,
             trial.name,
-            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-max'}),
+            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-high'}),
             task='f/c1',
         )
         (trial / 'result.json').write_text('{')
@@ -1329,6 +1348,7 @@ class TestClose:
         task = families_dir / 'f/tasks/echo'
         config = TaskConfig.model_validate_toml((task / 'task.toml').read_text())
         config.metadata['author'] = 'large'
+        config.metadata['author_vendor'] = 'acme'
         (task / 'task.toml').write_text(config.model_dump_toml())
         family = load_family('f')
         system = make_system(name='large', display_name='Public Large')
@@ -1393,7 +1413,7 @@ class TestFingerprints:
         self, monkeypatch: pytest.MonkeyPatch, change: dict[str, Any]
     ) -> None:
         head = revisions.current_systems(load_systems(load_export()))
-        key = 'writing-en/opus-5.5-max'
+        key = 'writing-en/opus-5.5-high'
         old = head[key].model_copy(update=change)
 
         def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
@@ -1406,7 +1426,7 @@ class TestFingerprints:
         assert result.exit_code == 1
         assert result.stdout == ''
         assert result.stderr == (
-            'System `opus-5.5-max` changed its fingerprint since `origin/main` in '
+            'System `opus-5.5-high` changed its fingerprint since `origin/main` in '
             '`writing-en`. Give the changed system a new name and keep the old '
             'name only in closed reports, as `docs/guide/authoring.md#systems` '
             'describes.\n'

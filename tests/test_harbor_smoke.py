@@ -12,6 +12,8 @@ from assistant_bench.families import case_task, load_cases, load_family
 from support import (
     StubEndpoint,
     make_system,
+    message,
+    message_stream,
     reasoned_response,
     terminus_completion,
     write_task_family,
@@ -55,7 +57,9 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None
     )
 
 
-@pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+@pytest.mark.parametrize(
+    'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+)
 def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
     export: NixosConfigExport,
@@ -72,6 +76,9 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     tool_response = reasoned_response(
         command['choices'][0]['message']['content'], 'resp-tool'
     )
+    native_tool = message(
+        command['choices'][0]['message']['content'], message_id='tool'
+    )
     if api == 'openai-responses':
         final = terminus_completion()
         endpoint.responses = [
@@ -80,11 +87,24 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
                 final['choices'][0]['message']['content'], 'resp-final', 'final_answer'
             ),
         ]
+    elif api == 'anthropic-messages':
+        final = terminus_completion()
+        endpoint.streams = [
+            message_stream(native_tool),
+            message_stream(
+                message(final['choices'][0]['message']['content'], message_id='final')
+            ),
+        ]
     else:
         endpoint.response = command
     system = make_system(
         api=api,
-        effort='max' if api == 'openai-responses' else 'medium',
+        effort='max'
+        if api == 'openai-responses'
+        else 'high'
+        if api == 'anthropic-messages'
+        else 'medium',
+        thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
         max_output_tokens=32768,
         context_window=131072,
     )
@@ -112,11 +132,13 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     assert output.harness_version == metadata.version('harbor')
     turns = 2
     assert (output.input_tokens, output.cached_tokens, output.output_tokens) == (
-        turns * 120,
+        turns * (130 if api == 'anthropic-messages' else 120),
         turns * 100,
         turns * 40,
     )
-    assert output.cost_usd == pytest.approx(turns * 0.00046)
+    assert output.cost_usd == pytest.approx(
+        turns * (0.000485 if api == 'anthropic-messages' else 0.00046)
+    )
     for request in endpoint.requests:
         assert request.headers['authorization'] == 'Bearer test-key'
         assert request.headers['x-trace'] == 'bench'
@@ -127,12 +149,27 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
             assert request.body['store'] is False
             assert 'previous_response_id' not in request.body
             assert 'max_completion_tokens' not in request.body
+        elif api == 'anthropic-messages':
+            assert request.path == '/anthropic/v1/messages'
+            assert request.headers['anthropic-version'] == '2023-06-01'
+            assert request.body['output_config'] == {'effort': 'high'}
+            assert request.body['thinking'] == {'type': 'adaptive'}
+            assert request.body['max_tokens'] == 32768
+            assert request.body['stream'] is True
+            assert 'tools' not in request.body
         else:
             assert request.body['reasoning_effort'] == 'medium'
             assert request.body['max_completion_tokens'] == 32768
     if api == 'openai-responses':
         assert len(endpoint.requests) == 2
         assert endpoint.requests[1].body['input'][1:3] == tool_response['output']
+    elif api == 'anthropic-messages':
+        assert len(endpoint.requests) == 2
+        assert endpoint.requests[1].body['messages'][1] == {
+            'role': 'assistant',
+            'content': native_tool['content'],
+        }
+        assert output.cache_write_tokens == turns * 10
     key = endpoint.key_file.read_text().strip().encode()
     assert not [
         path

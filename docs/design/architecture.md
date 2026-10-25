@@ -25,13 +25,15 @@ src/assistant_bench/
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
-│   ├── endpoint.py                         # The endpoint variables and native OpenAI client
+│   ├── endpoint.py                         # Endpoint variables and native SDK transports
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
+│   ├── messages.py                         # Native Messages streaming and conversation content
 │   ├── options.py                          # The kwargs each harness builds from its resolved system
 │   ├── responses.py                        # Native SDK results and stateless conversation items
-│   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
+│   ├── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
+│   └── usage.py                            # Validated measured token counters shared by every transport
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   ├── length.py                           # Shared output length measurement

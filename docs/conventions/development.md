@@ -51,7 +51,7 @@ Commands stay minimal, and settings live in config files:
 | The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
 | Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
 
-Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `arena/wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
+Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings and native `BENCH_ANTHROPIC_BASE_URL` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `arena/wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
 
 `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else.
 

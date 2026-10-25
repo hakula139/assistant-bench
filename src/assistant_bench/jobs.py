@@ -24,9 +24,9 @@ from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from harbor.publisher.packager import Packager
 from harbor.trial.network_policy import resolve_trial_network_plan
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
-from assistant_bench.catalog import System
+from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -41,6 +41,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.messages import MessageCompletionError
 from assistant_bench.harnesses.responses import ResponseCompletionError
 from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
@@ -326,28 +327,42 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
         )
 
 
+class TaskAuthor(BaseModel):
+    label: str = Field(alias='author', min_length=1)
+    vendor: str = Field(alias='author_vendor', min_length=1)
+
+
 def author_vendors(
-    family: Family, tasks: list[Path], systems: dict[str, System]
+    family: Family,
+    tasks: list[Path],
+    systems: dict[str, System],
+    export: NixosConfigExport,
 ) -> dict[str, str]:
-    """Return each task author's vendor, refusing missing or unknown authors."""
+    """Validate author provenance independently of runnable systems."""
+    known = {
+        model.vendor
+        for model in export.catalog.models.values()
+        if model.vendor is not None
+    }
+    known.update(
+        system.vendor for system in systems.values() if system.vendor is not None
+    )
     authors: dict[str, str] = {}
     problems: list[str] = []
     for task in tasks:
         location = f'`{task_location(family, task)}/task.toml`'
-        author = _task_config(task).metadata.get('author')
-        if not isinstance(author, str) or not author:
-            problems.append(f'{location}: set `[metadata] author` to a system name.')
-        elif author not in systems:
+        try:
+            author = TaskAuthor.model_validate(_task_config(task).metadata)
+        except ValidationError as error:
+            problems.append(error_lines(error, location))
+            continue
+        if author.vendor not in known:
             problems.append(
-                f'{location}: author `{author}` is not defined in `systems.toml`.'
-            )
-        elif (vendor := systems[author].vendor) is None:
-            problems.append(
-                f'{location}: author `{author}` needs vendor metadata in the '
-                'model catalog or its `route` table in `systems.toml`.'
+                f'{location}: author vendor `{author.vendor}` is not one of '
+                f'{code(sorted(known))}.'
             )
         else:
-            authors[task.name] = vendor
+            authors[task.name] = author.vendor
 
     if problems:
         raise ValueError(
@@ -473,7 +488,8 @@ def _job(
 ) -> JobConfig:
     retry = RetryConfig(max_retries=1)
     retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
-        ResponseCompletionError.__name__
+        ResponseCompletionError.__name__,
+        MessageCompletionError.__name__,
     }
 
     return JobConfig(
@@ -802,6 +818,7 @@ def _output(
         finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
+        cache_write_tokens=metadata.get('cache_write_tokens'),
         output_tokens=context.n_output_tokens,
         reasoning_tokens=metadata.get('reasoning_tokens'),
         cost_usd=_cost(systems.get(candidate.system), context),
@@ -887,8 +904,12 @@ def _cost(system: System | None, context: AgentContext) -> float | None:
         or system.price is None
         or context.n_input_tokens is None
         or context.n_output_tokens is None
+        or (context.metadata or {}).get('cache_write_unpriced', False)
     ):
         return None
     return system.price.cost(
-        context.n_input_tokens, context.n_cache_tokens or 0, context.n_output_tokens
+        context.n_input_tokens,
+        context.n_cache_tokens or 0,
+        context.n_output_tokens,
+        (context.metadata or {}).get('cache_write_tokens', 0),
     )
