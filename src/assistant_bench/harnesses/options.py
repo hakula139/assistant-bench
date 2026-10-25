@@ -6,12 +6,20 @@ from assistant_bench.catalog import System
 
 
 def generate(system: System) -> dict[str, Any]:
-    return _labels(system) | {
-        'api': system.api,
-        'effort': system.effort,
-        'system_prompt': system.prompt,
-        'max_output_tokens': system.max_output_tokens,
-    }
+    return (
+        _labels(system)
+        | {
+            'api': system.api,
+            'effort': system.effort,
+            'system_prompt': system.prompt,
+            'max_output_tokens': system.max_output_tokens,
+        }
+        | (
+            {'thinking_mode': system.thinking_mode}
+            if system.api == 'anthropic-messages'
+            else {}
+        )
+    )
 
 
 def terminus(system: System) -> dict[str, Any]:
@@ -23,6 +31,8 @@ def terminus(system: System) -> dict[str, Any]:
         },
         'record_terminal_session': False,
     }
+    if system.api == 'anthropic-messages':
+        values |= {'api': system.api, 'thinking_mode': system.thinking_mode}
 
     if system.api == 'openai-chat-completions':
         values['llm_call_kwargs'] = {'max_completion_tokens': system.max_output_tokens}

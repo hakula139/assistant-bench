@@ -9,8 +9,8 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5-max", "gpt-6.1-sol-max"]
-reference = "gpt-6.1-sol-max"
+systems = ["opus-5.5", "gpt-6.1-sol-high"]
+reference = "gpt-6.1-sol-high"
 samples = 1
 categories = ["message"]
 ```
@@ -104,25 +104,30 @@ A local task is a directory under the data directory's `cases/<family>/`, which 
 ```toml
 ["opus-5.5"]
 model = "claude-opus-5-5"
+api = "anthropic-messages"
+effort = "high"
 
 ["opus-5.5-nixos"]
 model = "claude-opus-5-5"
+api = "anthropic-messages"
+effort = "high"
 prompt = "nixos-config:claudeCode"
 display_name = "Claude Opus 5.5 · nixos-config"
 ```
 
-| Key                 | Meaning                                                                                                       |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `model`             | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name      |
-| `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`              |
-| `api`               | `openai-chat-completions` by default, or `openai-responses`. Effort must be supported by the selected API     |
-| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system or names it as an author        |
-| `price`             | For a `route`, an optional table of `input`, `output`, and `cache_read` prices in USD per million tokens      |
-| `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`    |
-| `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`          |
-| `effort`            | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level |
-| `prompt`            | The system message, as `nixos-config:<client>` for a rendered instruction file                                |
-| `display_name`      | The name the site shows, in place of the catalog model's `name`. Required for a `route`                       |
+| Key                 | Meaning                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`             | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name                                |
+| `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`                                        |
+| `api`               | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
+| `thinking_mode`     | For a bare native Messages route, required as `anthropic-adaptive`. Catalog models supply their thinking mode                           |
+| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system or names it as an author                                  |
+| `price`             | For a `route`, an optional table of `input`, `output`, `cache_read`, and optional `cache_write` prices in USD per million tokens        |
+| `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`                              |
+| `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`                                    |
+| `effort`            | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
+| `prompt`            | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
+| `display_name`      | The name the site shows, in place of the catalog model's `name`. Required for a `route`                                                 |
 
 Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 

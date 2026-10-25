@@ -26,7 +26,8 @@ from assistant_bench.paths import REPO_ROOT
 EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
-Api = Literal['openai-chat-completions', 'openai-responses']
+Api = Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+ThinkingMode = Literal['anthropic-adaptive']
 
 
 # ── nixos-config Export ──
@@ -36,9 +37,11 @@ class ChannelCost(BaseModel):
     input: float
     output: float
     cache_read: float = Field(alias='cacheRead')
+    cache_write: float | None = Field(alias='cacheWrite', default=None)
 
 
 class Thinking(BaseModel):
+    mode: str | None = None
     efforts: list[str]
     api_efforts: dict[str, list[str]] = Field(alias='apiEfforts', default={})
     default_level: str = Field(alias='defaultLevel')
@@ -49,6 +52,7 @@ class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
     name: str
+    apis: list[Api] | None = None
     vendor: str | None = Field(default=None, min_length=1)
     max_output_tokens: int = Field(alias='maxTokens', gt=0)
     context_window: int = Field(alias='contextWindow', gt=0)
@@ -99,12 +103,22 @@ class Price(BaseModel):
     input: float
     output: float
     cache_read: float
+    cache_write: float | None = None
 
-    def cost(self, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
+    def cost(
+        self,
+        input_tokens: int,
+        cached_tokens: int,
+        output_tokens: int,
+        cache_write_tokens: int = 0,
+    ) -> float | None:
         """Return the USD cost of one call. `input_tokens` includes the cached ones."""
+        if cache_write_tokens and self.cache_write is None:
+            return None
         return (
-            (input_tokens - cached_tokens) * self.input
+            (input_tokens - cached_tokens - cache_write_tokens) * self.input
             + cached_tokens * self.cache_read
+            + cache_write_tokens * (self.cache_write or 0)
             + output_tokens * self.output
         ) / 1_000_000
 
@@ -122,6 +136,7 @@ class SystemConfig(BaseModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     context_window: int | None = Field(default=None, gt=0)
     effort: str | None = None
+    thinking_mode: ThinkingMode | None = None
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
 
@@ -136,6 +151,14 @@ class SystemConfig(BaseModel):
             raise ValueError('`price` applies only to a `route`')
         if self.model is not None and self.vendor is not None:
             raise ValueError('`vendor` applies only to a `route`')
+        if self.model is not None and self.thinking_mode is not None:
+            raise ValueError('`thinking_mode` applies only to a `route`')
+        if (
+            self.route is not None
+            and self.api == 'anthropic-messages'
+            and self.thinking_mode is None
+        ):
+            raise ValueError('native Messages requires `thinking_mode`')
         limits = (self.max_output_tokens, self.context_window)
         if self.model is not None and any(value is not None for value in limits):
             raise ValueError('capacity settings apply only to a `route`')
@@ -167,6 +190,7 @@ class System(BaseModel):
 
     price: Price | None
     effort: str | None
+    thinking_mode: ThinkingMode | None = None
     prompt: str | None
     harness: str = 'generate'
     generation: Generation = Field(default_factory=load_generation)
@@ -188,7 +212,7 @@ class System(BaseModel):
         """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
         prompt = self.prompt
         identity = {
-            'version': self.generation.version(self.harness),
+            'version': self.generation.version(self.harness, self.api),
             'api': self.api,
             'route': self.route,
             'effort': self.effort,
@@ -197,6 +221,8 @@ class System(BaseModel):
             'context_window': self.context_window,
             'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
         }
+        if self.api == 'anthropic-messages':
+            identity['thinking_mode'] = self.thinking_mode
 
         encoded = json.dumps(
             {key: value for key, value in identity.items() if value is not None},
@@ -280,6 +306,7 @@ def resolve_system(
             vendor=config.vendor,
             price=config.price,
             effort=config.effort,
+            thinking_mode=config.thinking_mode,
             prompt=prompt,
             display_name=config.display_name,
         )
@@ -304,6 +331,21 @@ def resolve_system(
             f'{code(entry.channel_id)}. Set its `route` and `price` instead.'
         )
     ((channel, route),) = entry.channel_id.items()
+    if entry.apis is None:
+        raise ValueError(
+            f'System `{name}`: the catalog model declares no supported APIs.'
+        )
+    if entry.apis is not None and config.api not in entry.apis:
+        raise ValueError(
+            f'System `{name}`: API `{config.api}` is not one of {code(entry.apis)}.'
+        )
+    thinking_mode: ThinkingMode | None = None
+    if config.api == 'anthropic-messages':
+        if entry.thinking is None or entry.thinking.mode != 'anthropic-adaptive':
+            raise ValueError(
+                f'System `{name}`: native Messages requires adaptive thinking metadata.'
+            )
+        thinking_mode = 'anthropic-adaptive'
     return System(
         name=name,
         generation=generation,
@@ -314,6 +356,7 @@ def resolve_system(
         vendor=entry.vendor,
         price=_price(entry.channel_cost.get(channel)),
         effort=_resolve_effort(name, config.effort, entry.thinking, config.api),
+        thinking_mode=thinking_mode,
         prompt=prompt,
         display_name=config.display_name or entry.name,
     )
@@ -337,7 +380,10 @@ def _prompt(name: str, reference: str | None, export: NixosConfigExport) -> str 
 
 
 def _resolve_effort(
-    name: str, effort: str | None, thinking: Thinking | None, api: Api
+    name: str,
+    effort: str | None,
+    thinking: Thinking | None,
+    api: Api,
 ) -> str | None:
     if thinking is None:
         if effort is not None:
@@ -345,7 +391,7 @@ def _resolve_effort(
         return None
     if effort is None:
         effort = thinking.default_level if thinking.requires_effort else None
-    allowed = thinking.api_efforts.get(api, thinking.efforts)
+    allowed = thinking.api_efforts.get(api, [])
     if effort is not None and effort not in allowed:
         raise ValueError(
             f'System `{name}`: effort `{effort}` is not one of '
@@ -358,4 +404,9 @@ def _price(cost: ChannelCost | None) -> Price | None:
     # The catalog prices unbilled channels at zero, which report as unpriced.
     if cost is None or not (cost.input or cost.output or cost.cache_read):
         return None
-    return Price(input=cost.input, output=cost.output, cache_read=cost.cache_read)
+    return Price(
+        input=cost.input,
+        output=cost.output,
+        cache_read=cost.cache_read,
+        cache_write=cost.cache_write,
+    )

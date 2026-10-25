@@ -14,6 +14,7 @@ from assistant_bench.catalog import Api, load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.responses import ResponseResult
 
 
@@ -25,6 +26,7 @@ class GenerateOptions(Labels):
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int
+    thinking_mode: str | None = None
 
 
 class Generate(BaseAgent):
@@ -43,7 +45,8 @@ class Generate(BaseAgent):
 
     @override
     def version(self) -> str:
-        return generation_version('generate')
+        assert isinstance(self.options, GenerateOptions)
+        return generation_version('generate', self.options.api)
 
     @classmethod
     @override
@@ -53,7 +56,7 @@ class Generate(BaseAgent):
         env: Mapping[str, str] | None = None,
     ) -> None:
         super().preflight(kwargs, env)
-        preflight(env)
+        preflight(env, (kwargs or {}).get('api', 'openai-chat-completions'))
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -68,7 +71,16 @@ class Generate(BaseAgent):
     ) -> None:
         assert isinstance(self.options, GenerateOptions)
         nixos_config_rev = load_export(self._get_env).rev
-        endpoint = Endpoint.read(self._get_env)
+        endpoint = Endpoint.read(self._get_env, self.options.api)
+
+        if self.options.api == 'anthropic-messages':
+            try:
+                await self._native_messages(endpoint, instruction, context)
+            finally:
+                context.metadata = (context.metadata or {}) | {
+                    'nixos_config_rev': nixos_config_rev
+                }
+            return
 
         async with endpoint.client() as client:
             started = time.monotonic()
@@ -89,6 +101,32 @@ class Generate(BaseAgent):
                     'latency_sec': round(time.monotonic() - started, 3),
                     'nixos_config_rev': nixos_config_rev,
                 }
+
+    async def _native_messages(
+        self, endpoint: Endpoint, instruction: str, context: AgentContext
+    ) -> None:
+        assert isinstance(self.options, GenerateOptions)
+        assert self.model_name is not None
+        result = MessageResult()
+        try:
+            async with endpoint.messages_client() as client:
+                await request_messages(
+                    client,
+                    result,
+                    model=self.model_name,
+                    messages=[{'role': 'user', 'content': instruction}],
+                    system=self.options.system_prompt,
+                    max_tokens=self.options.max_output_tokens,
+                    effort=self.options.effort,
+                    artifact=self.logs_dir / 'message.json',
+                )
+            (self.logs_dir / OUTPUT_FILE).write_text(result.text)
+        finally:
+            context.metadata = result.details
+            if result.complete and 'input_tokens' in result.details:
+                context.n_input_tokens = result.details['input_tokens']
+                context.n_cache_tokens = result.details['cache_tokens']
+                context.n_output_tokens = result.details['output_tokens']
 
     async def _chat(
         self, client: AsyncOpenAI, instruction: str, context: AgentContext

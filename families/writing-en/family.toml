@@ -3,13 +3,13 @@ aspect = "writing"
 display_name = "English"
 public = true
 systems = [
-  "opus-5.5-max",
-  "gpt-6-astra-max",
-  "gpt-6.1-sol-max",
+  "opus-5.5",
+  "gpt-6-astra-high",
+  "gpt-6.1-sol-high",
   "gemini-4-argon-high",
   "gemini-3.8-flash-high",
-  "deepseek-v4.1-flash-1017-max",
-  "kimi-k3-max",
+  "deepseek-v4.1-flash-1017-high",
+  "kimi-k3-high",
 ]
 reference = "gemini-3.8-flash-high"
 language = "en"

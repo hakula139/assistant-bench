@@ -6,6 +6,8 @@ from collections.abc import Callable, Generator, Mapping
 from typing import override
 
 import httpx
+import httpx2
+from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic import (
     BaseModel,
@@ -17,17 +19,20 @@ from pydantic import (
     Json,
 )
 
-from assistant_bench.catalog import EXPORT_VAR
+from assistant_bench.catalog import EXPORT_VAR, Api
+from assistant_bench.generation import load_generation
 from assistant_bench.messages import code
 
 
 BASE_URL_VAR = 'BENCH_API_BASE_URL'
+ANTHROPIC_BASE_URL_VAR = 'BENCH_ANTHROPIC_BASE_URL'
 KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
 CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
 LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
 ENDPOINT_VARS = (
     BASE_URL_VAR,
+    ANTHROPIC_BASE_URL_VAR,
     KEY_FILE_VAR,
     CA_FILE_VAR,
     HEADERS_VAR,
@@ -35,6 +40,7 @@ ENDPOINT_VARS = (
 )
 
 REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=5.0, read=None)
+MESSAGES_TIMEOUT = httpx2.Timeout(600.0, connect=5.0, read=None)
 
 
 class Endpoint(BaseModel):
@@ -55,11 +61,16 @@ class Endpoint(BaseModel):
     )
 
     @classmethod
-    def read(cls, env: Callable[[str], str | None]) -> Endpoint:
+    def read(
+        cls, env: Callable[[str], str | None], api: Api = 'openai-chat-completions'
+    ) -> Endpoint:
         """Validate the value `env` returns for each endpoint variable."""
-        return cls.model_validate(
-            {name: value for name in ENDPOINT_VARS if (value := env(name))}
-        )
+        values = {name: value for name in ENDPOINT_VARS if (value := env(name))}
+        if api == 'anthropic-messages':
+            values.pop(BASE_URL_VAR, None)
+            if value := env(ANTHROPIC_BASE_URL_VAR):
+                values[BASE_URL_VAR] = value
+        return cls.model_validate(values)
 
     def api_key(self) -> str:
         return self.key_file.read_text().strip()
@@ -97,27 +108,78 @@ class Endpoint(BaseModel):
             timeout=REQUEST_TIMEOUT,
         )
 
+    def messages_client(self) -> AsyncAnthropic:
+        return AsyncAnthropic(
+            base_url=str(self.base_url),
+            api_key=self.api_key(),
+            max_retries=0,
+            timeout=MESSAGES_TIMEOUT,
+            default_headers={
+                'anthropic-version': load_generation().anthropic_api_version or ''
+            },
+            http_client=self.messages_http_client(),
+        )
+
+    def messages_http_client(self) -> httpx2.AsyncClient:
+        verify = self.verify()
+        transport = (
+            httpx2.AsyncHTTPTransport(
+                local_address=str(self.local_address), verify=verify
+            )
+            if self.local_address
+            else None
+        )
+        return httpx2.AsyncClient(
+            transport=transport,
+            verify=verify,
+            auth=_MessagesAuth(self),
+            follow_redirects=False,
+            timeout=MESSAGES_TIMEOUT,
+        )
+
+    def authenticate(self, scheme: str, host: str, port: int | None) -> dict[str, str]:
+        url = httpx.URL(str(self.base_url))
+        if (scheme, host, port) != (url.scheme, url.host, url.port):
+            raise ValueError('Endpoint credentials cannot authenticate another origin.')
+        return (self.headers or {}) | {'Authorization': f'Bearer {self.api_key()}'}
+
 
 class _EndpointAuth(httpx.Auth):
     def __init__(self, endpoint: Endpoint) -> None:
         self._endpoint = endpoint
-        url = httpx.URL(str(endpoint.base_url))
-        self._origin = (url.scheme, url.host, url.port)
 
     @override
     def auth_flow(
         self, request: httpx.Request
     ) -> Generator[httpx.Request, httpx.Response]:
         url = request.url
-        if (url.scheme, url.host, url.port) != self._origin:
-            raise ValueError('Endpoint credentials cannot authenticate another origin.')
-
-        request.headers.update(self._endpoint.headers or {})
-        request.headers['Authorization'] = f'Bearer {self._endpoint.api_key()}'
+        request.headers.update(
+            self._endpoint.authenticate(url.scheme, url.host, url.port)
+        )
         yield request
 
 
-def preflight(env: Mapping[str, str] | None = None) -> None:
+class _MessagesAuth(httpx2.Auth):
+    def __init__(self, endpoint: Endpoint) -> None:
+        self._endpoint = endpoint
+
+    @override
+    def auth_flow(
+        self, request: httpx2.Request
+    ) -> Generator[httpx2.Request, httpx2.Response]:
+        url = request.url
+        request.headers.update(
+            self._endpoint.authenticate(url.scheme, url.host, url.port)
+        )
+        request.headers['anthropic-version'] = (
+            load_generation().anthropic_api_version or ''
+        )
+        yield request
+
+
+def preflight(
+    env: Mapping[str, str] | None = None, api: Api = 'openai-chat-completions'
+) -> None:
     """Raise unless the endpoint variables and the nixos-config export are set.
 
     The endpoint must also resolve to a usable one. `env` overrides the process
@@ -128,11 +190,12 @@ def preflight(env: Mapping[str, str] | None = None) -> None:
     def lookup(var: str) -> str | None:
         return overrides.get(var, os.environ.get(var))
 
-    required = (BASE_URL_VAR, KEY_FILE_VAR, EXPORT_VAR)
+    base_var = ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
+    required = (base_var, KEY_FILE_VAR, EXPORT_VAR)
     missing = [var for var in required if not lookup(var)]
     if missing:
         raise ValueError(
             f'Set {code(missing)}. Copy `.env.example` to `.env`, and run inside '
             '`nix develop`.'
         )
-    Endpoint.read(lookup).verify()
+    Endpoint.read(lookup, api).verify()

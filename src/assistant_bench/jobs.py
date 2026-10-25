@@ -41,6 +41,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.messages import MessageCompletionError
 from assistant_bench.harnesses.responses import ResponseCompletionError
 from assistant_bench.messages import code, error_lines
 from assistant_bench.outputs import Output, write_outputs
@@ -473,7 +474,8 @@ def _job(
 ) -> JobConfig:
     retry = RetryConfig(max_retries=1)
     retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
-        ResponseCompletionError.__name__
+        ResponseCompletionError.__name__,
+        MessageCompletionError.__name__,
     }
 
     return JobConfig(
@@ -802,6 +804,7 @@ def _output(
         finish_reason=finish_reason,
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
+        cache_write_tokens=metadata.get('cache_write_tokens'),
         output_tokens=context.n_output_tokens,
         reasoning_tokens=metadata.get('reasoning_tokens'),
         cost_usd=_cost(systems.get(candidate.system), context),
@@ -887,8 +890,12 @@ def _cost(system: System | None, context: AgentContext) -> float | None:
         or system.price is None
         or context.n_input_tokens is None
         or context.n_output_tokens is None
+        or (context.metadata or {}).get('cache_write_unpriced', False)
     ):
         return None
     return system.price.cost(
-        context.n_input_tokens, context.n_cache_tokens or 0, context.n_output_tokens
+        context.n_input_tokens,
+        context.n_cache_tokens or 0,
+        context.n_output_tokens,
+        (context.metadata or {}).get('cache_write_tokens', 0),
     )
