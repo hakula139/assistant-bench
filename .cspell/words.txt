@@ -1,5 +1,3 @@
-_PYTHON_HOST_PLATFORM
-_PYTHON_SYSCONFIGDATA_NAME
 acompletion
 anyio
 asciinema
