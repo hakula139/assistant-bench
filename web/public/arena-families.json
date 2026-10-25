@@ -1,0 +1,14 @@
+[
+  {
+    "name": "writing-en",
+    "aspect": "writing",
+    "display_name": "English",
+    "defects": ["scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"]
+  },
+  {
+    "name": "writing-zh",
+    "aspect": "writing",
+    "display_name": "Chinese",
+    "defects": ["scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"]
+  }
+]
