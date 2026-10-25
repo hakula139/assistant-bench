@@ -19,7 +19,7 @@ The root Python project contains the `assistant_bench` CLI and the `assistant_be
 
 Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
 
-Open `assistant-bench.code-workspace` to check both Python projects in a compatible editor, using the root `.venv`. The host project targets Python 3.14. The coding family's `pyrightconfig.json` inherits its strict diagnostics and targets Python 3.13 for standalone task scripts.
+Open `assistant-bench.code-workspace` to check the host and coding-family sources in a compatible editor, using the root `.venv`. The host project targets Python 3.14. The coding family's `pyrightconfig.json` inherits its strict diagnostics and targets Python 3.13 for standalone task scripts.
 
 ## Pre-Commit Hooks
 
