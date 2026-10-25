@@ -23,7 +23,7 @@ crons = ["* * * * *"]
 ARENA_NAMESPACE = "assistant-bench-staging.c104019a-432d-4be1-af10-2b011dc1e165"
 APP_ORIGIN = "https://bench-staging.hakula.xyz"
 RENDER_ORIGIN = "https://render.bench-staging.hakula.xyz"
-TURNSTILE_SITEKEY = ""
+TURNSTILE_SITEKEY = "0x4AAAAAAFk4uKFs7GuqFW55"
 
 [env.staging.assets]
 binding = "ASSETS"
