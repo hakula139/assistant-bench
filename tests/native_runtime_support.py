@@ -193,6 +193,20 @@ _CONTROL = """
                     instance.owner.auth, RejectedAuthentication,
                 )
                 return json.dumps({'result': {'configured': True}})
+            if payload.get('operation') == 'fail_ingress':
+                message = payload['message']
+
+                class UnexpectedAuthentication(Authentication):
+                    async def preflight(
+                        self, address: str, now: int,
+                    ) -> NetworkIdentity:
+                        raise RuntimeError(message)
+
+                instance = Default(self.ctx, self.env)
+                instance.owner.auth = authentication(
+                    instance.owner.auth, UnexpectedAuthentication,
+                )
+                return json.dumps({'result': {'configured': True}})
             if payload.get('operation') == 'coverage_probe':
                 try:
                     import sqlite3
