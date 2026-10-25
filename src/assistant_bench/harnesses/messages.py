@@ -5,16 +5,21 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any, override
+from typing import Any, cast, override
 
-from anthropic import AsyncAnthropic, omit
+from anthropic import AsyncAnthropic, BadRequestError, omit
 from anthropic.types import (
     Message,
     MessageParam,
     OutputConfigParam,
     ThinkingConfigParam,
 )
-from harbor.llms.base import BaseLLM, LLMResponse, OutputLengthExceededError
+from harbor.llms.base import (
+    BaseLLM,
+    ContextLengthExceededError,
+    LLMResponse,
+    OutputLengthExceededError,
+)
 from harbor.llms.chat import Chat
 from pydantic import TypeAdapter
 
@@ -142,6 +147,7 @@ async def request_messages(
 ) -> None:
     """Accumulate typed events and retain private snapshots on every exit path."""
     started = time.monotonic()
+    stopped = False
     try:
         async with client.messages.stream(
             model=model,
@@ -161,12 +167,13 @@ async def request_messages(
                     if result.message is not None:
                         result.message = stream.current_message_snapshot
                     if event.type == 'message_stop':
-                        result.complete = True
-                if result.complete:
+                        stopped = True
+                if stopped:
                     result.message = await stream.get_final_message()
             finally:
                 if result.message is not None:
                     result.message = stream.current_message_snapshot
+        result.complete = stopped
         result.check(complete=False)
     finally:
         result.latency_sec = round(time.monotonic() - started, 3)
@@ -260,6 +267,9 @@ class MessagesLLM(BaseLLM):
         **kwargs: Any,
     ) -> LLMResponse:
         result = MessageResult()
+        attempt: dict[str, Any] = {}
+        self.attempts.append(attempt)
+        ordinal = len(self.attempts)
         try:
             await request_messages(
                 self.client,
@@ -270,10 +280,29 @@ class MessagesLLM(BaseLLM):
                 max_tokens=self.output_limit,
                 thinking_mode=self.thinking_mode,
                 effort=self.effort,
-                artifact=self.logs_dir / f'message-{len(self.results) + 1}.json',
+                artifact=self.logs_dir / f'message-{ordinal}.json',
             )
+        except BadRequestError as error:
+            body = error.body
+            raw_detail = (
+                cast(Mapping[str, object], body).get('error')
+                if isinstance(body, Mapping)
+                else None
+            )
+            detail: Mapping[str, object] = (
+                cast(Mapping[str, object], raw_detail)
+                if isinstance(raw_detail, Mapping)
+                else {}
+            )
+            if (
+                detail.get('type') == 'invalid_request_error'
+                and isinstance(message := detail.get('message'), str)
+                and message.startswith('prompt is too long')
+            ):
+                raise ContextLengthExceededError(message) from error
+            raise
         finally:
-            self.attempts.append(result.details)
+            attempt.update(result.details)
             if result.complete:
                 self.results.append(result.details)
         result.check(complete=True)

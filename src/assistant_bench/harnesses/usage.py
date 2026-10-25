@@ -62,7 +62,9 @@ def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
                 reasoning_value = _detail(
                     reported, 'completion_tokens_details', 'reasoning_tokens'
                 )
-                write_value = 0
+                write_value = _detail(
+                    reported, 'prompt_tokens_details', 'cache_write_tokens', 0
+                )
             case 'openai-responses':
                 input_value = reported.get('input_tokens')
                 output_value = reported.get('output_tokens')
@@ -72,7 +74,9 @@ def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
                 reasoning_value = _detail(
                     reported, 'output_tokens_details', 'reasoning_tokens'
                 )
-                write_value = 0
+                write_value = _detail(
+                    reported, 'input_tokens_details', 'cache_write_tokens', 0
+                )
             case 'anthropic-messages':
                 input_value = reported.get('input_tokens')
                 output_value = reported.get('output_tokens')

@@ -61,6 +61,7 @@ class ResponseResult:
             else incomplete or response.status or 'unknown'
         )
         return {
+            **(usage.details if usage else {}),
             'reasoning_tokens': usage.reasoning_tokens if usage else None,
             'reported_usage': reported,
             'usage_invalid': reported is not None and usage is None,

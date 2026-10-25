@@ -319,10 +319,10 @@ class Terminus(Terminus2):
             if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
                 if isinstance(self._llm, MessagesLLM):
                     context.metadata['message_attempts'] = self._llm.attempts
-                    context.metadata['cache_write_unpriced'] = any(
-                        result.get('cache_write_unpriced', False)
-                        for result in self._llm.results
-                    )
+                context.metadata['cache_write_unpriced'] = any(
+                    result.get('cache_write_unpriced', False)
+                    for result in self._llm.results
+                )
                 context.metadata['responses'] = self._llm.results
                 results = self._llm.results
                 if results and all('input_tokens' in result for result in results):
@@ -335,10 +335,9 @@ class Terminus(Terminus2):
                     context.n_output_tokens = sum(
                         result['output_tokens'] for result in results
                     )
-                    if isinstance(self._llm, MessagesLLM):
-                        context.metadata['cache_write_tokens'] = sum(
-                            result['cache_write_tokens'] for result in results
-                        )
+                    context.metadata['cache_write_tokens'] = sum(
+                        result['cache_write_tokens'] for result in results
+                    )
                 else:
                     context.n_input_tokens = None
                     context.n_cache_tokens = None

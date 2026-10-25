@@ -157,6 +157,7 @@ class Generate(BaseAgent):
             context.n_output_tokens = usage.output_tokens
 
         return {
+            **(usage.details if usage else {}),
             'reasoning_tokens': usage.reasoning_tokens if usage else None,
             'reported_usage': reported,
             'usage_invalid': reported is not None and usage is None,
