@@ -43,7 +43,6 @@ class ChannelCost(BaseModel):
 class Thinking(BaseModel):
     mode: str | None = None
     efforts: list[str]
-    api_efforts: dict[str, list[str]] = Field(alias='apiEfforts', default={})
     default_level: str = Field(alias='defaultLevel')
     requires_effort: bool = Field(alias='requiresEffort')
 
@@ -312,7 +311,7 @@ def resolve_system(
             raise ValueError(
                 f'System `{name}`: API `{config.api}` is not one of {code(entry.apis)}.'
             )
-        _check_effort(name, identity.effort, entry.thinking, config.api)
+        _check_effort(name, identity.effort, entry.thinking)
         channel = next(iter(entry.channel_id))
         price = _price(entry.channel_cost.get(channel))
         vendor = entry.vendor
@@ -432,17 +431,15 @@ def _check_effort(
     name: str,
     effort: str | None,
     thinking: Thinking | None,
-    api: Api,
 ) -> None:
     if thinking is None:
         if effort is not None:
             raise ValueError(f'System `{name}`: the model takes no effort.')
         return
-    allowed = thinking.api_efforts.get(api, [])
-    if effort is not None and effort not in allowed:
+    if effort is not None and effort not in thinking.efforts:
         raise ValueError(
             f'System `{name}`: effort `{effort}` is not one of '
-            f'{code(allowed)} for `{api}`.'
+            f'{code(thinking.efforts)}.'
         )
 
 

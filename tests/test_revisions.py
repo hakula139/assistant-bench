@@ -130,8 +130,6 @@ class TestSystemsAt:
         document = json.loads(EXPORT_FILE.read_text())
         for model in document['catalog']['models'].values():
             model.pop('apis', None)
-            if thinking := model.get('thinking'):
-                thinking.pop('apiEfforts', None)
         old_export = tmp_path / 'old-export.json'
         old_export.write_text(json.dumps(document))
         self.fake_git(
