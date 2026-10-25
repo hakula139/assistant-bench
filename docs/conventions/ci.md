@@ -31,7 +31,7 @@ Production deploys the Python voting owner, its private Service facade and the s
 
 Static PR previews use `web/wrangler.toml`. Both deploy jobs consume the `site-dist` artifact, and a separate workflow removes previews:
 
-- **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to. Deploys wait in the `production` concurrency group, and each skips a commit that `main` has moved past.
+- **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to. The `production` concurrency group retains up to 100 pending deploys without cancelling a running deploy. Each queued deploy skips a commit that `main` has moved past, so older checks finishing later preserve the current head's queued deployment.
 
 - **Deploy Preview:** runs `wrangler preview` in the `preview` environment as soon as Build Site passes on each PR, without waiting for the other checks, creating a Worker Preview named `pr-<number>` under the same Worker, and comments its URLs on the PR.
 
