@@ -137,7 +137,7 @@ class TestWorkspaceDiff:
                     'app.py': b'x\n',
                     'pkg/__pycache__/app.cpython-313.pyc': b'\x00',
                     '.pytest_cache/v/cache/lastfailed': b'{"t": true}\n',
-                    '.mypy_cache/3.13/app.meta.json': b'{}\n',
+                    '.mypy_cache/3.14/app.meta.json': b'{}\n',
                     '.ruff_cache/CACHEDIR.TAG': b'tag\n',
                     'pycache/keep.py': b'k\n',
                 },

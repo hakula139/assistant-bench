@@ -22,7 +22,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Dependencies
 
-- The host and authored-task checker projects share the strict policy in `pyproject.toml`. The recommended VS Code extensions use the checker installed in the selected `.venv`, so `uv sync` supplies the same version as CI. Fix first-party contracts behind diagnostics. Missing library typing metadata is permitted, while missing imports and unknown or incompatible API types remain errors.
+- The host and authored tasks share the strict policy in the root `pyproject.toml`. Editors use the checker installed in the selected `.venv`, so `uv sync` supplies the same version as CI. Fix first-party contracts behind diagnostics. Missing library typing metadata is permitted, while missing imports and unknown or incompatible API types remain errors.
 - Pin Harbor to an exact release, since it ships daily dev builds. Give every other dependency a lower bound at the version first locked, and let `uv.lock` pin the rest.
 - Prefer packages already in Harbor's tree, such as pydantic, httpx, Typer, and the `openai` SDK.
 

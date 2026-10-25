@@ -144,9 +144,6 @@ jobs:
       - name: Check editor types
         run: uv run basedpyright
 
-      - name: Check authored verifier types
-        run: uv run basedpyright --project families/coding-repo
-
       - name: Check standalone task assets
         run: uv run python -m assistant_bench.task_assets --check
 

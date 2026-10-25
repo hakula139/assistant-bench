@@ -16,7 +16,7 @@ class TestStandaloneTasks:
         self, tmp_path: Path
     ) -> None:
         family = load_family('coding-repo')
-        name = 'refactor-parsers'
+        name = 'migrate-customer-store'
         source = case_task(family, name)
         target = tmp_path / 'standalone' / source.name
         shutil.copytree(source, target, symlinks=True)
