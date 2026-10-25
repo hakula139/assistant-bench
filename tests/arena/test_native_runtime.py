@@ -286,6 +286,7 @@ class TestNativeRuntime:
                 reused = await transport.http('/api/admission', cookie=flow_cookie)
                 assert reused['status'] == 200
                 assert body(reused) == body(context)
+
                 flows = TokenCodec(
                     AdmissionClaims, keys, NAMESPACE, 'admission', 600_000
                 )
@@ -293,6 +294,7 @@ class TestNativeRuntime:
                 assert flows.decode(
                     cookie(reused).split('=', 1)[1], now
                 ) == flows.decode(flow_cookie.split('=', 1)[1], now)
+
                 retired = await transport.http('/admit')
                 assert retired['status'] == 404
                 request: dict[str, JsonValue] = {
