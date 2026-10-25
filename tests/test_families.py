@@ -1,4 +1,3 @@
-import json
 import textwrap
 from pathlib import Path
 from typing import TypedDict
@@ -41,16 +40,16 @@ def write_family(
     directory.mkdir(parents=True)
     (directory / 'family.toml').write_text(textwrap.dedent(settings))
     if cases:
-        (directory / 'cases.jsonl').write_text('')
+        (directory / 'cases.toml').write_text('cases = []\n')
     if tasks:
         (directory / 'tasks').mkdir()
 
 
-def case_line(
+def case_entry(
     case_id: str, source: str = 'synthetic', category: str = 'message'
 ) -> str:
     case = {'id': case_id, 'category': category, 'source': source, 'instruction': 'Hi.'}
-    return json.dumps(case) + '\n'
+    return '[[cases]]\n' + tomli_w.dumps(case)
 
 
 def write_task(
@@ -205,7 +204,7 @@ class TestLoadFamily:
                 """,
                 True,
                 True,
-                'Family `f`: expected exactly one of `cases.jsonl` and `tasks/`.',
+                'Family `f`: expected exactly one of `cases.toml` and `tasks/`.',
                 id='cases-and-tasks',
             ),
             pytest.param(
@@ -217,7 +216,7 @@ class TestLoadFamily:
                 """,
                 False,
                 False,
-                'Family `f`: expected exactly one of `cases.jsonl` and `tasks/`.',
+                'Family `f`: expected exactly one of `cases.toml` and `tasks/`.',
                 id='no-task-source',
             ),
             pytest.param(
@@ -245,7 +244,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: score a `cases.jsonl` family by `votes`, since only a '
+                'Family `f`: score a `cases.toml` family by `votes`, since only a '
                 '`tasks/` family has tests.',
                 id='cases-scored-by-tests',
             ),
@@ -261,7 +260,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: a `cases.jsonl` family runs every system as `generate`, '
+                'Family `f`: a `cases.toml` family runs every system as `generate`, '
                 'so remove `harness`.',
                 id='cases-with-an-agent-harness',
             ),
@@ -313,7 +312,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: a `cases.jsonl` family yields replies, so set `render` '
+                'Family `f`: a `cases.toml` family yields replies, so set `render` '
                 'to `"text"` or `"html"`.',
                 id='cases-with-diffs',
             ),
@@ -538,10 +537,119 @@ class TestLoadFamily:
 
 
 class TestLoadCases:
+    def test_preserves_case_fields_and_document_order(self, families_dir: Path) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text(
+            textwrap.dedent(
+                r"""
+                [[cases]]
+                id = "z-last"
+                category = "message"
+                source = "public"
+                instruction = '''
+
+                保留  「格式」。
+                  Keep C:\drafts\notes and the literal \n.
+                '''
+                checklist = ["Keep C:\\drafts\\notes.", "保留  「格式」  "]
+
+                [[cases]]
+                id = "a-first"
+                category = "message"
+                source = "synthetic"
+                instruction = "Next\nline."
+                """
+            ),
+            encoding='utf-8',
+        )
+
+        cases = load_cases(load_family('f'))
+
+        assert [case.model_dump() for case in cases] == [
+            {
+                'id': 'z-last',
+                'category': 'message',
+                'source': 'public',
+                'instruction': textwrap.dedent(
+                    r"""
+                    保留  「格式」。
+                      Keep C:\drafts\notes and the literal \n.
+                    """
+                ),
+                'checklist': [r'Keep C:\drafts\notes.', '保留  「格式」  '],
+            },
+            {
+                'id': 'a-first',
+                'category': 'message',
+                'source': 'synthetic',
+                'instruction': 'Next\nline.',
+                'checklist': [],
+            },
+        ]
+
+    @pytest.mark.parametrize(
+        ('text', 'field', 'message'),
+        [
+            pytest.param('', 'cases', 'Field required.', id='missing-container'),
+            pytest.param(
+                'cases = "message"',
+                'cases',
+                'Input should be a valid list.',
+                id='non-list-container',
+            ),
+            pytest.param(
+                'cases = []\ncase = []',
+                'case',
+                'Extra inputs are not permitted.',
+                id='unknown-container-key',
+            ),
+            pytest.param(
+                'cases = ["message"]',
+                'cases.0',
+                'Input should be a valid dictionary or instance of Case.',
+                id='non-case-entry',
+            ),
+            pytest.param(
+                case_entry('a') + 'instructions = "Hi."',
+                'cases.0.instructions',
+                'Extra inputs are not permitted.',
+                id='unknown-case-key',
+            ),
+            pytest.param(
+                case_entry('a') + 'checklist = "Keep the path."',
+                'cases.0.checklist',
+                'Input should be a valid list.',
+                id='non-list-checklist',
+            ),
+        ],
+    )
+    def test_rejects_a_case_document_that_breaks_its_contract(
+        self, families_dir: Path, text: str, field: str, message: str
+    ) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text(text)
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value) == f'Family `f`: `{path}`: `{field}`: {message}'
+
+    def test_names_the_file_and_location_of_malformed_toml(
+        self, families_dir: Path
+    ) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text('[[cases]\n')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value).startswith(f'Family `f`: `{path}` is not valid TOML:')
+        assert 'line 1, column' in str(error.value)
+
     def test_appends_local_cases_to_the_committed_ones(self, data_dir: Path) -> None:
-        local = data_dir / 'cases' / 'smoke-text.jsonl'
+        local = data_dir / 'cases' / 'smoke-text.toml'
         local.parent.mkdir(parents=True)
-        local.write_text(case_line('zh-local', source='held-out'))
+        local.write_text(case_entry('zh-local', source='held-out'))
 
         cases = load_cases(load_family('smoke-text'))
 
@@ -551,41 +659,42 @@ class TestLoadCases:
     def test_rejects_a_local_case_that_reuses_a_committed_id(
         self, data_dir: Path
     ) -> None:
-        local = data_dir / 'cases' / 'smoke-text.jsonl'
+        local = data_dir / 'cases' / 'smoke-text.toml'
         local.parent.mkdir(parents=True)
-        local.write_text(case_line('zh-local') + case_line('en-greeting'))
-        committed = FAMILIES_DIR / 'smoke-text' / 'cases.jsonl'
+        local.write_text(case_entry('zh-local') + case_entry('en-greeting'))
+        committed = FAMILIES_DIR / 'smoke-text' / 'cases.toml'
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('smoke-text'))
 
         assert str(error.value) == (
-            f'Family `smoke-text`: case `en-greeting` appears at `{committed}:1` '
-            f'and `{local}:2`.'
+            'Family `smoke-text`: case `en-greeting` appears at '
+            f'`{committed}:cases[0]` '
+            f'and `{local}:cases[1]`.'
         )
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(case_line('a') + '\n' + case_line('a'))
+        path.write_text(case_entry('a') + '\n' + case_entry('a'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `a` appears at `{path}:1` and `{path}:3`.'
+            f'Family `f`: case `a` appears at `{path}:cases[0]` and `{path}:cases[1]`.'
         )
 
-    def test_names_the_line_and_field_of_an_invalid_case(
+    def test_names_the_entry_and_field_of_an_invalid_case(
         self, families_dir: Path
     ) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(case_line('a') + case_line('B'))
+        path.write_text(case_entry('a') + case_entry('B'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: `{path}:2`: `id`: String should match pattern '
+            f'Family `f`: `{path}`: `cases.1.id`: String should match pattern '
             "'^[a-z0-9][a-z0-9-]*$'."
         )
 
@@ -593,13 +702,13 @@ class TestLoadCases:
         self, families_dir: Path
     ) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(case_line('a') + case_line('b', category='private-topic'))
+        path.write_text(case_entry('a') + case_entry('b', category='private-topic'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `b` at `{path}:2` has category `private-topic`, '
+            f'Family `f`: case `b` at `{path}:cases[1]` has category `private-topic`, '
             'missing from `categories` in `family.toml`.'
         )
 

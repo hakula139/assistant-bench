@@ -6,7 +6,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 - The [module map](../design/architecture.md#module-map) gives each module's responsibility, and imports stay within the [import layers](../design/architecture.md#import-layers).
 - For anything Harbor reads or writes, build on Harbor's own models so a schema change surfaces as a validation error. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory, the parts of Harbor's API least likely to churn. `Terminus` needs the private `Terminus2._init_llm` hook to inject the endpoint client, and `HostEnvironment` implements `BaseEnvironment`'s changing abstract interface. Keep both integrations covered by real Harbor trials when upgrading Harbor.
-- Model each input file the bench owns, such as `systems.toml`, `family.toml`, and `cases.jsonl`, with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
+- Model each input file the bench owns, such as `systems.toml`, `family.toml`, and `cases.toml`, with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
 - Branch on a family's scorer with a `match` over its settings model that ends in `case _: assert_never(...)`, so mypy reports each `match` a new scorer misses.
 - Reach the data directory only through `paths.data_dir()`.
 

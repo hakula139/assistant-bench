@@ -31,7 +31,7 @@ A case's `checklist` names what voters should check beyond general quality, such
 
 ## Case Sourcing
 
-The committed `cases.jsonl` of each family holds 42 synthetic cases. The data directory's `cases/<family>.jsonl` holds 17 more, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.
+The committed `cases.toml` of each family holds 42 synthetic cases. The data directory's `cases/<family>.toml` holds 17 more, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.
 
 Chinese cases are written in Chinese and keep code, paths, and commands in their original form. Code-comment cases in `writing-zh` ask for Chinese comments.
 
