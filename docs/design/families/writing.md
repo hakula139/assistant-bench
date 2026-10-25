@@ -23,7 +23,7 @@ The counts include the held-out cases, so each family has 59: 42 committed and 1
 
 Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content.
 
-Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review cases state their point of view, required beats, and length band in the instruction, so the checklist can judge the same things the brief asks for.
+Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 
 A review case supplies a synopsis of its invented work, with scene observations for an animation close reading. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
 

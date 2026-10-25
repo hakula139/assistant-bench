@@ -344,7 +344,7 @@ instruction = """
 背景信息：
 - 部署目标是使用 GNU Coreutils 的 Linux 服务器。先上传到带时间戳的新目录，再在 `current` 所在目录创建临时软链接，通过重命名替换 `current`，保证单次路径查找看到完整的旧链接或新链接。
 - `systemctl` 使用 `reload` 而非 `restart`，是为了不断开现有连接。
-- 保留最近 5 个版本以便快速回滚。
+- 版本目录名统一使用固定宽度的部署时间戳，按名称保留最近 5 个版本以便快速回滚。
 
 ```bash
 #!/usr/bin/env bash
@@ -356,7 +356,7 @@ next=/srv/app/.current-$stamp
 
 rsync -a dist/ \"deploy@web1:$release/\"
 ssh deploy@web1 \"ln -s $release $next && mv -Tf $next /srv/app/current && sudo systemctl reload app\"
-ssh deploy@web1 'ls -1dt /srv/app/releases/* | tail -n +6 | xargs -r rm -rf'
+ssh deploy@web1 'ls -1dr /srv/app/releases/* | tail -n +6 | xargs -r rm -rf'
 ```"""
 checklist = [
   "仅输出一个包含完整脚本的代码块，无额外文字",
