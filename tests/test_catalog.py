@@ -412,7 +412,6 @@ class TestResolveIdentity:
         document = export.model_dump(by_alias=True)
         entry = document['catalog']['models']['acme-large']
         entry.pop('apis')
-        entry['thinking'].pop('apiEfforts')
         entry['thinking']['requiresEffort'] = required
         old = NixosConfigExport.model_validate(document)
         config = SystemConfig(model='acme-large', api=api, effort=effort)
@@ -450,7 +449,6 @@ class TestResolveIdentity:
         elif change == 'capabilities':
             entry['apis'] = []
             entry['thinking']['efforts'] = []
-            entry['thinking']['apiEfforts'] = {}
         else:
             document['rev'] = 'another-revision'
         changed = NixosConfigExport.model_validate(document)
@@ -469,7 +467,7 @@ class TestResolveSystem:
                 'API `anthropic-messages` is not one of',
             ),
             ({'apis': None}, 'declares no supported APIs'),
-            ({'thinking': {'apiEfforts': {}}}, 'effort `high` is not one of'),
+            ({'thinking': {'efforts': []}}, 'effort `high` is not one of'),
             ({'thinking': {'mode': 'effort'}}, 'requires adaptive thinking metadata'),
         ],
         ids=[
@@ -514,53 +512,46 @@ class TestResolveSystem:
         )
 
     @pytest.mark.parametrize(
-        ('api', 'effort', 'required', 'expected'),
+        ('effort', 'default', 'required', 'expected'),
         [
-            ('openai-chat-completions', 'high', True, 'high'),
-            ('openai-chat-completions', 'max', True, 'invalid'),
-            ('openai-responses', 'max', True, 'max'),
-            ('openai-chat-completions', None, True, 'invalid'),
-            ('openai-responses', None, True, 'max'),
-            ('openai-chat-completions', None, False, None),
+            ('high', 'medium', True, 'high'),
+            ('max', 'medium', True, 'invalid'),
+            (None, 'high', True, 'high'),
+            (None, 'max', True, 'invalid'),
+            (None, 'max', False, None),
         ],
         ids=[
-            'chat-high',
-            'chat-rejects-max',
-            'responses-max',
-            'chat-default-rejected',
-            'responses-default',
-            'optional-default',
+            'explicit-effort',
+            'unoffered-effort',
+            'required-default',
+            'unoffered-required-default',
+            'optional-omission',
         ],
     )
-    def test_validates_effort_for_the_selected_api_without_downgrading_it(
+    def test_validates_effort_against_the_shared_model_list(
         self,
         export: NixosConfigExport,
-        api: Api,
         effort: str | None,
+        default: str,
         required: bool,
         expected: str | None,
     ) -> None:
         document = export.model_dump(by_alias=True)
         thinking = document['catalog']['models']['acme-large']['thinking']
-        thinking['efforts'] = ['low', 'medium', 'high', 'max']
-        thinking['apiEfforts'] = {
-            'openai-chat-completions': ['low', 'medium', 'high'],
-            'openai-responses': ['low', 'medium', 'high', 'max'],
-        }
-        thinking['defaultLevel'] = 'max'
+        thinking['defaultLevel'] = default
         thinking['requiresEffort'] = required
         resolved_export = NixosConfigExport.model_validate(document)
-        config = SystemConfig(model='acme-large', api=api, effort=effort)
+        config = SystemConfig(model='acme-large', api='openai-responses', effort=effort)
 
         if expected == 'invalid':
             with pytest.raises(
-                ValueError, match='effort `max`.*`openai-chat-completions`'
+                ValueError, match='effort `max` is not one of `low`, `medium`, `high`'
             ):
                 resolve_system('large', config, resolved_export)
         else:
             system = resolve_system('large', config, resolved_export)
 
-            assert system.api == api
+            assert system.api == config.api
             assert system.effort == expected
 
     def test_resolves_historical_exports_without_vendor_metadata(
@@ -674,8 +665,7 @@ class TestResolveSystem:
             ),
             (
                 SystemConfig(model='acme-small', effort='medium'),
-                'System `x`: effort `medium` is not one of `low`, `high` for '
-                '`openai-chat-completions`.',
+                'System `x`: effort `medium` is not one of `low`, `high`.',
             ),
             (
                 SystemConfig(model='local-model', effort='low'),
