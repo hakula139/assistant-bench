@@ -17,7 +17,12 @@ from assistant_bench_arena.api_models import AdmissionView
 from assistant_bench_arena.ledger_models import Point, Statement
 from assistant_bench_arena.policy import configuration
 from assistant_bench_arena.releases import Release, point_snapshot, publication_identity
-from assistant_bench_arena.runtime_models import CredentialClaims, KeyRing, KeyVersion
+from assistant_bench_arena.runtime_models import (
+    AdmissionClaims,
+    CredentialClaims,
+    KeyRing,
+    KeyVersion,
+)
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import publish_release
@@ -281,7 +286,13 @@ class TestNativeRuntime:
                 reused = await transport.http('/api/admission', cookie=flow_cookie)
                 assert reused['status'] == 200
                 assert body(reused) == body(context)
-                assert cookie(reused) == flow_cookie
+                flows = TokenCodec(
+                    AdmissionClaims, keys, NAMESPACE, 'admission', 600_000
+                )
+                now = time.time_ns() // 1_000_000
+                assert flows.decode(
+                    cookie(reused).split('=', 1)[1], now
+                ) == flows.decode(flow_cookie.split('=', 1)[1], now)
                 retired = await transport.http('/admit')
                 assert retired['status'] == 404
                 request: dict[str, JsonValue] = {
