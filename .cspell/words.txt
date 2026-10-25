@@ -91,6 +91,7 @@ SSIM
 starlette
 statix
 strconv
+sysconfigdata
 tamasfe
 taplo
 threadpoolctl

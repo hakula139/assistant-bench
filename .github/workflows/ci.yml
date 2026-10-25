@@ -101,7 +101,6 @@ jobs:
         run: uv sync --locked
 
       - name: Bundle the voting Worker
-        # cspell:ignore _PYTHON_HOST_PLATFORM _PYTHON_SYSCONFIGDATA_NAME
         run: >-
           env -u _PYTHON_SYSCONFIGDATA_NAME -u _PYTHON_HOST_PLATFORM
           uv run --directory arena pywrangler deploy --dry-run --env staging
