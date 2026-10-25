@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import math
@@ -472,6 +473,38 @@ class TestNativeRuntime:
         assert (tmp_path / 'pylock.toml').read_bytes() == (
             ROOT / 'arena' / 'pylock.toml'
         ).read_bytes()
+
+        if runtime.coverage is not None:
+            for receipt, name in (
+                ('coverage.json', 'production'),
+                ('renderer_coverage.json', 'rendering'),
+            ):
+                relative = Path('assistant_bench_arena/worker') / f'{name}.py'
+                source = ast.parse((ROOT / 'arena' / 'src' / relative).read_text())
+                fetch = next(
+                    node
+                    for node in ast.walk(source)
+                    if isinstance(node, ast.AsyncFunctionDef) and node.name == 'fetch'
+                )
+                returned = max(
+                    node.lineno
+                    for node in ast.walk(fetch)
+                    if isinstance(node, ast.Return)
+                )
+                exported = TypeAdapter(dict[str, JsonValue]).validate_json(
+                    (tmp_path / receipt).read_bytes()
+                )
+                files = exported['files']
+                assert isinstance(files, dict)
+                key = f'/session/metadata/{relative.as_posix()}'
+
+                assert key in files, f'Native coverage omitted {relative}.'
+                entry = files[key]
+                assert isinstance(entry, dict)
+                lines = TypeAdapter(list[int]).validate_python(entry['lines'])
+                assert returned in lines, (
+                    f'Native coverage missed {relative}:{returned}.'
+                )
 
     def test_charges_real_native_budgets_before_serving_or_rejecting_requests(
         self, tmp_path: Path
