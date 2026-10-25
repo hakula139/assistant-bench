@@ -39,8 +39,8 @@ ENDPOINT_VARS = (
     LOCAL_ADDRESS_VAR,
 )
 
-REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=5.0, read=None)
-MESSAGES_TIMEOUT = httpx2.Timeout(600.0, connect=5.0, read=None)
+REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=30.0, read=None)
+MESSAGES_TIMEOUT = httpx2.Timeout(**REQUEST_TIMEOUT.as_dict())
 
 
 class Endpoint(BaseModel):
