@@ -163,7 +163,7 @@ _COVERAGE = """
 
     measured = coverage.Coverage(
         data_file='/tmp/.coverage-native', config_file=False,
-        include=['*/assistant_bench_arena/*.py', '*/app.py', '*/render.py'],
+        include=['*/assistant_bench_arena/**/*.py', '*/app.py', '*/render.py'],
         branch=BRANCH,
     )
     measured.set_option('run:core', 'sysmon')
