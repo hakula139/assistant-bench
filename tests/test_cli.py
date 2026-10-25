@@ -952,7 +952,7 @@ class TestRun:
             'Family `f` has systems that changed their fingerprints:\n'
             'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves '
             f'to `{current}`.\nGive a changed system a new name, or keep its old '
-            'resolution on a `route` table, as `docs/guide/authoring.md#systems` '
+            'resolution on a `route`\ntable, as `docs/guide/authoring.md#systems` '
             'describes.\n',
         )
         assert submitted == []
@@ -1017,10 +1017,10 @@ class TestRun:
             '',
             'Family `z` has tasks to bump:\n'
             'Task `echo` changed since a trial ran it at version `1.0.0`.\n'
-            "Bump each task's `[task] version`: the patch for a change no trial "
-            'depends on, such as its solution, the minor for a change to `tests/` '
-            'alone, which regrades its trials, or the major for anything the '
-            'agent sees, which reruns them.\n',
+            "Bump each task's `[task] version`: the patch for a change no trial\n"
+            'depends on, such as its solution, the minor for a change to `tests/`\n'
+            'alone, which regrades its trials, or the major for anything the agent\n'
+            'sees, which reruns them.\n',
         )
         assert submitted == []
 

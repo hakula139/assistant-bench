@@ -5,6 +5,7 @@ import subprocess
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from textwrap import dedent
 from typing import Annotated, NoReturn
 
 import typer
@@ -352,11 +353,18 @@ def _task_dirs(family: Family) -> list[Path]:
             for task, version in changed
         )
         _fail(
-            f'Family `{family.name}` has tasks to bump:\n{detail}\nBump each '
-            "task's `[task] version`: the patch for a change no trial depends on, "
-            'such as its solution, the minor for a change to `tests/` alone, '
-            'which regrades its trials, or the major for anything the agent '
-            'sees, which reruns them.'
+            dedent(
+                """
+                Family `{family}` has tasks to bump:
+                {detail}
+                Bump each task's `[task] version`: the patch for a change no trial
+                depends on, such as its solution, the minor for a change to `tests/`
+                alone, which regrades its trials, or the major for anything the agent
+                sees, which reruns them.
+                """
+            )
+            .strip()
+            .format(family=family.name, detail=detail)
         )
     return tasks
 
@@ -493,9 +501,16 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         for name, recorded, current in drifted
     )
     _fail(
-        f'Family `{family.name}` has systems that changed their fingerprints:\n'
-        f'{detail}\nGive a changed system a new name, or keep its old resolution '
-        f'on a `route` table, as `{SYSTEMS_DOC}` describes.'
+        dedent(
+            """
+            Family `{family}` has systems that changed their fingerprints:
+            {detail}
+            Give a changed system a new name, or keep its old resolution on a `route`
+            table, as `{systems_doc}` describes.
+            """
+        )
+        .strip()
+        .format(family=family.name, detail=detail, systems_doc=SYSTEMS_DOC)
     )
 
 
