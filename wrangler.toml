@@ -1,4 +1,5 @@
 name = "assistant-bench"
+# cspell:ignore 0x4AAAAAAFlKZW7ZlfptMhwH
 main = "src/app.py"
 compatibility_date = "2026-10-24"
 compatibility_flags = ["python_workers"]
@@ -8,6 +9,54 @@ preview_urls = false
 
 [observability]
 enabled = false
+
+[env.production]
+name = "assistant-bench"
+routes = [{ pattern = "bench.hakula.xyz", custom_domain = true }]
+
+[env.production.secrets]
+required = ["SESSION_KEYS", "RENDER_KEYS", "NETWORK_KEYS", "TURNSTILE_SECRET"]
+
+[env.production.triggers]
+crons = ["* * * * *"]
+
+[env.production.vars]
+ARENA_NAMESPACE = "assistant-bench.62c412ee-5117-48ee-9cec-66ea7c69985f"
+APP_ORIGIN = "https://bench.hakula.xyz"
+RENDER_ORIGIN = "https://render.bench.hakula.xyz"
+TURNSTILE_SITEKEY = "0x4AAAAAAFlKZW7ZlfptMhwH"
+
+[env.production.assets]
+binding = "ASSETS"
+directory = "web/dist"
+run_worker_first = true
+not_found_handling = "404-page"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-votes-production"
+database_id = "62c412ee-5117-48ee-9cec-66ea7c69985f"
+remote = true
+
+[[env.production.ratelimits]]
+name = "INGRESS_LIMIT"
+namespace_id = "11057863370600"
+simple = { limit = 120, period = 60 }
+
+[[env.production.ratelimits]]
+name = "PREFIX_LIMIT"
+namespace_id = "1931754419214"
+simple = { limit = 300, period = 60 }
+
+[[env.production.ratelimits]]
+name = "DEPLOYMENT_LIMIT"
+namespace_id = "129954037084856"
+simple = { limit = 600, period = 60 }
+
+[[env.production.ratelimits]]
+name = "ACTOR_LIMIT"
+namespace_id = "66211931584339"
+simple = { limit = 60, period = 60 }
 
 [env.staging]
 name = "assistant-bench-staging"
