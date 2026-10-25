@@ -306,8 +306,16 @@ def renderer_config(target: RuntimeTarget) -> Generator[Path]:
         '''
     ).lstrip()
 
-    with _temporary_config(source) as path:
-        yield path
+    # Wrangler discovers Python dependencies beside its configuration file.
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        prefix='.wrangler-render-',
+        suffix='.toml',
+        dir=target.manifest_path.parent,
+    ) as config:
+        config.write(source)
+        config.flush()
+        yield Path(config.name)
 
 
 @contextmanager
