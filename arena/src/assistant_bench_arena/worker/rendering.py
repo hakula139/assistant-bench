@@ -36,11 +36,13 @@ class Default(WorkerEntrypoint):
     def __init__(self, ctx: object, env: RenderBindings) -> None:
         super().__init__(ctx, env)
         self.bindings = env
+
         try:
             self.profile = profile(env)
             self.keys = KeyRing.model_validate_json(env.RENDER_KEYS)
         except ValueError:
             raise ValueError('The renderer configuration is invalid.') from None
+
         self.capabilities = TokenCodec(
             RenderClaims, self.keys, self.profile.namespace, 'render', RENDER_MS
         )
