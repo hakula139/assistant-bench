@@ -102,7 +102,7 @@ class TestHostEnvironment:
         )
         (sent,) = model_requests
         assert sent.extensions['timeout'] == {
-            'connect': 5.0,
+            'connect': 30.0,
             'read': None,
             'write': 600.0,
             'pool': 600.0,
