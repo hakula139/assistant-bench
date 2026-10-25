@@ -26,6 +26,7 @@ esbuild
 exog
 expit
 fdopen
+fsize
 fsmonitor
 hakula
 hanzi
@@ -75,12 +76,15 @@ pytest
 PYTHONDONTWRITEBYTECODE
 pywrangler
 redoc
+rlimit
 rstrip
 Sarasa
 scipy
 sdist
+setrlimit
 shadcn
 shfmt
+sigxfsz
 srcdoc
 SSIM
 statix

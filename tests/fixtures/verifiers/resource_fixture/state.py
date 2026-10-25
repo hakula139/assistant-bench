@@ -1,1 +1,0 @@
-counts: dict[str, int] = {}

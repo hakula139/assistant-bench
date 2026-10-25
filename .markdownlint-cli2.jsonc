@@ -15,6 +15,4 @@
   },
 
   "gitignore": true,
-  // A task's repository keeps the style of the project under test.
-  "ignores": ["families/*/tasks/*/environment/app/**"],
 }
