@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue, SecretBytes, TypeAdapter
 
-from assistant_bench_arena.admission import TokenCodec
+from assistant_bench_arena.admission import NetworkIdentity, TokenCodec
 from assistant_bench_arena.ledger_models import Point, Statement
 from assistant_bench_arena.policy import configuration
 from assistant_bench_arena.releases import Release, point_snapshot, publication_identity
@@ -19,7 +19,7 @@ from assistant_bench_arena.runtime_models import CredentialClaims, KeyRing, KeyV
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import publish_release
-from native_runtime_support import NAMESPACE, ROOT, NativeRuntime
+from native_runtime_support import APP_ORIGIN, NAMESPACE, ROOT, NativeRuntime
 
 
 def body(response: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -148,35 +148,6 @@ class TestNativeRuntime:
 
                     assert weighted['weights'] == pytest.approx([1 / 5, 1 / 19, 0.0])
 
-                remaining = 60 - time.time() % 60
-                if remaining < 30:
-                    await asyncio.sleep(remaining + 0.1)
-                epoch = time.time_ns() // 60_000_000_000
-                rate_cases: tuple[
-                    tuple[str, str, dict[str, JsonValue] | str | None, int], ...
-                ] = (
-                    ('192.0.2.20', '/api/sessions', '{', 400),
-                    (
-                        '198.51.100.20',
-                        '/api/sessions',
-                        {'command_id': 'malformed', 'family': 'writing'},
-                        400,
-                    ),
-                    ('203.0.113.20', '/api/unknown', None, 404),
-                    ('2001:db8:1234::20', '/api/status', None, 200),
-                )
-                for address, path, payload, expected in rate_cases:
-                    for index in range(120):
-                        response = await transport.http(
-                            path, body=payload, address=address
-                        )
-
-                        assert response['status'] == expected, (path, index, response)
-                    limited = await transport.http(path, body=payload, address=address)
-
-                    assert limited['status'] == 429, (path, limited)
-                    assert body(limited) == {'error': 'rate_limited'}
-                assert time.time_ns() // 60_000_000_000 == epoch
                 assert runtime.provider.calls == []
                 worker_rejected = await transport.http(
                     '/api/sessions', body='{', forwarded_worker=True
@@ -502,45 +473,138 @@ class TestNativeRuntime:
             ROOT / 'arena' / 'pylock.toml'
         ).read_bytes()
 
-    def test_limits_rejected_native_inputs_and_static_asset_requests(
+    def test_charges_real_native_budgets_before_serving_or_rejecting_requests(
         self, tmp_path: Path
     ) -> None:
         async def scenario(runtime: NativeRuntime) -> None:
             async with runtime.client() as (_, transport):
-                remaining = 60 - time.time() % 60
-                if remaining < 30:
-                    await asyncio.sleep(remaining + 0.1)
-                epoch = time.time_ns() // 60_000_000_000
-                for address, path, payload, origin, expected in (
+                assert await transport.call({'operation': 'observe_ingress'}) == {
+                    'configured': True
+                }
+                keys = KeyRing(
+                    versions=(
+                        KeyVersion(
+                            version='test', starts_at=0, key=SecretBytes(b'k' * 32)
+                        ),
+                    )
+                )
+                cases: tuple[
+                    tuple[str, str, dict[str, JsonValue] | str | None, str, int],
+                    ...,
+                ] = (
+                    ('192.0.2.20', '/api/sessions', '{', APP_ORIGIN, 400),
                     (
-                        '192.0.2.20',
+                        '198.51.100.20',
+                        '/api/sessions',
+                        {'command_id': 'malformed', 'family': 'writing'},
+                        APP_ORIGIN,
+                        400,
+                    ),
+                    ('203.0.113.20', '/api/unknown', None, APP_ORIGIN, 404),
+                    ('2001:db8:1234::20', '/api/status', None, APP_ORIGIN, 200),
+                    (
+                        '192.0.2.21',
                         '/api/sessions',
                         '{}',
                         'https://other.example.com',
                         400,
                     ),
-                    (
-                        '198.51.100.20',
-                        '/api/sessions',
-                        'x' * 8193,
-                        'https://app.example.com',
-                        400,
-                    ),
-                    ('203.0.113.20', '/', None, 'https://app.example.com', 200),
-                ):
-                    for index in range(120):
-                        response = await transport.http(
-                            path, body=payload, address=address, origin=origin
-                        )
+                    ('198.51.100.21', '/api/sessions', 'x' * 8193, APP_ORIGIN, 400),
+                    ('203.0.113.21', '/', None, APP_ORIGIN, 200),
+                )
 
-                        assert response['status'] == expected, (path, index, response)
-                    limited = await transport.http(
+                for address, path, payload, origin, expected in cases:
+                    response = await transport.http(
                         path, body=payload, address=address, origin=origin
                     )
+                    assert response['status'] == expected, (address, path, response)
+                    recorded = await transport.call({'operation': 'ingress_events'})
+                    events = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
+                        recorded['events']
+                    )
+                    assert events and events[0]['kind'] == 'preflight', (
+                        address,
+                        path,
+                        events,
+                    )
+                    now = events[0]['now']
+                    assert isinstance(now, int)
+                    network = NetworkIdentity(address)
+                    expected_events: list[dict[str, JsonValue]] = [
+                        {'kind': 'preflight', 'address': address, 'now': now}
+                    ]
+                    for scope in ('exact', 'prefix'):
+                        expected_events.append(
+                            {
+                                'kind': 'limit',
+                                'scope': scope,
+                                'key': network.quota(
+                                    keys,
+                                    NAMESPACE,
+                                    'request',
+                                    scope,
+                                    now // 60_000 * 60_000,
+                                    60_000,
+                                ),
+                                'success': True,
+                            }
+                        )
+                    expected_events.extend(
+                        [
+                            {
+                                'kind': 'limit',
+                                'scope': 'deployment',
+                                'key': NAMESPACE,
+                                'success': True,
+                            },
+                            {'kind': 'validate'},
+                        ]
+                    )
+                    if payload is not None and origin == APP_ORIGIN:
+                        expected_events.append({'kind': 'body'})
 
-                    assert limited['status'] == 429, (path, limited)
-                    assert body(limited) == {'error': 'rate_limited'}
-                assert time.time_ns() // 60_000_000_000 == epoch
+                    assert events == expected_events, (address, path, events)
+                    if expected == 400:
+                        assert body(response) == {'error': 'invalid_request'}
+                    elif expected == 404:
+                        assert body(response) == {'error': 'not_found'}
+                    elif path == '/api/status':
+                        assert body(response) == {'status': 'admission_required'}
+                    else:
+                        assert 'bench-render-origin' in str(response['body'])
+
+                assert runtime.provider.calls == []
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
+
+    def test_composes_rate_limited_errors_into_real_native_responses(
+        self, tmp_path: Path
+    ) -> None:
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
+                assert await transport.call({'operation': 'reject_ingress'}) == {
+                    'configured': True
+                }
+
+                response = await transport.http('/api/status')
+                assert response['status'] == 429
+
+                assert body(response) == {'error': 'rate_limited'}
+                headers = response['headers']
+                assert isinstance(headers, dict)
+                assert headers['content-type'] == 'application/json'
+                assert headers['cache-control'] == 'no-store'
+                assert headers['referrer-policy'] == 'no-referrer'
+                assert headers['x-content-type-options'] == 'nosniff'
+                assert runtime.provider.calls == []
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
+
+    def test_recovers_invalid_and_expired_credentials(self, tmp_path: Path) -> None:
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
                 now = time.time_ns() // 1_000_000
                 keys = KeyRing(
                     versions=(

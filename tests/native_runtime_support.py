@@ -54,12 +54,79 @@ _CONTROL = """
     from app import Default as AppDefault
     from app import Management as AppManagement
     from app import RenderLookup as AppRenderLookup
+    from assistant_bench_arena.admission import NetworkIdentity
     from assistant_bench_arena.ledger_models import PointSnapshot
     from assistant_bench_arena.scheduler import pair_log_weights
+    from assistant_bench_arena.worker import api, production
+    from assistant_bench_arena.worker.authentication import Authentication
+    from assistant_bench_arena.worker.bindings import (
+        LimitResult, NativeLimiter, RateLimited,
+    )
     from pyodide.ffi import JsException
     from workers import WorkerEntrypoint
 
     coverage_finish()
+
+
+    ingress_events = []
+
+
+    class ObservedLimiter:
+        def __init__(self, scope: str, limiter: NativeLimiter) -> None:
+            self.scope = scope
+            self.limiter = limiter
+
+        async def limit(self, options: dict[str, str]) -> object:
+            result = await self.limiter.limit(options)
+            ingress_events.append({
+                'kind': 'limit', 'scope': self.scope, 'key': options['key'],
+                'success': LimitResult.model_validate(result).success,
+            })
+            return result
+
+
+    class ObservedAuthentication(Authentication):
+        async def preflight(self, address: str, now: int) -> NetworkIdentity:
+            ingress_events.append({
+                'kind': 'preflight', 'address': address, 'now': now,
+            })
+            return await super().preflight(address, now)
+
+
+    class RejectedAuthentication(Authentication):
+        async def preflight(self, address: str, now: int) -> NetworkIdentity:
+            raise RateLimited
+
+
+    def authentication(
+        auth: Authentication, kind: type[Authentication],
+    ) -> Authentication:
+        return kind(
+            auth.settings, auth.ledger, auth.ingress, auth.prefixes,
+            auth.deployment, auth.actors, auth.challenge_secret,
+            challenge_endpoint=auth.challenge_endpoint,
+        )
+
+
+    def observe_ingress(instance: AppDefault) -> None:
+        auth = authentication(instance.owner.auth, ObservedAuthentication)
+        auth.ingress = ObservedLimiter('exact', auth.ingress)
+        auth.prefixes = ObservedLimiter('prefix', auth.prefixes)
+        auth.deployment = ObservedLimiter('deployment', auth.deployment)
+        instance.owner.auth = auth
+        validate_request = production.validate_request
+        request_body = api.request_body
+
+        def observed_validate(request, profile, method):
+            ingress_events.append({'kind': 'validate'})
+            return validate_request(request, profile, method)
+
+        async def observed_body(request):
+            ingress_events.append({'kind': 'body'})
+            return await request_body(request)
+
+        production.validate_request = observed_validate
+        api.request_body = observed_body
 
 
     class Default(AppDefault):
@@ -112,6 +179,19 @@ _CONTROL = """
             if payload.get('operation') == 'configure_provider':
                 instance = Default(self.ctx, self.env)
                 instance.owner.auth.challenge_endpoint = self.env.TEST_PROVIDER_ENDPOINT
+                return json.dumps({'result': {'configured': True}})
+            if payload.get('operation') == 'observe_ingress':
+                observe_ingress(Default(self.ctx, self.env))
+                return json.dumps({'result': {'configured': True}})
+            if payload.get('operation') == 'ingress_events':
+                events = list(ingress_events)
+                ingress_events.clear()
+                return json.dumps({'result': {'events': events}})
+            if payload.get('operation') == 'reject_ingress':
+                instance = Default(self.ctx, self.env)
+                instance.owner.auth = authentication(
+                    instance.owner.auth, RejectedAuthentication,
+                )
                 return json.dumps({'result': {'configured': True}})
             if payload.get('operation') == 'coverage_probe':
                 try:
