@@ -1,4 +1,4 @@
-"""The OpenAI-compatible endpoint both agents send their model requests to."""
+"""Endpoint-bound clients and authentication for the bench's model APIs."""
 
 import os
 import ssl
