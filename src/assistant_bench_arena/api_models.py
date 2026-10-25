@@ -41,7 +41,6 @@ class StatusView(Record):
 class AdmissionView(Command):
     action: Literal['bench_admit', 'bench_renew']
     sitekey: Identifier
-    family: FamilyName | None
 
 
 class PairView(Record):

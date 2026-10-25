@@ -14,7 +14,7 @@ web/src/
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
-├── integrations/voting.ts                  # Injects the vote route and builds the admission client
+├── integrations/voting.ts                  # Injects the vote route
 ├── layouts/                                # The page shell
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only
@@ -35,7 +35,7 @@ web/src/
 - `pnpm test` parses both report fixtures and compares Zod's JSON Schema with the Pydantic-generated `tests/fixtures/report.schema.json`. It checks field types, nullability, constants, enums, required and allowed keys, and map keys within each results variant. Numeric bounds, formats and descriptions are not compared.
 - Add a scorer's schema variant and register its views in `components/scorers/index.ts`, its metadata and steps in `lib/method.ts`, and its icons in `components/site/Method.tsx`. Pages dispatch through the registry, and methodology links must reach the registered section. Keep render-specific steps, labels, and sections in those shared registries, keyed by scorer and render, never by family name.
 - Register a public aspect's title in `lib/aspects.ts` and its icon in `components/site/Method.tsx`. The registry determines listing order.
-- A new defect ID updates the `Defect` type in `arena/src/assistant_bench_arena/models.py`, the `defects` schema in `lib/report.ts`, and its label in `lib/glossary.ts`. A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
+- A new defect ID updates the `Defect` type in `src/assistant_bench_arena/models.py`, the `defects` schema in `lib/report.ts`, and its label in `lib/glossary.ts`. A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
 
 ## Components
 

@@ -1,0 +1,40 @@
+name: Arena Health
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arena-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    name: Check Voting Cleanup
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          nix develop .#python -c uv sync --locked
+          nix develop .#python -c pnpm install
+
+      - name: Check cleanup lag
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: nix develop .#python -c uv run bench arena health production

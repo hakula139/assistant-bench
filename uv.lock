@@ -10,12 +10,6 @@ resolution-markers = [
     "python_full_version < '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
-[manifest]
-members = [
-    "assistant-bench",
-    "assistant-bench-arena",
-]
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -191,16 +185,22 @@ wheels = [
 name = "assistant-bench"
 version = "0.1.0"
 source = { editable = "." }
+default-groups = ["bench", "dev"]
 dependencies = [
+    { name = "fastapi" },
+    { name = "itsdangerous" },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+bench = [
     { name = "anthropic" },
-    { name = "assistant-bench-arena" },
     { name = "harbor" },
     { name = "httpx" },
     { name = "httpx2" },
     { name = "markdown-it-py" },
     { name = "numpy" },
     { name = "openai" },
-    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "scipy" },
     { name = "semver" },
@@ -209,8 +209,6 @@ dependencies = [
     { name = "typer" },
     { name = "zhon" },
 ]
-
-[package.dev-dependencies]
 dev = [
     { name = "assistant-bench-typing" },
     { name = "basedpyright" },
@@ -230,15 +228,20 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.156.4" },
+    { name = "itsdangerous", specifier = ">=2.2.0" },
+    { name = "pydantic", specifier = ">=2.14.1" },
+]
+
+[package.metadata.requires-dev]
+bench = [
     { name = "anthropic", specifier = ">=2.3.0" },
-    { name = "assistant-bench-arena", editable = "arena" },
     { name = "harbor", specifier = "==0.24.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "openai", specifier = ">=2.54.0" },
-    { name = "pydantic", specifier = ">=2.14.1" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "semver", specifier = ">=3.1.0" },
@@ -247,8 +250,6 @@ requires-dist = [
     { name = "typer", specifier = ">=0.27.3" },
     { name = "zhon", specifier = ">=2.1.1" },
 ]
-
-[package.metadata.requires-dev]
 dev = [
     { name = "assistant-bench-typing", directory = "typings" },
     { name = "basedpyright", specifier = ">=1.40.2" },
@@ -262,33 +263,6 @@ dev = [
     { name = "trustme", specifier = ">=1.2.1" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
     { name = "types-pyopenssl", specifier = ">=24.1.0.20240722" },
-    { name = "workers-py", specifier = ">=1.17.9" },
-    { name = "workers-runtime-sdk", specifier = ">=1.9.5" },
-]
-
-[[package]]
-name = "assistant-bench-arena"
-version = "0.1.0"
-source = { editable = "arena" }
-dependencies = [
-    { name = "itsdangerous" },
-    { name = "pydantic" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "workers-py" },
-    { name = "workers-runtime-sdk" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "itsdangerous", specifier = ">=2.2.0" },
-    { name = "pydantic", specifier = ">=2.14.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
     { name = "workers-py", specifier = ">=1.17.9" },
     { name = "workers-runtime-sdk", specifier = ">=1.9.5" },
 ]

@@ -1,2 +1,4 @@
+exclude = ["**/pylock.toml"]
+
 [formatting]
 column_width = 100

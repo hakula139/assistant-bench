@@ -22,13 +22,14 @@ from assistant_bench.arena.publication import load_policy
 from assistant_bench.arena.publishing import publish_release
 from assistant_bench.arena.runtime import RuntimeTarget, TargetName
 from assistant_bench.arena.snapshots import analyze_export
-from assistant_bench_arena import management_domain as command
+from assistant_bench_arena import management_models as command
 from assistant_bench_arena.ledger_models import (
     BootstrapConfiguration,
     Moderation,
     Receipt,
     Target,
 )
+from assistant_bench_arena.management_domain import PRINCIPAL
 from assistant_bench_arena.runtime_models import Profile
 from assistant_bench_arena.serialization import canonical
 from ledger_fixtures import make_release
@@ -369,7 +370,7 @@ class TestModerate:
                 plan = Moderation(
                     id='reviewed-plan',
                     family='writing',
-                    principal=command.PRINCIPAL,
+                    principal=PRINCIPAL,
                     action='exclude',
                     reason='Synthetic abuse investigation.',
                     created_at=management.now,

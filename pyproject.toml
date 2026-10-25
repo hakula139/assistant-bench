@@ -5,16 +5,20 @@ description = "Leaderboards for AI models and agents, ranked through blind pairw
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
-dependencies = [
+dependencies = ["fastapi>=0.156.4", "itsdangerous>=2.2.0", "pydantic>=2.14.1"]
+
+[project.scripts]
+bench = "assistant_bench.cli:app"
+
+[dependency-groups]
+bench = [
   "anthropic>=2.3.0",
-  "assistant-bench-arena>=0.1.0",
   "harbor==0.24.0",
   "httpx>=0.28.1",
   "httpx2>=2.16.0",
   "markdown-it-py>=4.2.0",
   "numpy>=2.5.4",
   "openai>=2.54.0",
-  "pydantic>=2.14.1",
   "python-dotenv>=1.2.4",
   "scipy>=1.18.1",
   "semver>=3.1.0",
@@ -24,10 +28,6 @@ dependencies = [
   "zhon>=2.1.1",
 ]
 
-[project.scripts]
-bench = "assistant_bench.cli:app"
-
-[dependency-groups]
 dev = [
   "assistant-bench-typing",
   "basedpyright>=1.40.2",
@@ -50,7 +50,10 @@ requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/assistant_bench"]
+packages = ["src/assistant_bench", "src/assistant_bench_arena"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "pyproject.toml", "README.md"]
 
 [tool.assistant-bench]
 generation-protocol = 2
@@ -59,14 +62,11 @@ anthropic-api-version = "2023-06-01"
 
 [tool.uv]
 required-version = ">=0.13.4"
+default-groups = ["bench", "dev"]
 # Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
 python-preference = "only-managed"
 
-[tool.uv.workspace]
-members = ["arena"]
-
 [tool.uv.sources]
-assistant-bench-arena = { workspace = true }
 assistant-bench-typing = { path = "typings" }
 
 # This index overrides any registry set in the user's uv config, so the lockfile names only PyPI.
@@ -77,7 +77,7 @@ default = true
 
 [tool.ruff]
 target-version = "py314"
-src = ["src", "tests", "arena/src"]
+src = ["src", "tests"]
 
 [tool.ruff.format]
 quote-style = "single"
@@ -121,8 +121,8 @@ source = ["assistant_bench", "assistant_bench_arena"]
 exclude_also = ['case _:\n\s*assert_never\(']
 
 [tool.basedpyright]
-include = ["src", "tests", "arena/src", "typings", "families/coding-repo"]
-extraPaths = ["src", "tests", "arena/src"]
+include = ["src", "tests", "typings", "families/coding-repo"]
+extraPaths = ["src", "tests"]
 exclude = ["**/node_modules", "**/__pycache__"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
@@ -130,6 +130,7 @@ reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
 executionEnvironments = [
+  { root = "src/assistant_bench_arena/worker", reportMissingModuleSource = false },
   { root = "families/coding-repo/tasks/deliver-transactional-outbox", extraPaths = [
     "families/coding-repo/tasks/deliver-transactional-outbox/solution/app",
     "families/coding-repo/tasks/deliver-transactional-outbox/tests",
@@ -164,7 +165,7 @@ executionEnvironments = [
 ]
 
 [tool.mypy]
-files = ["src", "tests", "arena/src"]
+files = ["src", "tests"]
 exclude_gitignore = true
 strict = true
 # Harbor lacks typing metadata, so mypy follows its annotated source.

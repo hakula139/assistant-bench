@@ -2,6 +2,7 @@ scorer = "votes"
 aspect = "writing"
 display_name = "English"
 public = true
+public_voting = true
 systems = [
   "opus-5.5-high",
   "gpt-6-astra-high",
@@ -15,7 +16,7 @@ reference = "gemini-3.8-flash-high"
 language = "en"
 samples = 2
 categories = ["docs", "essay", "fiction", "message", "reply", "review"]
-defects = ["facts", "punctuation", "tone", "formulaic", "length"]
+defects = ["scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"]
 
 [gates]
 min_chars = 80

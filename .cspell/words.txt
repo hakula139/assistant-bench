@@ -1,5 +1,7 @@
 acompletion
+anyio
 asciinema
+asgi
 Atoi
 basedpyright
 BFGS
@@ -31,6 +33,7 @@ fsmonitor
 hakula
 hanzi
 httpx
+idna
 intp
 isinstance
 isort
@@ -68,6 +71,7 @@ pkgs
 pycache
 pydantic
 pydocstyle
+pylock
 pyodide
 pypi
 pyproject
@@ -76,6 +80,7 @@ pytest
 PYTHONDONTWRITEBYTECODE
 pywrangler
 redoc
+remoteip
 rlimit
 rstrip
 Sarasa
@@ -87,8 +92,10 @@ shfmt
 sigxfsz
 srcdoc
 SSIM
+starlette
 statix
 strconv
+sysconfigdata
 tamasfe
 taplo
 threadpoolctl

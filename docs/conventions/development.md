@@ -15,7 +15,9 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 
 Both shells export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
 
-The root Python project and `arena/` share one uv workspace and lockfile. The root depends on the arena's shared voting contracts. `uv sync --package assistant-bench-arena --no-dev` selects only that member's runtime dependencies. Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
+The root Python project contains the `assistant_bench` CLI and the `assistant_bench_arena` voting contracts, ledger and native services. `uv sync` installs the default `bench` and `dev` dependency groups for repository commands. Pywrangler reads only the base project dependencies for the Worker runtime and maintains its PEP 751 `pylock.toml` beside the universal `uv.lock`. The primary `wrangler.toml` lives beside `pyproject.toml` so the native tools discover one project and its dependencies.
+
+Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
 
 The root `pyproject.toml` checks the host and authored task code on Python 3.14. Each task resolves imports against its complete reference package, while its starter application is checked independently. Editors use the root `.venv`.
 
@@ -42,8 +44,8 @@ Commands stay minimal, and settings live in config files:
 | A family's scorer, systems, and samples                                       | `families/<family>/family.toml`                                                                                       |
 | Model completion and context allowances                                       | The shared model catalog, or a bare route's `systems.toml` table                                                      |
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
-| Repeat share, seed votes, and sampling policy                                 | `arena/src/assistant_bench_arena/scheduler.py`                                                                        |
-| The voting runtime's origins, namespace, and D1 bindings                      | `arena/wrangler.toml`                                                                                                 |
+| Repeat share, seed votes, and sampling policy                                 | `src/assistant_bench_arena/scheduler.py`                                                                              |
+| The voting runtime's origins, namespace, and D1 bindings                      | `wrangler.toml`                                                                                                       |
 | Point-fit parameters and diagnostic coverage rules                            | `scoring/ranking.py` and `report.py`, frozen in each voted report                                                     |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
@@ -51,7 +53,7 @@ Commands stay minimal, and settings live in config files:
 | The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
 | Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
 
-Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings and native `BENCH_ANTHROPIC_BASE_URL` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `arena/wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
+Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings and native `BENCH_ANTHROPIC_BASE_URL` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
 
 `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else.
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render as renderInDom, screen } from '@testing-library/react';
+import { cleanup, render as renderInDom, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -224,14 +224,23 @@ describe('VotesBoard', () => {
     expect(text(latest)).toContain('40 raw decisive votes');
   });
 
-  test('lists the ranked systems by score, best first', async () => {
-    const html = render(await load());
+  test('starts in score order and sorts systems in both directions', async () => {
+    const round = await load();
+    round.results.standings.reverse();
+    stubPlotFrame();
+    const user = userEvent.setup();
 
-    const systems = [...html.matchAll(/href="\/writing\/arena\/([^/]+)\/"/g)].map(
-      (match) => match[1],
-    );
+    const { container } = renderInDom(<VotesBoard base={BOARD} rounds={[round]} labels={CASES} />);
+    const table = container.querySelector('table');
+    const systems = () =>
+      [...(table?.querySelectorAll('tbody a') ?? [])].map((link) =>
+        link.getAttribute('href')?.slice(BOARD.length, -1),
+      );
+    const scoreHeader = screen.getByRole('button', { name: 'Score' }).closest('th');
+    const systemButton = screen.getByRole('button', { name: 'System' });
+    const systemHeader = systemButton.closest('th');
 
-    expect(systems).toEqual([
+    expect(systems()).toEqual([
       'acme-pro',
       'acme-large',
       'acme-small',
@@ -239,6 +248,26 @@ describe('VotesBoard', () => {
       'acme-mini',
       'acme-tiny',
     ]);
+    expect(scoreHeader?.getAttribute('aria-sort')).toBe('descending');
+
+    await user.click(systemButton);
+
+    const alphabetical = [
+      'acme-flash',
+      'acme-large',
+      'acme-mini',
+      'acme-pro',
+      'acme-small',
+      'acme-tiny',
+    ];
+    expect(systems()).toEqual(alphabetical);
+    expect(systemHeader?.getAttribute('aria-sort')).toBe('ascending');
+    expect(scoreHeader?.hasAttribute('aria-sort')).toBe(false);
+
+    await user.click(systemButton);
+
+    expect(systems()).toEqual(alphabetical.toReversed());
+    expect(systemHeader?.getAttribute('aria-sort')).toBe('descending');
   });
 
   test('shows descriptive diagnostics and unavailable population inference', async () => {
@@ -424,18 +453,6 @@ describe('VotesBoard', () => {
     expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
-  test('writes the category picked to the address', async () => {
-    const { round, results, systems, closed_at } = await load();
-    stubPlotFrame();
-    renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
-    );
-
-    await userEvent.setup().selectOptions(screen.getByLabelText('Category'), 'message');
-
-    expect(search.get('category')).toBe('message');
-  });
-
   test.each(['all', '', 'category:all', 'a&b + %'])(
     'selects literal category %j separately from all categories',
     async (category) => {
@@ -445,6 +462,7 @@ describe('VotesBoard', () => {
       categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
       const { round, results, systems, closed_at } = report;
       stubPlotFrame();
+      const user = userEvent.setup();
       renderInDom(
         <VotesBoard
           base={BOARD}
@@ -453,18 +471,17 @@ describe('VotesBoard', () => {
         />,
       );
       const select = screen.getByLabelText<HTMLSelectElement>('Category');
-      const option = [...select.options].find((item) => item.textContent === category);
-      expect(option).toBeDefined();
+      const option = screen.getByRole<HTMLOptionElement>('option', { name: category });
 
-      fireEvent.change(select, { target: { value: option?.value } });
+      await user.selectOptions(select, option.value);
 
       expect(search.get('category')).toBe(category);
       const selected = render(report);
       expect(text(head(selected))).toMatch(/^ System /);
       expect(text(parse(selected).querySelector('tbody')?.innerHTML ?? '')).toContain('1,100');
 
-      const aggregate = [...select.options].find((item) => item.textContent === 'All categories');
-      fireEvent.change(select, { target: { value: aggregate?.value } });
+      const aggregate = screen.getByRole<HTMLOptionElement>('option', { name: 'All categories' });
+      await user.selectOptions(select, aggregate.value);
 
       expect(search.has('category')).toBe(false);
       expect(text(head(render(report)))).toMatch(/^ Rank What Rank means System /);

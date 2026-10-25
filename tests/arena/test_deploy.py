@@ -25,7 +25,8 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeTarget:
     source.mkdir()
     for name in ('app.py', 'render.py'):
         (source / name).write_text('from workers import WorkerEntrypoint\n')
-    (tmp_path / 'rpc.ts').write_text('export {};\n')
+    (tmp_path / 'arena').mkdir()
+    (tmp_path / 'arena' / 'rpc.ts').write_text('export {};\n')
     assets = tmp_path / 'assets'
     assets.mkdir()
     (assets / 'arena-families.json').write_text(json.dumps([_FAMILY]))
@@ -145,7 +146,7 @@ class TestDeploy:
             relative = {
                 'missing-app': 'src/app.py',
                 'missing-renderer': 'src/render.py',
-                'missing-facade': 'rpc.ts',
+                'missing-facade': 'arena/rpc.ts',
             }[change]
             (manifest.parent / relative).unlink()
         elif change == 'missing-assets':

@@ -100,11 +100,12 @@ export const terms = {
 export const defectTerms: Record<Defect, Term> = {
   facts: {
     term: 'Wrong facts',
-    definition: "Gets a fact wrong, or adds one the prompt doesn't give.",
+    definition:
+      'Incorrect claims or invented evidence, including contradictions of the supplied material.',
   },
-  punctuation: {
-    term: 'Punctuation',
-    definition: "Marks that don't suit the language or the style.",
+  mechanics: {
+    term: 'Language errors',
+    definition: 'Grammar, spelling, or punctuation that does not suit the language or style.',
   },
   tone: {
     term: 'Wrong tone',
@@ -119,8 +120,8 @@ export const defectTerms: Record<Defect, Term> = {
     definition: 'Says more than its reader needs.',
   },
   scope: {
-    term: 'Off-scope',
-    definition: "Changes what the request didn't ask for, or leaves stray files.",
+    term: 'Misses the brief',
+    definition: 'Misses a requirement or adds unrelated material.',
   },
   conventions: {
     term: 'Conventions',
@@ -135,8 +136,8 @@ export const defectTerms: Record<Defect, Term> = {
     definition: "Its tests miss the change's cases or pin its implementation.",
   },
   clarity: {
-    term: 'Hard to read',
-    definition: 'Unclear names, comments, or control flow.',
+    term: 'Hard to follow',
+    definition: 'Unclear wording, structure, or flow.',
   },
 };
 

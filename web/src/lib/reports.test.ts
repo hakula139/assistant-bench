@@ -55,7 +55,10 @@ describe('publicFamilies', () => {
       'Acme Large',
       'Renamed Large',
     ]);
-    expect(rounds.map(({ closed_at }) => closed_at)).toEqual([earlier.closed_at, later.closed_at]);
+    expect(rounds.map(({ round, closed_at }) => [round, closed_at])).toEqual([
+      [earlier.round, earlier.closed_at],
+      [later.round, later.closed_at],
+    ]);
     expect(systemPages(family).has('acme-large')).toBe(true);
   });
 
@@ -90,21 +93,6 @@ describe('publicFamilies', () => {
       },
     ]);
     expect(votesRounds(family)).toEqual([]);
-  });
-
-  test('pairs each public family with its rounds, oldest first', async () => {
-    const later = await report('writing-prose', '2026-10-21', '2026-10-21T18:00:00Z');
-    const earlier = await report('writing-prose', '2026-10-07', '2026-10-07T18:00:00Z');
-
-    const families = publicFamilies(
-      [{ name: 'writing-prose', config: votes(true) }],
-      [later, earlier],
-      FIXTURE_NAMES,
-    );
-
-    expect(families.map((family) => family.rounds.map(({ round }) => round))).toEqual([
-      ['2026-10-07', '2026-10-21'],
-    ]);
   });
 
   test('lists the families by name', () => {

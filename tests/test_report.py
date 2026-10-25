@@ -25,10 +25,16 @@ from snapshot_support import make_analysis, make_capped_analysis, make_evidence
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,
+    PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
     make_output,
 )
+
+
+@pytest.fixture(scope='module')
+def capped_results() -> report.VotesResults:
+    return report.votes_results(make_capped_analysis())
 
 
 class TestReport:
@@ -321,12 +327,16 @@ class TestVotesResults:
         rows = (
             replace(
                 make_evidence(0, choice='both_bad'),
-                defects_a=('facts',),
+                defects_a=PROSE_DEFECTS,
                 defects_b=('tone',),
             ),
             replace(make_evidence(1, systems=('b', 'a')), defects_b=('facts',)),
         )
         analysis = make_analysis(rows)
+        analysis = replace(
+            analysis,
+            family=analysis.family.model_copy(update={'defects': PROSE_DEFECTS}),
+        )
         outputs = tuple(
             OutputMeasurement(
                 case=f'case-{index}',
@@ -344,8 +354,16 @@ class TestVotesResults:
         results = report.votes_results(replace(analysis, outputs=outputs))
 
         standings = {row.system: row for row in results.standings}
-        assert standings['a'].defects == {'facts': 2}
-        assert standings['b'].defects == {'facts': 0}
+        assert standings['a'].defects == {
+            defect: 2 if defect == 'facts' else 1 for defect in PROSE_DEFECTS
+        }
+        assert standings['b'].defects == {
+            defect: 1 if defect == 'tone' else 0 for defect in PROSE_DEFECTS
+        }
+        assert (
+            report.VotesResults.model_validate_json(results.model_dump_json())
+            == results
+        )
         assert standings['a'].both_bad_rate == 0.5
         assert standings['a'].outputs == 1
         assert standings['a'].gate_failure_rate == 0.5
@@ -428,13 +446,6 @@ class TestVotesResults:
             assert results.categories == []
             assert results.votes == 1
 
-    def test_reads_a_valid_serialized_capped_report(self) -> None:
-        results = report.votes_results(make_capped_analysis())
-
-        parsed = report.VotesResults.model_validate_json(results.model_dump_json())
-
-        assert parsed == results
-
     @pytest.mark.parametrize(
         'change',
         [
@@ -450,9 +461,9 @@ class TestVotesResults:
         ],
     )
     def test_rejects_aggregates_that_cannot_share_one_frozen_weight_sequence(
-        self, change: str
+        self, capped_results: report.VotesResults, change: str
     ) -> None:
-        payload = report.votes_results(make_capped_analysis()).model_dump(mode='json')
+        payload = capped_results.model_dump(mode='json')
         first = payload['head_to_head'][0]
         mirror = next(
             row
@@ -525,9 +536,9 @@ class TestVotesResults:
         ids=['name', 'version', 'nonpositive-cap', 'boolean-cap', 'scope', 'repeats'],
     )
     def test_rejects_unsupported_or_inconsistent_human_weight_methods(
-        self, field: str, value: str | int
+        self, capped_results: report.VotesResults, field: str, value: str | int
     ) -> None:
-        payload = report.votes_results(make_capped_analysis()).model_dump(mode='json')
+        payload = capped_results.model_dump(mode='json')
         payload['method']['human_weights'][field] = value
 
         with pytest.raises(ValidationError):
@@ -549,9 +560,9 @@ class TestVotesResults:
         ids=lambda value: str(value),
     )
     def test_rejects_invalid_effective_mass_at_every_aggregate(
-        self, scope: str, value: float
+        self, capped_results: report.VotesResults, scope: str, value: float
     ) -> None:
-        payload = report.votes_results(make_capped_analysis()).model_dump(mode='json')
+        payload = capped_results.model_dump(mode='json')
         match scope:
             case 'overall':
                 target = payload
@@ -576,9 +587,9 @@ class TestVotesResults:
         ['missing-provenance', 'unrecorded-provenance', 'negative-cutoff', 'actor-id'],
     )
     def test_requires_private_free_ledger_provenance_for_capped_reports(
-        self, change: str
+        self, capped_results: report.VotesResults, change: str
     ) -> None:
-        payload = report.votes_results(make_capped_analysis()).model_dump(mode='json')
+        payload = capped_results.model_dump(mode='json')
         match change:
             case 'missing-provenance':
                 del payload['provenance']
@@ -595,12 +606,13 @@ class TestVotesResults:
             report.VotesResults.model_validate_json(json.dumps(payload))
 
     def test_inherits_family_weights_in_categories_and_preference_summaries(
-        self,
+        self, capped_results: report.VotesResults
     ) -> None:
-        analysis = make_capped_analysis()
+        results = capped_results
 
-        results = report.votes_results(analysis)
+        parsed = report.VotesResults.model_validate_json(results.model_dump_json())
 
+        assert parsed == results
         assert results.votes == 275
         assert results.effective_votes == pytest.approx(125)
         assert results.dropped_votes == 1

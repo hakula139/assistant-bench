@@ -12,4 +12,4 @@ systems = [
 reference = "gemini-3.8-flash-high"
 samples = 1
 categories = ["message"]
-defects = ["facts", "punctuation", "tone", "formulaic", "length"]
+defects = ["facts", "mechanics", "tone", "formulaic", "length"]

@@ -226,7 +226,7 @@ class TestFacadeConfig:
 
             assert configuration == {
                 'name': 'synthetic-arena-rpc',
-                'main': str(tmp_path / 'rpc.ts'),
+                'main': str(tmp_path / 'arena/rpc.ts'),
                 'compatibility_date': '2026-10-24',
                 'account_id': 'synthetic-account',
                 'workers_dev': False,

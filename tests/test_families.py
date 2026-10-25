@@ -14,7 +14,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
-from support import CODE_DEFECTS, write_case_family, write_task_family
+from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
 
 
 class TaskFields(TypedDict, total=False):
@@ -92,6 +92,9 @@ class TestLoadFamily:
             systems = ["small", "large"]
             samples = 2
             reference = "large"
+            defects = [
+              "scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"
+            ]
             render = "html"
             public = true
             """,
@@ -111,6 +114,7 @@ class TestLoadFamily:
                 systems=['small', 'large'],
                 samples=2,
                 reference='large',
+                defects=list(PROSE_DEFECTS),
                 render='html',
                 public=True,
             ),
@@ -367,15 +371,12 @@ class TestLoadFamily:
                 systems = ["large"]
                 samples = 1
                 reference = "large"
-                defects = [
-                  "facts", "punctuation", "tone", "formulaic", "length", "scope"
-                ]
+                defects = ["punctuation"]
                 """,
                 True,
                 False,
-                'Family `f`: `family.toml`: `defects`: List should have at most 5 '
-                'items after validation, not 6.',
-                id='too-many-defects',
+                'Family `f`: `family.toml`: `defects.0`: Input should be',
+                id='retired-defect',
             ),
             pytest.param(
                 'f',

@@ -22,7 +22,7 @@ from assistant_bench_arena.runtime_models import Profile
 
 type TargetName = Literal['staging', 'production']
 
-CONFIG = REPO_ROOT / 'arena' / 'wrangler.toml'
+CONFIG = REPO_ROOT / 'wrangler.toml'
 
 
 class RuntimeTarget(Record):
@@ -135,7 +135,7 @@ def deploy(target: RuntimeTarget) -> None:
     if main is None or (directory / main).resolve() != app.resolve():
         raise ValueError('Voting deployment requires its native app entrypoint.')
 
-    sources = (app, directory / 'src' / 'render.py', directory / 'rpc.ts')
+    sources = (app, directory / 'src' / 'render.py', directory / 'arena' / 'rpc.ts')
 
     if any(not source.is_file() for source in sources):
         raise ValueError('Voting deployment requires its owner, renderer and facade.')
@@ -228,7 +228,7 @@ def facade_config(target: RuntimeTarget) -> Generator[Path]:
         dedent(
             f"""
             name = {json.dumps(target.facade_name)}
-            main = {json.dumps(str(target.manifest_path.parent / 'rpc.ts'))}
+            main = {json.dumps(str(target.manifest_path.parent / 'arena/rpc.ts'))}
             compatibility_date = {json.dumps(target.compatibility_date)}
             account_id = {json.dumps(target.account_id)}
             workers_dev = false
@@ -306,8 +306,16 @@ def renderer_config(target: RuntimeTarget) -> Generator[Path]:
         '''
     ).lstrip()
 
-    with _temporary_config(source) as path:
-        yield path
+    # Wrangler discovers Python dependencies beside its configuration file.
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        prefix='.wrangler-render-',
+        suffix='.toml',
+        dir=target.manifest_path.parent,
+    ) as config:
+        config.write(source)
+        config.flush()
+        yield Path(config.name)
 
 
 @contextmanager

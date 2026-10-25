@@ -17,6 +17,7 @@ import { defectTerms } from '@/lib/glossary';
 import type { Defect } from '@/lib/report';
 import { VoteFlow } from '@/lib/vote-flow';
 import { COMMAND_ID, VOTE_FAMILY as FAMILY, makeSession, requestBody } from '@/test/arena';
+import { ADMISSION, stubChallenge } from '@/test/verification';
 
 const PRIVATE_FAMILIES: FamilyView[] = [
   { name: 'private-review', aspect: 'private-research', display_name: 'Review', defects: [] },
@@ -191,6 +192,7 @@ describe('VoteApp', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    delete window.turnstile;
     document.head.innerHTML = '<meta name="bench-render-origin" content="https://render.example">';
     history.replaceState(null, '', '/vote/');
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
@@ -200,6 +202,131 @@ describe('VoteApp', () => {
     vi.useRealTimers();
     cleanup();
   });
+
+  test.each([null, FAMILY.name])(
+    'verifies a fresh browser inline and continues family %s',
+    async (family) => {
+      const api = stubApi();
+      const original = globalThis.fetch;
+      const provider = stubChallenge();
+      let admitted = false;
+      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+        if (path === '/api/status') {
+          return Promise.resolve(Response.json({ status: 'admission_required' }));
+        }
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Promise.resolve(Response.json(ADMISSION));
+          }
+          admitted = true;
+          return Promise.resolve(Response.json({ status: 'ready' }));
+        }
+        return !admitted && path === '/api/sessions'
+          ? Promise.resolve(Response.json({ error: 'admission_required' }, { status: 401 }))
+          : original(path, init);
+      });
+      history.replaceState(null, '', `/vote/${family === null ? '' : `?family=${family}`}`);
+      const user = userEvent.setup();
+
+      render(<VoteApp />);
+      await vi.waitFor(() => {
+        provider.options();
+      });
+
+      expect(api.starts).toEqual([]);
+      expect(screen.queryByRole('link', { name: /verification/i })).toBeNull();
+      act(() => {
+        provider.options().callback('fresh-proof');
+      });
+      if (family === null) {
+        await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+      }
+      await screen.findByText('Output A1');
+
+      expect(location.pathname).toBe('/vote/');
+      expect(api.starts).toEqual([{ family: FAMILY.name }]);
+      expect(api.casts).toEqual([]);
+      expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
+    },
+  );
+
+  test.each([true, false])(
+    'resolves an uncertain vote accepted=%s before inline renewal without resubmission',
+    async (accepted) => {
+      const api = stubApi();
+      const user = await startSession();
+      const original = globalThis.fetch;
+      const provider = stubChallenge();
+      let admitted = true;
+      let lost = true;
+      const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Response.json({ ...ADMISSION, action: 'bench_renew' });
+          }
+          admitted = true;
+          return Response.json({ status: 'ready' });
+        }
+        if (path === '/api/sessions/resume' && !admitted) {
+          return Response.json({ error: 'renewal_required' }, { status: 403 });
+        }
+        if (path === '/api/votes' && lost) {
+          lost = false;
+          admitted = false;
+          if (accepted) {
+            await original(path, init);
+          }
+          throw new TypeError('The vote response was lost');
+        }
+        return original(path, init);
+      });
+      vi.stubGlobal('fetch', fetch);
+      const pane = screen.getByRole('region', { name: 'Output A' });
+
+      await user.keyboard('b1{Enter}');
+      await user.click(await screen.findByRole('button', { name: 'Retry connection' }));
+      await vi.waitFor(() => {
+        provider.options();
+      });
+
+      expect(screen.getByRole('region', { name: 'Output A' })).toBe(pane);
+      expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
+      await user.keyboard('a2u{Enter}');
+      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+      if (accepted) {
+        expect(screen.getByText('Vote accepted.')).toBeDefined();
+      } else {
+        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+          'ariaChecked',
+          'true',
+        );
+        expect(within(pane).getByRole('button', { name: 'Issues 1' })).toBeDefined();
+      }
+
+      act(() => {
+        provider.options().callback('renew-proof');
+      });
+      await vi.waitFor(() => {
+        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+          'disabled',
+          false,
+        );
+      });
+      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+      if (!accepted) {
+        const originalVote = requestBody(fetch.mock.calls[0][1]);
+        await user.click(screen.getByRole('button', { name: /Submit vote/ }));
+        const retried = fetch.mock.calls.filter(([path]) => path === '/api/votes').at(-1);
+        expect(requestBody(retried?.[1])).toEqual(originalVote);
+      }
+      await screen.findByText('Output A2');
+
+      expect(api.starts).toEqual([{ family: FAMILY.name }]);
+      expect(api.casts.map(({ choice, defects }) => ({ choice, defects }))).toEqual([
+        { choice: 'b', defects: { a: ['scope'], b: [] } },
+      ]);
+    },
+  );
 
   test('keeps acceptance visible when acquiring the next pair fails', async () => {
     const api = stubApi({ prior: 1 });
@@ -259,46 +386,70 @@ describe('VoteApp', () => {
     expect(statusLine()).toBe('Writing · Chinese, 0 votes');
   });
 
-  test('keeps the prior family acknowledgment separate from the requested session', async () => {
-    const prior = makeSession();
-    const flow = new VoteFlow();
-    flow.show(prior);
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
-    await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
-    const family = { ...FAMILY, name: 'other', display_name: 'Other' };
-    const other = makeSession({ id: 's2', family });
-    const starts: unknown[] = [];
-    let available = false;
-    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-      if (path === '/api/status') {
-        return Promise.resolve(Response.json({ status: 'ready' }));
-      }
-      if (path === '/api/families') {
-        return Promise.resolve(Response.json([FAMILY, family]));
-      }
-      if (path === '/api/votes/resolve') {
-        return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
-      }
-      starts.push(requestBody(init));
-      return Promise.resolve(
-        available ? Response.json(other) : Response.json({ error: 'unavailable' }, { status: 503 }),
-      );
-    });
-    history.replaceState(null, '', '/vote/?family=other');
-    const user = userEvent.setup();
+  test.each(['connection', 'verification'] as const)(
+    'keeps the prior family acknowledgment separate through %s recovery',
+    async (recovery) => {
+      const prior = makeSession();
+      const flow = new VoteFlow();
+      flow.show(prior);
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
+      await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
+      const family = { ...FAMILY, name: 'other', display_name: 'Other' };
+      const other = makeSession({ id: 's2', family });
+      const starts: unknown[] = [];
+      const provider = stubChallenge();
+      let available = false;
+      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+        if (path === '/api/status') {
+          return Promise.resolve(
+            Response.json({ status: recovery === 'verification' ? 'renewal_required' : 'ready' }),
+          );
+        }
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Promise.resolve(Response.json({ ...ADMISSION, action: 'bench_renew' }));
+          }
+          available = true;
+          return Promise.resolve(Response.json({ status: 'ready' }));
+        }
+        if (path === '/api/families') {
+          return Promise.resolve(Response.json([FAMILY, family]));
+        }
+        if (path === '/api/votes/resolve') {
+          return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
+        }
+        starts.push(requestBody(init));
+        return Promise.resolve(
+          available
+            ? Response.json(other)
+            : Response.json({ error: 'unavailable' }, { status: 503 }),
+        );
+      });
+      history.replaceState(null, '', '/vote/?family=other');
+      const user = userEvent.setup();
 
-    render(<VoteApp />);
-    await screen.findByText('Vote accepted.');
-    available = true;
-    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
-    await screen.findByRole('button', { name: '0 votes' });
+      render(<VoteApp />);
+      await screen.findByText('Vote accepted.');
+      if (recovery === 'verification') {
+        await vi.waitFor(() => {
+          provider.options();
+        });
+        act(() => {
+          provider.options().callback('renew-proof');
+        });
+      } else {
+        available = true;
+        await user.click(screen.getByRole('button', { name: 'Retry connection' }));
+      }
+      await screen.findByRole('button', { name: '0 votes' });
 
-    expect(starts[1]).toEqual(starts[0]);
-    expect(statusLine()).toBe('Writing · Other, 0 votes');
-    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
-    expect(screen.queryByText('Saved')).toBeNull();
-    expect(screen.queryByText('Vote accepted.')).toBeNull();
-  });
+      expect(starts[1]).toEqual(starts[0]);
+      expect(statusLine()).toBe('Writing · Other, 0 votes');
+      expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
+      expect(screen.queryByText('Saved')).toBeNull();
+      expect(screen.queryByText('Vote accepted.')).toBeNull();
+    },
+  );
 
   test('explains an empty public family list without owner commands', async () => {
     vi.stubGlobal('fetch', (path: string) =>
@@ -357,6 +508,9 @@ describe('VoteApp', () => {
   test('submits the verdict picked and the vote sent by pointer', async () => {
     const api = stubApi();
     const user = await startSession();
+
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: 'B is better' }));
     await user.click(screen.getByRole('button', { name: /Submit vote/ }));
@@ -668,61 +822,73 @@ describe('VoteApp', () => {
     expect(screen.getByRole('region', { name: 'Output A' })).not.toBe(firstPane);
   });
 
-  test('tags issues on each output by digit or from its Issues button', async () => {
-    const api = stubApi();
-    const user = await startSession();
+  test.each([
+    ['A', '12345', ['1', '2', '3', '4', '5', null, null]],
+    ['B', '67890', ['6', '7', '8', '9', '0', null, null]],
+  ] as const)(
+    'orders and submits all seven output %s issues with digit keys on the first five',
+    async (side, digits, keys) => {
+      const api = stubApi();
+      const user = await startSession();
 
-    await user.keyboard('2');
-    await user.keyboard('0');
-    const outputA = screen.getByRole('region', { name: 'Output A' });
-    const outputB = screen.getByRole('region', { name: 'Output B' });
-    expect(within(outputA).getByRole('button', { name: 'Issues 1' })).toBeDefined();
-    await user.click(within(outputB).getByRole('button', { name: 'Issues 1' }));
-    expect(screen.getByRole('checkbox', { name: 'Too long' })).toHaveProperty(
-      'ariaChecked',
-      'true',
-    );
-    expect(screen.getByRole('checkbox', { name: 'Punctuation' })).toHaveProperty(
-      'ariaChecked',
-      'false',
-    );
-    const tone = await screen.findByRole('checkbox', { name: 'Wrong tone' });
-    expect(tone.getAttribute('aria-keyshortcuts')).toBe('8');
-    expect(screen.getByText('its reader.').className).toBe('text-nowrap');
-    await user.click(tone);
-    expect(within(outputB).getByRole('button', { name: 'Issues 2' })).toBeDefined();
-    for (const defect of FAMILY.defects) {
-      const { term, definition } = defectTerms[defect];
+      await user.keyboard(digits);
+      const pane = screen.getByRole('region', { name: `Output ${side}` });
+
+      await user.click(within(pane).getByRole('button', { name: 'Issues 5' }));
+      const popup = screen.getByRole('dialog', { name: `Issues in output ${side}` });
+      const boxes = within(popup).getAllByRole('checkbox');
+
       expect(
-        screen.queryByRole('checkbox', { name: term, description: definition }),
-        defect,
-      ).not.toBeNull();
-    }
-    await user.keyboard('{Escape}');
+        boxes.map((box) => document.querySelector(`label[for="${box.id}"]`)?.textContent),
+      ).toEqual([
+        'Misses the brief',
+        'Wrong facts',
+        'Hard to follow',
+        'Wrong tone',
+        'Language errors',
+        'Formulaic',
+        'Too long',
+      ]);
+      expect(boxes.map((box) => box.getAttribute('aria-keyshortcuts'))).toEqual(keys);
+      expect(boxes.map((box) => box.ariaChecked)).toEqual([
+        'true',
+        'true',
+        'true',
+        'true',
+        'true',
+        'false',
+        'false',
+      ]);
+      expect(popup.textContent).not.toContain('undefined');
+      expect(
+        boxes.map(
+          (box) => document.getElementById(box.getAttribute('aria-describedby') ?? '')?.textContent,
+        ),
+      ).toEqual(FAMILY.defects.map((defect) => defectTerms[defect].definition));
 
-    await user.click(within(outputA).getByRole('button', { name: 'Issues 1' }));
-    expect(screen.getByRole('checkbox', { name: 'Punctuation' })).toHaveProperty(
-      'ariaChecked',
-      'true',
-    );
-    expect(
-      screen.getByRole('checkbox', { name: 'Too long' }).getAttribute('aria-keyshortcuts'),
-    ).toBe('5');
-    await user.click(screen.getByRole('checkbox', { name: 'Too long' }));
-    expect(within(outputA).getByRole('button', { name: 'Issues 2' })).toBeDefined();
-    await user.keyboard('{Escape}');
-    screen.getByRole('group', { name: 'Pair 1' }).focus();
+      within(popup).getByRole('checkbox', { name: 'Formulaic' }).focus();
+      await user.keyboard(' {Tab} ');
 
-    await user.keyboard('a{Enter}');
-    await screen.findByText('Output A2');
-    await user.keyboard('b{Enter}');
-    await screen.findByText('Output A3');
+      expect(within(popup).getByRole('checkbox', { name: 'Formulaic' }).ariaChecked).toBe('true');
+      expect(within(popup).getByRole('checkbox', { name: 'Too long' }).ariaChecked).toBe('true');
+      await user.keyboard('{Escape}');
+      expect(within(pane).getByRole('button', { name: 'Issues 7' })).toBeDefined();
+      screen.getByRole('group', { name: 'Pair 1' }).focus();
 
-    expect(api.casts.map((cast) => cast.defects)).toEqual([
-      { a: ['punctuation', 'length'], b: ['tone', 'length'] },
-      { a: [], b: [] },
-    ]);
-  });
+      await user.keyboard('a{Enter}');
+      await screen.findByText('Output A2');
+      await user.keyboard('b{Enter}');
+      await screen.findByText('Output A3');
+
+      expect(api.casts.map((cast) => cast.defects)).toEqual([
+        {
+          a: side === 'A' ? FAMILY.defects : [],
+          b: side === 'B' ? FAMILY.defects : [],
+        },
+        { a: [], b: [] },
+      ]);
+    },
+  );
 
   test("keys the family's own issues and lists only those in each Issues popover", async () => {
     const api = stubApi({ defects: ['scope', 'testing'] });
@@ -742,7 +908,7 @@ describe('VoteApp', () => {
         box.ariaChecked,
       ]),
     ).toEqual([
-      ['Off-scope', '6', 'true'],
+      ['Misses the brief', '6', 'true'],
       ['Weak tests', '7', 'false'],
     ]);
     await user.keyboard('{Escape}');
@@ -899,7 +1065,7 @@ describe('VoteApp', () => {
     [
       'no server answers',
       () => Promise.reject(new TypeError('Failed to fetch')),
-      'The voting service is unavailable. Retry to check the same request.',
+      'The voting service is unavailable. Try again.',
     ],
     [
       'the response body cannot be read',
@@ -908,7 +1074,7 @@ describe('VoteApp', () => {
         await response.text();
         return response;
       },
-      'The voting service is unavailable. Retry to check the same request.',
+      'The voting service is unavailable. Try again.',
     ],
   ])('shows on the start screen why a session did not start when %s', async (_, start, alert) => {
     vi.stubGlobal('fetch', (path: string) => {

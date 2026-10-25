@@ -15,7 +15,7 @@ interface DefectPickerProps {
   defects: readonly Defect[];
   tagged: readonly Defect[];
   disabled: boolean;
-  /** The key that toggles each defect on this output, in `defects` order. */
+  /** Keys for the first defects, in `defects` order. */
   keys: readonly string[];
   onToggle: (defect: Defect) => void;
 }
@@ -43,10 +43,16 @@ export function DefectPicker({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" collisionPadding={16} aria-label={`Issues in output ${side}`}>
+      <PopoverContent
+        align="end"
+        collisionPadding={16}
+        aria-label={`Issues in output ${side}`}
+        className="max-w-[calc(100vw-2rem)]"
+      >
         <ul className="flex flex-col gap-3">
           {defects.map((defect, index) => {
             const key = `${id}-${defect}`;
+            const shortcut = keys.at(index);
             const { term, definition } = defectTerms[defect];
 
             return (
@@ -59,7 +65,7 @@ export function DefectPicker({
                     onToggle(defect);
                   }}
                   aria-describedby={`${key}-definition`}
-                  aria-keyshortcuts={keys[index]}
+                  aria-keyshortcuts={shortcut}
                   className="mt-0.5"
                 />
                 <div className="flex flex-1 flex-col gap-0.5">
@@ -70,7 +76,7 @@ export function DefectPicker({
                     <KeptTail text={definition} />
                   </p>
                 </div>
-                <Kbd aria-hidden="true">{keys[index]}</Kbd>
+                {shortcut !== undefined && <Kbd aria-hidden="true">{shortcut}</Kbd>}
               </li>
             );
           })}

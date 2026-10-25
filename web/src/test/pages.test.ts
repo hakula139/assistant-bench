@@ -578,7 +578,15 @@ describe('system page', () => {
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
-    const prose: Defect[] = ['facts', 'punctuation', 'tone', 'formulaic', 'length'];
+    const prose: Defect[] = [
+      'scope',
+      'facts',
+      'clarity',
+      'tone',
+      'mechanics',
+      'formulaic',
+      'length',
+    ];
     const html = await render(SystemPage, {
       family: await family(),
       system: 'acme-mini',
@@ -586,7 +594,7 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain(
-      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Wrong facts 3 2% Punctuation 4 3% Wrong tone 4 3% Formulaic 0 0% Too long 1 1%",
+      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Misses the brief 0 0% Wrong facts 3 2% Hard to follow 0 0% Wrong tone 4 3% Language errors 4 3% Formulaic 0 0% Too long 1 1%",
     );
     expect(islandHints(html, 'DefectsTable')).toEqual(
       prose.map((defect) => defectTerms[defect].term),
@@ -597,7 +605,7 @@ describe('system page', () => {
     [
       'in the order the report keys them',
       { testing: 2, scope: 1 },
-      'Weak tests 2 2% Off-scope 1 1%',
+      'Weak tests 2 2% Misses the brief 1 1%',
     ],
     ['nowhere for a family that tags none', {}, null],
   ])('lists the issues %s', async (_, defects, row) => {
@@ -678,7 +686,9 @@ describe('system page', () => {
 
     expect(headerStats(html).slice(0, 3)).toEqual(['Score 233', 'Rank 6', 'Votes 0 (0 decisive)']);
     expect(html).not.toContain('Head to head');
-    expect(text(html)).toContain('Issue Votes Share Wrong facts 0 – Punctuation 0 –');
+    expect(text(html)).toContain(
+      'Issue Votes Share Misses the brief 0 – Wrong facts 0 – Hard to follow 0 – Wrong tone 0 – Language errors 0 –',
+    );
     expect(islandHints(html, 'StatusMark')).toEqual(['Preliminary']);
   });
 

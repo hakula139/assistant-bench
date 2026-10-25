@@ -124,6 +124,7 @@ describe('VoteFlow', () => {
     'resolves an accepted %s vote before a failed next draw',
     async (failure) => {
       const { flow, session } = opened();
+      const tagged = { a: VOTE_FAMILY.defects, b: VOTE_FAMILY.defects };
       let available = false;
       const fetch = vi.fn<Fetch>((path) => {
         if (path === '/api/votes') {
@@ -140,7 +141,7 @@ describe('VoteFlow', () => {
           : reply({ error: 'unavailable' }, 503);
       });
       vi.stubGlobal('fetch', fetch);
-      await expect(flow.submit(session, 'a', defects)).rejects.toBeInstanceOf(
+      await expect(flow.submit(session, 'a', tagged)).rejects.toBeInstanceOf(
         failure === 'renewal' ? ApiError : NetworkError,
       );
       flow.choose(session, 'b', defects);
@@ -157,6 +158,13 @@ describe('VoteFlow', () => {
         '/api/votes/resolve',
         '/api/sessions/resume',
       ]);
+      const original = voteRequest.parse(body(fetch.mock.calls[0][1]));
+      expect(body(fetch.mock.calls[1][1])).toEqual({
+        command_id: original.command_id,
+        lease_id: original.lease_id,
+        choice: 'a',
+        defects: tagged,
+      });
       expect(sessionStorage.getItem('bench-vote-draft')).not.toContain('private-pair-capability');
 
       available = true;

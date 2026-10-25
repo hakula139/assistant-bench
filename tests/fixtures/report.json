@@ -97,9 +97,11 @@
           "p90": 35.81314695529415
         },
         "defects": {
+          "scope": 0,
           "facts": 1,
-          "punctuation": 1,
+          "clarity": 0,
           "tone": 2,
+          "mechanics": 1,
           "formulaic": 2,
           "length": 2
         }
@@ -130,9 +132,11 @@
           "p90": 35.284958728059806
         },
         "defects": {
+          "scope": 0,
           "facts": 0,
-          "punctuation": 2,
+          "clarity": 0,
           "tone": 3,
+          "mechanics": 2,
           "formulaic": 2,
           "length": 2
         }
@@ -163,9 +167,11 @@
           "p90": 35.70957127544697
         },
         "defects": {
+          "scope": 0,
           "facts": 1,
-          "punctuation": 1,
+          "clarity": 0,
           "tone": 1,
+          "mechanics": 1,
           "formulaic": 2,
           "length": 2
         }
@@ -196,9 +202,11 @@
           "p90": 33.04638308543842
         },
         "defects": {
+          "scope": 0,
           "facts": 2,
-          "punctuation": 2,
+          "clarity": 0,
           "tone": 1,
+          "mechanics": 2,
           "formulaic": 2,
           "length": 2
         }
@@ -229,9 +237,11 @@
           "p90": 36.99403937433945
         },
         "defects": {
+          "scope": 0,
           "facts": 3,
-          "punctuation": 4,
+          "clarity": 0,
           "tone": 4,
+          "mechanics": 4,
           "formulaic": 0,
           "length": 1
         }
@@ -262,9 +272,11 @@
           "p90": 37.73772458290453
         },
         "defects": {
+          "scope": 0,
           "facts": 0,
-          "punctuation": 0,
+          "clarity": 0,
           "tone": 0,
+          "mechanics": 0,
           "formulaic": 0,
           "length": 0
         }

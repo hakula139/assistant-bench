@@ -53,7 +53,6 @@ export const admissionView = z.strictObject({
   ...command,
   action: z.enum(['bench_admit', 'bench_renew']),
   sitekey: identifier,
-  family: familyName.nullable(),
 });
 export const admissionRequest = z.strictObject({ ...command, proof: capability });
 export const admissionReplay = z.strictObject({
@@ -99,19 +98,20 @@ export type FamilyView = z.infer<typeof familyView>;
 export type Pane = z.infer<typeof pane>;
 export type PairView = z.infer<typeof pairView>;
 export type SessionView = z.infer<typeof sessionView>;
+export type AdmissionView = z.infer<typeof admissionView>;
 export type ReceiptQuery = z.infer<typeof receiptQuery>;
 export type VoteAcknowledgment = z.infer<typeof voteAcknowledgment>;
 export type ErrorCode = z.infer<typeof errorView>['error'];
 
 export const errorMessages: Record<ErrorCode, string> = {
   invalid_request: 'The request could not be processed. Reload and try again.',
-  admission_required: 'Continue through admission to vote.',
-  renewal_required: 'Renew your admission to continue. Your choice is saved in this tab.',
+  admission_required: 'Complete verification to vote.',
+  renewal_required: 'Verify again to continue. Your choice is saved in this tab.',
   challenge_rejected: 'The challenge was rejected. Complete a new challenge.',
   rate_limited: 'Too many requests. Wait a moment, then retry.',
   not_found: 'That item is no longer available.',
   conflict: 'This pair changed. Review the current outputs and choose again.',
-  unavailable: 'The voting service is unavailable. Retry to check the same request.',
+  unavailable: 'The voting service is unavailable. Try again.',
 };
 
 /** A fixed public error code, without backend or provider details. */
@@ -162,6 +162,11 @@ export async function request<T>(
 }
 
 export const getStatus = () => request(statusView, 'GET', '/status');
+export const getAdmission = () => request(admissionView, 'GET', '/admission');
+export const admit = (body: z.infer<typeof admissionRequest>) =>
+  request(statusView, 'POST', '/admission', admissionRequest.parse(body));
+export const replayAdmission = (body: z.infer<typeof admissionReplay>) =>
+  request(statusView, 'POST', '/admission/replay', admissionReplay.parse(body));
 export const listFamilies = () => request(z.array(familyView), 'GET', '/families');
 export const startSession = (body: z.infer<typeof startSessionRequest>) =>
   request(sessionView, 'POST', '/sessions', startSessionRequest.parse(body));

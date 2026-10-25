@@ -29,6 +29,8 @@ A review case supplies a synopsis of its invented work, with scene observations 
 
 A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
 
+Voters can optionally tag missed requirements, incorrect facts, unclear writing, unsuitable tone, language errors, formulaic prose, and excessive length, in that order. These tags describe the comparison and do not change the vote's weight. Fictional invention is allowed unless it contradicts supplied material or presents invented evidence as fact.
+
 ## Case Sourcing
 
 The committed `cases.toml` of each family holds 42 synthetic cases. The data directory's `cases/<family>.toml` holds 17 more, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.

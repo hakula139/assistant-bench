@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import JsonValue, TypeAdapter
 
 from assistant_bench.paths import REPO_ROOT
-from assistant_bench_arena import management_domain
+from assistant_bench_arena import management_models
 from assistant_bench_arena.ledger_models import (
     ExportSection,
     Page,
@@ -36,9 +36,9 @@ class Management:
         self.sequence = 0
 
     async def domain[Result](
-        self, request: management_domain.Request, adapter: TypeAdapter[Result]
+        self, request: management_models.Request, adapter: TypeAdapter[Result]
     ) -> Result:
-        management_domain.parse_request(canonical(request))
+        management_models.parse_request(canonical(request))
         stdin, stdout = self.process.stdin, self.process.stdout
 
         if stdin is None or stdout is None:
@@ -90,7 +90,7 @@ class Management:
         limit: int = 250,
     ) -> Page:
         return await self.domain(
-            management_domain.ExportPage(
+            management_models.ExportPage(
                 export_id=export_id, section=section, cursor=cursor, limit=limit
             ),
             _PAGE,

@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -34,15 +34,12 @@ jobs:
     name: Node Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        shell: nix develop -c bash -eo pipefail {0}
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -50,25 +47,25 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: pnpm install
+        run: nix develop -c pnpm install
 
       - name: Format
-        run: pnpm format
+        run: nix develop -c pnpm format
 
       - name: Lint
-        run: pnpm lint
+        run: nix develop -c pnpm lint
 
       - name: Spell check
-        run: pnpm spellcheck
+        run: nix develop -c pnpm spellcheck
 
       - name: Type check
-        run: pnpm typecheck
+        run: nix develop -c pnpm typecheck
 
       - name: Test
-        run: pnpm test
+        run: nix develop -c pnpm test
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           files: web/coverage/lcov.info
@@ -79,12 +76,9 @@ jobs:
     name: Build Site
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        shell: nix develop -c bash -eo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -92,13 +86,26 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: pnpm install
+        run: nix develop -c pnpm install
 
       - name: Build site
-        run: pnpm build
+        run: nix develop -c pnpm build
+
+      - name: Install Worker tooling
+        run: nix develop -c uv sync --locked
+
+      - name: Bundle the voting Worker
+        shell: bash
+        run: |
+          nix develop -c env -u _PYTHON_SYSCONFIGDATA_NAME -u _PYTHON_HOST_PLATFORM \
+            uv run pywrangler deploy --dry-run --env staging \
+            --env-file /dev/null --outdir /tmp/assistant-bench-worker
+
+      - name: Check native dependency lock
+        run: git diff --exit-code -- pylock.toml
 
       - name: Upload artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: site-dist
           path: web/dist/
@@ -108,16 +115,13 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        shell: nix develop .#python -c bash -eo pipefail {0}
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           # The fingerprint check builds the base revision's nixos-config export.
           fetch-depth: 0
@@ -127,52 +131,56 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install Python dependencies
-        run: uv sync --locked
+        run: nix develop .#python -c uv sync --locked
 
       - name: Install Node dependencies
-        run: pnpm install
+        run: nix develop .#python -c pnpm install
 
       - name: Lint
-        run: uv run ruff check
+        run: nix develop .#python -c uv run ruff check
 
       - name: Format
-        run: uv run ruff format --check
+        run: nix develop .#python -c uv run ruff format --check
 
       - name: Type check
-        run: uv run mypy
+        run: nix develop .#python -c uv run mypy
 
       - name: Check editor types
-        run: uv run basedpyright
+        run: nix develop .#python -c uv run basedpyright
 
       - name: Check standalone task assets
-        run: uv run python -m assistant_bench.task_assets --check
+        run: nix develop .#python -c uv run python -m assistant_bench.task_assets --check
 
       - name: Check complete dependency type contracts
-        run: >-
-          uv run python -m mypy.stubtest --mypy-config-file pyproject.toml
-          zhon zhon.hanzi zhon.pinyin zhon.zhuyin zhon.cedict
-          zhon.cedict.all zhon.cedict.simplified zhon.cedict.traditional threadpoolctl
+        shell: bash
+        run: |
+          nix develop .#python -c uv run python -m mypy.stubtest \
+            --mypy-config-file pyproject.toml \
+            zhon zhon.hanzi zhon.pinyin zhon.zhuyin zhon.cedict \
+            zhon.cedict.all zhon.cedict.simplified zhon.cedict.traditional threadpoolctl
 
       - name: Check partial dependency type contracts
-        run: >-
-          uv run python -m mypy.stubtest --mypy-config-file pyproject.toml
-          --ignore-missing-stub harbor.llms.lite_llm harbor.llms.chat
-          statsmodels.discrete.discrete_model
+        shell: bash
+        run: |
+          nix develop .#python -c uv run python -m mypy.stubtest \
+            --mypy-config-file pyproject.toml \
+            --ignore-missing-stub harbor.llms.lite_llm harbor.llms.chat \
+            statsmodels.discrete.discrete_model
 
       - name: Check registered controller contract
-        run: uv run python typings/checks/controllers.py
+        run: nix develop .#python -c uv run python typings/checks/controllers.py
 
       - name: Test
-        run: uv run pytest
+        run: nix develop .#python -c uv run pytest
 
       - name: Check fingerprints
         if: github.event_name == 'pull_request' || github.event_name == 'push'
-        run: uv run bench fingerprints "$BASE_SHA"
+        run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           files: coverage.xml
@@ -183,12 +191,9 @@ jobs:
     name: Harbor Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        shell: nix develop .#python -c bash -eo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -197,13 +202,13 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: nix develop .#python -c uv sync --locked
 
       - name: Check Docker
         run: time docker info
 
       - name: Run trials under Docker
-        run: uv run pytest -m docker
+        run: nix develop .#python -c uv run pytest -m docker
 
       - name: Check the coding family
         shell: bash
@@ -250,9 +255,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        shell: nix develop -c bash -eo pipefail {0}
     # A preview that arrives during Preview Cleanup must wait, since cancelling the cleanup would
     # leave the previous Preview and its deployments behind. The workflow group already cancels
     # a superseded run on each push.
@@ -285,7 +287,7 @@ jobs:
 
       - name: Checkout
         if: steps.pr.outputs.open
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -295,11 +297,11 @@ jobs:
 
       - name: Install dependencies
         if: steps.pr.outputs.open
-        run: pnpm install
+        run: nix develop -c pnpm install
 
       - name: Download site artifact
         if: steps.pr.outputs.open
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@v8
         with:
           name: site-dist
           path: web/dist/
@@ -311,9 +313,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Wrangler appends one JSON record per command to this file, including the Preview's URLs.
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
-        run: >-
-          pnpm --filter web exec wrangler preview
-          --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
+        shell: bash
+        run: |
+          nix develop -c pnpm --filter web exec wrangler preview \
+            --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
 
       - name: Extract preview metadata
         id: meta
@@ -335,7 +338,7 @@ jobs:
 
       - name: Comment preview
         if: steps.pr.outputs.open
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: preview-url
           message: |
@@ -363,14 +366,11 @@ jobs:
             [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
   deploy:
-    name: Deploy Site
+    name: Deploy Voting
     if: github.ref == 'refs/heads/main'
     needs: result
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        shell: nix develop -c bash -eo pipefail {0}
     # Deploys queue in the order their checks finish, so cancelling one could stop a newer deploy.
     concurrency:
       group: production
@@ -394,7 +394,7 @@ jobs:
 
       - name: Checkout
         if: steps.head.outputs.current
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -404,11 +404,14 @@ jobs:
 
       - name: Install dependencies
         if: steps.head.outputs.current
-        run: pnpm install
+        shell: bash
+        run: |
+          nix develop -c pnpm install
+          nix develop -c uv sync --locked
 
       - name: Download site artifact
         if: steps.head.outputs.current
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@v8
         with:
           name: site-dist
           path: web/dist/
@@ -418,4 +421,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm --filter web exec wrangler deploy
+        run: nix develop -c uv run bench arena deploy production

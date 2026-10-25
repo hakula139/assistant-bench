@@ -7,7 +7,7 @@ from typing import get_args
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from assistant_bench_arena.investigation import (
+from assistant_bench_arena.investigation_models import (
     InvestigatedReceipt,
     InvestigationPage,
     NetworkLookup,
@@ -39,7 +39,7 @@ from assistant_bench_arena.ledger_models import (
     VoteMeaning,
 )
 from assistant_bench_arena.releases import Release, evaluation_identity, settlements
-from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements, parse_schema
+from assistant_bench_arena.schema import SCHEMA_ID, bootstrap_statements
 from assistant_bench_arena.serialization import digest
 from assistant_bench_arena.snapshots import OutputContentApproval
 from assistant_bench_arena.transport import CommandRejected
@@ -47,6 +47,7 @@ from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import (
     D1Runtime,
     D1Transport,
+    parse_schema,
     publish_presentation,
     publish_release,
     schema_statements,
@@ -3149,10 +3150,19 @@ class TestLedger:
                         )
                     )
 
-                    for index in range(251):
-                        await seed_actor(
-                            transport, Actor(id=f'expired:{index:03}', created_at=0)
+                    await transport.execute(
+                        Statement(
+                            sql="""
+                                INSERT INTO actors(id, created_at, rate_subject)
+                                SELECT value, 0, NULL FROM json_each(?) ORDER BY key
+                            """,
+                            params=(
+                                json.dumps(
+                                    [f'expired:{index:03}' for index in range(251)]
+                                ),
+                            ),
                         )
+                    )
 
                     await seed_actor(transport, Actor(id='fresh', created_at=1))
 
