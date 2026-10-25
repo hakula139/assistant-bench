@@ -45,8 +45,6 @@ async def serve_http(
     else:
         response = await fetch(app, request, environment)
 
-    response.headers.set('Cache-Control', 'no-store')
-    response.headers.set('Referrer-Policy', 'no-referrer')
     return response
 
 

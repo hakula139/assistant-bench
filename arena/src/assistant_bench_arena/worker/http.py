@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import HTMLResponse, JSONResponse
@@ -49,6 +48,7 @@ from assistant_bench_arena.worker.authentication import (
     Authentication,
 )
 from assistant_bench_arena.worker.bindings import RateLimited
+from assistant_bench_arena.worker.diagnostics import failure
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class BrowserApi:
             return JSONResponse(
                 ErrorView(error=error.code).model_dump(), status_code=error.status
             )
-        except ValidationError, RequestValidationError:
+        except RequestValidationError:
             return JSONResponse({'error': 'invalid_request'}, status_code=400)
         except RateLimited:
             return JSONResponse({'error': 'rate_limited'}, status_code=429)
@@ -90,7 +90,8 @@ class BrowserApi:
                 code, status = 'conflict', 409
 
             return JSONResponse({'error': code}, status_code=status)
-        except Exception:
+        except Exception as error:
+            failure('http', error)
             return JSONResponse({'error': 'unavailable'}, status_code=503)
 
     async def status(self) -> StatusView:

@@ -19,6 +19,7 @@ from assistant_bench_arena.worker.bindings import (
     RateLimited,
     enforce_limit,
 )
+from assistant_bench_arena.worker.diagnostics import failure
 from assistant_bench_arena.worker.settings import ProfileBindings, profile
 
 
@@ -70,7 +71,11 @@ class Default(WorkerEntrypoint):
                 raise InvalidToken
 
             address = header(native, 'CF-Connecting-IP') or ''
-            network = NetworkIdentity(address)
+            try:
+                network = NetworkIdentity(address)
+            except ValueError:
+                raise InvalidToken from None
+
             await enforce_limit(
                 self.bindings.RENDER_LIMIT,
                 network.quota(
@@ -93,16 +98,19 @@ class Default(WorkerEntrypoint):
                 serialized
             )
 
-            if not isinstance(result, RpcFailure) and result.result is not None:
+            if isinstance(result, RpcFailure):
+                status = 503
+            elif result.result is not None:
                 if result.result.render != 'html':
                     raise ValueError('The renderer received an incompatible output.')
 
                 status, body = 200, result.result.content
         except RateLimited:
             status = 429
-        except InvalidToken, ValueError:
+        except InvalidToken:
             pass
-        except Exception:
+        except Exception as error:
+            failure('render', error)
             status = 503
 
         return Response(

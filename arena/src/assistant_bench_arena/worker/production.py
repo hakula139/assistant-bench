@@ -1,9 +1,7 @@
 """HTTP and private Service entrypoints for the production database owner."""
 
 import html
-import logging
 import time
-from typing import Literal
 
 from js import Response as NativeResponse
 from pyodide.ffi import JsNull
@@ -27,11 +25,9 @@ from assistant_bench_arena.worker.api import (
 )
 from assistant_bench_arena.worker.authentication import ApiError
 from assistant_bench_arena.worker.bindings import RateLimited
+from assistant_bench_arena.worker.diagnostics import FailureStage, failure
 from assistant_bench_arena.worker.http import INGRESS, Ingress
 from assistant_bench_arena.worker.owner import AppBindings, owner
-
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class OwnerEntrypoint(WorkerEntrypoint):
@@ -55,7 +51,7 @@ class Default(OwnerEntrypoint):
 
     async def fetch(self, request: Request) -> NativeResponse:
         token = None
-        stage: Literal['preflight', 'validation', 'http', 'assets'] = 'preflight'
+        stage: FailureStage = 'preflight'
 
         try:
             native = request.js_object
@@ -76,42 +72,45 @@ class Default(OwnerEntrypoint):
 
             if path.startswith('/api/') or path == '/admit':
                 stage = 'http'
-                return await serve_http(
+                response = await serve_http(
                     await self.owner.browser(),
                     request,
                     self.owner.settings.profile,
                     self.env,
                 )
 
-            if native.method != 'GET' or path == '/api':
-                raise RequestRejected
-
-            stage = 'assets'
-            asset = await self.owner.bindings.ASSETS.fetch(native)
-            content_type = asset.headers.get('Content-Type')
-
-            if isinstance(content_type, str) and content_type.startswith('text/html'):
-                body = await asset.text()
-                origin = html.escape(
-                    self.owner.settings.profile.render_origin, quote=True
-                )
-                body = body.replace(
-                    '</head>',
-                    f'<meta name="bench-render-origin" content="{origin}"></head>',
-                    1,
-                )
-                response = NativeResponse.new(body, asset.js_object)
-                response.headers.set(
-                    'Content-Security-Policy',
-                    f'frame-src {self.owner.settings.profile.render_origin}; '
-                    "connect-src 'self'; base-uri 'none'; form-action 'none'; "
-                    "frame-ancestors 'none'; object-src 'none'",
-                )
             else:
-                stream = asset.js_object.body
-                response = NativeResponse.new(
-                    None if isinstance(stream, JsNull) else stream, asset.js_object
-                )
+                if native.method != 'GET' or path == '/api':
+                    raise RequestRejected
+
+                stage = 'assets'
+                asset = await self.owner.bindings.ASSETS.fetch(native)
+                content_type = asset.headers.get('Content-Type')
+
+                if isinstance(content_type, str) and content_type.startswith(
+                    'text/html'
+                ):
+                    body = await asset.text()
+                    origin = html.escape(
+                        self.owner.settings.profile.render_origin, quote=True
+                    )
+                    body = body.replace(
+                        '</head>',
+                        f'<meta name="bench-render-origin" content="{origin}"></head>',
+                        1,
+                    )
+                    response = NativeResponse.new(body, asset.js_object)
+                    response.headers.set(
+                        'Content-Security-Policy',
+                        f'frame-src {self.owner.settings.profile.render_origin}; '
+                        "connect-src 'self'; base-uri 'none'; form-action 'none'; "
+                        "frame-ancestors 'none'; object-src 'none'",
+                    )
+                else:
+                    stream = asset.js_object.body
+                    response = NativeResponse.new(
+                        None if isinstance(stream, JsNull) else stream, asset.js_object
+                    )
         except ApiError as error:
             response = Response(
                 ErrorView(error=error.code).model_dump_json(),
@@ -131,11 +130,7 @@ class Default(OwnerEntrypoint):
                 headers={'Content-Type': 'application/json'},
             ).js_object
         except Exception as error:
-            _LOGGER.error(
-                'Voting request failed: stage=%s exception=%s.',
-                stage,
-                type(error).__name__,
-            )
+            failure(stage, error)
             response = Response(
                 '{"error":"unavailable"}',
                 status=503,
@@ -172,7 +167,8 @@ class RenderLookup(OwnerEntrypoint):
             return result
         except InvalidToken, CommandRejected:
             return RpcSuccess[None](result=None).model_dump_json()
-        except Exception:
+        except Exception as error:
+            failure('render_lookup', error)
             return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json()
 
 
@@ -187,5 +183,6 @@ class Management(OwnerEntrypoint):
             return RpcSuccess(result=result).model_dump_json()
         except CommandRejected as error:
             return RpcFailure(error=RpcError(reason=error.reason)).model_dump_json()
-        except Exception:
+        except Exception as error:
+            failure('management', error)
             return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json()
