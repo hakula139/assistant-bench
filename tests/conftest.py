@@ -133,7 +133,7 @@ def messages_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncAnthropic]:
 
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Isolate data and clear the shell's endpoint and proxy variables."""
+    """Isolate data, endpoint settings and system proxies."""
     path = tmp_path / 'data'
     monkeypatch.setenv(DATA_DIR_VAR, str(path))
     monkeypatch.chdir(tmp_path)
@@ -143,6 +143,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in PROXY_VARS:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setenv('NO_PROXY', '*')
     return path
 
 

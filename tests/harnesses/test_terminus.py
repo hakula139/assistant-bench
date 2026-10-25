@@ -774,18 +774,28 @@ class TestTerminus:
             context = AgentContext()
 
             async def cancel() -> None:
+                waiting = asyncio.create_task(
+                    asyncio.to_thread(endpoint.response_waiting.wait)
+                )
                 task = asyncio.create_task(
                     messages_agent.execute(terminal_session, context)
                 )
                 try:
-                    assert await asyncio.to_thread(endpoint.response_waiting.wait, 5)
+                    completed, _ = await asyncio.wait(
+                        (task, waiting), return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if task in completed:
+                        await task
+                        pytest.fail('The agent exited before the second request.')
+                    await waiting
                     task.cancel()
                     with pytest.raises(asyncio.CancelledError):
                         await asyncio.wait_for(task, 5)
                 finally:
                     gate.set()
                     task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+                    endpoint.response_waiting.set()
+                    await asyncio.gather(task, waiting, return_exceptions=True)
 
             asyncio.run(cancel())
             job_dir = data_dir / 'jobs' / family.name / 'cancelled'

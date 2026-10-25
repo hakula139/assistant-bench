@@ -5,6 +5,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from urllib.request import getproxies_environment
 
 import httpx
 import httpx2
@@ -74,12 +75,18 @@ class TestEndpoint:
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'anthropic-messages']
         )
-        def test_authenticates_the_configured_origin_with_its_private_headers(
+        def test_sends_private_headers_directly_to_the_configured_origin(
             self,
             endpoint: StubEndpoint,
             model_requests: list[httpx.Request | httpx2.Request],
+            monkeypatch: pytest.MonkeyPatch,
             api: Api,
         ) -> None:
+            def inherited_proxies() -> dict[str, str]:
+                return getproxies_environment() or {'http': endpoint.url}
+
+            monkeypatch.setattr('httpx._utils.getproxies', inherited_proxies)
+            monkeypatch.setattr('httpx2._utils.getproxies', inherited_proxies)
             configured = Endpoint.read(endpoint.env.get, api)
             build = (
                 configured.messages_http_client
@@ -95,6 +102,7 @@ class TestEndpoint:
 
             assert reply.status_code == 200
             (sent,) = endpoint.requests
+            assert sent.path == '/v1/responses'
             assert sent.headers['authorization'] == 'Bearer test-key'
             assert sent.headers['x-trace'] == 'bench'
             (outgoing,) = model_requests
