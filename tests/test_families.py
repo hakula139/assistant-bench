@@ -49,7 +49,7 @@ def case_entry(
     case_id: str, source: str = 'synthetic', category: str = 'message'
 ) -> str:
     case = {'id': case_id, 'category': category, 'source': source, 'instruction': 'Hi.'}
-    return tomli_w.dumps({'cases': [case]})
+    return '[[cases]]\n' + tomli_w.dumps(case)
 
 
 def write_task(
