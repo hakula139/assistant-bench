@@ -1,7 +1,9 @@
 """HTTP and private Service entrypoints for the production database owner."""
 
 import html
+import logging
 import time
+from typing import Literal
 
 from js import Response as NativeResponse
 from pyodide.ffi import JsNull
@@ -29,6 +31,9 @@ from assistant_bench_arena.worker.http import INGRESS, Ingress
 from assistant_bench_arena.worker.owner import AppBindings, owner
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class OwnerEntrypoint(WorkerEntrypoint):
     def __init__(self, ctx: object, env: AppBindings) -> None:
         super().__init__(ctx, env)
@@ -50,6 +55,7 @@ class Default(OwnerEntrypoint):
 
     async def fetch(self, request: Request) -> NativeResponse:
         token = None
+        stage: Literal['preflight', 'validation', 'http', 'assets'] = 'preflight'
 
         try:
             native = request.js_object
@@ -58,6 +64,7 @@ class Default(OwnerEntrypoint):
                 header(native, 'CF-Connecting-IP') or '', now
             )
             token = INGRESS.set(Ingress(now, network, header(native, 'Cookie') or ''))
+            stage = 'validation'
 
             if header(native, 'CF-Worker') is not None:
                 raise RequestRejected
@@ -68,6 +75,7 @@ class Default(OwnerEntrypoint):
             path = validate_request(native, self.owner.settings.profile, native.method)
 
             if path.startswith('/api/') or path == '/admit':
+                stage = 'http'
                 return await serve_http(
                     await self.owner.browser(),
                     request,
@@ -78,6 +86,7 @@ class Default(OwnerEntrypoint):
             if native.method != 'GET' or path == '/api':
                 raise RequestRejected
 
+            stage = 'assets'
             asset = await self.owner.bindings.ASSETS.fetch(native)
             content_type = asset.headers.get('Content-Type')
 
@@ -121,7 +130,12 @@ class Default(OwnerEntrypoint):
                 status=400,
                 headers={'Content-Type': 'application/json'},
             ).js_object
-        except Exception:
+        except Exception as error:
+            _LOGGER.error(
+                'Voting request failed: stage=%s exception=%s.',
+                stage,
+                type(error).__name__,
+            )
             response = Response(
                 '{"error":"unavailable"}',
                 status=503,
