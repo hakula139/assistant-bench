@@ -102,7 +102,7 @@ Write a short maintainer section for a package mirror's `README.md` explaining h
 
 - The job runs rsync over SSH as the `mirror` user. The upstream host key is pinned in `ssh/known_hosts`, so a changed key halts the sync instead of prompting.
 - Because the upstream archive allows only one connection per client, the job syncs the `pool/` and `dists/` trees sequentially.
-- `--delay-updates` prevents clients from seeing a half-synced tree, and `--delete-after` removes stale files only after the transfer succeeds.
+- `--delay-updates` holds updated files aside until the end of the transfer, then replaces them in quick succession. Clients can still see a mix of old and new files during those replacements. `--delete-after` schedules stale-file deletion after the transfer phase.
 - Any sync still running after four hours is killed; the next night's run resumes from the existing file state."""
 checklist = [
   "Written as a 1-2 paragraph maintainer README section describing current behavior",
@@ -194,7 +194,7 @@ Write a GitHub pull request description containing a `## Summary` section and a 
 - Resized image URLs already include a hash of the source image and requested dimensions, so modified images always generate a new URL.
 - Previously, the service sent no caching headers, causing the CDN to revalidate every image against the origin roughly once an hour.
 - Across a seven-day staging run, daily origin requests dropped from 1.2 million to 140,000, and the CDN hit rate increased from 61% to 96%.
-- Browsers will also stop revalidating images they have already loaded.
+- Browsers that support `immutable` can reuse cached images without revalidation during the response's 24-hour freshness lifetime, including on ordinary reloads. A forced reload can still request revalidation, and stale responses follow the usual cache rules.
 - Verification performed: unit tests confirm the header is present on resized images and absent on error responses; the change ran in staging for seven days; CDN logs were compared before and after the change.
 - Unverified: the production cache hit rate, where the traffic mix differs."""
 checklist = [
@@ -798,20 +798,27 @@ id = "tide-bell-archive"
 category = "review"
 source = "synthetic"
 instruction = """
-Write a close reading of 900 to 1,300 words examining one scene from the invented 12-episode animated series \"The Cartographer's Daughter\". Base your essay strictly on the following synopsis:
+Write a close reading of 900 to 1,300 words examining one scene from the invented 12-episode animated series \"The Cartographer's Daughter\". Base your essay strictly on the following synopsis and scene notes:
 
 Synopsis: Set in a flooded archipelago after a century of retreating coastlines, \"The Cartographer's Daughter\" follows fourteen-year-old Lin as she travels north by mail boat to finish her late father's hydrographic survey. Across twelve episodes, divided into four three-episode port arcs, she learns that the imperial admiralty has been falsifying depth charts to steer merchant traffic away from silted, impoverished outer islands. Key scenes include \"The Sounding Line\" in episode 1, where Lin discovers two incompatible lead-line logs in her father's waterproof oilskin satchel; \"The Tide-Bell Archive\" in episode 3, where she confronts retired harbor master Oren inside a flooded stone bell tower as the incoming tide rises over the floor grates, while the bronze bell overhead tolls with each swell and drowns out half their dialogue; and \"The Salt Flats Verdict\" in episode 11, where Lin burns her clean fair-copy chart on the admiralty pier.
+
+Scene notes:
+- The opening wide shot holds Lin and Oren on opposite sides of the frame, with the bell's hanging rope between them. Water rises through the floor grates throughout the shot.
+- Lin's first question begins in a medium shot facing her. A bell toll covers the middle of the sentence. The camera stays on her face until she finishes, then cuts to Oren, who has not moved.
+- Lin repeats the question more slowly. There is no music. Water dripping from the bell rope remains audible during the pauses between her words.
+- Oren begins his reply in a low, even voice. A close-up shows his fingers tightening around the railing as another toll makes his final words inaudible. The scene supplies no subtitle for those words.
+- The last wide shot repeats the opening composition. Neither character has crossed the rope. The water now covers the floor grates, and the bell continues over the cut to black.
 
 1. Focus your close reading on \"The Tide-Bell Archive\" scene in episode 3, analyzing how its direction, framing, sound design, or voice performance creates meaning.
 2. Explain what this scene contributes to the larger 12-episode series and its themes, without writing a standalone plot summary.
 3. You may include a brief evaluative judgment of the series or scene, but do not assign a numerical score.
 
-Do not invent plot events, characters, or episodes beyond what is given in the synopsis. Avoid the words and phrases \"masterpiece\", \"must-watch\", and \"tour de force\"."""
+Ground observations about framing, sound, and performance in the supplied scene notes. Do not invent dialogue, shots, plot events, characters, or episodes beyond the supplied material. Avoid the words and phrases \"masterpiece\", \"must-watch\", and \"tour de force\"."""
 checklist = [
   "Focuses on a close reading of \"The Tide-Bell Archive\" scene from episode 3 of \"The Cartographer's Daughter\"",
-  "Analyzes how direction, framing, sound design, or voice acting produces meaning in the scene",
+  "Analyzes how direction, framing, sound design, or voice acting produces meaning using the supplied scene notes",
   "Explains how the scene connects to the broader 12-episode series without giving a standalone plot summary or a numerical score",
-  "Does not invent plot events, characters, or episodes outside the provided synopsis",
+  "Does not invent dialogue, shots, plot events, characters, or episodes outside the supplied material",
   "Does not contain \"masterpiece\", \"must-watch\", or \"tour de force\"",
 ]
 
