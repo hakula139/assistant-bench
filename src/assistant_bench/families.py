@@ -56,8 +56,6 @@ class _Settings(BaseModel):
 
 type Language = Literal['en', 'zh']
 
-MAX_DEFECTS = 5
-
 
 class Gate(StrEnum):
     """A check whose failure makes a voted output an automatic loss in its pairs."""
@@ -119,8 +117,8 @@ class VotesSettings(_Settings):
     gates: Gates = Gates()
     """Text eligibility checks. Task families set neither `language` nor `gates`."""
 
-    defects: list[Defect] = Field(default=[], max_length=MAX_DEFECTS)
-    """Available output tags, in the vote page's key order."""
+    defects: list[Defect] = []
+    """Available output tags, in presentation order."""
 
     @model_validator(mode='after')
     def _check_reference(self) -> Self:

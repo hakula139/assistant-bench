@@ -10,6 +10,7 @@ from typing_extensions import TypeForm
 
 from assistant_bench_arena import api_models as api
 from assistant_bench_arena.models import Defects, FamilyView, Pane
+from support import PROSE_DEFECTS
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / 'fixtures/arena.schema.json'
@@ -44,6 +45,26 @@ def input_schemas() -> dict[str, JsonSchemaValue]:
 
 
 class TestApiContract:
+    @pytest.mark.parametrize('invalid', [None, 'unknown', 'punctuation'])
+    def test_roundtrips_all_writing_issues_and_rejects_unknown_or_retired_codes(
+        self, invalid: str | None
+    ) -> None:
+        tags = list(PROSE_DEFECTS) if invalid is None else [invalid]
+        payload = {'a': tags, 'b': tags}
+        schema = Defects.model_json_schema(mode='validation')
+
+        if invalid is None:
+            parsed = Defects.model_validate_json(json.dumps(payload))
+
+            assert parsed.a == parsed.b == frozenset(PROSE_DEFECTS)
+            assert Defects.model_validate_json(parsed.model_dump_json()) == parsed
+            jsonschema.validate(json.loads(parsed.model_dump_json()), schema)
+        else:
+            with pytest.raises(ValidationError):
+                Defects.model_validate_json(json.dumps(payload))
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(payload, schema)
+
     @pytest.mark.parametrize(
         ('model', 'field', 'base'),
         [

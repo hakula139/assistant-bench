@@ -80,7 +80,7 @@
       "Defect": {
         "enum": [
           "facts",
-          "punctuation",
+          "mechanics",
           "tone",
           "formulaic",
           "length",
@@ -262,7 +262,7 @@
       "Defect": {
         "enum": [
           "facts",
-          "punctuation",
+          "mechanics",
           "tone",
           "formulaic",
           "length",
@@ -645,7 +645,7 @@
       "Defect": {
         "enum": [
           "facts",
-          "punctuation",
+          "mechanics",
           "tone",
           "formulaic",
           "length",
@@ -730,7 +730,7 @@
       "Defect": {
         "enum": [
           "facts",
-          "punctuation",
+          "mechanics",
           "tone",
           "formulaic",
           "length",
@@ -916,7 +916,7 @@
       "Defect": {
         "enum": [
           "facts",
-          "punctuation",
+          "mechanics",
           "tone",
           "formulaic",
           "length",

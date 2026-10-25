@@ -4,25 +4,25 @@ Vote on blind pairs at [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/),
 
 ## Opening the Vote Page
 
-Follow the site's Vote link and pick a family under its aspect. Admission opens a separate challenge page, then returns to voting. All real votes go to the production D1 database. The staging deployment has its own database for validation.
+Follow the site's Vote link and pick a family under its aspect. Verification opens on a separate page, then returns you to voting. All real votes go to the production D1 database. The staging deployment has its own database for validation.
 
-A session records one active vote per eligible case and ends when none remain. Cases need passing, different outputs from two systems to be eligible. The browser keeps a session locator per family, so picking the family again or reloading resumes it while the admission cookie remains valid. Each accepted vote is recorded before the next pair is requested. Tap the vote count in the Prompt bar to see how many pairs remain.
+A session records one active vote per eligible case and ends when none remain. Cases need passing, different outputs from two systems to be eligible. The browser keeps a session locator per family, so picking the family again or reloading resumes it while the verification cookie remains valid. Each accepted vote is recorded before the next pair is requested. Tap the vote count in the Prompt bar to see how many pairs remain.
 
-If a connection fails, retry checks the same command. The tab retains the choice and issue tags needed to resolve an uncertain submission after a reload or admission renewal. Resolve it before moving to another pair or family. If the pending pair changed, review the new outputs and choose again. Undo withdraws the exact last eligible vote acknowledged by the server.
+If a connection fails, retry checks whether your vote was saved. The tab retains your choice and issue tags through a reload or verification. Resolve the pending vote before moving to another pair or family. If the pair changed, review the new outputs and choose again. Undo withdraws the exact last eligible vote acknowledged by the server.
 
 ## Casting a Vote
 
 Each pair shows the case's prompt above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Under the prompt, What to check lists the points to judge by, which the model never saw. Nothing is selected until you choose:
 
-| Key        | Action                                                                           |
-| ---------- | -------------------------------------------------------------------------------- |
-| `a` / `b`  | A or B is better                                                                 |
-| `t`        | Tie                                                                              |
-| `x`        | Both bad                                                                         |
-| `1` to `5` | Toggle an issue on output A, in the order the family's Issues popover lists them |
-| `6` to `0` | Toggle the same issues on output B                                               |
-| `Enter`    | Submit from the pair background, or activate the focused control                 |
-| `u`        | Undo the last vote and show its pair again                                       |
+| Key        | Action                                                                               |
+| ---------- | ------------------------------------------------------------------------------------ |
+| `a` / `b`  | A or B is better                                                                     |
+| `t`        | Tie                                                                                  |
+| `x`        | Both bad                                                                             |
+| `1` to `5` | Toggle the first five issues on output A, in the order the Issues popover lists them |
+| `6` to `0` | Toggle the first five issues on output B                                             |
+| `Enter`    | Submit from the pair background, or activate the focused control                     |
+| `u`        | Undo the last vote and show its pair again                                           |
 
 Letter and digit shortcuts work while the voting panel has focus. Each new pair focuses the panel. Header controls and open popovers keep their own keyboard behavior.
 

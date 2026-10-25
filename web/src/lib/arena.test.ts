@@ -105,6 +105,17 @@ describe('arena contracts', () => {
     );
   });
 
+  test('roundtrips all seven selected issues in votes and receipt queries', () => {
+    const tagged = { a: VOTE_FAMILY.defects, b: VOTE_FAMILY.defects };
+    const query = { ...receipt, defects: tagged };
+
+    expect(arena.receiptQuery.parse(JSON.parse(JSON.stringify(query)))).toEqual(query);
+    expect(arena.voteRequest.parse({ ...query, capability: 'pair' })).toEqual({
+      ...query,
+      capability: 'pair',
+    });
+  });
+
   test.each([
     [
       'invalid command',
@@ -117,6 +128,7 @@ describe('arena contracts', () => {
     ['fractional count', arena.sessionView, makeSession({ remaining: 0.5 })],
     ['unknown choice', arena.receiptQuery, { ...receipt, choice: 'skip' }],
     ['unknown defect', arena.receiptQuery, { ...receipt, defects: { a: ['unknown'], b: [] } }],
+    ['retired defect', arena.receiptQuery, { ...receipt, defects: { a: ['punctuation'], b: [] } }],
     [
       'nested defect field',
       arena.receiptQuery,

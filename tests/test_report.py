@@ -25,6 +25,7 @@ from snapshot_support import make_analysis, make_capped_analysis, make_evidence
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,
+    PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
     make_output,
@@ -321,12 +322,16 @@ class TestVotesResults:
         rows = (
             replace(
                 make_evidence(0, choice='both_bad'),
-                defects_a=('facts',),
+                defects_a=PROSE_DEFECTS,
                 defects_b=('tone',),
             ),
             replace(make_evidence(1, systems=('b', 'a')), defects_b=('facts',)),
         )
         analysis = make_analysis(rows)
+        analysis = replace(
+            analysis,
+            family=analysis.family.model_copy(update={'defects': PROSE_DEFECTS}),
+        )
         outputs = tuple(
             OutputMeasurement(
                 case=f'case-{index}',
@@ -344,8 +349,16 @@ class TestVotesResults:
         results = report.votes_results(replace(analysis, outputs=outputs))
 
         standings = {row.system: row for row in results.standings}
-        assert standings['a'].defects == {'facts': 2}
-        assert standings['b'].defects == {'facts': 0}
+        assert standings['a'].defects == {
+            defect: 2 if defect == 'facts' else 1 for defect in PROSE_DEFECTS
+        }
+        assert standings['b'].defects == {
+            defect: 1 if defect == 'tone' else 0 for defect in PROSE_DEFECTS
+        }
+        assert (
+            report.VotesResults.model_validate_json(results.model_dump_json())
+            == results
+        )
         assert standings['a'].both_bad_rate == 0.5
         assert standings['a'].outputs == 1
         assert standings['a'].gate_failure_rate == 0.5

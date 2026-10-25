@@ -15,6 +15,8 @@ interface Turnstile {
       'sitekey': string;
       'action': string;
       'cData': string;
+      'size': 'compact' | 'flexible';
+      'theme': 'light' | 'dark';
       'callback': (proof: string) => void;
       'error-callback': () => void;
       'expired-callback': () => void;
@@ -32,23 +34,29 @@ const element = document.getElementById('admission-data');
 const status = document.getElementById('admission-status');
 const challenge = document.getElementById('admission-challenge');
 const retry = document.getElementById('admission-retry');
-const proceed = document.getElementById('admission-continue');
 
 async function initialize() {
   if (
     element === null ||
     status === null ||
     challenge === null ||
-    !(retry instanceof HTMLButtonElement) ||
-    !(proceed instanceof HTMLButtonElement)
+    !(retry instanceof HTMLButtonElement)
   ) {
     return;
   }
   const view = admissionView.parse(JSON.parse(element.textContent));
   let proof: string | null = null;
   let attempted = false;
-  let rejected = false;
+  let restart = false;
   let busy = false;
+  const reloadChallenge = (message: string) => {
+    restart = true;
+    status.textContent = message;
+    challenge.setAttribute('aria-busy', 'false');
+    challenge.hidden = true;
+    retry.textContent = 'Reload challenge';
+    retry.hidden = false;
+  };
   const navigate = () => {
     sessionStorage.removeItem('bench-admission-command');
     location.replace(
@@ -59,14 +67,13 @@ async function initialize() {
     if (busy) {
       return;
     }
-    if (rejected) {
+    if (restart) {
       location.reload();
       return;
     }
     busy = true;
     retry.disabled = true;
-    proceed.disabled = true;
-    status.textContent = 'Checking admission...';
+    status.textContent = 'Verifying your browser...';
     try {
       const body = admissionRequest.parse({ command_id: view.command_id, proof });
       const replay = attempted;
@@ -86,26 +93,24 @@ async function initialize() {
       if (result.status === 'ready') {
         navigate();
       } else {
-        status.textContent = 'Admission is required. Retry to continue.';
+        status.textContent = 'Verification is required. Retry to continue.';
+        retry.textContent = 'Retry verification';
+        retry.hidden = false;
       }
     } catch (reason) {
-      rejected = reason instanceof ApiError && reason.code === 'challenge_rejected';
+      restart = reason instanceof ApiError && reason.code === 'challenge_rejected';
       status.textContent =
         reason instanceof ApiError
           ? reason.message
-          : 'Admission could not be confirmed. Retry the same request.';
-      retry.textContent = rejected ? 'Try challenge again' : 'Retry admission';
+          : 'Verification could not be confirmed. Try again.';
+      retry.textContent = restart ? 'Try challenge again' : 'Retry verification';
       retry.hidden = false;
     } finally {
       busy = false;
       retry.disabled = false;
-      proceed.disabled = false;
     }
   };
   retry.addEventListener('click', () => {
-    void send();
-  });
-  proceed.addEventListener('click', () => {
     void send();
   });
 
@@ -128,7 +133,7 @@ async function initialize() {
       }
     }
   } catch {
-    status.textContent = 'Complete admission to continue.';
+    status.textContent = 'Complete verification to continue.';
   }
 
   status.textContent = 'Complete the challenge to continue.';
@@ -136,37 +141,59 @@ async function initialize() {
   script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
   script.async = true;
   script.addEventListener('load', () => {
-    window.turnstile?.render(challenge, {
+    if (window.turnstile === undefined) {
+      reloadChallenge('The challenge is unavailable. Reload to try again.');
+      return;
+    }
+
+    window.turnstile.render(challenge, {
       'sitekey': view.sitekey,
       'action': view.action,
       'cData': view.command_id,
+      'size': challenge.clientWidth < 300 ? 'compact' : 'flexible',
+      'theme': document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
       'callback': (token) => {
         if (!attempted) {
+          restart = false;
+          retry.hidden = true;
           proof = token;
           void send();
         }
       },
       'error-callback': () => {
         if (!attempted) {
-          status.textContent = 'The challenge is unavailable. Reload to try again.';
+          reloadChallenge('The challenge is unavailable. Reload to try again.');
         }
       },
       'expired-callback': () => {
         if (!attempted) {
           proof = null;
-          status.textContent = 'The challenge expired. Complete it again.';
+          reloadChallenge('The challenge expired. Reload to try again.');
         }
       },
     });
+    challenge.setAttribute('aria-busy', 'false');
   });
   script.addEventListener('error', () => {
-    status.textContent = 'The challenge is unavailable. Reload to try again.';
+    reloadChallenge('The challenge is unavailable. Reload to try again.');
   });
   document.head.append(script);
 }
 
 void initialize().catch(() => {
   if (status !== null) {
-    status.textContent = 'Admission is unavailable. Reload to try again.';
+    status.textContent = 'Verification is unavailable. Reload to try again.';
+  }
+  challenge?.setAttribute('aria-busy', 'false');
+  if (challenge !== null) {
+    challenge.hidden = true;
+  }
+
+  if (retry instanceof HTMLButtonElement) {
+    retry.textContent = 'Reload page';
+    retry.hidden = false;
+    retry.addEventListener('click', () => {
+      location.reload();
+    });
   }
 });

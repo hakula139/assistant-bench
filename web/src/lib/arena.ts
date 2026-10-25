@@ -105,13 +105,13 @@ export type ErrorCode = z.infer<typeof errorView>['error'];
 
 export const errorMessages: Record<ErrorCode, string> = {
   invalid_request: 'The request could not be processed. Reload and try again.',
-  admission_required: 'Continue through admission to vote.',
-  renewal_required: 'Renew your admission to continue. Your choice is saved in this tab.',
+  admission_required: 'Complete verification to vote.',
+  renewal_required: 'Verify again to continue. Your choice is saved in this tab.',
   challenge_rejected: 'The challenge was rejected. Complete a new challenge.',
   rate_limited: 'Too many requests. Wait a moment, then retry.',
   not_found: 'That item is no longer available.',
   conflict: 'This pair changed. Review the current outputs and choose again.',
-  unavailable: 'The voting service is unavailable. Retry to check the same request.',
+  unavailable: 'The voting service is unavailable. Try again.',
 };
 
 /** A fixed public error code, without backend or provider details. */

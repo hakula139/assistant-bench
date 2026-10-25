@@ -1,8 +1,10 @@
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import tomli_w
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.lock import TrialLock
 from harbor.models.task.config import TaskConfig
@@ -28,7 +30,7 @@ from assistant_bench_arena.snapshots import (
     PresentedCase,
     PublicApproval,
 )
-from support import finish_job, write_task_family, write_votes_family
+from support import PROSE_DEFECTS, finish_job, write_task_family, write_votes_family
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,49 @@ def selection(
 
 
 class TestPrepareSelection:
+    def test_expanding_issue_options_reseals_evaluation_without_regenerating_tasks(
+        self, selection: Selection, families_dir: Path
+    ) -> None:
+        settings = families_dir / 'f/family.toml'
+        configuration = tomllib.loads(settings.read_text())
+        configuration['defects'] = ['facts']
+        settings.write_text(tomli_w.dumps(configuration))
+        original = prepare_selection(selection.request)
+        original_task = {
+            path.name: path.read_bytes()
+            for path in selection.task.iterdir()
+            if path.is_file()
+        }
+        original_config = TaskConfig.model_validate_toml(
+            (selection.task / 'task.toml').read_text()
+        )
+
+        configuration['defects'] = list(PROSE_DEFECTS)
+        settings.write_text(tomli_w.dumps(configuration))
+        family = load_family('f')
+        jobs.render_tasks(family, load_cases(family))
+        expanded = prepare_selection(selection.request)
+
+        assert original.evaluation.manifest.family.defects == ('facts',)
+        assert expanded.evaluation.manifest.family.defects == PROSE_DEFECTS
+        assert expanded.evaluation.id != original.evaluation.id
+        assert expanded.publication.id != original.publication.id
+        assert expanded.cases == original.cases
+        assert expanded.outputs == original.outputs
+        assert expanded.rendered == original.rendered
+        assert expanded.publication.presentation == original.publication.presentation
+        assert {
+            path.name: path.read_bytes()
+            for path in selection.task.iterdir()
+            if path.is_file()
+        } == original_task
+        current_config = TaskConfig.model_validate_toml(
+            (selection.task / 'task.toml').read_text()
+        )
+        assert current_config.task is not None
+        assert original_config.task is not None
+        assert current_config.task.version == original_config.task.version
+
     @pytest.mark.parametrize(
         'systems', [(), ('acme-large', 'acme-small')], ids=['tests', 'votes']
     )

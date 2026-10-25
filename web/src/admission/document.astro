@@ -1,0 +1,61 @@
+---
+import { note, PageHeader } from '@/components/site/PageParts';
+import { buttonVariants } from '@/components/ui/button';
+import Base from '@/layouts/Base.astro';
+
+const csp = Astro.csp;
+if (csp === undefined) {
+  throw new Error('Voting admission requires Content Security Policy.');
+}
+
+csp.insertScriptResource("'self'");
+csp.insertScriptResource('https://challenges.cloudflare.com');
+csp.insertDirective("default-src 'none'");
+csp.insertDirective("font-src 'self'");
+csp.insertDirective("img-src 'self'");
+csp.insertDirective("connect-src 'self'");
+csp.insertDirective('frame-src https://challenges.cloudflare.com');
+csp.insertDirective("base-uri 'none'");
+csp.insertDirective("form-action 'none'");
+---
+
+<Base title="Before you vote" section="vote">
+  <div class="flex max-w-2xl flex-col gap-8">
+    <PageHeader title="Before you vote">
+      <p class="text-lg text-muted-foreground">
+        You can vote without an account. This check helps protect the rankings from automated
+        submissions.
+      </p>
+    </PageHeader>
+
+    <section
+      aria-label="Voting verification"
+      class="flex flex-col gap-4 rounded-lg border p-4 sm:p-6"
+    >
+      <p
+        id="admission-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        class="font-medium"
+      >
+        Preparing verification...
+      </p>
+      <div id="admission-challenge" class="grid min-h-36 content-center" aria-busy="true"></div>
+      <div>
+        <button id="admission-retry" type="button" hidden class={buttonVariants()}>
+          Retry
+        </button>
+      </div>
+    </section>
+
+    <p class={note}>After verification, your comparison opens automatically.</p>
+    <noscript>
+      <p class={note}>Enable JavaScript, then reload this page to complete verification.</p>
+    </noscript>
+  </div>
+  <script id="admission-data" type="application/json" is:inline>
+    "__BENCH_ADMISSION_DATA__"
+  </script>
+  <script type="module" src="/admission.js" is:inline></script>
+</Base>

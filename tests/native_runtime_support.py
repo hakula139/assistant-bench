@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_ORIGIN = 'https://app.example.com'
 RENDER_ORIGIN = 'https://render.example.com'
 NAMESPACE = 'native-runtime-test'
+SITEKEY = 'synthetic-</script><script>alert("key")</script>'
 
 _CONTROL = """
     from test_coverage import finish as coverage_finish
@@ -535,6 +536,14 @@ class NativeRuntime:
         (assets / 'index.html').write_text(
             '<html><head></head><body>Vote</body></html>'
         )
+        admission = assets / 'admission-shell'
+        admission.mkdir()
+        (admission / 'index.html').write_text(
+            '<!doctype html><html><head><title>Voting verification</title></head>'
+            '<body><main><h1>Before you vote</h1>'
+            '<script id="admission-data" type="application/json">'
+            '"__BENCH_ADMISSION_DATA__"</script></main></body></html>'
+        )
         name = f'runtime-test-{uuid4().hex}'
         manifest = tomllib.loads((ROOT / 'wrangler.toml').read_text())
         configuration = manifest['env']['staging']
@@ -566,7 +575,7 @@ class NativeRuntime:
             'SESSION_KEYS': key,
             'RENDER_KEYS': key,
             'NETWORK_KEYS': key,
-            'TURNSTILE_SITEKEY': 'synthetic-sitekey',
+            'TURNSTILE_SITEKEY': SITEKEY,
             'TURNSTILE_SECRET': 'synthetic-secret',
             'TEST_PROVIDER_ENDPOINT': endpoint,
         }

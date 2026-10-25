@@ -2,7 +2,6 @@
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from textwrap import dedent
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -62,9 +61,16 @@ INGRESS: ContextVar[Ingress] = ContextVar('arena_ingress')
 
 
 class BrowserApi:
-    def __init__(self, authentication: Authentication, voting: Voting) -> None:
+    def __init__(
+        self, authentication: Authentication, voting: Voting, admission_shell: str
+    ) -> None:
         self.authentication = authentication
         self.voting = voting
+
+        if admission_shell.count('"__BENCH_ADMISSION_DATA__"') != 1:
+            raise ValueError('The prepared admission document is invalid.')
+
+        self.admission_shell = admission_shell
 
     async def middleware(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -118,31 +124,12 @@ class BrowserApi:
         )
 
         payload = view.model_dump_json().replace('<', '\\u003c')
-        body = dedent(
-            f"""
-            <!doctype html>
-            <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width,initial-scale=1">
-              <title>Voting admission</title>
-            </head>
-            <body><main>
-              <h1>Voting admission</h1>
-              <p id="admission-status" role="status">Preparing admission...</p>
-              <div id="admission-challenge"></div>
-              <button id="admission-retry" hidden>Retry</button>
-              <button id="admission-continue" hidden>Continue</button>
-              <script id="admission-data" type="application/json">{payload}</script>
-              <script type="module" src="/admission.js"></script>
-            </main></body></html>
-            """
-        ).lstrip()
+        body = self.admission_shell.replace('"__BENCH_ADMISSION_DATA__"', payload)
         response = HTMLResponse(body)
         response.headers['Content-Security-Policy'] = (
-            "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; "
             "frame-src https://challenges.cloudflare.com; connect-src 'self'; "
-            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            "style-src 'self'; base-uri 'none'; form-action 'none'; "
+            "frame-ancestors 'none'; object-src 'none'"
         )
         response.headers['Set-Cookie'] = self.authentication.set_cookie(
             self.authentication.flow_cookie,

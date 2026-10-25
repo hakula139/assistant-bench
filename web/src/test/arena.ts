@@ -6,7 +6,7 @@ export const VOTE_FAMILY: FamilyView = {
   name: 'fixture',
   aspect: 'writing',
   display_name: 'Chinese',
-  defects: ['facts', 'punctuation', 'tone', 'formulaic', 'length'],
+  defects: ['scope', 'facts', 'clarity', 'tone', 'mechanics', 'formulaic', 'length'],
 };
 
 export function requestBody(init?: RequestInit): unknown {

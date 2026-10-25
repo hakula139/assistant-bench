@@ -63,6 +63,45 @@ async function cappedReport() {
 }
 
 describe('reportSchema', () => {
+  test.each(['unknown', 'punctuation'])(
+    'rejects the %s issue code in an aggregate',
+    async (defect) => {
+      const payload = await readFixture();
+      replaceField(payload, ['results', 'standings', 0, 'defects'], { [defect]: 1 });
+
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
+
+  test('roundtrips every writing issue count in the published order', async () => {
+    const payload = await readFixture();
+    const parsed = reportSchema.parse(JSON.parse(JSON.stringify(payload)));
+    if (parsed.results.scorer !== 'votes') {
+      throw new Error('Expected votes fixture');
+    }
+    const row = parsed.results.standings.find((standing) => standing.system === 'acme-mini');
+
+    expect(row?.defects).toEqual({
+      scope: 0,
+      facts: 3,
+      clarity: 0,
+      tone: 4,
+      mechanics: 4,
+      formulaic: 0,
+      length: 1,
+    });
+    expect(Object.keys(row?.defects ?? {})).toEqual([
+      'scope',
+      'facts',
+      'clarity',
+      'tone',
+      'mechanics',
+      'formulaic',
+      'length',
+    ]);
+    expect(reportSchema.parse(parsed)).toEqual(parsed);
+  });
+
   test.each([
     ['family', '../outside'],
     ['family', '/outside'],

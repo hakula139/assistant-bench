@@ -29,14 +29,14 @@ Shared fields:
 
 Vote-only fields:
 
-| Field           | Required      | Meaning                                                                                                                             |
-| --------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `reference`     | yes           | One of `systems`, anchored at 1,000 when the round ranks it                                                                         |
-| `public_voting` | no            | Opt a rendered case family into [approved public publication](../design/arena.md#publication-and-evidence). Defaults to `false`     |
-| `render`        | task families | `text` (default) or sandboxed `html` for cases. Tasks require `diff`, showing each solution against `environment/app/`              |
-| `defects`       | no            | At most five issue IDs, in vote-page key order. Defaults to empty, hiding Issues buttons                                            |
-| `language`      | no            | `zh` or `en` for a case family's language gate                                                                                      |
-| `[gates]`       | no            | A case family's `min_chars`, `max_chars`, and `script = "hans"` settings, defined in [Writing](../design/families/writing.md#gates) |
+| Field           | Required      | Meaning                                                                                                                                |
+| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `reference`     | yes           | One of `systems`, anchored at 1,000 when the round ranks it                                                                            |
+| `public_voting` | no            | Opt a rendered case family into [approved public publication](../design/arena.md#publication-and-evidence). Defaults to `false`        |
+| `render`        | task families | `text` (default) or sandboxed `html` for cases. Tasks require `diff`, showing each solution against `environment/app/`                 |
+| `defects`       | no            | Unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. See [Voting](voting.md#casting-a-vote) for shortcuts |
+| `language`      | no            | `zh` or `en` for a case family's language gate                                                                                         |
+| `[gates]`       | no            | A case family's `min_chars`, `max_chars`, and `script = "hans"` settings, defined in [Writing](../design/families/writing.md#gates)    |
 
 Case families use `votes`. Public preparation supports rendered case families. Authored task families retain collection and tests-only regrading. [TypeScript](../conventions/typescript.md#reports) covers adding defect IDs or languages.
 

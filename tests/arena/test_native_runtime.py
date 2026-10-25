@@ -20,7 +20,7 @@ from assistant_bench_arena.runtime_models import CredentialClaims, KeyRing, KeyV
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import publish_release
-from native_runtime_support import APP_ORIGIN, NAMESPACE, ROOT, NativeRuntime
+from native_runtime_support import APP_ORIGIN, NAMESPACE, ROOT, SITEKEY, NativeRuntime
 
 
 def body(response: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -228,8 +228,40 @@ class TestNativeRuntime:
 
                 document = await transport.http('/admit?family=writing')
                 assert document['status'] == 200
+                assert '<h1>Before you vote</h1>' in str(document['body'])
+                assert '__BENCH_ADMISSION_DATA__' not in str(document['body'])
+                assert '<script>alert' not in str(document['body'])
+                assert '\\u003c/script>' in str(document['body'])
+                headers = document['headers']
+                assert isinstance(headers, dict)
+                assert headers['content-type'] == 'text/html; charset=utf-8'
+                assert headers['cache-control'] == 'no-store'
+                assert headers['referrer-policy'] == 'no-referrer'
+                policy = str(headers['content-security-policy'])
+                assert "frame-ancestors 'none'" in policy
+                assert 'frame-src https://challenges.cloudflare.com' in policy
+                assert "connect-src 'self'" in policy
+                assert "object-src 'none'" in policy
+                assert 'script-src' not in policy
+                assert 'default-src' not in policy
                 flow_cookie = cookie(document)
                 command = admission(document)
+                match = re.search(
+                    r'<script id="admission-data" '
+                    r'type="application/json">(.*?)</script>',
+                    str(document['body']),
+                )
+                assert match is not None
+                assert json.loads(match[1]) == {
+                    'command_id': command,
+                    'action': 'bench_admit',
+                    'sitekey': SITEKEY,
+                    'family': 'writing',
+                }
+                unknown = await transport.http('/admit?family=unknown')
+                assert unknown['status'] == 404
+                assert body(unknown) == {'error': 'not_found'}
+                assert 'set-cookie' not in str(unknown['headers'])
                 request: dict[str, JsonValue] = {
                     'command_id': command,
                     'proof': 'admit-proof',
@@ -299,6 +331,8 @@ class TestNativeRuntime:
 
                 renewal = await transport.http('/admit', cookie=credential_cookie)
                 renew_command = admission(renewal)
+                assert '"action":"bench_renew"' in str(renewal['body'])
+                assert '"family":null' in str(renewal['body'])
                 renewed = await transport.http(
                     '/api/admission',
                     body={'command_id': renew_command, 'proof': 'renew-proof'},

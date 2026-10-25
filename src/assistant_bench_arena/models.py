@@ -39,7 +39,7 @@ type Choice = Literal['a', 'b', 'tie', 'both_bad']
 
 type Defect = Literal[
     'facts',
-    'punctuation',
+    'mechanics',
     'tone',
     'formulaic',
     'length',

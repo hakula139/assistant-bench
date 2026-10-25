@@ -52,7 +52,6 @@ const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
 
 const UNTAGGED: TaggedDefects = { a: [], b: [] };
 
-/** Five shortcut keys per pane match the family's maximum defect count. */
 const DEFECT_KEYS: Record<keyof TaggedDefects, readonly string[]> = {
   a: ['1', '2', '3', '4', '5'],
   b: ['6', '7', '8', '9', '0'],
@@ -61,7 +60,11 @@ const DEFECT_KEYS: Record<keyof TaggedDefects, readonly string[]> = {
 function keyedDefects(defects: readonly Defect[]) {
   return new Map(
     SIDES.flatMap(({ key }) =>
-      defects.map((defect, index) => [DEFECT_KEYS[key][index], { key, defect }] as const),
+      DEFECT_KEYS[key].flatMap((shortcut, index) => {
+        const defect = defects.at(index);
+
+        return defect === undefined ? [] : [[shortcut, { key, defect }] as const];
+      }),
     ),
   );
 }
@@ -71,7 +74,7 @@ const notFound = (reason: unknown) => reason instanceof ApiError && reason.statu
 function message(error: unknown): ReactNode {
   return error instanceof ApiError || error instanceof NetworkError
     ? error.message
-    : 'The voting service is unavailable. Retry to check the same request.';
+    : 'The voting service is unavailable. Try again.';
 }
 
 function ErrorAlert({ error }: { error: ReactNode }) {
@@ -530,7 +533,7 @@ export function VoteApp() {
           <a
             href={`/admit${currentFamily === null ? '' : `?${new URLSearchParams({ family: currentFamily })}`}`}
           >
-            Continue through admission
+            Continue to verification
           </a>
         </Button>
       ) : (
@@ -555,7 +558,7 @@ export function VoteApp() {
   if (checking) {
     return (
       <Screen title="Connecting to voting">
-        <p role="status">Checking admission...</p>
+        <p role="status">Checking your browser...</p>
       </Screen>
     );
   }

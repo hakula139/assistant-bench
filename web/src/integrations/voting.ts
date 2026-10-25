@@ -8,6 +8,7 @@ export default function voting(): AstroIntegration {
     hooks: {
       'astro:config:setup': ({ injectRoute, updateConfig }) => {
         injectRoute({ pattern: '/vote', entrypoint: './src/vote/vote.astro' });
+        injectRoute({ pattern: '/admission-shell', entrypoint: './src/admission/document.astro' });
         updateConfig({
           vite: {
             plugins: [

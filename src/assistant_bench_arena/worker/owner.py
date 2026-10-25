@@ -83,22 +83,7 @@ class Owner:
 
     async def browser(self) -> FastAPI:
         if self.http is None:
-            from workers import Request
-
-            result = await self.bindings.ASSETS.fetch(
-                Request(
-                    f'{self.settings.profile.app_origin}/arena-families.json'
-                ).js_object
-            )
-
-            if result.status != 200:
-                raise ValueError('The prepared family catalog is unavailable.')
-
-            body = await result.text()
-
-            if len(body.encode()) > 1_048_576:
-                raise ValueError('The prepared family catalog exceeds its limit.')
-
+            body = await self._asset('/arena-families.json')
             catalog = TypeAdapter(list[FamilyView]).validate_json(body)
             families = {family.name: family for family in catalog}
 
@@ -115,10 +100,28 @@ class Owner:
                         self.pairs,
                         self.renders,
                     ),
+                    await self._asset('/admission-shell/'),
                 )
             )
 
         return self.http
+
+    async def _asset(self, path: str) -> str:
+        from workers import Request
+
+        result = await self.bindings.ASSETS.fetch(
+            Request(f'{self.settings.profile.app_origin}{path}').js_object
+        )
+
+        if result.status != 200:
+            raise ValueError(f'The prepared asset `{path}` is unavailable.')
+
+        body = await result.text()
+
+        if len(body.encode()) > 1_048_576:
+            raise ValueError(f'The prepared asset `{path}` exceeds its limit.')
+
+        return body
 
 
 _owner: Owner | None = None

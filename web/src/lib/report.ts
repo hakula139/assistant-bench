@@ -4,7 +4,7 @@ import { z } from 'astro/zod';
 
 export const defects = [
   'facts',
-  'punctuation',
+  'mechanics',
   'tone',
   'formulaic',
   'length',

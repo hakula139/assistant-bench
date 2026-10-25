@@ -66,9 +66,11 @@ REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
 
 PROSE_DEFECTS: tuple[Defect, ...] = (
+    'scope',
     'facts',
-    'punctuation',
+    'clarity',
     'tone',
+    'mechanics',
     'formulaic',
     'length',
 )
