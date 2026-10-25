@@ -1,4 +1,4 @@
-"""Typed private management operations for the canonical voting owner."""
+"""Private management request contracts and bounded native Service results."""
 
 from typing import Annotated, Literal
 

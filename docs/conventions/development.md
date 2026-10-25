@@ -15,7 +15,9 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 
 Both shells export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
 
-The root Python project and `arena/` share one uv workspace and universal `uv.lock`. The arena distribution contains shared voting contracts, the ledger and native services under `assistant_bench_arena/worker/`. The root depends on its shared contracts. `uv sync --package assistant-bench-arena --no-dev` selects only that member's runtime dependencies. Both projects declare Worker tooling for their development commands. The native tooling maintains `arena/pylock.toml` for the Worker target. Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
+The root Python project and `arena/` share one uv workspace and universal `uv.lock`. The arena distribution contains shared voting contracts, the ledger and native services under `assistant_bench_arena/worker/`. The root depends on its shared contracts. `uv sync --package assistant-bench-arena --no-dev` selects only that member's runtime dependencies. Both projects declare Worker tooling for their development commands. The native tooling maintains the PEP 751 `arena/pylock.toml` for the Worker target.
+
+Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
 
 Open `assistant-bench.code-workspace` to check both Python projects in a compatible editor, using the root `.venv`. The host project targets Python 3.14. The coding family's `pyrightconfig.json` inherits its strict diagnostics and targets Python 3.13 for standalone task scripts.
 

@@ -51,6 +51,8 @@ src/assistant_bench/
 
 ```text
 arena/src/assistant_bench_arena/
+├── admission.py              # Purpose-bound signatures and network identities
+├── api_models.py             # Browser commands and safe acknowledgments
 ├── investigation.py          # Private receipt queries and expiring network associations
 ├── investigation_models.py   # Private receipt filters, results and sampling provenance
 ├── ledger.py                 # Atomic commands and authenticated command recovery
@@ -59,14 +61,18 @@ arena/src/assistant_bench_arena/
 ├── management_domain.py      # Private management command execution with a fixed principal
 ├── management_models.py      # Management requests, validation and bounded Service results
 ├── models.py                 # Shared record policy and blinded browser views
+├── policy.py                 # Public admission budgets
 ├── read_models.py            # Private scheduling projections
 ├── reads.py                  # Bounded inventory, scheduling, and rendered content reads
 ├── releases.py               # Shared release identities and persisted-fact validation
+├── runtime_models.py         # Signed browser claims and deployment profiles
+├── scheduler.py              # Balanced and adaptive pair draws
 ├── schema.py                 # Current profile inspection and atomic initialization marker
 ├── schema.sql                # Current schema, created with its profile in one native batch
 ├── serialization.py          # Canonical JSON and content identities
 ├── snapshots.py              # Numerical policy and approved presentation contracts
 ├── transport.py              # Prepared statements and exact database rejection mapping
+├── voting.py                 # Authenticated pair acquisition and blinded views
 └── worker/
     ├── api.py                # Native request, response and ASGI adapters
     ├── authentication.py     # Cookie ownership, admission and network budgets
