@@ -27,7 +27,7 @@ from harbor.trial.queue import TrialQueue
 from openai.types.responses import Response
 
 from assistant_bench import jobs
-from assistant_bench.catalog import System
+from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -478,6 +478,7 @@ class TestJob:
             )
 
         assert not queue.retries(type(error.value).__name__)
+        assert not queue.retries('MessageCompletionError')
         assert queue.retries('APIConnectionError')
         assert queue.retries('InternalServerError')
         assert not queue.retries('AgentTimeoutError')
@@ -822,60 +823,76 @@ class TestCheckTasks:
 
 
 class TestAuthorVendors:
-    def test_resolves_an_author_outside_the_participating_systems(
-        self, families_dir: Path
+    @pytest.mark.parametrize(
+        ('author', 'vendor', 'systems'),
+        [
+            ('retired-author', 'acme', {}),
+            ('writer', 'other', {'writer': make_system(name='writer', vendor='other')}),
+        ],
+        ids=['catalog-vendor-with-retired-label', 'explicit-bare-vendor'],
+    )
+    def test_resolves_provenance_without_requiring_a_runnable_author(
+        self,
+        families_dir: Path,
+        export: NixosConfigExport,
+        author: str,
+        vendor: str,
+        systems: dict[str, System],
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         task = case_task(family, 'echo')
-        break_setting(task, ('metadata', 'author'), 'writer')
-        systems = {
-            'acme-large': make_system(),
-            'writer': make_system(name='writer', vendor='other'),
-        }
+        break_setting(task, ('metadata', 'author'), author)
+        break_setting(task, ('metadata', 'author_vendor'), vendor)
 
-        vendors = jobs.author_vendors(family, [task], systems)
+        vendors = jobs.author_vendors(family, [task], systems, export)
 
-        assert vendors == {'echo': 'other'}
+        assert vendors == {'echo': vendor}
 
     @pytest.mark.parametrize(
-        ('author', 'vendor', 'message'),
+        ('field', 'value', 'message'),
         [
-            (None, 'acme', 'set `[metadata] author` to a system name.'),
-            ('', 'acme', 'set `[metadata] author` to a system name.'),
-            (42, 'acme', 'set `[metadata] author` to a system name.'),
-            ('unknown', 'acme', 'author `unknown` is not defined in `systems.toml`.'),
+            ('author', None, '`author`: Field required'),
+            ('author', '', '`author`: String should have at least 1 character'),
+            ('author', 42, '`author`: Input should be a valid string'),
+            ('author_vendor', None, '`author_vendor`: Field required'),
             (
-                'acme-large',
-                None,
-                'author `acme-large` needs vendor metadata in the model catalog '
-                'or its `route` table in `systems.toml`.',
+                'author_vendor',
+                '',
+                '`author_vendor`: String should have at least 1 character',
+            ),
+            ('author_vendor', 42, '`author_vendor`: Input should be a valid string'),
+            (
+                'author_vendor',
+                'unknown',
+                'author vendor `unknown` is not one of `acme`, `other`.',
             ),
         ],
         ids=[
             'missing-author',
             'empty-author',
             'non-string-author',
-            'unknown-author',
-            'unowned-author',
+            'missing-vendor',
+            'empty-vendor',
+            'non-string-vendor',
+            'unknown-vendor',
         ],
     )
     def test_names_invalid_author_metadata(
         self,
         families_dir: Path,
-        author: str | int | None,
-        vendor: str | None,
+        export: NixosConfigExport,
+        field: str,
+        value: str | int | None,
         message: str,
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         task = case_task(family, 'echo')
-        break_setting(task, ('metadata', 'author'), author)
+        break_setting(task, ('metadata', field), value)
 
         with pytest.raises(ValueError) as error:
-            jobs.author_vendors(
-                family, [task], {'acme-large': make_system(vendor=vendor)}
-            )
+            jobs.author_vendors(family, [task], {}, export)
 
-        assert str(error.value) == (
+        assert str(error.value).startswith(
             f'Family `f` has authors to fix:\n`tasks/echo/task.toml`: {message}'
         )
 
@@ -1183,6 +1200,7 @@ class TestCollect:
             'finish_reason': 'stop',
             'input_tokens': 1_000,
             'cached_tokens': 600,
+            'cache_write_tokens': None,
             'output_tokens': 500,
             'reasoning_tokens': 100,
             'cost_usd': pytest.approx((400 * 2.0 + 600 * 0.2 + 500 * 10.0) / 1e6),

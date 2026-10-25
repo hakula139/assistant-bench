@@ -2,13 +2,16 @@
 
 import subprocess
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 
 from assistant_bench.catalog import (
     SYSTEMS_FILE,
     NixosConfigExport,
     System,
-    parse_systems,
+    SystemIdentity,
+    parse_system_configs,
+    resolve_identity,
 )
 from assistant_bench.families import family_names, load_family
 from assistant_bench.generation import parse_generation
@@ -35,7 +38,7 @@ def current_systems(systems: dict[str, System]) -> dict[str, System]:
     return resolved
 
 
-def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
+def systems_at(revision: str, selected: set[str]) -> dict[str, SystemIdentity]:
     """Resolve the revision's `systems.toml` against the revision's own export.
 
     Raises
@@ -85,15 +88,26 @@ def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
 
     export = NixosConfigExport.model_validate_json(Path(export_path).read_bytes())
 
-    resolved = parse_systems(export, systems, generation)
+    configs = parse_system_configs(systems)
+    missing = {
+        name for _, names in selections.values() for name in names
+    } - configs.keys()
+    if missing:
+        raise ValueError(
+            f'Revision `{revision}` does not define systems {code(sorted(missing))}.'
+        )
     return {
-        f'{family}/{name}': resolved[name].model_copy(update={'harness': harness})
+        f'{family}/{name}': resolve_identity(
+            name, configs[name], export, generation
+        ).model_copy(update={'harness': harness})
         for family, (harness, names) in selections.items()
         for name in names
     }
 
 
-def changed_fingerprints(base: dict[str, System], head: dict[str, System]) -> list[str]:
+def changed_fingerprints(
+    base: Mapping[str, SystemIdentity], head: Mapping[str, SystemIdentity]
+) -> list[str]:
     """Return the names of systems in both whose fingerprints differ."""
     return [
         name

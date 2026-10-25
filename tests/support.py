@@ -42,7 +42,12 @@ from harbor.trial.regrade import local_task_name
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import TaskTestsSettings
-from assistant_bench.harnesses.endpoint import BASE_URL_VAR, HEADERS_VAR, KEY_FILE_VAR
+from assistant_bench.harnesses.endpoint import (
+    ANTHROPIC_BASE_URL_VAR,
+    BASE_URL_VAR,
+    HEADERS_VAR,
+    KEY_FILE_VAR,
+)
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
 from assistant_bench.outputs import Output
@@ -109,6 +114,7 @@ def write_task_family(
     *task_ids: str,
     name: str = 'f',
     systems: tuple[str, ...] = (),
+    author_vendor: str = 'acme',
     defects: tuple[Defect, ...] = CODE_DEFECTS,
 ) -> None:
     """Write a task family in the `smoke` category, copying the echo task per ID.
@@ -148,7 +154,9 @@ def write_task_family(
         if systems:
             config.write_text(
                 config.read_text().replace(
-                    '[metadata]', f'[metadata]\nauthor = "{systems[0]}"'
+                    '[metadata]',
+                    f'[metadata]\nauthor = "{systems[0]}"\n'
+                    f'author_vendor = "{author_vendor}"',
                 )
             )
 
@@ -166,7 +174,7 @@ def make_system(**overrides: Any) -> System:
         'context_window': 8192,
         'effort': 'medium',
         'prompt': None,
-        'price': Price(input=2.0, output=10.0, cache_read=0.2),
+        'price': Price(input=2.0, output=10.0, cache_read=0.2, cache_write=2.5),
     }
     return System(**(fields | overrides))
 
@@ -429,6 +437,88 @@ def terminus_completion(
     return completion(json.dumps(reply))
 
 
+def message(
+    text: str = 'Hello there.',
+    *,
+    message_id: str = 'msg-1',
+    stop_reason: str = 'end_turn',
+) -> dict[str, Any]:
+    return {
+        'id': message_id,
+        'type': 'message',
+        'role': 'assistant',
+        'model': 'large-2026',
+        'content': [
+            {
+                'type': 'thinking',
+                'thinking': 'Private reasoning.',
+                'signature': f'signed-{message_id}',
+            },
+            {'type': 'text', 'text': text},
+        ],
+        'stop_reason': stop_reason,
+        'stop_sequence': None,
+        'usage': {
+            'input_tokens': 20,
+            'cache_read_input_tokens': 100,
+            'cache_creation_input_tokens': 10,
+            'output_tokens': 40,
+        },
+    }
+
+
+def message_stream(payload: dict[str, Any]) -> list[bytes]:
+    """Encode native events, including thinking and signature deltas, for the SDK."""
+    start: dict[str, Any] = payload | {'content': [], 'stop_reason': None}
+    if payload.get('usage') is not None:
+        start['usage'] = payload['usage'] | {'output_tokens': 0}
+    events: list[dict[str, Any]] = [{'type': 'message_start', 'message': start}]
+    for index, block in enumerate(payload['content']):
+        kind = block['type']
+        initial = (
+            {'type': 'text', 'text': ''}
+            if kind == 'text'
+            else {'type': 'thinking', 'thinking': '', 'signature': ''}
+            if kind == 'thinking'
+            else block
+        )
+        events.append(
+            {'type': 'content_block_start', 'index': index, 'content_block': initial}
+        )
+        deltas = (
+            [{'type': 'text_delta', 'text': block['text']}]
+            if kind == 'text'
+            else [
+                {'type': 'thinking_delta', 'thinking': block['thinking']},
+                {'type': 'signature_delta', 'signature': block['signature']},
+            ]
+            if kind == 'thinking'
+            else []
+        )
+        events.extend(
+            {'type': 'content_block_delta', 'index': index, 'delta': delta}
+            for delta in deltas
+        )
+        events.append({'type': 'content_block_stop', 'index': index})
+    events.extend(
+        [
+            {
+                'type': 'message_delta',
+                'delta': {
+                    'stop_reason': payload['stop_reason'],
+                    'stop_sequence': payload['stop_sequence'],
+                },
+                'usage': payload.get('usage') or {},
+            },
+            {'type': 'message_stop'},
+        ]
+    )
+    return [
+        f'event: {event["type"]}\ndata: {json.dumps(event)}\n\n'.encode()
+        for event in events
+    ]
+
+
 @dataclass
 class Request:
     path: str
@@ -448,6 +538,11 @@ class StubEndpoint:
     response_headers: dict[str, str] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=completion)
     responses: list[dict[str, Any]] = field(default_factory=list)
+    stream: list[bytes] | None = None
+    streams: list[list[bytes]] = field(default_factory=list)
+    stream_gate: threading.Event | None = None
+    stream_gate_after: int = 0
+    stream_waiting: threading.Event = field(default_factory=threading.Event)
     request_received: threading.Event = field(default_factory=threading.Event)
     response_gate: threading.Event | None = None
     response_gate_after: int = 0
@@ -457,6 +552,7 @@ class StubEndpoint:
     def env(self) -> dict[str, str]:
         return {
             BASE_URL_VAR: f'{self.url}/v1',
+            ANTHROPIC_BASE_URL_VAR: f'{self.url}/anthropic',
             KEY_FILE_VAR: str(self.key_file),
             HEADERS_VAR: '{"x-trace": "bench"}',
         }
@@ -495,16 +591,28 @@ def serve_stub(
                 stub.response_waiting.set()
                 stub.response_gate.wait()
             reply = stub.responses.pop(0) if stub.responses else stub.response
-            payload = json.dumps(reply).encode()
+            stream = stub.streams.pop(0) if stub.streams else stub.stream
+            payload = (
+                b''.join(stream) if stream is not None else json.dumps(reply).encode()
+            )
             self.send_response(stub.status)
-            self.send_header('Content-Type', 'application/json')
+            self.send_header(
+                'Content-Type',
+                'text/event-stream' if stream is not None else 'application/json',
+            )
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
+            self.send_header('request-id', 'req-1')
             for name, value in stub.response_headers.items():
                 self.send_header(name, value)
             with suppress(BrokenPipeError, ConnectionResetError):
                 self.end_headers()
-                self.wfile.write(payload)
+                for index, chunk in enumerate(stream or [payload]):
+                    if stub.stream_gate is not None and index == stub.stream_gate_after:
+                        stub.stream_waiting.set()
+                        stub.stream_gate.wait()
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
 
         def log_message(self, format: str, *args: Any) -> None:
             pass
@@ -529,6 +637,8 @@ def serve_stub(
     finally:
         if stub.response_gate is not None:
             stub.response_gate.set()
+        if stub.stream_gate is not None:
+            stub.stream_gate.set()
         server.shutdown()
         thread.join()
         server.server_close()

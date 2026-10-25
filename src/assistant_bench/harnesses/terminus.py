@@ -5,6 +5,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, ClassVar, Self, override
 
+from anthropic import AsyncAnthropic
 from harbor.agents.terminus_2.terminus_2 import Terminus2, Terminus2Options
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
@@ -16,7 +17,6 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
-from openai.types.completion_usage import CompletionUsage
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from tenacity import retry_if_not_exception_type
 
@@ -24,12 +24,20 @@ from assistant_bench.catalog import load_export
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.messages import (
+    MessageCompletionError,
+    MessagesChat,
+    MessagesLLM,
+    attach_content,
+)
+from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import (
     ResponseCompletionError,
     ResponsesChat,
     ResponsesLLM,
     attach_items,
 )
+from assistant_bench.harnesses.usage import measured_usage
 
 
 _RESPONSE_METADATA = TypeAdapter(
@@ -37,7 +45,7 @@ _RESPONSE_METADATA = TypeAdapter(
 )
 
 
-class TerminusOptions(Labels, Terminus2Options):
+class TerminusOptions(Labels, ApiOptions, Terminus2Options):
     pass
 
 
@@ -97,26 +105,23 @@ class _ConfiguredLiteLLM(LiteLLM):
             return
         if response.get('usage') is None:
             return
-        try:
-            usage = CompletionUsage.model_validate(response['usage'])
-            reported = UsageInfo(
-                prompt_tokens=usage.prompt_tokens,
-                cache_tokens=(
-                    usage.prompt_tokens_details.cached_tokens or 0
-                    if usage.prompt_tokens_details is not None
-                    else 0
-                ),
-                completion_tokens=usage.completion_tokens,
-                cost_usd=0,
-            )
-        except ValidationError:
-            raise ValueError('The provider returned invalid token usage.') from None
+        result['reported_usage'] = response['usage']
+        usage = measured_usage('openai-chat-completions', response['usage'])
+        result['usage_invalid'] = usage is None
+        if usage is not None:
+            result.update(usage.details)
 
-        result.update(
-            input_tokens=reported.prompt_tokens,
-            cache_tokens=reported.cache_tokens,
-            output_tokens=reported.completion_tokens,
+    @override
+    def _extract_usage_info(self, response: Any) -> UsageInfo | None:
+        """Use original SDK counters before LiteLLM fills absent values."""
+        usage = (
+            measured_usage(
+                'openai-chat-completions', self.results[-1].get('reported_usage')
+            )
+            if self.results
+            else None
         )
+        return usage.harbor if usage is not None else None
 
 
 class Terminus(Terminus2):
@@ -127,12 +132,14 @@ class Terminus(Terminus2):
     """
 
     options_model: ClassVar[type[Terminus2Options]] = TerminusOptions
-    _endpoint_client: AsyncOpenAI
+    _endpoint_client: AsyncOpenAI | AsyncAnthropic
     _responses_summaries: dict[str, LLMResponse]
 
     @override
     def version(self) -> str:
-        return generation_version('terminus-2')
+        assert isinstance(self.options, TerminusOptions)
+        api = 'openai-responses' if self.options.use_responses_api else self.options.api
+        return generation_version('terminus-2', api)
 
     @classmethod
     @override
@@ -142,7 +149,7 @@ class Terminus(Terminus2):
         env: Mapping[str, str] | None = None,
     ) -> None:
         super().preflight(kwargs, env)
-        preflight(env)
+        preflight(env, (kwargs or {}).get('api', 'openai-chat-completions'))
 
     @override
     def _init_llm(
@@ -164,7 +171,20 @@ class Terminus(Terminus2):
         if model_info is None:
             raise ValueError('Terminus requires resolved model capacities.')
 
-        endpoint = Endpoint.read(self._get_env)
+        assert isinstance(self.options, TerminusOptions)
+        endpoint = Endpoint.read(self._get_env, self.options.api)
+        if self.options.api == 'anthropic-messages':
+            assert self.options.thinking_mode is not None
+            self._endpoint_client = endpoint.messages_client()
+            return MessagesLLM(
+                client=self._endpoint_client,
+                model_name=model_name,
+                context_limit=model_info['max_input_tokens'],
+                output_limit=model_info['max_output_tokens'],
+                effort=reasoning_effort,
+                thinking_mode=self.options.thinking_mode,
+                logs_dir=self.logs_dir,
+            )
         self._endpoint_client = endpoint.client()
         if use_responses_api:
             assert isinstance(self.options, TerminusOptions)
@@ -203,15 +223,18 @@ class Terminus(Terminus2):
 
     _query_llm = Terminus2._query_llm.retry_with(
         retry=Terminus2._query_llm.retry.retry
-        & retry_if_not_exception_type(ResponseCompletionError)
+        & retry_if_not_exception_type((ResponseCompletionError, MessageCompletionError))
     )
 
     @override
     async def _run_agent_loop(
         self, initial_prompt: str, chat: Chat, original_instruction: str = ''
     ) -> None:
-        if isinstance(self._llm, ResponsesLLM):
-            responses_chat = ResponsesChat(
+        if isinstance(self._llm, (ResponsesLLM, MessagesLLM)):
+            chat_type = (
+                MessagesChat if isinstance(self._llm, MessagesLLM) else ResponsesChat
+            )
+            responses_chat = chat_type(
                 self._llm, interleaved_thinking=self.options.interleaved_thinking
             )
             responses_chat.messages.extend(chat.messages)
@@ -232,8 +255,14 @@ class Terminus(Terminus2):
         subagent_name_for_logging: str = 'subagent',
     ) -> tuple[LLMResponse, SubagentTrajectoryRef]:
         """Retain SDK items when Harbor builds the answers branch from its summary."""
-        if isinstance(self._llm, ResponsesLLM) and filename_suffix == 'answers':
-            attach_items(message_history[-1], self._responses_summaries['summary'])
+        if (
+            isinstance(self._llm, (ResponsesLLM, MessagesLLM))
+            and filename_suffix == 'answers'
+        ):
+            attach = (
+                attach_content if isinstance(self._llm, MessagesLLM) else attach_items
+            )
+            attach(message_history[-1], self._responses_summaries['summary'])
         response, trajectory = await super()._run_subagent(
             prompt,
             message_history,
@@ -244,7 +273,7 @@ class Terminus(Terminus2):
             summary_text,
             subagent_name_for_logging,
         )
-        if isinstance(self._llm, ResponsesLLM):
+        if isinstance(self._llm, (ResponsesLLM, MessagesLLM)):
             self._responses_summaries[filename_suffix] = response
         return response, trajectory
 
@@ -255,8 +284,16 @@ class Terminus(Terminus2):
         self._responses_summaries = {}
         try:
             result = await super()._summarize(chat, original_instruction, session)
-            if isinstance(self._llm, ResponsesLLM) and result[1] is not None:
-                attach_items(chat.messages[-1], self._responses_summaries['questions'])
+            if (
+                isinstance(self._llm, (ResponsesLLM, MessagesLLM))
+                and result[1] is not None
+            ):
+                attach = (
+                    attach_content
+                    if isinstance(self._llm, MessagesLLM)
+                    else attach_items
+                )
+                attach(chat.messages[-1], self._responses_summaries['questions'])
             return result
         finally:
             self._responses_summaries = {}
@@ -279,7 +316,13 @@ class Terminus(Terminus2):
                 'nixos_config_rev': nixos_config_rev,
                 'harbor_version': harbor_version,
             }
-            if isinstance(self._llm, (ResponsesLLM, _ConfiguredLiteLLM)):
+            if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
+                if isinstance(self._llm, MessagesLLM):
+                    context.metadata['message_attempts'] = self._llm.attempts
+                context.metadata['cache_write_unpriced'] = any(
+                    result.get('cache_write_unpriced', False)
+                    for result in self._llm.results
+                )
                 context.metadata['responses'] = self._llm.results
                 results = self._llm.results
                 if results and all('input_tokens' in result for result in results):
@@ -291,6 +334,9 @@ class Terminus(Terminus2):
                     )
                     context.n_output_tokens = sum(
                         result['output_tokens'] for result in results
+                    )
+                    context.metadata['cache_write_tokens'] = sum(
+                        result['cache_write_tokens'] for result in results
                     )
                 else:
                     context.n_input_tokens = None

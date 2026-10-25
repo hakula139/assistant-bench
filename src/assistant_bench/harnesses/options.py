@@ -1,17 +1,38 @@
 """The kwargs each harness builds from its resolved system."""
 
-from typing import Any
+from typing import Any, Self
 
-from assistant_bench.catalog import System
+from pydantic import BaseModel, model_validator
+
+from assistant_bench.catalog import Api, System, ThinkingMode
+
+
+class ApiOptions(BaseModel):
+    api: Api = 'openai-chat-completions'
+    thinking_mode: ThinkingMode | None = None
+
+    @model_validator(mode='after')
+    def _check_thinking(self) -> Self:
+        if self.api == 'anthropic-messages' and self.thinking_mode is None:
+            raise ValueError('Native Messages requires a resolved thinking mode.')
+        return self
 
 
 def generate(system: System) -> dict[str, Any]:
-    return _labels(system) | {
-        'api': system.api,
-        'effort': system.effort,
-        'system_prompt': system.prompt,
-        'max_output_tokens': system.max_output_tokens,
-    }
+    return (
+        _labels(system)
+        | {
+            'api': system.api,
+            'effort': system.effort,
+            'system_prompt': system.prompt,
+            'max_output_tokens': system.max_output_tokens,
+        }
+        | (
+            {'thinking_mode': system.thinking_mode}
+            if system.api == 'anthropic-messages'
+            else {}
+        )
+    )
 
 
 def terminus(system: System) -> dict[str, Any]:
@@ -23,6 +44,8 @@ def terminus(system: System) -> dict[str, Any]:
         },
         'record_terminal_session': False,
     }
+    if system.api == 'anthropic-messages':
+        values |= {'api': system.api, 'thinking_mode': system.thinking_mode}
 
     if system.api == 'openai-chat-completions':
         values['llm_call_kwargs'] = {'max_completion_tokens': system.max_output_tokens}

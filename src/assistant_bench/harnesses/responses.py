@@ -14,10 +14,11 @@ from harbor.llms.base import (
     OutputLengthExceededError,
 )
 from harbor.llms.chat import Chat
-from harbor.models.metric import UsageInfo
 from openai import APIError, AsyncOpenAI, BadRequestError
 from openai.types.responses import Response, ResponseInputParam
 from pydantic import TypeAdapter
+
+from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
 
 
 ITEMS_KEY = 'response_items'
@@ -30,8 +31,14 @@ class ResponseResult:
     request_id: str | None
 
     @property
+    def usage(self) -> MeasuredUsage | None:
+        return measured_usage('openai-responses', getattr(self.response, 'usage', None))
+
+    @property
     def details(self) -> dict[str, Any]:
         response = self.response
+        usage = self.usage
+        reported = usage_payload(getattr(response, 'usage', None))
         refusals = [
             content.refusal
             for item in response.output
@@ -54,9 +61,10 @@ class ResponseResult:
             else incomplete or response.status or 'unknown'
         )
         return {
-            'reasoning_tokens': response.usage.output_tokens_details.reasoning_tokens
-            if response.usage
-            else None,
+            **(usage.details if usage else {}),
+            'reasoning_tokens': usage.reasoning_tokens if usage else None,
+            'reported_usage': reported,
+            'usage_invalid': reported is not None and usage is None,
             'finish_reason': finish,
             'response_status': response.status,
             'incomplete_reason': incomplete,
@@ -243,13 +251,9 @@ class ResponsesLLM(BaseLLM):
 
         result = ResponseResult(raw.parse(), raw.headers.get('x-request-id'))
         details = result.details | {'latency_sec': round(time.monotonic() - started, 3)}
-        usage = result.response.usage
+        usage = result.usage
         if usage is not None:
-            details |= {
-                'input_tokens': usage.input_tokens,
-                'cache_tokens': usage.input_tokens_details.cached_tokens,
-                'output_tokens': usage.output_tokens,
-            }
+            details |= usage.details
         self.results.append(details)
         artifact = self.logs_dir / f'response-{len(self.results)}.json'
         artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -259,13 +263,6 @@ class ResponsesLLM(BaseLLM):
             content=result.response.output_text,
             model_name=result.response.model,
             response_id=result.response.id,
-            usage=UsageInfo(
-                prompt_tokens=usage.input_tokens,
-                completion_tokens=usage.output_tokens,
-                cache_tokens=usage.input_tokens_details.cached_tokens,
-                cost_usd=0,
-            )
-            if usage
-            else None,
+            usage=usage.harbor if usage else None,
             extra=details | {ITEMS_KEY: result.items},
         )

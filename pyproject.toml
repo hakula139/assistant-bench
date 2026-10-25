@@ -12,8 +12,10 @@ bench = "assistant_bench.cli:app"
 
 [dependency-groups]
 bench = [
+  "anthropic>=2.3.0",
   "harbor==0.24.0",
   "httpx>=0.28.1",
+  "httpx2>=2.16.0",
   "markdown-it-py>=4.2.0",
   "numpy>=2.5.4",
   "openai>=2.54.0",
@@ -29,7 +31,6 @@ bench = [
 dev = [
   "assistant-bench-typing",
   "basedpyright>=1.40.2",
-  "httpx2>=2.16.0",
   "jsonschema>=4.26.0",
   "mypy>=2.4.0",
   "pytest>=9.1.1",
@@ -56,6 +57,8 @@ only-include = ["src", "pyproject.toml", "README.md"]
 
 [tool.assistant-bench]
 generation-protocol = 2
+messages-protocol = 1
+anthropic-api-version = "2023-06-01"
 
 [tool.uv]
 required-version = ">=0.13.4"
