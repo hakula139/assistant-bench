@@ -271,7 +271,7 @@ class TestRequestMessages:
         assert result.details['anthropic_api_version'] == '2023-06-01'
         (outgoing,) = model_requests
         assert outgoing.extensions['timeout'] == {
-            'connect': 5.0,
+            'connect': 30.0,
             'read': None,
             'write': 600.0,
             'pool': 600.0,
