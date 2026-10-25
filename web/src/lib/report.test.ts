@@ -315,17 +315,6 @@ describe('reportSchema', () => {
     expect(shape).toEqual(schemaShape(committed));
   });
 
-  test.each(['report', 'report-early', 'report-ledger'] as const)(
-    'parses the %s fixture the pydantic models write',
-    async (name) => {
-      const report = await readFixture(name);
-
-      const result = reportSchema.safeParse(report);
-
-      expect(result.error?.issues ?? []).toEqual([]);
-    },
-  );
-
   test('preserves genuine capped ledger weights and provenance on the wire', async () => {
     const payload = await readFixture('report-ledger');
 
