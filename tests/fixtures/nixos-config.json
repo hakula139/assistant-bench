@@ -23,11 +23,6 @@
         "thinking": {
           "mode": "anthropic-adaptive",
           "efforts": ["low", "medium", "high"],
-          "apiEfforts": {
-            "openai-chat-completions": ["low", "medium", "high"],
-            "openai-responses": ["low", "medium", "high"],
-            "anthropic-messages": ["low", "medium", "high"]
-          },
           "defaultLevel": "medium",
           "requiresEffort": true
         }
@@ -51,7 +46,6 @@
         },
         "thinking": {
           "efforts": ["low", "high"],
-          "apiEfforts": { "openai-chat-completions": ["low", "high"] },
           "defaultLevel": "high",
           "requiresEffort": false
         }
