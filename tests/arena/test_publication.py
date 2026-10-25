@@ -233,6 +233,29 @@ class TestPrepare:
 
         release = inputs.prepare(approval)
 
+        settings = inputs.family.settings
+        assert isinstance(settings, VotesSettings)
+        expanded = replace(
+            inputs,
+            family=inputs.family.model_copy(
+                update={
+                    'settings': settings.model_copy(update={'systems': ['a', 'c', 'b']})
+                }
+            ),
+            outputs=(
+                *inputs.outputs,
+                make_output(
+                    case='public-case',
+                    system='c',
+                    fingerprint='fp-c',
+                    text='unapproved-system-marker',
+                ),
+            ),
+            names={**inputs.names, 'c': 'Public C'},
+            fingerprints={**inputs.fingerprints, 'c': 'fp-c'},
+        )
+        assert expanded.prepare(approval) == release
+
         encoded = release.model_dump_json()
         assert 'Approved output A.' in encoded
         assert 'Approved output B.' in encoded

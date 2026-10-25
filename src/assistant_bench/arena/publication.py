@@ -326,14 +326,15 @@ def _systems(
 ) -> list[System]:
     fingerprints: defaultdict[str, set[str]] = defaultdict(set)
 
-    for system in order:
-        fingerprints[system].add(configured[system])
-
     for output in outputs:
         if output.fingerprint is None:
             raise ValueError('Published output identity requires a known fingerprint.')
 
         fingerprints[output.system].add(output.fingerprint)
+
+    for system, values in fingerprints.items():
+        if system in configured:
+            values.add(configured[system])
 
     if any(len(values) != 1 for values in fingerprints.values()):
         raise ValueError(
