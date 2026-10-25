@@ -537,6 +537,115 @@ class TestLoadFamily:
 
 
 class TestLoadCases:
+    def test_preserves_case_fields_and_document_order(self, families_dir: Path) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text(
+            textwrap.dedent(
+                r"""
+                [[cases]]
+                id = "z-last"
+                category = "message"
+                source = "public"
+                instruction = '''
+
+                保留  「格式」。
+                  Keep C:\drafts\notes and the literal \n.
+                '''
+                checklist = ["Keep C:\\drafts\\notes.", "保留  「格式」  "]
+
+                [[cases]]
+                id = "a-first"
+                category = "message"
+                source = "synthetic"
+                instruction = "Next\nline."
+                """
+            ),
+            encoding='utf-8',
+        )
+
+        cases = load_cases(load_family('f'))
+
+        assert [case.model_dump() for case in cases] == [
+            {
+                'id': 'z-last',
+                'category': 'message',
+                'source': 'public',
+                'instruction': textwrap.dedent(
+                    r"""
+                    保留  「格式」。
+                      Keep C:\drafts\notes and the literal \n.
+                    """
+                ),
+                'checklist': [r'Keep C:\drafts\notes.', '保留  「格式」  '],
+            },
+            {
+                'id': 'a-first',
+                'category': 'message',
+                'source': 'synthetic',
+                'instruction': 'Next\nline.',
+                'checklist': [],
+            },
+        ]
+
+    @pytest.mark.parametrize(
+        ('text', 'field', 'message'),
+        [
+            pytest.param('', 'cases', 'Field required.', id='missing-container'),
+            pytest.param(
+                'cases = "message"',
+                'cases',
+                'Input should be a valid list.',
+                id='non-list-container',
+            ),
+            pytest.param(
+                'cases = []\ncase = []',
+                'case',
+                'Extra inputs are not permitted.',
+                id='unknown-container-key',
+            ),
+            pytest.param(
+                'cases = ["message"]',
+                'cases.0',
+                'Input should be a valid dictionary or instance of Case.',
+                id='non-case-entry',
+            ),
+            pytest.param(
+                case_entry('a') + 'instructions = "Hi."',
+                'cases.0.instructions',
+                'Extra inputs are not permitted.',
+                id='unknown-case-key',
+            ),
+            pytest.param(
+                case_entry('a') + 'checklist = "Keep the path."',
+                'cases.0.checklist',
+                'Input should be a valid list.',
+                id='non-list-checklist',
+            ),
+        ],
+    )
+    def test_rejects_a_case_document_that_breaks_its_contract(
+        self, families_dir: Path, text: str, field: str, message: str
+    ) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text(text)
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value) == f'Family `f`: `{path}`: `{field}`: {message}'
+
+    def test_names_the_file_and_location_of_malformed_toml(
+        self, families_dir: Path
+    ) -> None:
+        path = write_case_family(families_dir, ['large'])
+        path.write_text('[[cases]\n')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('f'))
+
+        assert str(error.value).startswith(f'Family `f`: `{path}` is not valid TOML:')
+        assert 'line 1, column' in str(error.value)
+
     def test_appends_local_cases_to_the_committed_ones(self, data_dir: Path) -> None:
         local = data_dir / 'cases' / 'smoke-text.toml'
         local.parent.mkdir(parents=True)
