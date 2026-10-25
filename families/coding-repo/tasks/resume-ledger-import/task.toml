@@ -1,0 +1,28 @@
+schema_version = "1.4"
+
+[task]
+name = "coding-repo/resume-ledger-import"
+description = "Implement atomic resumable CSV imports with exact ledger accounting"
+version = "1.0.0"
+
+[metadata]
+category = "feature"
+source = "synthetic"
+author = "gpt-6.1-sol"
+author_vendor = "openai"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 600.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 2
+memory_mb = 2048
+network_mode = "no-network"
+
+[[artifacts]]
+source = "/app"

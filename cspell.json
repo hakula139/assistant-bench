@@ -11,10 +11,5 @@
     }
   ],
   "dictionaries": ["project-words"],
-  "ignorePaths": [
-    "families/*/tasks/*/environment/app/**",
-    "flake.lock",
-    "pnpm-lock.yaml",
-    "uv.lock"
-  ]
+  "ignorePaths": ["flake.lock", "pnpm-lock.yaml", "uv.lock"]
 }

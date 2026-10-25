@@ -19,7 +19,7 @@ The root Python project contains the `assistant_bench` CLI and the `assistant_be
 
 Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
 
-Open `assistant-bench.code-workspace` to check the host and coding-family sources in a compatible editor, using the root `.venv`. The host project targets Python 3.14. The coding family's `pyrightconfig.json` inherits its strict diagnostics and targets Python 3.13 for standalone task scripts.
+The root `pyproject.toml` checks the host and authored task code on Python 3.14. Each task resolves imports against its complete reference package, while its starter application is checked independently. Editors use the root `.venv`.
 
 ## Pre-Commit Hooks
 
@@ -29,7 +29,7 @@ The hook runs the fast subset of the [verification](../../AGENTS.md#verification
 
 Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-Ruff, Prettier, markdownlint, and cspell skip each task's `environment/app/`, and Ruff also skips its `tests/hidden/`, since those hold the project under test in its own style.
+The authored task applications, reference solutions, hidden tests and deliberately wrong variants follow the same formatting, spelling and strict typing policy as the host code. Behavioral defects remain executable and well typed.
 
 The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 

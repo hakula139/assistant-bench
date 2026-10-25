@@ -78,12 +78,6 @@ default = true
 [tool.ruff]
 target-version = "py314"
 src = ["src", "tests"]
-# A task's repository and hidden tests keep the style of the project under test.
-extend-exclude = ["families/*/tasks/*/environment/app/", "families/*/tasks/*/tests/hidden/"]
-# The pre-commit hook passes staged paths, which Ruff checks despite the excludes otherwise.
-force-exclude = true
-# Task scripts run on the Python of the task's image.
-per-file-target-version = { "families/**" = "py313" }
 
 [tool.ruff.format]
 quote-style = "single"
@@ -94,7 +88,7 @@ select = ["B", "C4", "D", "E", "F", "I", "PGH003", "PGH004", "RUF100", "RUF102",
 ignore = ["D101", "D102", "D103", "D105", "D106", "D107"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D100", "D104"]
+"**/tests/**" = ["D100", "D104"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
@@ -127,7 +121,7 @@ source = ["assistant_bench", "assistant_bench_arena"]
 exclude_also = ['case _:\n\s*assert_never\(']
 
 [tool.basedpyright]
-include = ["src", "tests", "typings"]
+include = ["src", "tests", "typings", "families/coding-repo"]
 extraPaths = ["src", "tests"]
 exclude = ["**/node_modules", "**/__pycache__"]
 pythonVersion = "3.14"
@@ -137,6 +131,36 @@ reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
 executionEnvironments = [
   { root = "src/assistant_bench_arena/worker", reportMissingModuleSource = false },
+  { root = "families/coding-repo/tasks/deliver-transactional-outbox", extraPaths = [
+    "families/coding-repo/tasks/deliver-transactional-outbox/solution/app",
+    "families/coding-repo/tasks/deliver-transactional-outbox/tests",
+    "families/coding-repo/shared/tests",
+  ] },
+  { root = "families/coding-repo/tasks/migrate-customer-store", extraPaths = [
+    "families/coding-repo/tasks/migrate-customer-store/solution/app",
+    "families/coding-repo/tasks/migrate-customer-store/tests",
+    "families/coding-repo/shared/tests",
+  ] },
+  { root = "families/coding-repo/tasks/publish-asset-graph", extraPaths = [
+    "families/coding-repo/tasks/publish-asset-graph/solution/app",
+    "families/coding-repo/tasks/publish-asset-graph/tests",
+    "families/coding-repo/shared/tests",
+  ] },
+  { root = "families/coding-repo/tasks/repair-singleflight-cache", extraPaths = [
+    "families/coding-repo/tasks/repair-singleflight-cache/solution/app",
+    "families/coding-repo/tasks/repair-singleflight-cache/tests",
+    "families/coding-repo/shared/tests",
+  ] },
+  { root = "families/coding-repo/tasks/resume-ledger-import", extraPaths = [
+    "families/coding-repo/tasks/resume-ledger-import/solution/app",
+    "families/coding-repo/tasks/resume-ledger-import/tests",
+    "families/coding-repo/shared/tests",
+  ] },
+  { root = "families/coding-repo/tasks/stabilize-cursor-pagination", extraPaths = [
+    "families/coding-repo/tasks/stabilize-cursor-pagination/solution/app",
+    "families/coding-repo/tasks/stabilize-cursor-pagination/tests",
+    "families/coding-repo/shared/tests",
+  ] },
   { root = "." },
 ]
 

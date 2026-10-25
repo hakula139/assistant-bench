@@ -11,12 +11,21 @@ Every system that [`family.toml`](../../../families/coding-repo/family.toml) lis
 | Category   | The instruction asks for                                                                 | Tasks |
 | ---------- | ---------------------------------------------------------------------------------------- | ----: |
 | `bug-fix`  | Fixing the bugs behind a user report or a failing suite, sometimes with regression tests |     2 |
-| `feature`  | A function, CLI option, or module that the request or the repository's docs specify      |     3 |
-| `refactor` | Removing duplication or renaming an API without changing behavior                        |     2 |
+| `feature`  | Adding durable behavior across application and persistence boundaries                    |     2 |
+| `refactor` | Preserving public behavior while changing publication or persisted data                  |     2 |
 
 ## Task Sourcing
 
-Every task is a small synthetic Python project written for the bench, using the standard library and `unittest` alone, so no task carries a lockfile. Each task's instruction reads like a developer's request in chat: it says where the repository is and names every interface the hidden tests call and every rule a structural check enforces, unless the repository's own AGENTS.md or docstrings state it. A reviewer who reads only the instruction and the repository can write tests that agree with the hidden ones, and any check that fails this test is a hidden requirement to remove.
+Every task is a synthetic Python 3.14 application using the standard library and `unittest`, so no task carries a lockfile. Its instruction and candidate-visible API documentation define every behavior the hidden tests require. The starter implements a usable baseline with a causal state defect or missing integration. The reference provides a complete application and focused regression tests.
+
+| Task                           | Behavior                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `resume-ledger-import`         | Import exact CSV amounts with durable identity, atomic batches and resumable checkpoints      |
+| `repair-singleflight-cache`    | Isolate tenants and preserve loader generations through cancellation, expiry and invalidation |
+| `stabilize-cursor-pagination`  | Traverse an append-only snapshot with stable binary ordering and filter-bound cursors         |
+| `deliver-transactional-outbox` | Commit orders and notifications together, then retry delivery with stable payloads and keys   |
+| `publish-asset-graph`          | Rewrite and hash an asset graph before atomically publishing a complete release               |
+| `migrate-customer-store`       | Migrate persisted names atomically while preserving API responses, reports and relationships  |
 
 A task's `[metadata] author` preserves the public label of the system whose model wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
 
@@ -24,27 +33,23 @@ A task's `[metadata] author` preserves the public label of the system whose mode
 
 Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
-- **Image:** `python:3.13-slim` pinned by its multi-arch index digest, with `git` and `tmux`, a fixed time zone, locale, and commit dates, and the repository from `environment/app/` committed at `/app` as one `chore: import project` commit.
+- **Image:** `python:3.14-slim` pinned by its multi-arch index digest, with `git` and `tmux`, a fixed time zone, locale, and commit dates, and the repository from `environment/app/` committed at `/app` as one `chore: import project` commit.
 
 - **Sandbox:** no network for the agent or the verifier, two CPUs, and 2,048 MB of memory per container. The verifier runs in its own container, which receives only `/app`, so the agent cannot reach the interpreter or `/tests`, and a tests-only fix regrades every recorded trial without a model call.
 
-- **Verifier:** `tests/test.sh` runs `tests/verify.py` and always writes a reward, 1 only when every check passes. `tests/verify_lib.py` copies `/app` to a scratch directory, adds the hidden test modules from `tests/hidden/`, and runs `python3 -m unittest`. Each verifier starts at most five subprocesses with a 60-second timeout each, so their timeouts sum to less than the 600-second limit.
+- **Verifier:** `tests/test.sh` runs `tests/verify.py` and writes reward 1 only when every check passes, or 0 when verification fails. `tests/verify_lib.py` copies `/app` to a scratch directory, adds the hidden test modules from `tests/hidden/`, and runs `python3 -m unittest` with a 60-second timeout inside the separate 600-second verifier limit.
 
-  It also fails a workspace whose top-level module or regular package shadows a standard-library one, since `python3 -m unittest` would otherwise import the workspace's own `unittest`, and it runs git under a configuration of its own, so the workspace's `.git/config` and hooks run nothing.
+  It also fails a workspace whose top-level module or regular package shadows a standard-library one, since `python3 -m unittest` would otherwise import the workspace's own `unittest`.
 
 - **Shared files:** author `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to update their standalone task copies. CI checks those copies with `--check`. Each affected task needs a version bump after it has run.
 
-- **Tests the agent writes:** each variant under `tests/broken/<variant>/` holds a `sitecustomize.py` that breaks one part of the agent's own code as Python starts, such as restoring a reported bug, leaving a function unimplemented, or ignoring a command-line option, and the verifier requires the agent's tests to fail under each.
+- **Tests:** hidden tests assert documented behavior through the application's real callers, persisted state and controlled concurrency. Root integration tests run the real verifier against reference solutions, starters and deliberately wrong source variants under `tests/broken/`. Candidates add focused regression tests without test-count, helper-name or patch-shape requirements.
 
-  Subprocesses inherit the variant, so a test that runs the CLI as a child process sees the defect too. The check proves that the tests fail once that part breaks, whatever the agent named its helpers, while a check on test counts or names would accept a test that never exercises it.
-
-- **Style:** `environment/app/` and `tests/hidden/` hold the project under test in its own style, with its intended defects, so the linters skip them as [Development](../../conventions/development.md#pre-commit-hooks) lists. The verifier scripts, the variants, and `solution/solve.sh` follow the bench's own conventions, with Ruff targeting the image's Python 3.13.
-
-  Strict typing checks every authored verifier, probe and fault script on Python 3.13. The candidate repository under `environment/app/` contains the faults the task asks the agent to fix. Hidden tests under `tests/hidden/` exercise the completed solution's APIs, which can be absent from that starter repository. These two input directories stay outside the verifier type-checking scope, preserving the unsolved benchmark. The canonical helper and all generated helper copies remain checked.
+- **Style:** starters, references, hidden tests, verifier scripts and wrong variants share the root formatting, spelling and strict Python 3.14 typing policy. Each task has an import environment resolving its completed reference package, and starters retain their local package imports.
 
 The solution's own code runs inside the verifier's unittest process, beside the hidden tests, so it can still patch the runner or the checks it shares that process with.
 
-`fix-pagination` hashes every file in its `tests/` and rejects added ones, which prevents a patch through a test module. A task still cannot rule out a patch in the solution's own modules, so a passing reward still needs review.
+A passing reward still needs review because candidate modules execute alongside the hidden tests.
 
 ## Scoring
 

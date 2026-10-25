@@ -1,0 +1,61 @@
+"""SQLite storage for orders and notification attempts."""
+
+import sqlite3
+from pathlib import Path
+from types import TracebackType
+from typing import Self
+
+from .models import Notification, Order
+
+
+class Store:
+    def __init__(self, db: Path) -> None:
+        self.connection = sqlite3.connect(db)
+
+        try:
+            self.connection.executescript(
+                Path(__file__).with_name('schema.sql').read_text()
+            )
+        except BaseException:
+            self.connection.close()
+            raise
+
+    def get_order(self, order_id: str) -> Order | None:
+        row = self.connection.execute(
+            'SELECT order_id, amount_cents FROM orders WHERE order_id = ?', (order_id,)
+        ).fetchone()
+        return None if row is None else Order(row[0], row[1])
+
+    def orders(self) -> list[Order]:
+        rows = self.connection.execute(
+            'SELECT order_id, amount_cents FROM orders ORDER BY rowid'
+        )
+        return [Order(row[0], row[1]) for row in rows]
+
+    def pending(self, limit: int) -> list[Notification]:
+        rows = self.connection.execute(
+            'SELECT id, order_id, idempotency_key, payload FROM outbox '
+            'WHERE delivered = 0 ORDER BY id LIMIT ?',
+            (min(limit, 2**63 - 1),),
+        )
+        return [Notification(row[0], row[1], row[2], row[3]) for row in rows]
+
+    def mark_delivered(self, notification_id: int) -> None:
+        with self.connection:
+            self.connection.execute(
+                'UPDATE outbox SET delivered = 1 WHERE id = ?', (notification_id,)
+            )
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()

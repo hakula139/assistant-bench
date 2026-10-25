@@ -28,6 +28,7 @@ esbuild
 exog
 expit
 fdopen
+fsize
 fsmonitor
 hakula
 hanzi
@@ -80,12 +81,15 @@ PYTHONDONTWRITEBYTECODE
 pywrangler
 redoc
 remoteip
+rlimit
 rstrip
 Sarasa
 scipy
 sdist
+setrlimit
 shadcn
 shfmt
+sigxfsz
 srcdoc
 SSIM
 starlette
