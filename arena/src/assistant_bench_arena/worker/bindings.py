@@ -82,7 +82,7 @@ class NativeLimiter(Protocol):
 
 
 class LimitResult(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+    model_config = ConfigDict(extra='ignore', strict=True)
 
     success: StrictBool
 
