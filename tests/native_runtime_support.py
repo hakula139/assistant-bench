@@ -55,6 +55,7 @@ _CONTROL = """
     from app import Management as AppManagement
     from app import RenderLookup as AppRenderLookup
     from assistant_bench_arena.admission import NetworkIdentity
+    from assistant_bench_arena.api_models import StatusView
     from assistant_bench_arena.ledger_models import PointSnapshot
     from assistant_bench_arena.scheduler import pair_log_weights
     from assistant_bench_arena.worker import api, production
@@ -68,6 +69,7 @@ _CONTROL = """
 
 
     ingress_events = []
+    original_lookup = AppRenderLookup.lookup
 
 
     class ObservedLimiter:
@@ -193,18 +195,46 @@ _CONTROL = """
                 auth.ingress = ConfiguredLimiter()
                 instance.owner.auth = auth
                 return json.dumps({'result': {'configured': True}})
-            if payload.get('operation') == 'fail_ingress':
+            if payload.get('operation') == 'request_failure':
+                stage = payload['stage']
                 message = payload['message']
+
+                def fail() -> None:
+                    if payload['exception'] == 'validation':
+                        LimitResult.model_validate({'success': message})
+                    raise RuntimeError(message)
 
                 class UnexpectedAuthentication(Authentication):
                     async def preflight(
                         self, address: str, now: int,
                     ) -> NetworkIdentity:
-                        raise RuntimeError(message)
+                        if stage == 'preflight':
+                            fail()
+                        return await super().preflight(address, now)
+
+                    async def status(self, cookies: str, now: int) -> StatusView:
+                        if stage == 'http':
+                            fail()
+                        return await super().status(cookies, now)
+
+                    async def ensure_ready(self) -> None:
+                        if stage == 'management':
+                            fail()
+                        await super().ensure_ready()
 
                 instance = Default(self.ctx, self.env)
                 instance.owner.auth = authentication(
-                    instance.owner.auth, UnexpectedAuthentication,
+                    instance.owner.auth,
+                    Authentication if stage is None else UnexpectedAuthentication,
+                )
+                instance.owner.http = None
+                return json.dumps({'result': {'configured': True}})
+            if payload.get('operation') == 'lookup_result':
+                async def lookup(self, capability: str) -> str:
+                    return payload['result']
+
+                AppRenderLookup.lookup = (
+                    original_lookup if payload['result'] is None else lookup
                 )
                 return json.dumps({'result': {'configured': True}})
             if payload.get('operation') == 'coverage_probe':

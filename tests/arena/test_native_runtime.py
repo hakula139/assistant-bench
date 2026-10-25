@@ -650,13 +650,9 @@ class TestNativeRuntime:
                         ('content-type', 'application/json'),
                         ('cache-control', 'no-store'),
                         ('referrer-policy', 'no-referrer'),
+                        ('x-content-type-options', 'nosniff'),
                     ):
                         assert headers.get(header) == value, (name, response)
-                    if status != 200:
-                        assert headers.get('x-content-type-options') == 'nosniff', (
-                            name,
-                            response,
-                        )
                 assert runtime.provider.calls == []
 
         with NativeRuntime(tmp_path).owner() as runtime:
