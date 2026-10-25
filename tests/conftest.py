@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 import trustme
+from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs
@@ -50,6 +52,7 @@ def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]
 @pytest.fixture(autouse=True)
 def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
     send = httpx.AsyncClient.send
+    send_messages = httpx2.AsyncClient.send
 
     async def checked_send(
         client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
@@ -62,11 +65,25 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
 
+    async def checked_messages_send(
+        client: httpx2.AsyncClient, request: httpx2.Request, **kwargs: Any
+    ) -> httpx2.Response:
+        if request.url.host not in {'127.0.0.1', '::1'}:
+            pytest.fail(
+                f'A model test attempted a non-loopback request: {request.url.host}'
+            )
+        return await send_messages(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_messages_send)
+
 
 @pytest.fixture
-def model_requests(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
-    requests: list[httpx.Request] = []
+def model_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[httpx.Request | httpx2.Request]:
+    requests: list[httpx.Request | httpx2.Request] = []
     send = httpx.AsyncClient.send
+    send_messages = httpx2.AsyncClient.send
 
     async def record(
         client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
@@ -75,6 +92,14 @@ def model_requests(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
         return await send(client, request, **kwargs)
 
     monkeypatch.setattr(httpx.AsyncClient, 'send', record)
+
+    async def record_messages(
+        client: httpx2.AsyncClient, request: httpx2.Request, **kwargs: Any
+    ) -> httpx2.Response:
+        requests.append(request)
+        return await send_messages(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', record_messages)
     return requests
 
 
@@ -92,6 +117,20 @@ def endpoint_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncOpenAI]:
     return clients
 
 
+@pytest.fixture
+def messages_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncAnthropic]:
+    clients: list[AsyncAnthropic] = []
+    build = Endpoint.messages_client
+
+    def record(endpoint: Endpoint) -> AsyncAnthropic:
+        client = build(endpoint)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(Endpoint, 'messages_client', record)
+    return clients
+
+
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolate data and clear the shell's endpoint and proxy variables."""
@@ -100,6 +139,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     for name in ENDPOINT_VARS:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv('ANTHROPIC_CUSTOM_HEADERS', raising=False)
     for name in PROXY_VARS:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)

@@ -1,6 +1,7 @@
 import textwrap
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from assistant_bench.catalog import (
     SystemConfig,
     load_export,
     load_systems,
+    resolve_identity,
     resolve_system,
 )
 from assistant_bench.generation import Generation
@@ -20,12 +22,24 @@ from support import make_system
 
 
 class TestPrice:
-    def test_cost_bills_cached_input_at_the_cache_read_rate(self) -> None:
-        price = Price(input=2.0, output=10.0, cache_read=0.2)
+    @pytest.mark.parametrize(
+        ('writes', 'rate', 'expected'),
+        [(0, None, 0.00592), (100, 2.5, 0.00597), (100, None, None)],
+        ids=['cache-read', 'priced-cache-write', 'unknown-cache-write-rate'],
+    )
+    def test_cost_bills_each_measured_cache_category_at_its_declared_rate(
+        self, writes: int, rate: float | None, expected: float | None
+    ) -> None:
+        price = Price(input=2.0, output=10.0, cache_read=0.2, cache_write=rate)
 
-        cost = price.cost(input_tokens=1_000, cached_tokens=600, output_tokens=500)
+        cost = price.cost(
+            input_tokens=1_000,
+            cached_tokens=600,
+            cache_write_tokens=writes,
+            output_tokens=500,
+        )
 
-        assert cost == pytest.approx((400 * 2.0 + 600 * 0.2 + 500 * 10.0) / 1e6)
+        assert cost == (pytest.approx(expected) if expected is not None else None)
 
 
 class TestLoadExport:
@@ -123,6 +137,44 @@ class TestSystem:
             System.model_validate(fields)
 
     class TestFingerprint:
+        @pytest.mark.parametrize(
+            'change',
+            [
+                {'messages_protocol': 2},
+                {'anthropic_api_version': '2026-10-21'},
+                {'anthropic': '2.4.0'},
+            ],
+            ids=['messages-protocol', 'api-version', 'sdk-version'],
+        )
+        @pytest.mark.parametrize('harness', ['generate', 'terminus-2'])
+        def test_native_versions_invalidate_only_messages_outputs(
+            self, change: dict[str, Any], harness: str
+        ) -> None:
+            versions = Generation(
+                protocol=2,
+                harbor='0.24.0',
+                messages_protocol=1,
+                anthropic_api_version='2023-06-01',
+                anthropic='2.3.0',
+            )
+            changed = versions.model_copy(update=change)
+            native = make_system(
+                api='anthropic-messages',
+                thinking_mode='anthropic-adaptive',
+                harness=harness,
+                generation=versions,
+            )
+            other = make_system(harness=harness, generation=versions)
+
+            assert (
+                native.model_copy(update={'generation': changed}).fingerprint
+                != native.fingerprint
+            )
+            assert (
+                other.model_copy(update={'generation': changed}).fingerprint
+                == other.fingerprint
+            )
+
         def test_captured_identity_stays_stable_when_the_runtime_changes(
             self, monkeypatch: pytest.MonkeyPatch
         ) -> None:
@@ -291,34 +343,176 @@ class TestLoadSystems:
         systems = load_systems(load_export())
 
         assert {name: system.display_name for name, system in systems.items()} == {
-            'opus-5.5': 'Claude Opus 5.5',
-            'opus-5.5-max': 'Claude Opus 5.5 · Max',
-            'gpt-6-astra-max': 'GPT-6 Astra · Max',
-            'gpt-6.1-sol-max': 'GPT-6.1 Sol · Max',
+            'opus-5.5-high': 'Claude Opus 5.5 · High',
+            'gpt-6-astra-high': 'GPT-6 Astra · High',
+            'gpt-6.1-sol-high': 'GPT-6.1 Sol · High',
             'gemini-4-argon-high': 'Gemini 4 Argon · High',
             'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
-            'deepseek-v4.1-flash-1017-max': 'DeepSeek V4.1 Flash 1017 · Max',
-            'kimi-k3-max': 'Kimi K3 · Max',
+            'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
+            'kimi-k3-high': 'Kimi K3 · High',
         }
-        assert {
-            name: system.effort
-            for name, system in systems.items()
-            if name != 'opus-5.5'
-        } == {
-            'opus-5.5-max': 'max',
-            'gpt-6-astra-max': 'max',
-            'gpt-6.1-sol-max': 'max',
-            'gemini-4-argon-high': 'high',
-            'gemini-3.8-flash-high': 'high',
-            'deepseek-v4.1-flash-1017-max': 'max',
-            'kimi-k3-max': 'max',
-        }
+        assert {system.effort for system in systems.values()} == {'high'}
         assert {
             name for name, system in systems.items() if system.api == 'openai-responses'
-        } == {'gpt-6-astra-max', 'gpt-6.1-sol-max'}
+        } == {'gpt-6-astra-high', 'gpt-6.1-sol-high'}
+        native = systems['opus-5.5-high']
+        assert (
+            native.api,
+            native.thinking_mode,
+            native.max_output_tokens,
+            native.context_window,
+        ) == ('anthropic-messages', 'anthropic-adaptive', 128000, 1000000)
+
+
+class TestResolveIdentity:
+    def test_requires_native_thinking_metadata_for_a_replayable_identity(
+        self, export: NixosConfigExport
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        document['catalog']['models']['acme-large']['thinking']['mode'] = None
+        missing_mode = NixosConfigExport.model_validate(document)
+        config = SystemConfig(
+            model='acme-large', api='anthropic-messages', effort='high'
+        )
+        versions = Generation(
+            protocol=2,
+            harbor='0.24.0',
+            messages_protocol=1,
+            anthropic_api_version='2023-06-01',
+            anthropic='2.3.0',
+        )
+
+        with pytest.raises(ValueError):
+            resolve_identity('native', config, missing_mode, versions)
+
+    @pytest.mark.parametrize(
+        ('api', 'effort', 'required', 'expected'),
+        [
+            ('openai-chat-completions', None, True, '46256f5027af8dc1'),
+            ('openai-responses', 'high', True, 'a6f35da264e89395'),
+            ('openai-chat-completions', None, False, '476d95dfb9b26e31'),
+            ('openai-responses', 'unlisted', True, '6e7b17ad7560852c'),
+        ],
+        ids=[
+            'required-default',
+            'explicit-effort',
+            'optional-default',
+            'identity-without-admission',
+        ],
+    )
+    def test_projects_historical_facts_while_current_execution_stays_strict(
+        self,
+        export: NixosConfigExport,
+        monkeypatch: pytest.MonkeyPatch,
+        api: Api,
+        effort: str | None,
+        required: bool,
+        expected: str,
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        entry = document['catalog']['models']['acme-large']
+        entry.pop('apis')
+        entry['thinking'].pop('apiEfforts')
+        entry['thinking']['requiresEffort'] = required
+        old = NixosConfigExport.model_validate(document)
+        config = SystemConfig(model='acme-large', api=api, effort=effort)
+        versions = Generation(protocol=1, harbor='0.23.0')
+
+        def unexpected(*args: object, **kwargs: object) -> Any:
+            pytest.fail('Historical identity attempted to read current runtime state')
+
+        monkeypatch.setattr('assistant_bench.catalog.load_generation', unexpected)
+        monkeypatch.setattr('assistant_bench.catalog.load_export', unexpected)
+        monkeypatch.setattr(metadata, 'version', unexpected)
+
+        identity = resolve_identity('large', config, old, versions)
+
+        assert identity.fingerprint == expected
+        with pytest.raises(ValueError, match='declares no supported APIs'):
+            resolve_system('large', config, old, versions)
+
+    @pytest.mark.parametrize(
+        'change', ['price', 'display-name', 'vendor', 'capabilities', 'export-revision']
+    )
+    def test_excludes_non_generation_metadata_from_historical_identity(
+        self, export: NixosConfigExport, change: str
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        entry = document['catalog']['models']['acme-large']
+        config = SystemConfig(model='acme-large')
+        versions = Generation(protocol=1, harbor='0.23.0')
+        if change == 'price':
+            entry['channelCost'] = {}
+        elif change == 'display-name':
+            config = config.model_copy(update={'display_name': 'Other label'})
+        elif change == 'vendor':
+            entry['vendor'] = 'other'
+        elif change == 'capabilities':
+            entry['apis'] = []
+            entry['thinking']['efforts'] = []
+            entry['thinking']['apiEfforts'] = {}
+        else:
+            document['rev'] = 'another-revision'
+        changed = NixosConfigExport.model_validate(document)
+
+        identity = resolve_identity('large', config, changed, versions)
+
+        assert identity.fingerprint == '46256f5027af8dc1'
 
 
 class TestResolveSystem:
+    @pytest.mark.parametrize(
+        ('change', 'message'),
+        [
+            (
+                {'apis': ['openai-chat-completions']},
+                'API `anthropic-messages` is not one of',
+            ),
+            ({'apis': None}, 'declares no supported APIs'),
+            ({'thinking': {'apiEfforts': {}}}, 'effort `high` is not one of'),
+            ({'thinking': {'mode': 'effort'}}, 'requires adaptive thinking metadata'),
+        ],
+        ids=[
+            'unlisted-api',
+            'missing-api-contract',
+            'missing-effort-contract',
+            'missing-adaptive-mode',
+        ],
+    )
+    def test_rejects_native_capabilities_the_catalog_has_not_declared(
+        self, export: NixosConfigExport, change: dict[str, Any], message: str
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        entry = document['catalog']['models']['acme-large']
+        for field, value in change.items():
+            if field == 'thinking':
+                entry[field].update(value)
+            else:
+                entry[field] = value
+        configured = NixosConfigExport.model_validate(document)
+        config = SystemConfig(
+            model='acme-large', api='anthropic-messages', effort='high'
+        )
+
+        with pytest.raises(ValueError, match=message):
+            resolve_system('native', config, configured)
+
+    def test_resolves_native_capacities_and_thinking_from_catalog_metadata(
+        self, export: NixosConfigExport
+    ) -> None:
+        config = SystemConfig(
+            model='acme-large', api='anthropic-messages', effort='high'
+        )
+
+        resolved = resolve_system('native', config, export)
+
+        assert resolved == make_system(
+            name='native',
+            api='anthropic-messages',
+            effort='high',
+            thinking_mode='anthropic-adaptive',
+        )
+
     @pytest.mark.parametrize(
         ('api', 'effort', 'required', 'expected'),
         [
@@ -349,7 +543,10 @@ class TestResolveSystem:
         document = export.model_dump(by_alias=True)
         thinking = document['catalog']['models']['acme-large']['thinking']
         thinking['efforts'] = ['low', 'medium', 'high', 'max']
-        thinking['apiEfforts'] = {'openai-chat-completions': ['low', 'medium', 'high']}
+        thinking['apiEfforts'] = {
+            'openai-chat-completions': ['low', 'medium', 'high'],
+            'openai-responses': ['low', 'medium', 'high', 'max'],
+        }
         thinking['defaultLevel'] = 'max'
         thinking['requiresEffort'] = required
         resolved_export = NixosConfigExport.model_validate(document)

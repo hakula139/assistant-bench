@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from unittest.mock import MagicMock
 
+import anthropic
 import httpx
 import openai
 import pytest
+from anthropic import AsyncAnthropic
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
@@ -28,18 +30,26 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from assistant_bench import jobs
-from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
 from assistant_bench.families import load_family
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.host import HostEnvironment
+from assistant_bench.harnesses.messages import (
+    MessageCompletionError,
+    MessagesChat,
+    MessagesLLM,
+    MessageStreamError,
+)
 from assistant_bench.harnesses.responses import ResponsesChat, ResponsesLLM
 from assistant_bench.harnesses.terminus import Terminus
 from support import (
     StubEndpoint,
     completion,
     make_system,
+    message,
+    message_stream,
     reasoned_response,
     response,
     terminus_completion,
@@ -87,6 +97,8 @@ def terminal_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TmuxSes
 
 @runtime_checkable
 class NativeClient(Protocol):
+    results: list[dict[str, Any]]
+
     def get_model_context_limit(self) -> int: ...
     def get_model_output_limit(self) -> int | None: ...
     async def call(self, prompt: str, **kwargs: object) -> LLMResponse: ...
@@ -131,7 +143,9 @@ class NativeProbe(Terminus):
     def conversation(self) -> NativeConversation:
         self._reset_per_run_state()
         chat = (
-            ResponsesChat(self._llm)
+            MessagesChat(self._llm)
+            if isinstance(self._llm, MessagesLLM)
+            else ResponsesChat(self._llm)
             if isinstance(self._llm, ResponsesLLM)
             else Chat(self._llm)
         )
@@ -158,6 +172,28 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
         harness='terminus-2',
         api='openai-responses',
         effort='max',
+        max_output_tokens=32768,
+        context_window=131072,
+    )
+    agent = NativeProbe(
+        logs_dir=tmp_path,
+        model_name=f'openai/{system.route}',
+        extra_env=endpoint.env,
+        **options.terminus(system),
+    )
+    yield agent
+    asyncio.run(agent.close())
+
+
+@pytest.fixture
+def messages_agent(
+    endpoint: StubEndpoint, tmp_path: Path, messages_clients: list[AsyncAnthropic]
+) -> Iterator[NativeProbe]:
+    system = make_system(
+        harness='terminus-2',
+        api='anthropic-messages',
+        thinking_mode='anthropic-adaptive',
+        effort='high',
         max_output_tokens=32768,
         context_window=131072,
     )
@@ -271,6 +307,79 @@ class TestTerminus:
                 Terminus.preflight(OPTIONS, {})
 
     class TestSummarize:
+        @pytest.mark.parametrize('empty', [False, True], ids=['text', 'thinking-only'])
+        def test_native_blocks_follow_their_summary_branch_and_selected_context(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            terminal_session: TmuxSession,
+            empty: bool,
+        ) -> None:
+            main = message('Started.', message_id='main')
+            summary = message('' if empty else 'Summary.', message_id='summary')
+            questions = message('' if empty else 'Questions.', message_id='questions')
+            answers = message('Answers.', message_id='answers')
+            continued = message('Continued.', message_id='continued')
+            endpoint.streams = [
+                message_stream(payload)
+                for payload in (
+                    main,
+                    summary,
+                    questions,
+                    answers,
+                    continued,
+                    message('Selected.', message_id='selected'),
+                )
+            ]
+            chat = messages_agent.conversation()
+
+            async def summarize() -> str:
+                await messages_agent.follow(chat, 'Read the greeting.')
+                handoff = await messages_agent.summarize(chat, terminal_session)
+                await messages_agent.follow(chat, handoff)
+                chat.messages[:] = chat.messages[-2:]
+                chat.reset_response_chain()
+                await messages_agent.follow(chat, 'Continue selected context.')
+                return handoff
+
+            handoff = asyncio.run(summarize())
+
+            _, summarized, questioned, answered, resumed, selected = endpoint.requests
+            assert summarized.body['messages'][:-1] == [
+                {'role': 'user', 'content': 'Read the greeting.'},
+                {'role': 'assistant', 'content': main['content']},
+            ]
+            (question_prompt,) = questioned.body['messages']
+            assert question_prompt['role'] == 'user'
+            assert answered.body['messages'][:-1] == [
+                *summarized.body['messages'],
+                {'role': 'assistant', 'content': summary['content']},
+            ]
+            if not empty:
+                assert 'Questions.' in answered.body['messages'][-1]['content']
+            assert resumed.body['messages'] == [
+                {'role': 'user', 'content': 'Read the greeting.'},
+                question_prompt,
+                {'role': 'assistant', 'content': questions['content']},
+                {'role': 'user', 'content': handoff},
+            ]
+            assert selected.body['messages'] == [
+                {'role': 'user', 'content': handoff},
+                {'role': 'assistant', 'content': continued['content']},
+                {'role': 'user', 'content': 'Continue selected context.'},
+            ]
+            assert 'Answers.' in handoff
+            assert (
+                chat.total_input_tokens,
+                chat.total_cache_tokens,
+                chat.total_output_tokens,
+            ) == (390, 300, 120)
+            assert isinstance(messages_agent.client, MessagesLLM)
+            assert (
+                sum(result['input_tokens'] for result in messages_agent.client.results)
+                == 780
+            )
+
         @pytest.mark.parametrize('empty', [False, True], ids=['text', 'reasoning-only'])
         def test_keeps_each_subagent_and_the_handoff_on_its_own_native_items(
             self,
@@ -382,6 +491,397 @@ class TestTerminus:
             ]
 
     class TestRun:
+        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+        def test_openai_cache_writes_survive_terminal_aggregation_and_collection(
+            self,
+            endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            families_dir: Path,
+            data_dir: Path,
+            api: Api,
+        ) -> None:
+            payload = terminus_completion()
+            if api == 'openai-responses':
+                payload = response(payload['choices'][0]['message']['content'])
+            details = (
+                'input_tokens_details'
+                if api == 'openai-responses'
+                else 'prompt_tokens_details'
+            )
+            payload['usage'][details]['cache_write_tokens'] = 10
+            endpoint.responses = [payload, payload]
+            system = make_system(
+                harness='terminus-2',
+                api=api,
+                max_output_tokens=32768,
+                context_window=131072,
+                price=Price(input=2.0, output=10.0, cache_read=0.2),
+            )
+            write_task_family(families_dir, 'echo', systems=(system.name,))
+            family = load_family('f')
+            config = jobs.job(family, [system], [])
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+            context = AgentContext()
+
+            asyncio.run(agent.execute(terminal_session, context))
+            write_trial(
+                data_dir / 'jobs' / family.name / 'job-1',
+                'echo__1',
+                config.agents[0],
+                task=f'{family.name}/echo',
+                version='1.0.0',
+                instruction=None,
+                context=context,
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+            (collected,) = jobs.collect(family, {system.name: system})
+
+            assert (
+                collected.input_tokens,
+                collected.cached_tokens,
+                collected.output_tokens,
+            ) == (240, 200, 80)
+            assert collected.cache_write_tokens == 20
+            assert collected.cost_usd is None
+            assert context.metadata is not None
+            assert [
+                result['cache_write_tokens'] for result in context.metadata['responses']
+            ] == [10, 10]
+            assert len(endpoint.requests) == 2
+
+        def test_failed_native_attempts_keep_their_artifacts_when_the_caller_retries(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            tmp_path: Path,
+        ) -> None:
+            partial = message('Partial.', message_id='partial')
+            completed = message('Recovered.', message_id='recovered')
+            endpoint.streams = [
+                message_stream(partial)[:-1],
+                message_stream(completed),
+            ]
+
+            async def retry() -> LLMResponse:
+                with pytest.raises(MessageStreamError):
+                    await messages_agent.client.call('Greet me.')
+                return await messages_agent.client.call('Greet me.')
+
+            result = asyncio.run(retry())
+
+            assert result.content == 'Recovered.'
+            assert [request.body['messages'] for request in endpoint.requests] == [
+                [{'role': 'user', 'content': 'Greet me.'}]
+            ] * 2
+            assert [
+                json.loads((tmp_path / f'message-{ordinal}.json').read_text())['id']
+                for ordinal in (1, 2)
+            ] == ['partial', 'recovered']
+            assert isinstance(messages_agent.client, MessagesLLM)
+            assert [
+                attempt['response_status'] for attempt in messages_agent.client.attempts
+            ] == ['incomplete', 'completed']
+            assert [
+                recorded['response_id'] for recorded in messages_agent.client.results
+            ] == ['recovered']
+
+        @pytest.mark.parametrize(
+            ('error_type', 'message', 'expected'),
+            [
+                (
+                    'invalid_request_error',
+                    'prompt is too long: 9000 tokens > 8192 maximum',
+                    ContextLengthExceededError,
+                ),
+                (
+                    'invalid_request_error',
+                    'max_tokens must be positive',
+                    anthropic.BadRequestError,
+                ),
+                (
+                    'permission_error',
+                    'prompt is too long: 9000 tokens > 8192 maximum',
+                    anthropic.BadRequestError,
+                ),
+            ],
+            ids=['context-overflow', 'other-invalid-request', 'other-error-type'],
+        )
+        def test_only_native_context_overflow_enters_harbor_context_management(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            error_type: str,
+            message: str,
+            expected: type[Exception],
+        ) -> None:
+            endpoint.status = 400
+            endpoint.response = {
+                'type': 'error',
+                'error': {'type': error_type, 'message': message},
+                'request_id': 'req-context',
+            }
+
+            with pytest.raises(expected):
+                asyncio.run(messages_agent.request('Greet me.'))
+
+            assert len(endpoint.requests) == 1
+            assert isinstance(messages_agent.client, MessagesLLM)
+            assert messages_agent.client.results == []
+            (attempt,) = messages_agent.client.attempts
+            assert attempt['response_status'] == 'incomplete'
+            assert 'input_tokens' not in attempt
+
+        @pytest.mark.parametrize(
+            ('api', 'scenario'),
+            [
+                ('openai-chat-completions', 'negative-input'),
+                ('openai-responses', 'negative-input'),
+                ('anthropic-messages', 'negative-input'),
+                ('openai-chat-completions', 'negative-write'),
+                ('openai-responses', 'negative-write'),
+            ],
+        )
+        def test_invalid_sdk_usage_preserves_the_answer_without_entering_accounting(
+            self, endpoint: StubEndpoint, tmp_path: Path, api: Api, scenario: str
+        ) -> None:
+            payload = (
+                message()
+                if api == 'anthropic-messages'
+                else response()
+                if api == 'openai-responses'
+                else completion()
+            )
+            if scenario == 'negative-input':
+                payload['usage'][
+                    'prompt_tokens'
+                    if api == 'openai-chat-completions'
+                    else 'input_tokens'
+                ] = -1
+            else:
+                payload['usage'][
+                    'prompt_tokens_details'
+                    if api == 'openai-chat-completions'
+                    else 'input_tokens_details'
+                ]['cache_write_tokens'] = -1
+            if api == 'anthropic-messages':
+                endpoint.stream = message_stream(payload)
+            else:
+                endpoint.response = payload
+            system = make_system(
+                harness='terminus-2',
+                api=api,
+                thinking_mode='anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
+            )
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+
+            result = asyncio.run(agent.request('Greet me.'))
+
+            assert result.content == 'Hello there.'
+            assert result.usage is None
+            assert len(endpoint.requests) == 1
+            (recorded,) = agent.client.results
+            assert 'input_tokens' not in recorded
+            assert recorded['usage_invalid'] is True
+
+        def test_native_refusal_keeps_one_measured_attempt_without_quality_retries(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            terminal_session: TmuxSession,
+        ) -> None:
+            endpoint.stream = message_stream(
+                message('Cannot answer.', stop_reason='refusal')
+            )
+            context = AgentContext()
+
+            with pytest.raises(MessageCompletionError):
+                asyncio.run(messages_agent.execute(terminal_session, context))
+
+            assert len(endpoint.requests) == 1
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == (130, 100, 40)
+            assert context.metadata is not None
+            assert [
+                item['finish_reason'] for item in context.metadata['responses']
+            ] == ['refusal']
+
+        @pytest.mark.parametrize(
+            ('usage', 'tokens', 'cost'),
+            [
+                ('reported', (130, 100, 40), 0.000485),
+                ('zero', (0, 0, 0), 0.0),
+                ('missing', (None, None, None), None),
+                ('ttl-unpriced', (130, 100, 40), None),
+            ],
+            ids=['reported-first', 'zero-first', 'unknown-first', 'unpriced-cache-ttl'],
+        )
+        def test_native_cancellation_keeps_completed_usage_through_collection(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            messages_clients: list[AsyncAnthropic],
+            terminal_session: TmuxSession,
+            families_dir: Path,
+            data_dir: Path,
+            usage: str,
+            tokens: tuple[int | None, ...],
+            cost: float | None,
+        ) -> None:
+            text = terminus_completion(task_complete=False)['choices'][0]['message'][
+                'content'
+            ]
+            first = message(text)
+            if usage == 'zero':
+                first['usage'] = dict.fromkeys(first['usage'], 0)
+            elif usage == 'missing':
+                first['usage'] = {}
+            elif usage == 'ttl-unpriced':
+                first['usage']['cache_creation'] = {
+                    'ephemeral_1h_input_tokens': 10,
+                    'ephemeral_5m_input_tokens': 0,
+                }
+            endpoint.streams = [message_stream(first)]
+            gate = endpoint.response_gate = threading.Event()
+            endpoint.response_gate_after = 1
+            system = make_system(
+                harness='terminus-2',
+                api='anthropic-messages',
+                thinking_mode='anthropic-adaptive',
+                effort='high',
+                max_output_tokens=32768,
+                context_window=131072,
+            )
+            write_task_family(families_dir, 'echo', systems=(system.name,))
+            family = load_family('f')
+            config = jobs.job(family, [system], [])
+            context = AgentContext()
+
+            async def cancel() -> None:
+                task = asyncio.create_task(
+                    messages_agent.execute(terminal_session, context)
+                )
+                try:
+                    assert await asyncio.to_thread(endpoint.response_waiting.wait, 5)
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await asyncio.wait_for(task, 5)
+                finally:
+                    gate.set()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+            asyncio.run(cancel())
+            job_dir = data_dir / 'jobs' / family.name / 'cancelled'
+            write_trial(
+                job_dir,
+                'echo__cancelled',
+                config.agents[0],
+                task='f/echo',
+                version='1.0.0',
+                context=context,
+                error='CancelledError',
+                instruction=None,
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+            (collected,) = jobs.collect(family, {system.name: system})
+
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == tokens
+            assert (
+                collected.input_tokens,
+                collected.cached_tokens,
+                collected.output_tokens,
+            ) == tokens
+            assert collected.cache_write_tokens == (
+                10
+                if usage in ('reported', 'ttl-unpriced')
+                else 0
+                if usage == 'zero'
+                else None
+            )
+            assert collected.cost_usd == (
+                pytest.approx(cost) if cost is not None else None
+            )
+            assert context.metadata is not None
+            assert [
+                call['response_status'] for call in context.metadata['responses']
+            ] == ['completed']
+            assert [
+                call['response_status'] for call in context.metadata['message_attempts']
+            ] == ['completed', 'incomplete']
+            (client,) = messages_clients
+            assert client.is_closed()
+            assert len(endpoint.requests) == 2
+
+        def test_native_budget_continuation_keeps_signed_blocks_and_all_usage(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            terminal_session: TmuxSession,
+        ) -> None:
+            partial = message(
+                '{"analysis": "partial', message_id='partial', stop_reason='max_tokens'
+            )
+            text = terminus_completion()['choices'][0]['message']['content']
+            endpoint.streams = [
+                message_stream(payload)
+                for payload in (
+                    partial,
+                    message(text, message_id='finished'),
+                    message(text, message_id='confirmed'),
+                )
+            ]
+            context = AgentContext()
+
+            asyncio.run(messages_agent.execute(terminal_session, context))
+
+            first, reissued, confirmed = endpoint.requests
+            assert reissued.body['messages'][:-1] == [
+                *first.body['messages'],
+                {'role': 'assistant', 'content': partial['content']},
+            ]
+            assert '32768 tokens' in reissued.body['messages'][-1]['content']
+            assert (
+                confirmed.body['messages'][: len(reissued.body['messages'])]
+                == reissued.body['messages']
+            )
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == (390, 300, 120)
+            assert context.metadata is not None
+            assert context.metadata['cache_write_tokens'] == 30
+            assert [
+                call['finish_reason'] for call in context.metadata['responses']
+            ] == ['length', 'stop', 'stop']
+            assert all(
+                request.body['output_config'] == {'effort': 'high'}
+                for request in endpoint.requests
+            )
+            assert all('tools' not in request.body for request in endpoint.requests)
+
         def test_counts_native_chat_summary_subagents_once_with_main_requests(
             self,
             endpoint: StubEndpoint,
@@ -445,10 +945,13 @@ class TestTerminus:
             ) == (720, 600, 240)
             assert context.metadata is not None
             assert context.metadata['summarization_count'] == 1
-            assert (
-                context.metadata['responses']
-                == [{'input_tokens': 120, 'cache_tokens': 100, 'output_tokens': 40}] * 6
-            )
+            assert [
+                tuple(
+                    result[key]
+                    for key in ('input_tokens', 'cache_tokens', 'output_tokens')
+                )
+                for result in context.metadata['responses']
+            ] == [(120, 100, 40)] * 6
             logged = json.loads(api_log.read_text())
             assert logged['log_event_type'] == 'post_api_call'
             assert ChatCompletion.model_validate_json(
@@ -789,20 +1292,15 @@ class TestTerminus:
             recorded, reissued_usage, confirmed_usage = context.metadata['responses']
             assert ('input_tokens' not in recorded) == missing_usage
             if not missing_usage:
-                assert recorded == {
-                    'input_tokens': 120,
-                    'cache_tokens': 100,
-                    'output_tokens': 40,
-                }
-            assert (
-                reissued_usage
-                == confirmed_usage
-                == {
-                    'input_tokens': 120,
-                    'cache_tokens': 100,
-                    'output_tokens': 40,
-                }
-            )
+                assert tuple(
+                    recorded[key]
+                    for key in ('input_tokens', 'cache_tokens', 'output_tokens')
+                ) == (120, 100, 40)
+            assert reissued_usage == confirmed_usage
+            assert tuple(
+                reissued_usage[key]
+                for key in ('input_tokens', 'cache_tokens', 'output_tokens')
+            ) == (120, 100, 40)
 
         @pytest.mark.parametrize(
             'object_type',
@@ -843,10 +1341,11 @@ class TestTerminus:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
-            assert context.metadata['responses'] == [
-                {'input_tokens': 120, 'cache_tokens': 100, 'output_tokens': 40},
-                {},
-            ]
+            first, second = context.metadata['responses']
+            assert tuple(
+                first[key] for key in ('input_tokens', 'cache_tokens', 'output_tokens')
+            ) == (120, 100, 40)
+            assert second == {}
 
         @pytest.mark.parametrize(
             ('api', 'usage'),
@@ -906,7 +1405,7 @@ class TestTerminus:
 
             asyncio.run(agent.execute(terminal_session, context))
 
-            assert len(endpoint.requests) == (3 if usage == 'negative' else 2)
+            assert len(endpoint.requests) == 2
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -1238,4 +1737,5 @@ class TestTerminus:
                 'nixos_config_rev': export.rev,
                 'harbor_version': metadata.version('harbor'),
                 'responses': [],
+                'cache_write_unpriced': False,
             }

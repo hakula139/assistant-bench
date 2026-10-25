@@ -28,6 +28,49 @@ version = "0.24.0"
 class TestGeneration:
     class TestVersion:
         @pytest.mark.parametrize(
+            'field', ['messages_protocol', 'anthropic_api_version', 'anthropic']
+        )
+        def test_requires_native_identity_metadata_only_for_messages(
+            self, field: str
+        ) -> None:
+            versions = Generation(
+                protocol=2,
+                harbor='0.24.0',
+                messages_protocol=1,
+                anthropic_api_version='2023-06-01',
+                anthropic='2.3.0',
+            ).model_copy(update={field: None})
+
+            with pytest.raises(ValueError):
+                versions.version('generate', 'anthropic-messages')
+
+            assert versions.version('generate', 'openai-chat-completions') == '2'
+            assert (
+                versions.version('terminus-2', 'openai-responses') == '0.24.0+bench.2'
+            )
+
+        @pytest.mark.parametrize(
+            ('harness', 'base'), [('generate', '2'), ('terminus-2', '0.24.0+bench.2')]
+        )
+        def test_includes_native_versions_only_for_the_messages_api(
+            self, harness: str, base: str
+        ) -> None:
+            versions = Generation(
+                protocol=2,
+                harbor='0.24.0',
+                messages_protocol=1,
+                anthropic_api_version='2023-06-01',
+                anthropic='2.3.0',
+            )
+
+            assert (
+                versions.version(harness, 'anthropic-messages')
+                == f'{base}+messages.1.2023-06-01.2.3.0'
+            )
+            assert versions.version(harness, 'openai-responses') == base
+            assert versions.version(harness, 'openai-chat-completions') == base
+
+        @pytest.mark.parametrize(
             ('harness', 'expected'),
             [('generate', '2'), ('terminus-2', '0.24.0+bench.2')],
         )
