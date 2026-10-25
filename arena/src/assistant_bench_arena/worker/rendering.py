@@ -9,13 +9,17 @@ from pydantic import TypeAdapter
 from workers import Request, Response, WorkerEntrypoint
 
 from assistant_bench_arena.admission import InvalidToken, NetworkIdentity, TokenCodec
-from assistant_bench_arena.api import header
-from assistant_bench_arena.bindings import NativeLimiter, RateLimited, enforce_limit
 from assistant_bench_arena.management_models import RpcFailure, RpcResult
 from assistant_bench_arena.read_models import RenderedContent
 from assistant_bench_arena.runtime_models import KeyRing, RenderClaims
-from assistant_bench_arena.settings import ProfileBindings, profile
 from assistant_bench_arena.voting import RENDER_MS
+from assistant_bench_arena.worker.api import header
+from assistant_bench_arena.worker.bindings import (
+    NativeLimiter,
+    RateLimited,
+    enforce_limit,
+)
+from assistant_bench_arena.worker.settings import ProfileBindings, profile
 
 
 class RenderLookup(Protocol):

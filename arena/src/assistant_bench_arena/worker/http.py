@@ -33,8 +33,6 @@ from assistant_bench_arena.api_models import (
     VoteRequest,
     WithdrawRequest,
 )
-from assistant_bench_arena.authentication import CREDENTIAL_MS, ApiError, Authentication
-from assistant_bench_arena.bindings import RateLimited
 from assistant_bench_arena.ledger_models import (
     Accept,
     Context,
@@ -45,6 +43,12 @@ from assistant_bench_arena.ledger_models import (
 from assistant_bench_arena.models import FamilyView
 from assistant_bench_arena.transport import CommandRejected
 from assistant_bench_arena.voting import Voting
+from assistant_bench_arena.worker.authentication import (
+    CREDENTIAL_MS,
+    ApiError,
+    Authentication,
+)
+from assistant_bench_arena.worker.bindings import RateLimited
 
 
 @dataclass(frozen=True)

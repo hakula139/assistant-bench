@@ -16,7 +16,6 @@ from assistant_bench_arena.admission import (
     verify_challenge,
 )
 from assistant_bench_arena.api_models import ErrorCode, StatusView
-from assistant_bench_arena.bindings import NativeLimiter, enforce_limit, siteverify
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
     Admission,
@@ -29,7 +28,12 @@ from assistant_bench_arena.ledger_models import (
 )
 from assistant_bench_arena.runtime_models import AdmissionClaims, CredentialClaims
 from assistant_bench_arena.serialization import digest
-from assistant_bench_arena.settings import Settings
+from assistant_bench_arena.worker.bindings import (
+    NativeLimiter,
+    enforce_limit,
+    siteverify,
+)
+from assistant_bench_arena.worker.settings import Settings
 
 
 CREDENTIAL_MS = 2_592_000_000
@@ -66,7 +70,9 @@ class Authentication:
         self.challenge_secret = challenge_secret
         self.challenge_endpoint = challenge_endpoint
         self.ready = False
+
         profile = settings.profile
+
         self.credentials = TokenCodec(
             CredentialClaims,
             settings.sessions,
@@ -74,9 +80,11 @@ class Authentication:
             'credential',
             CREDENTIAL_MS,
         )
+
         self.flows = TokenCodec(
             AdmissionClaims, settings.sessions, profile.namespace, 'admission', FLOW_MS
         )
+
         self.credential_cookie = '__Host-bench-credential'
         self.flow_cookie = '__Host-bench-admission'
 

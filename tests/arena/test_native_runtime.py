@@ -107,7 +107,7 @@ class TestNativeRuntime:
                     'heavy_import': False,
                     'actual_app': True,
                     'direct_entrypoint': runtime.coverage is None,
-                    'actual_renderer': 'assistant_bench_arena.rendering',
+                    'actual_renderer': 'assistant_bench_arena.worker.rendering',
                 }
                 points = point_snapshot(
                     'e' * 64,

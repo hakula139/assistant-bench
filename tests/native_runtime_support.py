@@ -703,7 +703,7 @@ class NativeRuntime:
             from pydantic import TypeAdapter
 
             from assistant_bench.arena.management import connect
-            from assistant_bench_arena.management_domain import ManagementStatus, Status
+            from assistant_bench_arena.management_models import ManagementStatus, Status
 
 
             async def main():

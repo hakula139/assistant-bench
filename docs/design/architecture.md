@@ -47,23 +47,35 @@ src/assistant_bench/
 
 ## Import Layers
 
-`arena/src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports the shared contracts for family validation, release preparation and evidence analysis.
+`arena/src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports shared contracts for family validation, release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `arena/src/app.py` and `arena/src/render.py` entrypoints export the application and renderer's native SDK classes.
 
 ```text
 arena/src/assistant_bench_arena/
-├── investigation.py       # Private receipt filters and expiring network associations
-├── ledger.py              # Atomic commands and authenticated command recovery
-├── ledger_models.py       # Private evidence, control inputs, and export contracts
-├── maintenance.py         # Bounded expiry of private and unaccepted state
-├── models.py              # Shared record policy and blinded browser views
-├── read_models.py         # Private scheduling projections
-├── reads.py               # Bounded inventory, scheduling, and rendered content reads
-├── releases.py            # Shared release identities and persisted-fact validation
-├── schema.py              # Current profile inspection and atomic initialization marker
-├── schema.sql             # Current schema, created with its profile in one native batch
-├── serialization.py       # Canonical JSON and content identities
-├── snapshots.py           # Numerical policy and approved presentation contracts
-└── transport.py           # Prepared statements and exact database rejection mapping
+├── investigation.py          # Private receipt queries and expiring network associations
+├── investigation_models.py   # Private receipt filters, results and sampling provenance
+├── ledger.py                 # Atomic commands and authenticated command recovery
+├── ledger_models.py          # Private evidence, control inputs, and export contracts
+├── maintenance.py            # Bounded expiry of private and unaccepted state
+├── management_domain.py      # Private management command execution with a fixed principal
+├── management_models.py      # Management requests, validation and bounded Service results
+├── models.py                 # Shared record policy and blinded browser views
+├── read_models.py            # Private scheduling projections
+├── reads.py                  # Bounded inventory, scheduling, and rendered content reads
+├── releases.py               # Shared release identities and persisted-fact validation
+├── schema.py                 # Current profile inspection and atomic initialization marker
+├── schema.sql                # Current schema, created with its profile in one native batch
+├── serialization.py          # Canonical JSON and content identities
+├── snapshots.py              # Numerical policy and approved presentation contracts
+├── transport.py              # Prepared statements and exact database rejection mapping
+└── worker/
+    ├── api.py                # Native request, response and ASGI adapters
+    ├── authentication.py     # Cookie ownership, admission and network budgets
+    ├── bindings.py           # Native D1, limiter, challenge and body adapters
+    ├── http.py               # Browser routes and blinded response handling
+    ├── owner.py              # The shared application and database owner
+    ├── production.py         # Application HTTP and confined Service entrypoints
+    ├── rendering.py          # The isolated renderer entrypoint
+    └── settings.py           # Native bindings and validated deployment settings
 ```
 
 Imports point downward through these layers, so a module never imports one above it:

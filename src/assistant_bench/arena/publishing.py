@@ -3,8 +3,8 @@
 from pydantic import JsonValue, TypeAdapter
 
 from assistant_bench.arena.management import Management
-from assistant_bench_arena import management_domain as command
-from assistant_bench_arena.investigation import FamilyStatus
+from assistant_bench_arena import management_models as command
+from assistant_bench_arena.investigation_models import FamilyStatus
 from assistant_bench_arena.ledger_models import Event, PointSnapshot
 from assistant_bench_arena.read_models import FamilyState
 from assistant_bench_arena.releases import Release

@@ -6,7 +6,7 @@ from pydantic import TypeAdapter
 
 from assistant_bench.arena.exports import FrozenExport, capture_export
 from assistant_bench.arena.management import Management
-from assistant_bench_arena import management_domain as command
+from assistant_bench_arena import management_models as command
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
     Accept,
@@ -19,6 +19,7 @@ from assistant_bench_arena.ledger_models import (
     Quota,
     Session,
 )
+from assistant_bench_arena.management_domain import execute
 from assistant_bench_arena.releases import Release
 from assistant_bench_arena.serialization import canonical
 from ledger_support import D1Runtime
@@ -51,7 +52,7 @@ class NativeManagement(Management):
 
         request = command.parse_request(canonical(request))
         self.operations.append(request)
-        result = await command.execute(self.ledger, request, self.now)
+        result = await execute(self.ledger, request, self.now)
 
         if self.lose_reply == request.operation:
             self.lose_reply = None

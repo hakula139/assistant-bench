@@ -1,7 +1,7 @@
 [project]
 name = "assistant-bench-arena"
 version = "0.1.0"
-description = "Shared contracts for assistant-bench voting"
+description = "Voting contracts, ledger, and native Worker services for assistant-bench"
 license = "MIT"
 requires-python = ">=3.14"
 dependencies = ["fastapi>=0.156.4", "itsdangerous>=2.2.0", "pydantic>=2.14.1"]

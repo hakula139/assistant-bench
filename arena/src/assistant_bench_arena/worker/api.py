@@ -6,8 +6,8 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI
 from pyodide.ffi import JsNull
 
-from assistant_bench_arena.bindings import BodyRejected, read_body
 from assistant_bench_arena.runtime_models import Profile
+from assistant_bench_arena.worker.bindings import BodyRejected, read_body
 
 
 if TYPE_CHECKING:

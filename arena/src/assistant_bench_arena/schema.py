@@ -12,26 +12,6 @@ from assistant_bench_arena.transport import Transport
 SCHEMA_ID = 'arena-v1'
 
 
-def parse_schema(source: str) -> tuple[Statement, ...]:
-    """Split terminated SQL on native Python without opening a database."""
-    import sqlite3
-
-    statements: list[Statement] = []
-    pending = ''
-
-    for character in source:
-        pending += character
-
-        if character == ';' and sqlite3.complete_statement(pending):
-            statements.append(Statement(sql=pending))
-            pending = ''
-
-    if pending.strip():
-        raise ValueError('The schema ends with an unterminated SQL statement.')
-
-    return tuple(statements)
-
-
 def bootstrap_statements(config: BootstrapConfiguration) -> tuple[Statement, ...]:
     """Append the immutable profile marker last in the schema's native batch."""
     return (

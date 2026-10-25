@@ -6,6 +6,7 @@ import queue
 import re
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -29,7 +30,7 @@ from assistant_bench_arena.ledger_models import (
     Statement,
 )
 from assistant_bench_arena.releases import Release
-from assistant_bench_arena.schema import bootstrap_statements, parse_schema
+from assistant_bench_arena.schema import bootstrap_statements
 from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
@@ -70,6 +71,24 @@ _OWNER = """
 
             return json.dumps({'result': result})
 """
+
+
+def parse_schema(source: str) -> tuple[Statement, ...]:
+    """Split terminated SQL on native Python without opening a database."""
+    statements: list[Statement] = []
+    pending = ''
+
+    for character in source:
+        pending += character
+
+        if character == ';' and sqlite3.complete_statement(pending):
+            statements.append(Statement(sql=pending))
+            pending = ''
+
+    if pending.strip():
+        raise ValueError('The schema ends with an unterminated SQL statement.')
+
+    return tuple(statements)
 
 
 async def publish_release(

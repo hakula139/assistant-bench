@@ -7,14 +7,18 @@ from pydantic import TypeAdapter
 from workers import Response
 
 from assistant_bench_arena.admission import TokenCodec
-from assistant_bench_arena.authentication import Authentication
-from assistant_bench_arena.bindings import D1Transport, NativeDatabase, NativeLimiter
-from assistant_bench_arena.http import BrowserApi, application
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.models import FamilyView
 from assistant_bench_arena.runtime_models import PairClaims, RenderClaims
-from assistant_bench_arena.settings import ConfigurationBindings, Settings
 from assistant_bench_arena.voting import LEASE_MS, RENDER_MS, Voting
+from assistant_bench_arena.worker.authentication import Authentication
+from assistant_bench_arena.worker.bindings import (
+    D1Transport,
+    NativeDatabase,
+    NativeLimiter,
+)
+from assistant_bench_arena.worker.http import BrowserApi, application
+from assistant_bench_arena.worker.settings import ConfigurationBindings, Settings
 
 
 if TYPE_CHECKING:
@@ -38,13 +42,16 @@ class AppBindings(ConfigurationBindings, Protocol):
 class Owner:
     def __init__(self, bindings: AppBindings) -> None:
         self.bindings = bindings
+
         try:
             self.settings = Settings(bindings)
         except ValueError:
             raise ValueError('The voting configuration is invalid.') from None
+
         self.transport = D1Transport(bindings.DB)
         self.ledger = Ledger(self.transport)
         self.http: FastAPI | None = None
+
         self.auth = Authentication(
             self.settings,
             self.ledger,
@@ -54,6 +61,7 @@ class Owner:
             bindings.ACTOR_LIMIT,
             bindings.TURNSTILE_SECRET,
         )
+
         self.pairs = TokenCodec(
             PairClaims,
             self.settings.sessions,
@@ -61,6 +69,7 @@ class Owner:
             'pair',
             LEASE_MS,
         )
+
         self.renders = TokenCodec(
             RenderClaims,
             self.settings.renders,

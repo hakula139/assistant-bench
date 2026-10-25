@@ -24,8 +24,8 @@ from assistant_bench.arena.runtime import (
 )
 from assistant_bench.arena.snapshots import analyze_export
 from assistant_bench.paths import REPORTS_DIR, write_atomically
-from assistant_bench_arena import management_domain as command
-from assistant_bench_arena.investigation import (
+from assistant_bench_arena import management_models as command
+from assistant_bench_arena.investigation_models import (
     FamilyStatus,
     InvestigationPage,
     ReceiptFilter,

@@ -10,7 +10,7 @@ from assistant_bench.arena.publishing import (
     publish_release,
 )
 from assistant_bench.arena.snapshots import analyze_export
-from assistant_bench_arena import management_domain as command
+from assistant_bench_arena.management_domain import PRINCIPAL
 from ledger_fixtures import make_release
 from ledger_support import D1Runtime
 
@@ -80,7 +80,7 @@ class TestPublishRelease:
                 event = await publish_release(management, refreshed)
                 current = await management.ledger.read.family('writing')
 
-                assert event is not None and event.principal == command.PRINCIPAL
+                assert event is not None and event.principal == PRINCIPAL
                 assert current is not None
                 assert current.publication_id == refreshed.publication.id
                 assert current.point_id == fitted.id

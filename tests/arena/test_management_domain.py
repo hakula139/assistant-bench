@@ -3,8 +3,9 @@ from collections.abc import Iterator
 
 import pytest
 
-from assistant_bench_arena import management_domain as management
+from assistant_bench_arena import management_models as management
 from assistant_bench_arena.ledger_models import BootstrapConfiguration
+from assistant_bench_arena.management_domain import execute
 from assistant_bench_arena.serialization import digest
 from ledger_fixtures import make_release
 from ledger_support import D1Runtime
@@ -108,7 +109,7 @@ class TestExecute:
                 )
 
                 for request in requests[:target]:
-                    await management.execute(
+                    await execute(
                         ledger,
                         management.parse_request(request.model_dump_json()),
                         10,
@@ -197,13 +198,13 @@ class TestExecute:
                 parsed = management.parse_request(invalid.model_dump_json())
 
                 with pytest.raises(ValueError):
-                    await management.execute(ledger, parsed, 11)
+                    await execute(ledger, parsed, 11)
 
                 assert await transport.rows(f'SELECT * FROM {table}') == before
                 assert await transport.rows('SELECT * FROM family_state') == []
 
                 for request in requests[target:]:
-                    await management.execute(
+                    await execute(
                         ledger,
                         management.parse_request(request.model_dump_json()),
                         12,

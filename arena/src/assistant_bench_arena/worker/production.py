@@ -8,20 +8,25 @@ from pyodide.ffi import JsNull
 from workers import Request, Response, WorkerEntrypoint
 
 from assistant_bench_arena.admission import InvalidToken
-from assistant_bench_arena.api import (
+from assistant_bench_arena.api_models import ErrorView
+from assistant_bench_arena.management_domain import execute
+from assistant_bench_arena.management_models import (
+    RpcError,
+    RpcFailure,
+    RpcSuccess,
+    parse_request,
+)
+from assistant_bench_arena.transport import CommandRejected
+from assistant_bench_arena.worker.api import (
     RequestRejected,
     header,
     serve_http,
     validate_request,
 )
-from assistant_bench_arena.api_models import ErrorView
-from assistant_bench_arena.authentication import ApiError
-from assistant_bench_arena.bindings import RateLimited
-from assistant_bench_arena.http import INGRESS, Ingress
-from assistant_bench_arena.management_domain import execute, parse_request
-from assistant_bench_arena.management_models import RpcError, RpcFailure, RpcSuccess
-from assistant_bench_arena.owner import AppBindings, owner
-from assistant_bench_arena.transport import CommandRejected
+from assistant_bench_arena.worker.authentication import ApiError
+from assistant_bench_arena.worker.bindings import RateLimited
+from assistant_bench_arena.worker.http import INGRESS, Ingress
+from assistant_bench_arena.worker.owner import AppBindings, owner
 
 
 class OwnerEntrypoint(WorkerEntrypoint):
