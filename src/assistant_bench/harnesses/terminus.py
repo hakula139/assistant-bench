@@ -14,6 +14,7 @@ from harbor.llms.chat import Chat
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
+from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
 from pydantic import ConfigDict, TypeAdapter, ValidationError
@@ -109,6 +110,18 @@ class _ConfiguredLiteLLM(LiteLLM):
         result['usage_invalid'] = usage is None
         if usage is not None:
             result.update(usage.details)
+
+    @override
+    def _extract_usage_info(self, response: Any) -> UsageInfo | None:
+        """Use original SDK counters before LiteLLM fills absent values."""
+        usage = (
+            measured_usage(
+                'openai-chat-completions', self.results[-1].get('reported_usage')
+            )
+            if self.results
+            else None
+        )
+        return usage.harbor if usage is not None else None
 
 
 class Terminus(Terminus2):
