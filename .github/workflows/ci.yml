@@ -374,6 +374,7 @@ jobs:
     # Deploys queue in the order their checks finish, so cancelling one could stop a newer deploy.
     concurrency:
       group: production
+      queue: max
       cancel-in-progress: false
     environment:
       name: production

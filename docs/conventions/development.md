@@ -50,7 +50,7 @@ Commands stay minimal, and settings live in config files:
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
-| The Cloudflare Workers deploy                                                 | `web/wrangler.toml`                                                                                                   |
+| The Cloudflare Workers deploy                                                 | `wrangler.toml` for voting and `web/wrangler.toml` for static previews                                                |
 | Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
 
 Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings and native `BENCH_ANTHROPIC_BASE_URL` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.

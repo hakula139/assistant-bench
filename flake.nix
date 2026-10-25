@@ -83,7 +83,18 @@
           check-added-large-files.enable = true;
           check-yaml.enable = true;
           taplo.enable = true;
-          actionlint.enable = true;
+          actionlint = {
+            enable = true;
+            package = pkgs.actionlint.overrideAttrs (old: {
+              patches = (old.patches or [ ]) ++ [
+                (pkgs.fetchpatch {
+                  url = "https://github.com/rhysd/actionlint/commit/644076a59742c2d1540ebd4686eab3c308f0e562.patch";
+                  hash = "sha256-Lpd7CTkLbzgvAZV2H8G4GTUoPNDCK7PiW3A40+cquUk=";
+                })
+              ];
+            });
+          };
+
           lychee.enable = true;
 
           sort-file-contents = {
