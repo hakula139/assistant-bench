@@ -17,6 +17,7 @@ from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
+from assistant_bench.harnesses.usage import measured_usage, usage_payload
 
 
 OUTPUT_FILE = 'output.txt'
@@ -148,22 +149,17 @@ class Generate(BaseAgent):
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
-        usage = completion.usage
-        reasoning_tokens = None
+        reported = usage_payload(getattr(completion, 'usage', None))
+        usage = measured_usage('openai-chat-completions', reported)
         if usage is not None:
-            prompt_details = usage.prompt_tokens_details
-            completion_details = usage.completion_tokens_details
-            context.n_input_tokens = usage.prompt_tokens
-            context.n_cache_tokens = (
-                prompt_details and prompt_details.cached_tokens
-            ) or 0
-            context.n_output_tokens = usage.completion_tokens
-            reasoning_tokens = (
-                completion_details and completion_details.reasoning_tokens
-            )
+            context.n_input_tokens = usage.input_tokens
+            context.n_cache_tokens = usage.cache_tokens
+            context.n_output_tokens = usage.output_tokens
 
         return {
-            'reasoning_tokens': reasoning_tokens,
+            'reasoning_tokens': usage.reasoning_tokens if usage else None,
+            'reported_usage': reported,
+            'usage_invalid': reported is not None and usage is None,
             'finish_reason': 'refusal'
             if choice.message.refusal
             else choice.finish_reason,
@@ -195,10 +191,10 @@ class Generate(BaseAgent):
         response = result.response
         (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
 
-        usage = response.usage
+        usage = result.usage
         if usage is not None:
             context.n_input_tokens = usage.input_tokens
-            context.n_cache_tokens = usage.input_tokens_details.cached_tokens
+            context.n_cache_tokens = usage.cache_tokens
             context.n_output_tokens = usage.output_tokens
 
         context.metadata = result.details

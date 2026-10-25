@@ -335,7 +335,7 @@ def resolve_system(
         raise ValueError(
             f'System `{name}`: the catalog model declares no supported APIs.'
         )
-    if entry.apis is not None and config.api not in entry.apis:
+    if config.api not in entry.apis:
         raise ValueError(
             f'System `{name}`: API `{config.api}` is not one of {code(entry.apis)}.'
         )

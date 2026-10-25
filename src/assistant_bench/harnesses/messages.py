@@ -16,11 +16,11 @@ from anthropic.types import (
 )
 from harbor.llms.base import BaseLLM, LLMResponse, OutputLengthExceededError
 from harbor.llms.chat import Chat
-from harbor.models.metric import UsageInfo
 from pydantic import TypeAdapter
 
 from assistant_bench.catalog import ThinkingMode
 from assistant_bench.generation import load_generation
+from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
 
 
 ITEMS_KEY = 'message_content'
@@ -45,6 +45,12 @@ class MessageResult:
     request_id: str | None = None
     complete: bool = False
     latency_sec: float | None = None
+
+    @property
+    def usage(self) -> MeasuredUsage | None:
+        return measured_usage(
+            'anthropic-messages', getattr(self.message, 'usage', None)
+        )
 
     @property
     def text(self) -> str:
@@ -79,7 +85,8 @@ class MessageResult:
             for block in message.content
         ):
             finish = 'unexpected_content'
-        usage = getattr(message, 'usage', None)
+        usage = self.usage
+        reported = usage_payload(getattr(message, 'usage', None))
         details: dict[str, Any] = {
             'finish_reason': finish if self.complete else None,
             'native_stop_reason': stop,
@@ -90,26 +97,12 @@ class MessageResult:
             'latency_sec': self.latency_sec,
             'anthropic_sdk_version': metadata.version('anthropic'),
             'anthropic_api_version': load_generation().anthropic_api_version,
-            'native_usage': usage.model_dump(mode='json', exclude_unset=True)
-            if usage
-            else None,
-            'reasoning_tokens': usage.output_tokens_details.thinking_tokens
-            if usage and usage.output_tokens_details
-            else None,
+            'native_usage': reported,
+            'reasoning_tokens': usage.reasoning_tokens if usage else None,
+            'usage_invalid': reported is not None and usage is None,
         }
-        if usage and {'input_tokens', 'output_tokens'} <= usage.model_fields_set:
-            reads = usage.cache_read_input_tokens or 0
-            writes = usage.cache_creation_input_tokens or 0
-            details |= {
-                'input_tokens': usage.input_tokens + reads + writes,
-                'cache_tokens': reads,
-                'cache_write_tokens': writes,
-                'output_tokens': usage.output_tokens,
-                'cache_write_unpriced': bool(
-                    usage.cache_creation
-                    and usage.cache_creation.ephemeral_1h_input_tokens
-                ),
-            }
+        if usage is not None:
+            details |= usage.details
         return details
 
     def check(self, *, complete: bool) -> None:
@@ -245,7 +238,7 @@ class MessagesLLM(BaseLLM):
         self.context_limit = context_limit
         self.output_limit = output_limit
         self.effort = effort
-        self.thinking_mode = thinking_mode
+        self.thinking_mode: ThinkingMode = thinking_mode
         self.logs_dir = logs_dir
         self.results: list[dict[str, Any]] = []
         self.attempts: list[dict[str, Any]] = []
@@ -289,13 +282,6 @@ class MessagesLLM(BaseLLM):
             content=result.text,
             model_name=details['response_model'],
             response_id=details['response_id'],
-            usage=UsageInfo(
-                prompt_tokens=details['input_tokens'],
-                completion_tokens=details['output_tokens'],
-                cache_tokens=details['cache_tokens'],
-                cost_usd=0,
-            )
-            if 'input_tokens' in details
-            else None,
+            usage=result.usage.harbor if result.usage else None,
             extra=details | {ITEMS_KEY: result.items},
         )

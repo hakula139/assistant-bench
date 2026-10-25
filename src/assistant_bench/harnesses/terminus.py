@@ -14,10 +14,8 @@ from harbor.llms.chat import Chat
 from harbor.llms.lite_llm import LiteLLM
 from harbor.llms.litellm_config import configure_litellm_debug
 from harbor.models.agent.context import AgentContext
-from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
-from openai.types.completion_usage import CompletionUsage
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from tenacity import retry_if_not_exception_type
 
@@ -38,6 +36,7 @@ from assistant_bench.harnesses.responses import (
     ResponsesLLM,
     attach_items,
 )
+from assistant_bench.harnesses.usage import measured_usage
 
 
 _RESPONSE_METADATA = TypeAdapter(
@@ -105,26 +104,11 @@ class _ConfiguredLiteLLM(LiteLLM):
             return
         if response.get('usage') is None:
             return
-        try:
-            usage = CompletionUsage.model_validate(response['usage'])
-            reported = UsageInfo(
-                prompt_tokens=usage.prompt_tokens,
-                cache_tokens=(
-                    usage.prompt_tokens_details.cached_tokens or 0
-                    if usage.prompt_tokens_details is not None
-                    else 0
-                ),
-                completion_tokens=usage.completion_tokens,
-                cost_usd=0,
-            )
-        except ValidationError:
-            raise ValueError('The provider returned invalid token usage.') from None
-
-        result.update(
-            input_tokens=reported.prompt_tokens,
-            cache_tokens=reported.cache_tokens,
-            output_tokens=reported.completion_tokens,
-        )
+        result['reported_usage'] = response['usage']
+        usage = measured_usage('openai-chat-completions', response['usage'])
+        result['usage_invalid'] = usage is None
+        if usage is not None:
+            result.update(usage.details)
 
 
 class Terminus(Terminus2):
