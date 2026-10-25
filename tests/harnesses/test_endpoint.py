@@ -88,15 +88,19 @@ class TestEndpoint:
             monkeypatch.setattr('httpx._utils.getproxies', inherited_proxies)
             monkeypatch.setattr('httpx2._utils.getproxies', inherited_proxies)
             configured = Endpoint.read(endpoint.env.get, api)
-            build = (
-                configured.messages_http_client
-                if api == 'anthropic-messages'
-                else configured.http_client
-            )
 
             async def request() -> httpx.Response | httpx2.Response:
-                async with build() as client:
-                    return await client.post(f'{endpoint.url}/v1/responses', json={})
+                if api == 'anthropic-messages':
+                    async with configured.messages_client() as client:
+                        return await client.post(
+                            f'{endpoint.url}/v1/responses',
+                            cast_to=httpx2.Response,
+                            body={},
+                        )
+                async with configured.client() as client:
+                    return await client.post(
+                        f'{endpoint.url}/v1/responses', cast_to=httpx.Response, body={}
+                    )
 
             reply = asyncio.run(request())
 
@@ -107,7 +111,7 @@ class TestEndpoint:
             assert sent.headers['x-trace'] == 'bench'
             (outgoing,) = model_requests
             assert outgoing.extensions['timeout'] == {
-                'connect': 5.0,
+                'connect': 30.0,
                 'read': None,
                 'write': 600.0,
                 'pool': 600.0,
