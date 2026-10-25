@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import RequestResponseEndpoint
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import JSONResponse
 
 from assistant_bench_arena.admission import (
     ChallengeRejected,
@@ -61,16 +61,9 @@ INGRESS: ContextVar[Ingress] = ContextVar('arena_ingress')
 
 
 class BrowserApi:
-    def __init__(
-        self, authentication: Authentication, voting: Voting, admission_shell: str
-    ) -> None:
+    def __init__(self, authentication: Authentication, voting: Voting) -> None:
         self.authentication = authentication
         self.voting = voting
-
-        if admission_shell.count('"__BENCH_ADMISSION_DATA__"') != 1:
-            raise ValueError('The prepared admission document is invalid.')
-
-        self.admission_shell = admission_shell
 
     async def middleware(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -107,30 +100,17 @@ class BrowserApi:
     async def families(self) -> list[FamilyView]:
         return list(self.voting.catalog.values())
 
-    async def admission_document(self, request: Request) -> Response:
+    async def admission_context(self) -> Response:
         ingress = INGRESS.get()
-        family = request.query_params.get('family')
-
-        if family is not None and family not in self.voting.catalog:
-            raise ApiError(404, 'not_found')
-
         flow = await self.authentication.flow(ingress.cookies, ingress.now)
 
         view = AdmissionView(
             command_id=flow.flow,
             action='bench_admit' if flow.operation == 'new' else 'bench_renew',
             sitekey=self.authentication.settings.sitekey,
-            family=family,
         )
 
-        payload = view.model_dump_json().replace('<', '\\u003c')
-        body = self.admission_shell.replace('"__BENCH_ADMISSION_DATA__"', payload)
-        response = HTMLResponse(body)
-        response.headers['Content-Security-Policy'] = (
-            "frame-src https://challenges.cloudflare.com; connect-src 'self'; "
-            "style-src 'self'; base-uri 'none'; form-action 'none'; "
-            "frame-ancestors 'none'; object-src 'none'"
-        )
+        response = JSONResponse(view.model_dump(mode='json'))
         response.headers['Set-Cookie'] = self.authentication.set_cookie(
             self.authentication.flow_cookie,
             self.authentication.flows.encode(flow),
@@ -301,7 +281,7 @@ def application(api: BrowserApi) -> FastAPI:
     app.add_exception_handler(HTTPException, missing_route)
     app.add_api_route('/api/status', api.status, methods=['GET'])
     app.add_api_route('/api/families', api.families, methods=['GET'])
-    app.add_api_route('/admit', api.admission_document, methods=['GET'])
+    app.add_api_route('/api/admission', api.admission_context, methods=['GET'])
     app.add_api_route('/api/admission', api.admission, methods=['POST'])
     app.add_api_route('/api/admission/replay', api.admission_replay, methods=['POST'])
     app.add_api_route('/api/sessions', api.start, methods=['POST'], status_code=201)

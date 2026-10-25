@@ -3,6 +3,14 @@ import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
 import { VoteApp } from '@/components/vote/VoteApp';
 import { SITE_NAME } from '@/lib/site';
+
+const csp = Astro.csp;
+if (csp === undefined) {
+  throw new Error('Voting requires Content Security Policy.');
+}
+
+csp.insertScriptResource("'self'");
+csp.insertScriptResource('https://challenges.cloudflare.com');
 ---
 
 <!doctype html>

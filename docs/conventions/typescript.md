@@ -14,7 +14,7 @@ web/src/
 ├── components/vote/                        # The vote island
 ├── content.config.ts                       # The families, reports, systems, and models collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
-├── integrations/voting.ts                  # Injects the vote route and builds the admission client
+├── integrations/voting.ts                  # Injects the vote route
 ├── layouts/                                # The page shell
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only

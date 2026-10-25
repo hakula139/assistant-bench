@@ -489,11 +489,6 @@
   },
   "admissionView": {
     "$defs": {
-      "FamilyName": {
-        "maxLength": 256,
-        "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])",
-        "type": "string"
-      },
       "Identifier": {
         "maxLength": 256,
         "minLength": 1,
@@ -515,19 +510,9 @@
       },
       "sitekey": {
         "$ref": "#/$defs/Identifier"
-      },
-      "family": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/FamilyName"
-          },
-          {
-            "type": "null"
-          }
-        ]
       }
     },
-    "required": ["command_id", "action", "sitekey", "family"],
+    "required": ["command_id", "action", "sitekey"],
     "title": "AdmissionView",
     "type": "object"
   },

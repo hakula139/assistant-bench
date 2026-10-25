@@ -17,6 +17,7 @@ import { defectTerms } from '@/lib/glossary';
 import type { Defect } from '@/lib/report';
 import { VoteFlow } from '@/lib/vote-flow';
 import { COMMAND_ID, VOTE_FAMILY as FAMILY, makeSession, requestBody } from '@/test/arena';
+import { ADMISSION, stubChallenge } from '@/test/verification';
 
 const PRIVATE_FAMILIES: FamilyView[] = [
   { name: 'private-review', aspect: 'private-research', display_name: 'Review', defects: [] },
@@ -191,6 +192,7 @@ describe('VoteApp', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    delete window.turnstile;
     document.head.innerHTML = '<meta name="bench-render-origin" content="https://render.example">';
     history.replaceState(null, '', '/vote/');
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
@@ -200,6 +202,131 @@ describe('VoteApp', () => {
     vi.useRealTimers();
     cleanup();
   });
+
+  test.each([null, FAMILY.name])(
+    'verifies a fresh browser inline and continues family %s',
+    async (family) => {
+      const api = stubApi();
+      const original = globalThis.fetch;
+      const provider = stubChallenge();
+      let admitted = false;
+      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+        if (path === '/api/status') {
+          return Promise.resolve(Response.json({ status: 'admission_required' }));
+        }
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Promise.resolve(Response.json(ADMISSION));
+          }
+          admitted = true;
+          return Promise.resolve(Response.json({ status: 'ready' }));
+        }
+        return !admitted && path === '/api/sessions'
+          ? Promise.resolve(Response.json({ error: 'admission_required' }, { status: 401 }))
+          : original(path, init);
+      });
+      history.replaceState(null, '', `/vote/${family === null ? '' : `?family=${family}`}`);
+      const user = userEvent.setup();
+
+      render(<VoteApp />);
+      await vi.waitFor(() => {
+        provider.options();
+      });
+
+      expect(api.starts).toEqual([]);
+      expect(screen.queryByRole('link', { name: /verification/i })).toBeNull();
+      act(() => {
+        provider.options().callback('fresh-proof');
+      });
+      if (family === null) {
+        await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+      }
+      await screen.findByText('Output A1');
+
+      expect(location.pathname).toBe('/vote/');
+      expect(api.starts).toEqual([{ family: FAMILY.name }]);
+      expect(api.casts).toEqual([]);
+      expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
+    },
+  );
+
+  test.each([true, false])(
+    'resolves an uncertain vote accepted=%s before inline renewal without resubmission',
+    async (accepted) => {
+      const api = stubApi();
+      const user = await startSession();
+      const original = globalThis.fetch;
+      const provider = stubChallenge();
+      let admitted = true;
+      let lost = true;
+      const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Response.json({ ...ADMISSION, action: 'bench_renew' });
+          }
+          admitted = true;
+          return Response.json({ status: 'ready' });
+        }
+        if (path === '/api/sessions/resume' && !admitted) {
+          return Response.json({ error: 'renewal_required' }, { status: 403 });
+        }
+        if (path === '/api/votes' && lost) {
+          lost = false;
+          admitted = false;
+          if (accepted) {
+            await original(path, init);
+          }
+          throw new TypeError('The vote response was lost');
+        }
+        return original(path, init);
+      });
+      vi.stubGlobal('fetch', fetch);
+      const pane = screen.getByRole('region', { name: 'Output A' });
+
+      await user.keyboard('b1{Enter}');
+      await user.click(await screen.findByRole('button', { name: 'Retry connection' }));
+      await vi.waitFor(() => {
+        provider.options();
+      });
+
+      expect(screen.getByRole('region', { name: 'Output A' })).toBe(pane);
+      expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
+      await user.keyboard('a2u{Enter}');
+      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+      if (accepted) {
+        expect(screen.getByText('Vote accepted.')).toBeDefined();
+      } else {
+        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+          'ariaChecked',
+          'true',
+        );
+        expect(within(pane).getByRole('button', { name: 'Issues 1' })).toBeDefined();
+      }
+
+      act(() => {
+        provider.options().callback('renew-proof');
+      });
+      await vi.waitFor(() => {
+        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+          'disabled',
+          false,
+        );
+      });
+      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+      if (!accepted) {
+        const originalVote = requestBody(fetch.mock.calls[0][1]);
+        await user.click(screen.getByRole('button', { name: /Submit vote/ }));
+        const retried = fetch.mock.calls.filter(([path]) => path === '/api/votes').at(-1);
+        expect(requestBody(retried?.[1])).toEqual(originalVote);
+      }
+      await screen.findByText('Output A2');
+
+      expect(api.starts).toEqual([{ family: FAMILY.name }]);
+      expect(api.casts.map(({ choice, defects }) => ({ choice, defects }))).toEqual([
+        { choice: 'b', defects: { a: ['scope'], b: [] } },
+      ]);
+    },
+  );
 
   test('keeps acceptance visible when acquiring the next pair fails', async () => {
     const api = stubApi({ prior: 1 });
@@ -259,46 +386,70 @@ describe('VoteApp', () => {
     expect(statusLine()).toBe('Writing · Chinese, 0 votes');
   });
 
-  test('keeps the prior family acknowledgment separate from the requested session', async () => {
-    const prior = makeSession();
-    const flow = new VoteFlow();
-    flow.show(prior);
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
-    await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
-    const family = { ...FAMILY, name: 'other', display_name: 'Other' };
-    const other = makeSession({ id: 's2', family });
-    const starts: unknown[] = [];
-    let available = false;
-    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-      if (path === '/api/status') {
-        return Promise.resolve(Response.json({ status: 'ready' }));
-      }
-      if (path === '/api/families') {
-        return Promise.resolve(Response.json([FAMILY, family]));
-      }
-      if (path === '/api/votes/resolve') {
-        return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
-      }
-      starts.push(requestBody(init));
-      return Promise.resolve(
-        available ? Response.json(other) : Response.json({ error: 'unavailable' }, { status: 503 }),
-      );
-    });
-    history.replaceState(null, '', '/vote/?family=other');
-    const user = userEvent.setup();
+  test.each(['connection', 'verification'] as const)(
+    'keeps the prior family acknowledgment separate through %s recovery',
+    async (recovery) => {
+      const prior = makeSession();
+      const flow = new VoteFlow();
+      flow.show(prior);
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
+      await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
+      const family = { ...FAMILY, name: 'other', display_name: 'Other' };
+      const other = makeSession({ id: 's2', family });
+      const starts: unknown[] = [];
+      const provider = stubChallenge();
+      let available = false;
+      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
+        if (path === '/api/status') {
+          return Promise.resolve(
+            Response.json({ status: recovery === 'verification' ? 'renewal_required' : 'ready' }),
+          );
+        }
+        if (path === '/api/admission') {
+          if (init?.method === 'GET') {
+            return Promise.resolve(Response.json({ ...ADMISSION, action: 'bench_renew' }));
+          }
+          available = true;
+          return Promise.resolve(Response.json({ status: 'ready' }));
+        }
+        if (path === '/api/families') {
+          return Promise.resolve(Response.json([FAMILY, family]));
+        }
+        if (path === '/api/votes/resolve') {
+          return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
+        }
+        starts.push(requestBody(init));
+        return Promise.resolve(
+          available
+            ? Response.json(other)
+            : Response.json({ error: 'unavailable' }, { status: 503 }),
+        );
+      });
+      history.replaceState(null, '', '/vote/?family=other');
+      const user = userEvent.setup();
 
-    render(<VoteApp />);
-    await screen.findByText('Vote accepted.');
-    available = true;
-    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
-    await screen.findByRole('button', { name: '0 votes' });
+      render(<VoteApp />);
+      await screen.findByText('Vote accepted.');
+      if (recovery === 'verification') {
+        await vi.waitFor(() => {
+          provider.options();
+        });
+        act(() => {
+          provider.options().callback('renew-proof');
+        });
+      } else {
+        available = true;
+        await user.click(screen.getByRole('button', { name: 'Retry connection' }));
+      }
+      await screen.findByRole('button', { name: '0 votes' });
 
-    expect(starts[1]).toEqual(starts[0]);
-    expect(statusLine()).toBe('Writing · Other, 0 votes');
-    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
-    expect(screen.queryByText('Saved')).toBeNull();
-    expect(screen.queryByText('Vote accepted.')).toBeNull();
-  });
+      expect(starts[1]).toEqual(starts[0]);
+      expect(statusLine()).toBe('Writing · Other, 0 votes');
+      expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
+      expect(screen.queryByText('Saved')).toBeNull();
+      expect(screen.queryByText('Vote accepted.')).toBeNull();
+    },
+  );
 
   test('explains an empty public family list without owner commands', async () => {
     vi.stubGlobal('fetch', (path: string) =>
@@ -357,6 +508,9 @@ describe('VoteApp', () => {
   test('submits the verdict picked and the vote sent by pointer', async () => {
     const api = stubApi();
     const user = await startSession();
+
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: 'B is better' }));
     await user.click(screen.getByRole('button', { name: /Submit vote/ }));

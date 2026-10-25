@@ -70,7 +70,7 @@ class Default(OwnerEntrypoint):
 
             path = validate_request(native, self.owner.settings.profile, native.method)
 
-            if path.startswith('/api/') or path == '/admit':
+            if path.startswith('/api/'):
                 stage = 'http'
                 response = await serve_http(
                     await self.owner.browser(),
@@ -100,9 +100,14 @@ class Default(OwnerEntrypoint):
                         1,
                     )
                     response = NativeResponse.new(body, asset.js_object)
+                    frames = self.owner.settings.profile.render_origin
+
+                    if path in {'/vote', '/vote/'}:
+                        frames += ' https://challenges.cloudflare.com'
+
                     response.headers.set(
                         'Content-Security-Policy',
-                        f'frame-src {self.owner.settings.profile.render_origin}; '
+                        f'frame-src {frames}; '
                         "connect-src 'self'; base-uri 'none'; form-action 'none'; "
                         "frame-ancestors 'none'; object-src 'none'",
                     )

@@ -15,6 +15,7 @@ import { DefectPicker } from '@/components/vote/DefectPicker';
 import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
+import { Verification } from '@/components/vote/Verification';
 import {
   ApiError,
   getStatus,
@@ -295,6 +296,8 @@ export function VoteApp() {
       (reason.code === 'admission_required' || reason.code === 'renewal_required')
     ) {
       setAdmission(true);
+      setError(null);
+      return;
     }
     setError(message(reason));
   };
@@ -521,39 +524,42 @@ export function VoteApp() {
   }, []);
 
   const currentFamily =
+    new URLSearchParams(window.location.search).get(FAMILY_PARAM) ??
     session?.family.name ??
     resumingFamily ??
-    flow.family ??
-    new URLSearchParams(window.location.search).get(FAMILY_PARAM);
-  const recovery = (
-    <div className="flex flex-wrap items-center gap-2">
-      {acceptedReceipt !== null && <p role="status">Vote accepted.</p>}
-      {admission ? (
-        <Button asChild>
-          <a
-            href={`/admit${currentFamily === null ? '' : `?${new URLSearchParams({ family: currentFamily })}`}`}
-          >
-            Continue to verification
-          </a>
-        </Button>
-      ) : (
-        error !== null && (
-          <Button
-            disabled={busy}
-            onClick={() => {
+    flow.family;
+  const recovery =
+    acceptedReceipt !== null || admission || error !== null ? (
+      <div className="flex flex-col items-start gap-2">
+        {acceptedReceipt !== null && <p role="status">Vote accepted.</p>}
+        {admission ? (
+          <Verification
+            onReady={() => {
+              setAdmission(false);
+              setError(null);
               if (currentFamily !== null) {
                 void run(() => flow.enter(currentFamily, accepted));
-              } else {
-                window.location.reload();
               }
             }}
-          >
-            Retry connection
-          </Button>
-        )
-      )}
-    </div>
-  );
+          />
+        ) : (
+          error !== null && (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                if (currentFamily !== null) {
+                  void run(() => flow.enter(currentFamily, accepted));
+                } else {
+                  window.location.reload();
+                }
+              }}
+            >
+              Retry connection
+            </Button>
+          )
+        )}
+      </div>
+    ) : null;
 
   if (checking) {
     return (
@@ -564,6 +570,10 @@ export function VoteApp() {
   }
 
   if (session === null) {
+    if (admission) {
+      return <Screen title="Connecting to voting">{recovery}</Screen>;
+    }
+
     return (
       <>
         <div className="mx-auto pt-4">{recovery}</div>
@@ -704,14 +714,13 @@ export function VoteApp() {
       </div>
 
       <div className="flex flex-col gap-3">
-        {frameFocused && (
+        {frameFocused && !admission && (
           <p role="status" className="text-sm text-muted-foreground">
             Keys go to the output frame while it has focus. Click outside the frame to vote by
             keyboard.
           </p>
         )}
         <ErrorAlert error={error} />
-        {recovery}
 
         <div className="flex flex-wrap items-center gap-3">
           {hasText && (
@@ -728,6 +737,7 @@ export function VoteApp() {
           'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
         )}
       >
+        {recovery !== null && <div className="sm:col-span-2">{recovery}</div>}
         <ToggleGroup
           type="single"
           variant="choice"

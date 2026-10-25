@@ -536,14 +536,9 @@ class NativeRuntime:
         (assets / 'index.html').write_text(
             '<html><head></head><body>Vote</body></html>'
         )
-        admission = assets / 'admission-shell'
-        admission.mkdir()
-        (admission / 'index.html').write_text(
-            '<!doctype html><html><head><title>Voting verification</title></head>'
-            '<body><main><h1>Before you vote</h1>'
-            '<script id="admission-data" type="application/json">'
-            '"__BENCH_ADMISSION_DATA__"</script></main></body></html>'
-        )
+        vote = assets / 'vote'
+        vote.mkdir()
+        (vote / 'index.html').write_text((assets / 'index.html').read_text())
         name = f'runtime-test-{uuid4().hex}'
         manifest = tomllib.loads((ROOT / 'wrangler.toml').read_text())
         configuration = manifest['env']['staging']

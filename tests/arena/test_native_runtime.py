@@ -13,6 +13,7 @@ import pytest
 from pydantic import JsonValue, SecretBytes, TypeAdapter
 
 from assistant_bench_arena.admission import NetworkIdentity, TokenCodec
+from assistant_bench_arena.api_models import AdmissionView
 from assistant_bench_arena.ledger_models import Point, Statement
 from assistant_bench_arena.policy import configuration
 from assistant_bench_arena.releases import Release, point_snapshot, publication_identity
@@ -39,14 +40,7 @@ def cookie(response: dict[str, JsonValue]) -> str:
 
 
 def admission(response: dict[str, JsonValue]) -> str:
-    content = response['body']
-    assert isinstance(content, str)
-    match = re.search(
-        r'<script id="admission-data" type="application/json">(.*?)</script>', content
-    )
-    assert match is not None
-    value: dict[str, str] = json.loads(match[1])
-    return value['command_id']
+    return str(AdmissionView.model_validate(body(response)).command_id)
 
 
 def html_release() -> Release:
@@ -156,15 +150,29 @@ class TestNativeRuntime:
                 assert worker_rejected['status'] == 400
                 assert body(worker_rejected) == {'error': 'invalid_request'}
 
-                page = await transport.http('/')
-                assert page['status'] == 200
-                assert 'bench-render-origin' in str(page['body'])
-                page_headers = page['headers']
-                assert isinstance(page_headers, dict)
-                assert 'https://render.example.com' in str(
-                    page_headers['content-security-policy']
-                )
-                assert page_headers['cache-control'] == 'no-store'
+                for path, frames in (
+                    ('/', 'https://render.example.com'),
+                    (
+                        '/vote/',
+                        'https://render.example.com https://challenges.cloudflare.com',
+                    ),
+                ):
+                    page = await transport.http(path)
+                    assert page['status'] == 200, path
+                    assert 'bench-render-origin' in str(page['body']), path
+                    page_headers = page['headers']
+                    assert isinstance(page_headers, dict)
+                    policy = str(page_headers['content-security-policy'])
+                    assert policy.split('; ')[0] == f'frame-src {frames}', path
+                    for directive in (
+                        "connect-src 'self'",
+                        "base-uri 'none'",
+                        "form-action 'none'",
+                        "frame-ancestors 'none'",
+                        "object-src 'none'",
+                    ):
+                        assert directive in policy, (path, directive)
+                    assert page_headers['cache-control'] == 'no-store'
 
                 families = await transport.http('/api/families')
                 assert families['status'] == 200
@@ -181,6 +189,35 @@ class TestNativeRuntime:
                 )
                 assert invalid['status'] == 200
                 assert body(invalid) == {'status': 'admission_required'}
+                now = time.time_ns() // 1_000_000
+                keys = KeyRing(
+                    versions=(
+                        KeyVersion(
+                            version='test', starts_at=0, key=SecretBytes(b'k' * 32)
+                        ),
+                    )
+                )
+                expired = TokenCodec(
+                    CredentialClaims, keys, NAMESPACE, 'credential', 1000
+                ).encode(
+                    CredentialClaims(
+                        namespace=NAMESPACE,
+                        issued_at=now - 2000,
+                        expires_at=now - 1000,
+                        credential='expired',
+                        rate_subject='expired',
+                    )
+                )
+                for credential in ('invalid', expired):
+                    recovered = await transport.http(
+                        '/api/admission', cookie=f'__Host-bench-credential={credential}'
+                    )
+
+                    assert recovered['status'] == 200
+                    assert admission(recovered)
+                    assert body(recovered)['action'] == 'bench_admit'
+                    cookie(recovered)
+                assert runtime.provider.calls == []
                 invalid_commands: tuple[JsonValue, ...] = (
                     'malformed',
                     True,
@@ -226,42 +263,27 @@ class TestNativeRuntime:
                 assert status['result']['expiry_lag_ms'] == 0
                 assert await runtime.management_status() == status['result']
 
-                document = await transport.http('/admit?family=writing')
-                assert document['status'] == 200
-                assert '<h1>Before you vote</h1>' in str(document['body'])
-                assert '__BENCH_ADMISSION_DATA__' not in str(document['body'])
-                assert '<script>alert' not in str(document['body'])
-                assert '\\u003c/script>' in str(document['body'])
-                headers = document['headers']
+                context = await transport.http('/api/admission')
+                assert context['status'] == 200
+                headers = context['headers']
                 assert isinstance(headers, dict)
-                assert headers['content-type'] == 'text/html; charset=utf-8'
+                assert headers['content-type'] == 'application/json'
                 assert headers['cache-control'] == 'no-store'
                 assert headers['referrer-policy'] == 'no-referrer'
-                policy = str(headers['content-security-policy'])
-                assert "frame-ancestors 'none'" in policy
-                assert 'frame-src https://challenges.cloudflare.com' in policy
-                assert "connect-src 'self'" in policy
-                assert "object-src 'none'" in policy
-                assert 'script-src' not in policy
-                assert 'default-src' not in policy
-                flow_cookie = cookie(document)
-                command = admission(document)
-                match = re.search(
-                    r'<script id="admission-data" '
-                    r'type="application/json">(.*?)</script>',
-                    str(document['body']),
-                )
-                assert match is not None
-                assert json.loads(match[1]) == {
+                assert headers['x-content-type-options'] == 'nosniff'
+                flow_cookie = cookie(context)
+                command = admission(context)
+                assert body(context) == {
                     'command_id': command,
                     'action': 'bench_admit',
                     'sitekey': SITEKEY,
-                    'family': 'writing',
                 }
-                unknown = await transport.http('/admit?family=unknown')
-                assert unknown['status'] == 404
-                assert body(unknown) == {'error': 'not_found'}
-                assert 'set-cookie' not in str(unknown['headers'])
+                reused = await transport.http('/api/admission', cookie=flow_cookie)
+                assert reused['status'] == 200
+                assert body(reused) == body(context)
+                assert cookie(reused) == flow_cookie
+                retired = await transport.http('/admit')
+                assert retired['status'] == 404
                 request: dict[str, JsonValue] = {
                     'command_id': command,
                     'proof': 'admit-proof',
@@ -329,26 +351,6 @@ class TestNativeRuntime:
                     {'scope': 'prefix', 'consumed': 1},
                 ]
 
-                renewal = await transport.http('/admit', cookie=credential_cookie)
-                renew_command = admission(renewal)
-                assert '"action":"bench_renew"' in str(renewal['body'])
-                assert '"family":null' in str(renewal['body'])
-                renewed = await transport.http(
-                    '/api/admission',
-                    body={'command_id': renew_command, 'proof': 'renew-proof'},
-                    cookie=f'{credential_cookie}; {cookie(renewal)}',
-                )
-                assert renewed['status'] == 200
-                renewed_cookie = cookie(renewed)
-                assert renewed_cookie != credential_cookie
-                old_status = await transport.http(
-                    '/api/status', cookie=credential_cookie
-                )
-                assert body(old_status) == {'status': 'admission_required'}
-                assert await transport.rows('SELECT count(*) AS count FROM actors') == [
-                    {'count': 1}
-                ]
-
                 release = html_release()
                 await publish_release(ledger, release)
                 activated = await transport.call(
@@ -366,10 +368,17 @@ class TestNativeRuntime:
                     }
                 )
                 assert 'result' in activated
+                unknown = await transport.http(
+                    '/api/sessions',
+                    body={'command_id': str(uuid4()), 'family': 'unknown'},
+                    cookie=credential_cookie,
+                )
+                assert unknown['status'] == 404
+                assert body(unknown) == {'error': 'not_found'}
                 started = await transport.http(
                     '/api/sessions',
                     body={'command_id': str(uuid4()), 'family': 'writing'},
-                    cookie=renewed_cookie,
+                    cookie=credential_cookie,
                 )
                 assert started['status'] == 201
                 session = body(started)
@@ -398,11 +407,11 @@ class TestNativeRuntime:
                 }
 
                 accepted = await transport.http(
-                    '/api/votes', body=vote, cookie=renewed_cookie
+                    '/api/votes', body=vote, cookie=credential_cookie
                 )
                 assert accepted['status'] == 200
                 repeated = await transport.http(
-                    '/api/votes', body=vote, cookie=renewed_cookie
+                    '/api/votes', body=vote, cookie=credential_cookie
                 )
                 assert repeated['status'] == 200
                 assert body(repeated) == body(accepted)
@@ -410,13 +419,54 @@ class TestNativeRuntime:
                     key: value for key, value in vote.items() if key != 'capability'
                 }
                 resolved = await transport.http(
-                    '/api/votes/resolve', body=receipt, cookie=renewed_cookie
+                    '/api/votes/resolve', body=receipt, cookie=credential_cookie
                 )
                 assert resolved['status'] == 200
                 assert body(resolved) == body(accepted)
                 assert await transport.rows(
                     'SELECT count(*) AS count FROM vote_receipts'
                 ) == [{'count': 1}]
+
+                budgets = await transport.rows(
+                    'SELECT * FROM quota_windows WHERE operation IN '
+                    "('admit', 'issue', 'accept') "
+                    'ORDER BY operation, scope, subject'
+                )
+                (identity,) = await transport.rows(
+                    'SELECT actor_id, rate_subject FROM credentials'
+                )
+                renewal = await transport.http(
+                    '/api/admission', cookie=credential_cookie
+                )
+                renew_command = admission(renewal)
+                assert body(renewal) == {
+                    'command_id': renew_command,
+                    'action': 'bench_renew',
+                    'sitekey': SITEKEY,
+                }
+                renewed = await transport.http(
+                    '/api/admission',
+                    body={'command_id': renew_command, 'proof': 'renew-proof'},
+                    cookie=f'{credential_cookie}; {cookie(renewal)}',
+                )
+                assert renewed['status'] == 200
+                renewed_cookie = cookie(renewed)
+                assert renewed_cookie != credential_cookie
+                old_status = await transport.http(
+                    '/api/status', cookie=credential_cookie
+                )
+                assert body(old_status) == {'status': 'admission_required'}
+                assert await transport.rows(
+                    'SELECT actor_id, rate_subject FROM credentials'
+                ) == [identity, identity]
+                assert (
+                    await transport.rows(
+                        'SELECT * FROM quota_windows WHERE operation IN '
+                        "('admit', 'issue', 'accept') "
+                        'ORDER BY operation, scope, subject'
+                    )
+                    == budgets
+                )
 
                 acknowledgment = body(accepted)
                 withdrawn = await transport.http(
@@ -689,41 +739,6 @@ class TestNativeRuntime:
                         ('x-content-type-options', 'nosniff'),
                     ):
                         assert headers.get(header) == value, (name, response)
-                assert runtime.provider.calls == []
-
-        with NativeRuntime(tmp_path).owner() as runtime:
-            asyncio.run(scenario(runtime))
-
-    def test_recovers_invalid_and_expired_credentials(self, tmp_path: Path) -> None:
-        async def scenario(runtime: NativeRuntime) -> None:
-            async with runtime.client() as (_, transport):
-                now = time.time_ns() // 1_000_000
-                keys = KeyRing(
-                    versions=(
-                        KeyVersion(
-                            version='test', starts_at=0, key=SecretBytes(b'k' * 32)
-                        ),
-                    )
-                )
-                expired = TokenCodec(
-                    CredentialClaims, keys, NAMESPACE, 'credential', 1000
-                ).encode(
-                    CredentialClaims(
-                        namespace=NAMESPACE,
-                        issued_at=now - 2000,
-                        expires_at=now - 1000,
-                        credential='expired',
-                        rate_subject='expired',
-                    )
-                )
-                for credential in ('invalid', expired):
-                    recovered = await transport.http(
-                        '/admit', cookie=f'__Host-bench-credential={credential}'
-                    )
-
-                    assert recovered['status'] == 200
-                    assert admission(recovered)
-                    assert 'bench_admit' in str(recovered['body'])
                 assert runtime.provider.calls == []
 
         with NativeRuntime(tmp_path).owner() as runtime:

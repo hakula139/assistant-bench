@@ -4,7 +4,7 @@ Vote on blind pairs at [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/),
 
 ## Opening the Vote Page
 
-Follow the site's Vote link and pick a family under its aspect. Verification opens on a separate page, then returns you to voting. All real votes go to the production D1 database. The staging deployment has its own database for validation.
+Follow the site's Vote link and pick a family under its aspect. Browser verification runs automatically on the vote page and shows a challenge only when interaction is needed. Your comparison opens after verification. All real votes go to the production D1 database. The staging deployment has its own database for validation.
 
 A session records one active vote per eligible case and ends when none remain. Cases need passing, different outputs from two systems to be eligible. The browser keeps a session locator per family, so picking the family again or reloading resumes it while the verification cookie remains valid. Each accepted vote is recorded before the next pair is requested. Tap the vote count in the Prompt bar to see how many pairs remain.
 

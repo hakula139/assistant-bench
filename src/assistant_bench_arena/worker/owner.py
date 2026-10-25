@@ -100,7 +100,6 @@ class Owner:
                         self.pairs,
                         self.renders,
                     ),
-                    await self._asset('/admission-shell/'),
                 )
             )
 

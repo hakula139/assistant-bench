@@ -27,7 +27,7 @@ const contracts = [
   [
     'public admission view',
     arena.admissionView,
-    { ...command, action: 'bench_admit', sitekey: 'site', family: 'fixture' },
+    { ...command, action: 'bench_admit', sitekey: 'site' },
   ],
   ['public admission', arena.admissionRequest, { ...command, proof: 'challenge-proof' }],
   ['admission replay', arena.admissionReplay, { ...command, proof: null }],
@@ -54,10 +54,6 @@ describe('arena contracts', () => {
     ['a'.repeat(257), false],
   ] as const)('enforces the native family boundary for %j', (family, valid) => {
     expect(arena.startSessionRequest.safeParse({ ...command, family }).success).toBe(valid);
-    expect(
-      arena.admissionView.safeParse({ ...command, action: 'bench_admit', sitekey: 'site', family })
-        .success,
-    ).toBe(valid);
     expect(arena.familyView.safeParse({ ...VOTE_FAMILY, name: family }).success).toBe(valid);
   });
 
@@ -96,10 +92,7 @@ describe('arena contracts', () => {
     },
   );
 
-  test('accepts maximum identifier and proof lengths', () => {
-    expect(
-      arena.startSessionRequest.safeParse({ ...command, family: 'x'.repeat(256) }).success,
-    ).toBe(true);
+  test('accepts the maximum proof length', () => {
     expect(arena.admissionRequest.safeParse({ ...command, proof: 'x'.repeat(2048) }).success).toBe(
       true,
     );
@@ -122,8 +115,6 @@ describe('arena contracts', () => {
       arena.startSessionRequest,
       { ...command, command_id: 'not-a-uuid', family: 'f' },
     ],
-    ['empty identifier', arena.startSessionRequest, { ...command, family: '' }],
-    ['long identifier', arena.startSessionRequest, { ...command, family: 'x'.repeat(257) }],
     ['negative count', arena.sessionView, makeSession({ votes: -1 })],
     ['fractional count', arena.sessionView, makeSession({ remaining: 0.5 })],
     ['unknown choice', arena.receiptQuery, { ...receipt, choice: 'skip' }],
@@ -139,7 +130,7 @@ describe('arena contracts', () => {
     [
       'retired admission kind',
       arena.admissionView,
-      { ...command, kind: 'turnstile', action: 'bench_admit', sitekey: 'site', family: null },
+      { ...command, kind: 'turnstile', action: 'bench_admit', sitekey: 'site' },
     ],
     ['empty proof', arena.admissionRequest, { ...command, proof: '' }],
     ['long proof', arena.admissionRequest, { ...command, proof: 'x'.repeat(2049) }],

@@ -23,7 +23,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 ledger, and staging has a separate D1 ledger for validation. Admission runs in its own document at `/admit`, using the shared site shell with its challenge context inserted at request time. Static previews without the API show an unavailable state.
+`/vote/` is emitted in every build. The page fetches pairs and verification context from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 ledger, and staging has a separate D1 ledger for validation. Verification runs inline when required, retaining the comparison and draft while the provider checks the browser. Static previews without the API show an unavailable state.
 
 The prompt and the checklist are separate because the model never saw the checklist. Outputs scroll independently and render as text, diffs, or sandboxed HTML from the render origin. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze HTML viewports and diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 

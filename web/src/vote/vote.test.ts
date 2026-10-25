@@ -25,19 +25,19 @@ function allowsScript(script: HTMLScriptElement, sources: readonly string[]): bo
   return sources.includes(`'sha256-${hash}'`);
 }
 
-describe('built admission document', () => {
+describe('built vote document', () => {
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'bench-admission-'));
+    directory = await mkdtemp(join(tmpdir(), 'bench-vote-'));
     await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
       cwd: fileURLToPath(new URL('../../', import.meta.url)),
     });
-    const html = await readFile(join(directory, 'admission-shell/index.html'), 'utf8');
-    document = new JSDOM(html, { url: 'https://app.example.com/admit' }).window.document;
+    const html = await readFile(join(directory, 'vote/index.html'), 'utf8');
+    document = new JSDOM(html, { url: 'https://app.example.com/vote/' }).window.document;
     const meta = document.querySelector<HTMLMetaElement>(
       'meta[http-equiv="Content-Security-Policy"]',
     );
     if (meta === null) {
-      throw new Error('Expected the generated admission policy');
+      throw new Error('Expected the generated vote policy');
     }
     policy = new Map(
       meta.content
@@ -54,27 +54,10 @@ describe('built admission document', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  test('provides one inert JSON slot inside the shared accessible shell', () => {
-    const data = document.querySelector<HTMLScriptElement>('#admission-data');
-
-    expect(document.title).toContain('Before you vote');
-    expect(document.querySelector('main h1')?.textContent).toBe('Before you vote');
-    expect(document.querySelector('header nav')).not.toBeNull();
-    expect(document.querySelector('noscript')?.textContent).toContain('Enable JavaScript');
-    expect(document.querySelector('#admission-status')?.getAttribute('aria-live')).toBe('polite');
-    expect(document.querySelector('#admission-challenge')?.getAttribute('aria-busy')).toBe('true');
-    expect(data?.type).toBe('application/json');
-    expect(JSON.parse(data?.textContent ?? '')).toBe('__BENCH_ADMISSION_DATA__');
-    expect(document.documentElement.outerHTML.match(/"__BENCH_ADMISSION_DATA__"/g)).toHaveLength(1);
-  });
-
-  test('allows its emitted client and governed theme script under the generated policy', async () => {
+  test('allows the emitted vote island, shared theme and managed provider under its script policy', () => {
     const sources = policy.get('script-src') ?? policy.get('default-src') ?? [];
     const scripts = [...document.querySelectorAll<HTMLScriptElement>('script')].filter(
       (script) => script.type !== 'application/json',
-    );
-    const client = scripts.find(
-      (script) => new URL(script.src || document.URL).pathname === '/admission.js',
     );
     const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
     if (meta === null) {
@@ -85,23 +68,14 @@ describe('built admission document', () => {
     );
     const theme = governed.find((script) => script.textContent.includes('dataset.theme'));
     const initializer = scripts.find((script) => script.textContent.includes('dataset.theme'));
-    if (client === undefined || theme === undefined || initializer === undefined) {
-      throw new Error('Expected the built admission client and shared theme initializer');
+    if (theme === undefined || initializer === undefined) {
+      throw new Error('Expected the shared theme initializer');
     }
 
-    expect(client.type).toBe('module');
     expect(
       Boolean(initializer.compareDocumentPosition(meta) & initializer.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
-    expect(await readFile(join(directory, 'admission.js'), 'utf8')).toContain('/admission/replay');
-    expect(allowsScript(client, sources)).toBe(true);
     expect(allowsScript(theme, sources)).toBe(true);
-    expect(
-      allowsScript(
-        client,
-        sources.filter((source) => source !== "'self'"),
-      ),
-    ).toBe(false);
     expect(
       allowsScript(
         theme,
@@ -111,12 +85,21 @@ describe('built admission document', () => {
     for (const script of governed) {
       expect(allowsScript(script, sources), script.src || 'inline script').toBe(true);
     }
+    const island = document.querySelector('astro-island[component-export="VoteApp"]');
+    const client = new URL(island?.getAttribute('component-url') ?? '', document.URL);
+    expect(client.pathname).toMatch(/^\/_astro\/.+\.js$/);
+    expect(sources.includes("'self'") || sources.includes(client.origin)).toBe(true);
     expect(sources).toContain('https://challenges.cloudflare.com');
     expect(sources).not.toContain("'unsafe-inline'");
     expect(sources).not.toContain("'unsafe-eval'");
   });
 
-  test('serves actual shared styles and permits the stylesheet and challenge frame', async () => {
+  test('serves the shared shell, styles and public catalog with runtime frame policy', async () => {
+    expect(await readFile(join(directory, 'arena-families.json'))).toEqual(
+      await readFile(fileURLToPath(new URL('../../public/arena-families.json', import.meta.url))),
+    );
+    expect(document.title).toContain('Vote');
+    expect(document.querySelector('header nav')).not.toBeNull();
     const styles = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')];
     expect(styles.length).toBeGreaterThan(0);
     for (const style of styles) {
@@ -125,9 +108,13 @@ describe('built admission document', () => {
       expect(await readFile(join(directory, url.pathname), 'utf8')).toContain('--background');
     }
     expect(policy.get('style-src')).toContain("'self'");
-    expect(policy.get('frame-src')).toEqual(['https://challenges.cloudflare.com']);
-    expect(policy.get('connect-src')).toEqual(["'self'"]);
-    expect(policy.get('default-src')).toEqual(["'none'"]);
+    expect(policy.has('frame-src')).toBe(false);
+    await expect(readFile(join(directory, 'admission-shell/index.html'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(readFile(join(directory, 'admission.js'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });
 import { execFile } from 'node:child_process';

@@ -74,21 +74,12 @@ class TestApiContract:
                 {'command_id': '10000000-0000-4000-8000-000000000001'},
             ),
             (
-                api.AdmissionView,
-                'family',
-                {
-                    'command_id': '10000000-0000-4000-8000-000000000001',
-                    'action': 'bench_admit',
-                    'sitekey': 'synthetic-site',
-                },
-            ),
-            (
                 FamilyView,
                 'name',
                 {'aspect': None, 'display_name': 'Synthetic', 'defects': []},
             ),
         ],
-        ids=['start', 'admission', 'family-view'],
+        ids=['start', 'family-view'],
     )
     @pytest.mark.parametrize(
         ('value', 'valid'),
