@@ -3,7 +3,7 @@ aspect = "writing"
 display_name = "English"
 public = true
 systems = [
-  "opus-5.5",
+  "opus-5.5-high",
   "gpt-6-astra-high",
   "gpt-6.1-sol-high",
   "gemini-4-argon-high",

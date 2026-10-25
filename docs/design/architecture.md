@@ -32,7 +32,8 @@ src/assistant_bench/
 │   ├── messages.py                         # Native Messages streaming and conversation content
 │   ├── options.py                          # The kwargs each harness builds from its resolved system
 │   ├── responses.py                        # Native SDK results and stateless conversation items
-│   └── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
+│   ├── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
+│   └── usage.py                            # Validated measured token counters shared by every transport
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   ├── length.py                           # Shared output length measurement

@@ -9,7 +9,7 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5", "gpt-6.1-sol-high"]
+systems = ["opus-5.5-high", "gpt-6.1-sol-high"]
 reference = "gpt-6.1-sol-high"
 samples = 1
 categories = ["message"]
@@ -70,7 +70,7 @@ checklist = ["One sentence"]
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Harbor runs the task's scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so the image must include bash. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
-A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, the `systems.toml` name of the system that wrote the task, which may be outside the family's participants.
+A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, the public label of the system that wrote the task, and `author_vendor`, its vendor ID from the shared catalog or an explicitly declared bare route. Authorship remains fixed when that system retires from the runnable configuration.
 
 `bench check` checks each task's `task.toml` for what a run needs:
 
@@ -102,7 +102,7 @@ A local task is a directory under the data directory's `cases/<family>/`, which 
 [`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key ends in the snapshot, as in `deepseek-v4.1-flash-1017`:
 
 ```toml
-["opus-5.5"]
+["opus-5.5-high"]
 model = "claude-opus-5-5"
 api = "anthropic-messages"
 effort = "high"
@@ -121,7 +121,7 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`                                        |
 | `api`               | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
 | `thinking_mode`     | For a bare native Messages route, required as `anthropic-adaptive`. Catalog models supply their thinking mode                           |
-| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system or names it as an author                                  |
+| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system                                                           |
 | `price`             | For a `route`, an optional table of `input`, `output`, `cache_read`, and optional `cache_write` prices in USD per million tokens        |
 | `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`                              |
 | `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`                                    |
@@ -138,5 +138,5 @@ When changing a model snapshot, effort, capacities, or generation protocol:
 1. Run `uv run bench fingerprints <base>` to identify runnable systems whose generation identity changed.
 2. Give each changed configuration a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
 3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
-4. Preserve valid closed reports for retired systems. Remove their runnable tables when nothing else, such as authored-task provenance, references them.
+4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
 5. Run `uv run bench fingerprints <base>` again to confirm that no runnable name retains a changed fingerprint.

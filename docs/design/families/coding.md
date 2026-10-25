@@ -18,7 +18,7 @@ Every system that [`family.toml`](../../../families/coding-repo/family.toml) lis
 
 Every task is a small synthetic Python project written for the bench, using the standard library and `unittest` alone, so no task carries a lockfile. Each task's instruction reads like a developer's request in chat: it says where the repository is and names every interface the hidden tests call and every rule a structural check enforces, unless the repository's own AGENTS.md or docstrings state it. A reviewer who reads only the instruction and the repository can write tests that agree with the hidden ones, and any check that fails this test is a hidden requirement to remove.
 
-A task's `[metadata] author` names the `systems.toml` system whose model wrote it. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
+A task's `[metadata] author` preserves the public label of the system whose model wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
 
 ## Task Conventions
 

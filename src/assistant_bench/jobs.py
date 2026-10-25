@@ -24,9 +24,9 @@ from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from harbor.publisher.packager import Packager
 from harbor.trial.network_policy import resolve_trial_network_plan
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
-from assistant_bench.catalog import System
+from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -327,28 +327,42 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
         )
 
 
+class TaskAuthor(BaseModel):
+    label: str = Field(alias='author', min_length=1)
+    vendor: str = Field(alias='author_vendor', min_length=1)
+
+
 def author_vendors(
-    family: Family, tasks: list[Path], systems: dict[str, System]
+    family: Family,
+    tasks: list[Path],
+    systems: dict[str, System],
+    export: NixosConfigExport,
 ) -> dict[str, str]:
-    """Return each task author's vendor, refusing missing or unknown authors."""
+    """Validate author provenance independently of runnable systems."""
+    known = {
+        model.vendor
+        for model in export.catalog.models.values()
+        if model.vendor is not None
+    }
+    known.update(
+        system.vendor for system in systems.values() if system.vendor is not None
+    )
     authors: dict[str, str] = {}
     problems: list[str] = []
     for task in tasks:
         location = f'`{task_location(family, task)}/task.toml`'
-        author = _task_config(task).metadata.get('author')
-        if not isinstance(author, str) or not author:
-            problems.append(f'{location}: set `[metadata] author` to a system name.')
-        elif author not in systems:
+        try:
+            author = TaskAuthor.model_validate(_task_config(task).metadata)
+        except ValidationError as error:
+            problems.append(error_lines(error, location))
+            continue
+        if author.vendor not in known:
             problems.append(
-                f'{location}: author `{author}` is not defined in `systems.toml`.'
-            )
-        elif (vendor := systems[author].vendor) is None:
-            problems.append(
-                f'{location}: author `{author}` needs vendor metadata in the '
-                'model catalog or its `route` table in `systems.toml`.'
+                f'{location}: author vendor `{author.vendor}` is not one of '
+                f'{code(sorted(known))}.'
             )
         else:
-            authors[task.name] = vendor
+            authors[task.name] = author.vendor
 
     if problems:
         raise ValueError(

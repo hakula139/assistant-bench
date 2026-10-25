@@ -15,12 +15,21 @@ class Generation(BaseModel):
 
     protocol: int = Field(gt=0)
     harbor: str
-    messages_protocol: int | None = None
+    messages_protocol: int | None = Field(default=None, gt=0)
     anthropic_api_version: str | None = None
     anthropic: str | None = None
 
     def version(self, harness: str, api: str | None = None) -> str:
         if api == 'anthropic-messages':
+            if (
+                self.messages_protocol is None
+                or not self.anthropic_api_version
+                or not self.anthropic
+            ):
+                raise ValueError(
+                    'Native Messages identity requires its protocol, API version, '
+                    'and locked SDK version.'
+                )
             return (
                 f'{self.version(harness)}+messages.{self.messages_protocol}'
                 f'.{self.anthropic_api_version}.{self.anthropic}'

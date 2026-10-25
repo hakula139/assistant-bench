@@ -109,10 +109,12 @@ class Endpoint(BaseModel):
         )
 
     def messages_client(self) -> AsyncAnthropic:
+        _check_messages_environment(os.environ.get)
         return AsyncAnthropic(
             base_url=str(self.base_url),
             api_key=self.api_key(),
             max_retries=0,
+            open_telemetry=False,
             timeout=MESSAGES_TIMEOUT,
             default_headers={
                 'anthropic-version': load_generation().anthropic_api_version or ''
@@ -190,6 +192,9 @@ def preflight(
     def lookup(var: str) -> str | None:
         return overrides.get(var, os.environ.get(var))
 
+    if api == 'anthropic-messages':
+        _check_messages_environment(lookup)
+
     base_var = ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
     required = (base_var, KEY_FILE_VAR, EXPORT_VAR)
     missing = [var for var in required if not lookup(var)]
@@ -199,3 +204,11 @@ def preflight(
             '`nix develop`.'
         )
     Endpoint.read(lookup, api).verify()
+
+
+def _check_messages_environment(env: Callable[[str], str | None]) -> None:
+    if env('ANTHROPIC_CUSTOM_HEADERS'):
+        raise ValueError(
+            'Unset `ANTHROPIC_CUSTOM_HEADERS`. Configure native endpoint headers '
+            'with `BENCH_API_HEADERS`.'
+        )

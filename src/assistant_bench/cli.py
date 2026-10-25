@@ -340,7 +340,8 @@ def _task_dirs(family: Family) -> list[Path]:
     try:
         jobs.check_tasks(family, tasks)
         if family.settings.systems:
-            jobs.author_vendors(family, tasks, _load_systems())
+            export = load_export()
+            jobs.author_vendors(family, tasks, load_systems(export), export)
     except ValueError as error:
         _fail(str(error))
 
@@ -546,7 +547,7 @@ def _author_rates(
 ) -> None:
     tasks = [case_task(family, case.id) for case in _load_cases(family)]
     try:
-        vendors = jobs.author_vendors(family, tasks, systems)
+        vendors = jobs.author_vendors(family, tasks, systems, load_export())
     except ValueError as error:
         _fail(str(error))
 
