@@ -59,11 +59,10 @@ _CONTROL = """
     from assistant_bench_arena.scheduler import pair_log_weights
     from assistant_bench_arena.worker import api, production
     from assistant_bench_arena.worker.authentication import Authentication
-    from assistant_bench_arena.worker.bindings import (
-        LimitResult, NativeLimiter, RateLimited,
-    )
+    from assistant_bench_arena.worker.bindings import LimitResult, NativeLimiter
     from pyodide.ffi import JsException
     from workers import WorkerEntrypoint
+    from workers.rpc import JsDict
 
     coverage_finish()
 
@@ -91,11 +90,6 @@ _CONTROL = """
                 'kind': 'preflight', 'address': address, 'now': now,
             })
             return await super().preflight(address, now)
-
-
-    class RejectedAuthentication(Authentication):
-        async def preflight(self, address: str, now: int) -> NetworkIdentity:
-            raise RateLimited
 
 
     def authentication(
@@ -187,11 +181,17 @@ _CONTROL = """
                 events = list(ingress_events)
                 ingress_events.clear()
                 return json.dumps({'result': {'events': events}})
-            if payload.get('operation') == 'reject_ingress':
+            if payload.get('operation') == 'ingress_result':
+                result = JsDict(payload['result'])
+
+                class ConfiguredLimiter:
+                    async def limit(self, options: dict[str, str]) -> object:
+                        return result
+
                 instance = Default(self.ctx, self.env)
-                instance.owner.auth = authentication(
-                    instance.owner.auth, RejectedAuthentication,
-                )
+                auth = authentication(instance.owner.auth, Authentication)
+                auth.ingress = ConfiguredLimiter()
+                instance.owner.auth = auth
                 return json.dumps({'result': {'configured': True}})
             if payload.get('operation') == 'fail_ingress':
                 message = payload['message']

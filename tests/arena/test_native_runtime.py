@@ -611,25 +611,52 @@ class TestNativeRuntime:
         with NativeRuntime(tmp_path).owner() as runtime:
             asyncio.run(scenario(runtime))
 
-    def test_composes_rate_limited_errors_into_real_native_responses(
+    def test_validates_native_limiter_results_with_provider_metadata(
         self, tmp_path: Path
     ) -> None:
         async def scenario(runtime: NativeRuntime) -> None:
             async with runtime.client() as (_, transport):
-                assert await transport.call({'operation': 'reject_ingress'}) == {
-                    'configured': True
-                }
+                cases: tuple[
+                    tuple[str, dict[str, JsonValue], int, dict[str, str]], ...
+                ] = (
+                    (
+                        'allowed',
+                        {'success': True},
+                        200,
+                        {'status': 'admission_required'},
+                    ),
+                    ('denied', {'success': False}, 429, {'error': 'rate_limited'}),
+                    ('missing', {}, 503, {'error': 'unavailable'}),
+                    ('string', {'success': 'true'}, 503, {'error': 'unavailable'}),
+                    ('integer', {'success': 1}, 503, {'error': 'unavailable'}),
+                    ('null', {'success': None}, 503, {'error': 'unavailable'}),
+                )
 
-                response = await transport.http('/api/status')
-                assert response['status'] == 429
+                for name, result, status, expected in cases:
+                    assert await transport.call(
+                        {
+                            'operation': 'ingress_result',
+                            'result': {**result, 'metadata': {'source': 'synthetic'}},
+                        }
+                    ) == {'configured': True}, name
 
-                assert body(response) == {'error': 'rate_limited'}
-                headers = response['headers']
-                assert isinstance(headers, dict)
-                assert headers['content-type'] == 'application/json'
-                assert headers['cache-control'] == 'no-store'
-                assert headers['referrer-policy'] == 'no-referrer'
-                assert headers['x-content-type-options'] == 'nosniff'
+                    response = await transport.http('/api/status')
+                    assert response['status'] == status, (name, response)
+
+                    assert body(response) == expected, (name, response)
+                    headers = response['headers']
+                    assert isinstance(headers, dict), (name, response)
+                    for header, value in (
+                        ('content-type', 'application/json'),
+                        ('cache-control', 'no-store'),
+                        ('referrer-policy', 'no-referrer'),
+                    ):
+                        assert headers.get(header) == value, (name, response)
+                    if status != 200:
+                        assert headers.get('x-content-type-options') == 'nosniff', (
+                            name,
+                            response,
+                        )
                 assert runtime.provider.calls == []
 
         with NativeRuntime(tmp_path).owner() as runtime:

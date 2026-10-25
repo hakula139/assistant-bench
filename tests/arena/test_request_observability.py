@@ -30,9 +30,15 @@ class TestDefaultFetch:
                 assert isinstance(unavailable['body'], str)
                 assert json.loads(unavailable['body']) == {'error': 'unavailable'}
                 responses.append(unavailable['body'])
-                assert await transport.call({'operation': 'reject_ingress'}) == {
-                    'configured': True
-                }
+                assert await transport.call(
+                    {
+                        'operation': 'ingress_result',
+                        'result': {
+                            'success': False,
+                            'metadata': {'source': 'synthetic'},
+                        },
+                    }
+                ) == {'configured': True}
 
                 rejected = await transport.http('/api/status')
                 assert rejected['status'] == 429
