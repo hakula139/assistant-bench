@@ -18,12 +18,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        shell: nix develop .#python -c bash -eo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -31,12 +28,13 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Install dependencies
+        shell: bash
         run: |
-          uv sync --locked
-          pnpm install
+          nix develop .#python -c uv sync --locked
+          nix develop .#python -c pnpm install
 
       - name: Check cleanup lag
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: uv run bench arena health production
+        run: nix develop .#python -c uv run bench arena health production

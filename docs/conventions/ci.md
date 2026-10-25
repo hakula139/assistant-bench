@@ -49,9 +49,7 @@ Arena Health uses the same credentials to check production through its private M
 
 ## Workflow Steps
 
-Each job that needs the dev shell sets `defaults.run.shell` to run bash inside `nix develop`, or `nix develop .#python` for the Python jobs, so its `run:` steps hold bare commands.
-
-actionlint runs shellcheck only on steps whose shell is plain `bash`, so every multiline script sets `shell: bash` and prefixes the commands that need the dev shell with `nix develop -c`.
+Steps that need the dev shell prefix commands with `nix develop -c`, or `nix develop .#python -c` for Python jobs. Every multiline script uses a literal block and sets `shell: bash` so actionlint can run shellcheck.
 
 Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls.
 

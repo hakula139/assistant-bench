@@ -1,4 +1,4 @@
-exclude = ["arena/pylock.toml"]
+exclude = ["**/pylock.toml"]
 
 [formatting]
 column_width = 100
