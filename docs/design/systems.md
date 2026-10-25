@@ -8,7 +8,7 @@ A system specifies either a catalog model with `model` or a bare `route`. A cata
 
 The catalog's `maxTokens` is the configured completion allowance, including reasoning. It is not proof of the endpoint's maximum capacity. The benchmark baseline explicitly selects high effort or its supported equivalent for every model. This is a deliberate configuration and does not establish that higher effort improves every answer. Terminus uses the configured context window minus the completion allowance as its input limit, reserving completion space through Harbor's native context management.
 
-`api` selects `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog declares supported APIs in `apis` and supported efforts in `thinking.apiEfforts`. An unsupported API, explicit effort, or required default is rejected during resolution. Opus uses native Messages with the catalog's adaptive thinking mode, while GPT systems use Responses. Requests never substitute an effort or transport after a failure.
+`api` selects `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog declares supported APIs in `apis` and supported efforts in `thinking.efforts`. An unsupported API, explicit effort, or required default is rejected during resolution. Opus uses native Messages with the catalog's adaptive thinking mode, while GPT systems use Responses. Requests never substitute an effort or transport after a failure.
 
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 
