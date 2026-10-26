@@ -110,7 +110,7 @@ export function Forest({ rows, domain, caption, anchorScore, large = false }: Fo
       <colgroup>
         <col className="w-2/5 sm:w-48" />
         <col />
-        <col className="w-16 sm:w-24" />
+        <col className="w-22 sm:w-24" />
       </colgroup>
       <TableHeader>
         <TableRow className="hover:bg-transparent">

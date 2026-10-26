@@ -49,8 +49,8 @@ export function ScoreDot({ preliminary, left }: { preliminary: boolean; left: st
 /** The arrowhead at the axis start for a score the axis cuts off. */
 export function CutArrow() {
   return (
-    <svg viewBox="0 0 6 10" className={cn(middle, 'left-0 h-2.5 w-1.5 fill-chart-series')}>
-      <path d="M6 0 0 5l6 5z" />
+    <svg viewBox="0 0 10 12" className={cn(middle, 'left-0 h-3 w-2.5 fill-chart-series')}>
+      <path d="M10 0 0 6l10 6z" />
     </svg>
   );
 }

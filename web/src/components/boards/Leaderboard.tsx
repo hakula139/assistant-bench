@@ -249,7 +249,7 @@ export function Leaderboard({
               const { numeric, forest, term, detail } = header.column.columnDef.meta ?? {};
               if (forest) {
                 return (
-                  <TableHead key={header.id} className="w-[38%] p-0 align-bottom max-lg:hidden">
+                  <TableHead key={header.id} className="w-[38%] p-0 max-lg:hidden">
                     <span className="sr-only">Point score</span>
                     <table.FlexRender header={header} />
                   </TableHead>
