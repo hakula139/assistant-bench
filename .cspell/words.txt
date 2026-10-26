@@ -109,6 +109,7 @@ statix
 strconv
 syncd
 sysconfigdata
+tabex
 taplo
 threadpoolctl
 tinykv

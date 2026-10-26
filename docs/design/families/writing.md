@@ -17,7 +17,7 @@ Every case belongs to one category, which the per-category leaderboards split on
 | `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained          |               21 |
 | `fiction` | A scene, dialogue, continuation, or letter                                                  |                5 |
 | `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader |                8 |
-| `review`  | A review or close reading of a work from a supplied synopsis                                |                3 |
+| `review`  | A review or close reading of an invented work from supplied material                        |                3 |
 
 The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
 
@@ -27,7 +27,7 @@ Most instructions supply the material a reply must use, such as a list of facts,
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 
-A review case supplies a synopsis of its invented work, with scene observations for an animation close reading. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
+A review case supplies the material on its invented work, such as a synopsis, the staging notes a close reading draws on, or a rules summary with playtest notes. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker beyond the concept's own name, and ban inventing quotations.
 
 A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
 

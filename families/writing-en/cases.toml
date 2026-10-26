@@ -363,7 +363,7 @@ source = "synthetic"
 instruction = '''
 Add comments to the Rust code below only where a future maintainer needs them. Return the complete code in a single fenced code block and nothing else.
 
-Leave the code unchanged. The listing is the type's complete implementation except `push`, which lives in another file and is correct. The context comes from the design doc, and some of it may be wrong. Where the doc disagrees with the code, comment on what the code actually does without repeating the doc's claim. If you spot a defect, describe it in a `// TODO:` comment without fixing it.
+Leave the code unchanged. The listing is the type's complete implementation except `push` and the `unsafe impl Send` and `unsafe impl Sync` blocks, which live in another file and are correct. The context comes from the design doc, and some of it may be wrong. Where the doc disagrees with the code, comment on what the code actually does without repeating the doc's claim. If you spot a defect, describe it in a `// TODO:` comment without fixing it.
 
 Context:
 - `with_capacity(n)` creates a buffer that holds exactly `n` items.
@@ -436,7 +436,7 @@ checklist = [
   "Output is a single fenced code block with no surrounding text, and every command is unchanged",
   "Comments say that `flock -n` makes a second run give up at once without waiting, and that `|| exit 0` keeps the scheduler from alerting",
   "Comments do not repeat the `pipefail` note: without it, a `zstd` failure already fails the pipeline, and `pipefail` is what catches a `tar` failure",
-  "A `# TODO:` notes that a failed run leaves a `.tmp` file that the cleanup pattern never matches",
+  "A `# TODO:` notes that a failed run leaves a `.tmp` file that the cleanup pattern never matches, or that `zstd` then refuses to overwrite it, so later runs fail until the date changes",
   "Comments cover `--one-file-system` and the temporary-name rename without restating obvious Bash commands",
 ]
 
@@ -471,7 +471,7 @@ checklist = [
 id = "rebase-hashes"
 category = "docs"
 source = "synthetic"
-instruction = "A new contributor asks: \"I rebased my branch onto main and now Git says my branch and origin have diverged, and every commit has a new hash. What happened, and is it safe to force-push?\" Write a reply of two or three short paragraphs for someone who uses Git daily but doesn't know how commits are stored under the hood."
+instruction = '''A new contributor asks: "I rebased my branch onto main and now Git says my branch and origin have diverged, and every commit has a new hash. What happened, and is it safe to force-push?" Write a reply of two or three short paragraphs for someone who uses Git daily but doesn't know how commits are stored under the hood.'''
 checklist = [
   "Explains why rebasing changes commit hashes",
   "States when force-pushing is safe (e.g., when no one else is working on the branch)",
@@ -500,7 +500,7 @@ checklist = [
 id = "iframe-sandbox"
 category = "docs"
 source = "synthetic"
-instruction = "In under 250 words, explain to a frontend developer how an `<iframe sandbox=\"allow-scripts\">` isolates untrusted HTML. Compare a document served from a separate origin with `srcdoc` using the same sandbox flags. Cover their opaque origins, what a dedicated origin adds when a document is opened directly, and remaining risks such as network requests, deceptive content, or resource exhaustion."
+instruction = '''In under 250 words, explain to a frontend developer how an `<iframe sandbox="allow-scripts">` isolates untrusted HTML. Compare a document served from a separate origin with `srcdoc` using the same sandbox flags. Cover their opaque origins, what a dedicated origin adds when a document is opened directly, and remaining risks such as network requests, deceptive content, or resource exhaustion.'''
 checklist = [
   "Explains that both variants receive opaque origins under the specified flags and distinguishes the protection a dedicated origin adds for direct navigation",
   "Identifies at least one remaining risk, such as network requests, deceptive content, or resource exhaustion",
@@ -510,7 +510,7 @@ checklist = [
 id = "write-durability"
 category = "docs"
 source = "synthetic"
-instruction = "A backend developer asks in chat: \"Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?\" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs."
+instruction = '''A backend developer asks in chat: "Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs.'''
 checklist = [
   "Corrects the premise: a successful `write()` means the kernel holds the data in its page cache, which a power cut can still lose",
   "Explains that durability needs `fsync()` or `fdatasync()`, or a synchronous open flag such as `O_DSYNC`, plus an `fsync()` of the parent directory when the log file is newly created",
@@ -523,12 +523,16 @@ checklist = [
 id = "zero-major-semver"
 category = "docs"
 source = "synthetic"
-instruction = "A teammate writes: \"Our Rust crate `tomlfmt` is at 0.9.3, and my PR renames the public function `format_str` to `format_document`. Since we're pre-1.0, SemVer says breaking changes are fine, so I'll ship it as 0.9.4. Any objection?\" Most downstream crates depend on it with Cargo's default requirement syntax, such as `tomlfmt = \"0.9.3\"`. Reply in at most two short paragraphs."
+instruction = '''
+A pull request for `tomlfmt`, a Rust crate at version 0.9.3, renames the public function `format_str` to `format_document`. Its author plans to release it as 0.9.4, reasoning that "SemVer allows breaking changes before 1.0". The project has never written down how it numbers pre-1.0 releases, so before anyone decides, write the "Versioning" section of the crate's `CONTRIBUTING.md` that settles it, using this pull request as the worked example. Keep the section under 200 words.
+
+Most downstream crates depend on `tomlfmt` with Cargo's default requirement syntax, such as `tomlfmt = "0.9.3"`.'''
 checklist = [
-  "Agrees that SemVer allows breaking changes in 0.y.z releases while explaining why the version number still matters",
-  "Explains that Cargo reads `\"0.9.3\"` as `^0.9.3`, which accepts 0.9.4 automatically, so a breaking 0.9.4 would break downstream builds on their next update",
-  "Recommends releasing the rename as 0.10.0",
-  "Stays within two short paragraphs",
+  "Agrees that SemVer itself sets no compatibility rules for 0.y.z releases, and explains why the crate's version numbers still matter to Cargo",
+  "Explains that Cargo reads `\"0.9.3\"` as `^0.9.3`, which accepts any later 0.9.x, so a breaking 0.9.4 would break downstream builds on their next update",
+  "States the policy that while the major version is 0, breaking changes bump the minor version and compatible changes bump the patch version",
+  "Resolves the worked example as 0.10.0, or as 0.9.4 if the pull request keeps `format_str` as a deprecated alias of `format_document`",
+  "Reads as a `CONTRIBUTING.md` policy section for all contributors and stays under 200 words",
 ]
 
 [[cases]]
