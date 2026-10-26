@@ -22,7 +22,7 @@ class LedgerRow:
     memo: str
 
 
-class ImportError(ValueError):
+class SourceError(ValueError):
     """Invalid source or logical record. Index zero identifies file-level errors."""
 
     def __init__(self, record_index: int, message: str) -> None:
@@ -30,5 +30,5 @@ class ImportError(ValueError):
         super().__init__(f'Record {record_index}: {message}')
 
 
-class ConflictError(ImportError):
+class ConflictError(SourceError):
     """An external ID already belongs to a different amount or memo."""

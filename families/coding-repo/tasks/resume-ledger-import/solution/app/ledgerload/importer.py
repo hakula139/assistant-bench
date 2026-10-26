@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 from .csv_input import records
-from .models import ConflictError, ImportError, ImportResult
+from .models import ConflictError, ImportResult, SourceError
 from .store import Store
 
 
@@ -23,7 +23,7 @@ def import_file(
     with Store(db) as store:
         original = store.source_digest(source_id)
         if original is not None and original != digest:
-            raise ImportError(0, 'Source bytes changed.')
+            raise SourceError(0, 'Source bytes changed.')
 
         with store.connection:
             store.connection.execute(

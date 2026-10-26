@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/publish-asset-graph"
 description = "Publish complete dependency-aware content-addressed asset releases"
-version = "1.0.0"
+version = "2.0.0"
 
 [metadata]
 category = "refactor"
