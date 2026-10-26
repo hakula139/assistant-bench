@@ -1,37 +1,49 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import AxeBuilder from '@axe-core/playwright';
+import { preview } from 'astro';
 import { JSDOM } from 'jsdom';
+import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+const root = fileURLToPath(new URL('../../', import.meta.url));
 let directory: string;
-let document: Document;
-let policy: Map<string, string[]>;
 
-function allowsScript(script: HTMLScriptElement, sources: readonly string[]): boolean {
-  if (script.src !== '') {
-    const url = new URL(script.src);
-    return (
-      sources.includes(url.origin) ||
-      (url.origin === new URL(document.URL).origin && sources.includes("'self'"))
-    );
-  }
+beforeAll(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'bench-site-'));
+  await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
+    cwd: root,
+  });
+}, 60_000);
 
-  const hash = createHash('sha256').update(script.textContent).digest('base64');
-  return sources.includes(`'sha256-${hash}'`);
-}
+afterAll(async () => {
+  await rm(directory, { recursive: true, force: true });
+});
 
 describe('built vote document', () => {
+  let document: Document;
+  let policy: Map<string, string[]>;
+
+  function allowsScript(script: HTMLScriptElement, sources: readonly string[]): boolean {
+    if (script.src !== '') {
+      const url = new URL(script.src);
+      return (
+        sources.includes(url.origin) ||
+        (url.origin === new URL(document.URL).origin && sources.includes("'self'"))
+      );
+    }
+
+    const hash = createHash('sha256').update(script.textContent).digest('base64');
+    return sources.includes(`'sha256-${hash}'`);
+  }
+
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'bench-vote-'));
-    await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
-      cwd: fileURLToPath(new URL('../../', import.meta.url)),
-    });
     const html = await readFile(join(directory, 'vote/index.html'), 'utf8');
     document = new JSDOM(html, { url: 'https://app.example.com/vote/' }).window.document;
     const meta = document.querySelector<HTMLMetaElement>(
@@ -49,10 +61,6 @@ describe('built vote document', () => {
           return [name, sources];
         }),
     );
-  }, 60_000);
-
-  afterAll(async () => {
-    await rm(directory, { recursive: true, force: true });
   });
 
   test('allows the emitted vote island, shared theme and managed provider under its script policy', () => {
@@ -97,7 +105,7 @@ describe('built vote document', () => {
 
   test('serves the shared shell, styles and public catalog with runtime frame policy', async () => {
     expect(await readFile(join(directory, 'arena-families.json'))).toEqual(
-      await readFile(fileURLToPath(new URL('../../public/arena-families.json', import.meta.url))),
+      await readFile(join(root, 'public/arena-families.json')),
     );
     expect(document.title).toContain('Vote');
     expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe(
@@ -124,4 +132,64 @@ describe('built vote document', () => {
       code: 'ENOENT',
     });
   });
+});
+
+describe('built pages', () => {
+  let pages: string[];
+  let server: Awaited<ReturnType<typeof preview>>;
+  let browser: Browser;
+
+  beforeAll(async () => {
+    pages = (await readdir(directory, { recursive: true }))
+      .filter((path) => path.endsWith('.html'))
+      .map((path) => `/${path}`)
+      .sort();
+    server = await preview({
+      root,
+      outDir: directory,
+      logLevel: 'silent',
+      server: { host: '127.0.0.1', port: 0 },
+    });
+    browser = await chromium.launch();
+  }, 60_000);
+
+  afterAll(async () => {
+    await browser.close();
+    await server.stop();
+  });
+
+  test.each(['light', 'dark'] as const)(
+    'pass every axe rule in the %s theme once their islands hydrate',
+    async (theme) => {
+      const context = await browser.newContext({ colorScheme: theme });
+      const violations: Record<string, string[]> = {};
+
+      for (const path of pages) {
+        const page = await context.newPage();
+        await page.goto(`http://127.0.0.1:${String(server.port)}${path}`);
+        // Charts hydrate only once visible, so the viewport takes the whole page.
+        await page.setViewportSize({
+          width: 1280,
+          height: await page.evaluate(() => document.documentElement.scrollHeight),
+        });
+        await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
+        await page.waitForLoadState('networkidle');
+
+        expect(await page.evaluate(() => document.documentElement.dataset.theme), path).toBe(theme);
+        const results = await new AxeBuilder({ page }).analyze();
+        const found = results.violations.flatMap(({ id, nodes }) =>
+          nodes.map(({ target }) => `${id}: ${target.join(' ')}`),
+        );
+        if (found.length > 0) {
+          violations[path] = found;
+        }
+        await page.close();
+      }
+      await context.close();
+
+      expect(pages).toContain('/index.html');
+      expect(violations).toEqual({});
+    },
+    120_000,
+  );
 });

@@ -61,6 +61,9 @@ jobs:
       - name: Type check
         run: nix develop -c pnpm typecheck
 
+      - name: Install Chromium
+        run: nix develop -c pnpm --filter web exec playwright install --with-deps chromium
+
       - name: Test
         run: nix develop -c pnpm test
 
