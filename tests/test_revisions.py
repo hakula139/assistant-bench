@@ -122,7 +122,7 @@ class TestSystemsAt:
         )
 
         assert {name: system.fingerprint for name, system in systems.items()} == {
-            'writing/large': '46256f5027af8dc1',
+            'writing/large': '30d562d847e1e432',
             'coding/large': 'c03b2010a1b02a22',
         }
         assert all(system.generation == historical for system in systems.values())
@@ -156,7 +156,7 @@ class TestSystemsAt:
         old = revisions.systems_at('origin/main', {'writing/large'})
 
         assert revisions.changed_fingerprints(old, {'writing/large': current}) == []
-        assert old['writing/large'].fingerprint == '46256f5027af8dc1'
+        assert old['writing/large'].fingerprint == '30d562d847e1e432'
 
     def test_requires_no_historical_metadata_after_all_shared_names_are_replaced(
         self, monkeypatch: pytest.MonkeyPatch

@@ -550,6 +550,45 @@ class TestJob:
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
 
+    @pytest.mark.parametrize(
+        ('source', 'base', 'change', 'changes'),
+        [
+            pytest.param('cases', {}, {'context_window': 16384}, False, id='context'),
+            pytest.param(
+                'cases',
+                {'api': 'anthropic-messages', 'thinking_mode': 'anthropic-adaptive'},
+                {'context_window': 16384},
+                False,
+                id='messages-context',
+            ),
+            pytest.param('cases', {}, {'max_output_tokens': 128}, True, id='output'),
+            pytest.param('cases', {}, {'effort': 'high'}, True, id='effort'),
+            pytest.param(
+                'tasks', {}, {'context_window': 16384}, True, id='terminus-context'
+            ),
+            pytest.param('tasks', {}, {'effort': 'high'}, True, id='terminus-effort'),
+        ],
+    )
+    def test_changes_the_agent_config_exactly_when_the_fingerprint_changes(
+        self,
+        families_dir: Path,
+        source: str,
+        base: dict[str, str],
+        change: dict[str, str | int],
+        changes: bool,
+    ) -> None:
+        family = VOTES if source == 'cases' else voted_tasks(families_dir, 'echo')
+
+        old, new = (
+            current_agent(family, make_system(**fields))
+            for fields in (base, base | change)
+        )
+
+        assert (old != new, old.kwargs['fingerprint'] != new.kwargs['fingerprint']) == (
+            changes,
+            changes,
+        )
+
     def test_keeps_a_successful_authored_task_reusable_at_its_declared_deadline(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

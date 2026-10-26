@@ -182,7 +182,7 @@ class SystemIdentity(BaseModel):
     """Configured completion allowance, including reasoning tokens."""
 
     context_window: int = Field(gt=0)
-    """Configured context capacity for the agent's native context management."""
+    """Configured context capacity for Terminus's native context management."""
 
     effort: str | None
     thinking_mode: ThinkingMode | None = None
@@ -210,9 +210,10 @@ class SystemIdentity(BaseModel):
             'effort': self.effort,
             'harness': self.harness,
             'max_output_tokens': self.max_output_tokens,
-            'context_window': self.context_window,
             'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
         }
+        if self.harness == 'terminus-2':
+            identity['context_window'] = self.context_window
         if self.api == 'anthropic-messages':
             identity['thinking_mode'] = self.thinking_mode
 

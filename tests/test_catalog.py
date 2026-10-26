@@ -146,24 +146,14 @@ class TestSystem:
     class TestFingerprint:
         @pytest.mark.parametrize(
             'change',
-            [
-                {'messages_protocol': 2},
-                {'anthropic_api_version': '2026-10-21'},
-                {'anthropic': '2.4.0'},
-            ],
-            ids=['messages-protocol', 'api-version', 'sdk-version'],
+            [{'messages_protocol': 2}, {'anthropic_api_version': '2026-10-21'}],
+            ids=['messages-protocol', 'api-version'],
         )
         @pytest.mark.parametrize('harness', ['generate', 'terminus-2'])
         def test_native_versions_invalidate_only_messages_outputs(
             self, change: dict[str, Any], harness: str
         ) -> None:
-            versions = Generation(
-                protocol=2,
-                harbor='0.24.0',
-                messages_protocol=1,
-                anthropic_api_version='2023-06-01',
-                anthropic='2.3.0',
-            )
+            versions = make_generation()
             changed = versions.model_copy(update=change)
             native = make_system(
                 api='anthropic-messages',
@@ -227,36 +217,46 @@ class TestSystem:
             assert differences == expected
 
         def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
-            assert make_system().fingerprint == 'c8899f53b1177f65'
-            assert make_system(name='x').fingerprint == 'c8899f53b1177f65'
-            assert make_system(display_name='x').fingerprint == 'c8899f53b1177f65'
-            assert make_system(vendor='other').fingerprint == 'c8899f53b1177f65'
+            assert make_system().fingerprint == '1f58b40f86f0f14c'
+            assert make_system(name='x').fingerprint == '1f58b40f86f0f14c'
+            assert make_system(display_name='x').fingerprint == '1f58b40f86f0f14c'
+            assert make_system(vendor='other').fingerprint == '1f58b40f86f0f14c'
 
         @pytest.mark.parametrize(
-            'change',
+            ('base', 'change', 'changes'),
             [
-                {'route': 'acme/large-2'},
-                {'effort': 'high'},
-                {'prompt': 'Be brief.'},
-                {'harness': 'terminus-2'},
-                {'max_output_tokens': 128},
-                {'context_window': 16384},
-                {'api': 'openai-responses'},
-            ],
-            ids=[
-                'route',
-                'effort',
-                'prompt',
-                'harness',
-                'output-capacity',
-                'context',
-                'api',
+                pytest.param({}, {'route': 'acme/large-2'}, True, id='route'),
+                pytest.param({}, {'effort': 'high'}, True, id='effort'),
+                pytest.param({}, {'prompt': 'Be brief.'}, True, id='prompt'),
+                pytest.param({}, {'harness': 'terminus-2'}, True, id='harness'),
+                pytest.param({}, {'max_output_tokens': 128}, True, id='output'),
+                pytest.param({}, {'api': 'openai-responses'}, True, id='api'),
+                pytest.param(
+                    {'harness': 'terminus-2'},
+                    {'context_window': 16384},
+                    True,
+                    id='terminus-context',
+                ),
+                pytest.param({}, {'context_window': 16384}, False, id='context'),
+                pytest.param(
+                    {
+                        'api': 'anthropic-messages',
+                        'thinking_mode': 'anthropic-adaptive',
+                    },
+                    {'context_window': 16384},
+                    False,
+                    id='messages-context',
+                ),
             ],
         )
-        def test_changes_with_what_shapes_the_outputs(
-            self, change: dict[str, str | int]
+        def test_changes_only_with_what_shapes_the_requests(
+            self, base: dict[str, str], change: dict[str, str | int], changes: bool
         ) -> None:
-            assert make_system(**change).fingerprint != make_system().fingerprint
+            before = make_system(**base)
+
+            after = make_system(**(base | change))
+
+            assert (after.fingerprint != before.fingerprint) is changes
 
 
 class TestLoadSystems:
@@ -385,13 +385,7 @@ class TestResolveIdentity:
         config = SystemConfig(
             model='acme-large', api='anthropic-messages', effort='high'
         )
-        versions = Generation(
-            protocol=2,
-            harbor='0.24.0',
-            messages_protocol=1,
-            anthropic_api_version='2023-06-01',
-            anthropic='2.3.0',
-        )
+        versions = make_generation()
 
         with pytest.raises(ValueError):
             resolve_identity('native', config, missing_mode, versions, 'generate')
@@ -399,10 +393,10 @@ class TestResolveIdentity:
     @pytest.mark.parametrize(
         ('api', 'effort', 'required', 'expected'),
         [
-            ('openai-chat-completions', None, True, '46256f5027af8dc1'),
-            ('openai-responses', 'high', True, 'a6f35da264e89395'),
-            ('openai-chat-completions', None, False, '476d95dfb9b26e31'),
-            ('openai-responses', 'unlisted', True, '6e7b17ad7560852c'),
+            ('openai-chat-completions', None, True, '30d562d847e1e432'),
+            ('openai-responses', 'high', True, '4fa5e51fbc1b97b1'),
+            ('openai-chat-completions', None, False, '26c62ac1c147644e'),
+            ('openai-responses', 'unlisted', True, '7f0d2b4f5e0f682f'),
         ],
         ids=[
             'required-default',
@@ -466,7 +460,7 @@ class TestResolveIdentity:
 
         identity = resolve_identity('large', config, changed, versions, 'generate')
 
-        assert identity.fingerprint == '46256f5027af8dc1'
+        assert identity.fingerprint == '30d562d847e1e432'
 
 
 class TestResolveSystem:
