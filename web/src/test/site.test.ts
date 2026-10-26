@@ -1,13 +1,12 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import AxeBuilder from '@axe-core/playwright';
-import { preview } from 'astro';
 import { JSDOM } from 'jsdom';
 import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -135,8 +134,8 @@ describe('built vote document', () => {
 });
 
 describe('built pages', () => {
+  const origin = 'http://site.example';
   let pages: string[];
-  let server: Awaited<ReturnType<typeof preview>>;
   let browser: Browser;
 
   beforeAll(async () => {
@@ -144,29 +143,30 @@ describe('built pages', () => {
       .filter((path) => path.endsWith('.html'))
       .map((path) => `/${path}`)
       .sort();
-    server = await preview({
-      root,
-      outDir: directory,
-      logLevel: 'silent',
-      server: { host: '127.0.0.1', port: 0 },
-    });
     browser = await chromium.launch();
   }, 60_000);
 
   afterAll(async () => {
     await browser.close();
-    await server.stop();
   });
 
   test.each(['light', 'dark'] as const)(
     'pass every axe rule in the %s theme once their islands hydrate',
     async (theme) => {
       const context = await browser.newContext({ colorScheme: theme });
+      await context.route(`${origin}/**`, async (route) => {
+        const file = join(directory, new URL(route.request().url()).pathname);
+        const found = await stat(file).then(
+          (stats) => stats.isFile(),
+          () => false,
+        );
+        await route.fulfill(found ? { path: file } : { status: 404 });
+      });
       const violations: Record<string, string[]> = {};
 
       for (const path of pages) {
         const page = await context.newPage();
-        await page.goto(`http://127.0.0.1:${String(server.port)}${path}`);
+        await page.goto(`${origin}${path}`);
         // Charts hydrate only once visible, so the viewport takes the whole page.
         await page.setViewportSize({
           width: 1280,
