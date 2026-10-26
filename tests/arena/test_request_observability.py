@@ -260,6 +260,22 @@ class TestDefaultFetch:
                 assert all(secret not in contents for contents in logs.values())
 
 
+class TestUninitializedDeployment:
+    def test_reports_an_empty_database_through_the_management_entrypoint(
+        self, tmp_path: Path
+    ) -> None:
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
+                result = await transport.call(
+                    {'operation': 'management', 'request': {'operation': 'status'}}
+                )
+
+                assert result == {'result': None}
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
+
+
 class TestManagementRejection:
     def test_surfaces_and_logs_the_owner_input_diagnosis(self, tmp_path: Path) -> None:
         detail = 'A moderation plan must name its management principal.'

@@ -76,7 +76,7 @@ def validate_request(request: Request, profile: Profile, method: str) -> str:
             or header(request, 'Content-Encoding') is not None
         ):
             raise RequestRejected
-    elif site not in {None, 'same-origin', 'none'}:
+    elif url.path.startswith('/api/') and site not in {None, 'same-origin', 'none'}:
         raise RequestRejected
 
     return url.path

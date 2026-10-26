@@ -3,6 +3,8 @@
 import logging
 from typing import Literal
 
+from assistant_bench_arena.transport import OwnerInputError
+
 
 type FailureStage = Literal[
     'preflight', 'validation', 'http', 'assets', 'render', 'render_lookup', 'management'
@@ -19,7 +21,7 @@ def failure(stage: FailureStage, error: Exception) -> None:
     )
 
 
-def rejected(error: ValueError) -> None:
+def rejected(error: OwnerInputError) -> None:
     """Record the owner's private refusal, whose message is authored diagnosis."""
     _LOGGER.error(
         'Voting management rejected: exception=%s message=%s',

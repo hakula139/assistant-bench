@@ -1289,7 +1289,7 @@ class TestLedger:
 
             asyncio.run(scenario())
 
-        def test_a_vote_during_staging_does_not_make_the_activation_stale(
+        def test_votes_and_withdrawals_during_staging_do_not_make_activation_stale(
             self, d1_runtime: D1Runtime
         ) -> None:
             async def scenario() -> None:
@@ -1302,7 +1302,7 @@ class TestLedger:
                     before = await ledger.freeze('before', 'writing', 20)
                     refreshed = make_release(suffix='next')
                     await publish_presentation(ledger, refreshed)
-                    await ledger.accept(
+                    receipt = await ledger.accept(
                         Context(command_id='accept', principal='actor', now=25),
                         Accept(
                             lease_id=lease.id,
@@ -1310,6 +1310,14 @@ class TestLedger:
                             choice='b',
                             attribution=attribution(25),
                         ),
+                    )
+                    voted = await ledger.read.session('actor', 'session')
+                    assert voted is not None
+                    await ledger.withdraw(
+                        Context(command_id='withdraw', principal='actor', now=26),
+                        'session',
+                        voted.version,
+                        receipt.seq,
                     )
 
                     await ledger.activate(
@@ -1324,6 +1332,82 @@ class TestLedger:
                     current = await ledger.read.family('writing')
                     assert current is not None
                     assert current.publication_id == refreshed.publication.id
+
+            asyncio.run(scenario())
+
+        @pytest.mark.parametrize('change', ['activation', 'moderation'])
+        def test_control_changes_make_a_staged_activation_stale(
+            self, d1_runtime: D1Runtime, change: str
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+
+                    receipt = None
+
+                    if change == 'moderation':
+                        lease = await ledger.issue(
+                            Context(command_id='issue', principal='actor', now=10),
+                            issue(),
+                        )
+                        receipt = await ledger.accept(
+                            Context(command_id='accept', principal='actor', now=15),
+                            Accept(
+                                lease_id=lease.id,
+                                acknowledgment='ack',
+                                choice='b',
+                                attribution=attribution(15),
+                            ),
+                        )
+
+                    before = await ledger.freeze('before', 'writing', 20)
+                    refreshed = make_release(suffix='next')
+                    await publish_presentation(ledger, refreshed)
+
+                    if change == 'activation':
+                        await ledger.activate(
+                            Context(
+                                command_id='activate:first', principal='admin', now=25
+                            ),
+                            'writing',
+                            before.family_revision,
+                            refreshed.evaluation.id,
+                            refreshed.publication.id,
+                            refreshed.points.id,
+                        )
+                    else:
+                        assert receipt is not None
+                        await ledger.stage_moderation(
+                            Moderation(
+                                id='competing',
+                                family='writing',
+                                principal='admin',
+                                action='exclude',
+                                reason='Reviewed synthetic exclusion.',
+                                created_at=25,
+                                targets=(
+                                    Target(receipt_seq=receipt.seq, claim_version=2),
+                                ),
+                            )
+                        )
+                        await ledger.seal_moderation('competing', 25)
+                        await ledger.moderate(
+                            Context(command_id='moderate', principal='admin', now=25),
+                            'competing',
+                            0,
+                        )
+
+                    with pytest.raises(CommandRejected, match='^family_stale$'):
+                        await ledger.activate(
+                            Context(
+                                command_id='activate:stale', principal='admin', now=30
+                            ),
+                            'writing',
+                            before.family_revision,
+                            refreshed.evaluation.id,
+                            refreshed.publication.id,
+                            refreshed.points.id,
+                        )
 
             asyncio.run(scenario())
 

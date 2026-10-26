@@ -20,7 +20,7 @@ The selection names a rendered case family and exact `outputs`, each identified 
 
 Preparation requires the family's `public_voting` opt-in and an exact `PublicApproval`: source and license attestations for the selected cases, plus content and presentation digests for every published case and output. Synthetic classification and passing gates alone do not authorize publication. Regeneration changes the approved output identities and requires another review.
 
-Publication seals the replacement before activating it with the current family revision. A presentation refresh retains the active fitted points when its numerical evaluation is unchanged. `refresh` fits the saved evidence offline, then updates sampling points while retaining the active presentation. Concurrent control changes can refuse activation, so inspect the current status before choosing another cut. Ordinary votes do not change the revision, so steady voting does not invalidate a staged publication.
+Publication seals the replacement before activating it with the current family revision. A presentation refresh retains the active fitted points when its numerical evaluation is unchanged. `refresh` fits the saved evidence offline, then updates sampling points while retaining the active presentation. Concurrent control changes can refuse activation, so inspect the current status before choosing another cut. In the current schema, ordinary votes do not change the revision, so steady voting does not invalidate a staged publication.
 
 `status` includes the deployment's aggregate network-association expiry lag in milliseconds. `health` checks the selected deployment and exits unsuccessfully when expired associations have awaited cleanup for more than five minutes.
 

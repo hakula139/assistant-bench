@@ -52,7 +52,7 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeTarget:
             [env.production.assets]
             binding = "ASSETS"
             directory = "assets"
-            run_worker_first = true
+            run_worker_first = ["/api/*", "/vote/"]
         """)
     )
     monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'synthetic-credential')
@@ -65,7 +65,7 @@ class TestRouting:
 
         for name in ('staging', 'production'):
             assets = manifest['env'][name]['assets']
-            assert assets['run_worker_first'] == ['/api/*', '/vote', '/vote/']
+            assert assets['run_worker_first'] == ['/api/*', '/vote/']
 
 
 class TestDeploy:

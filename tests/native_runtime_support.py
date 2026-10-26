@@ -404,6 +404,7 @@ class NativeClient(D1Transport):
         address: str = '192.0.2.10',
         forwarded_worker: bool = False,
         origin: str = APP_ORIGIN,
+        sec_fetch_site: str = '',
     ) -> dict[str, JsonValue]:
         return await self.call(
             {
@@ -415,6 +416,7 @@ class NativeClient(D1Transport):
                 'address': address,
                 'forwarded_worker': forwarded_worker,
                 'origin': origin,
+                'sec_fetch_site': sec_fetch_site,
             }
         )
 
@@ -663,6 +665,9 @@ class NativeRuntime:
                             headers.set('CF-Worker', 'synthetic.example');
                         }}
                         if (payload.cookie) headers.set('Cookie', payload.cookie);
+                        if (payload.sec_fetch_site) {{
+                            headers.set('Sec-Fetch-Site', payload.sec_fetch_site);
+                        }}
                         const init = {{headers}};
                         if (payload.body !== null) {{
                             init.method = 'POST';

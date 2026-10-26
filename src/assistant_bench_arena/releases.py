@@ -27,6 +27,7 @@ from assistant_bench_arena.snapshots import (
     PublicApproval,
     Settlement,
 )
+from assistant_bench_arena.transport import OwnerInputError
 
 
 class EvaluationBundle(Record):
@@ -266,7 +267,7 @@ def validate_case(case: Case) -> None:
         or approval.source != case.source
         or approval.instruction_digest != case.instruction_digest
     ):
-        raise ValueError(
+        raise OwnerInputError(
             'Every public case needs exact redistributable content approval.'
         )
 
@@ -280,7 +281,7 @@ def validate_output(output: Output) -> None:
         or approval.output_key != output.key
         or approval.content_digest != output.content_digest
     ):
-        raise ValueError('Every public output needs exact content approval.')
+        raise OwnerInputError('Every public output needs exact content approval.')
 
 
 def validate_presentation(bundle: EvaluationBundle, publication: Publication) -> None:
@@ -296,7 +297,9 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
         or set(presentation.systems) != {system.id for system in bundle.systems}
         or approval is None
     ):
-        raise ValueError('The publication identity and complete sections must agree.')
+        raise OwnerInputError(
+            'The publication identity and complete sections must agree.'
+        )
 
     case_approvals = {row.case_key: row for row in approval.cases}
     output_approvals = {row.output_key: row for row in approval.outputs}
@@ -306,7 +309,9 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
         or set(case_approvals) != set(cases)
         or set(output_approvals) != set(outputs)
     ):
-        raise ValueError('The public approval must cover every exact case and output.')
+        raise OwnerInputError(
+            'The public approval must cover every exact case and output.'
+        )
 
     for key, case in cases.items():
         document = presentation.cases[key]
@@ -318,7 +323,7 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
                 'checklist': list(document.checklist),
             }
         ):
-            raise ValueError(
+            raise OwnerInputError(
                 'A presented case must match its frozen source and instruction.'
             )
 
@@ -329,13 +334,17 @@ def validate_presentation(bundle: EvaluationBundle, publication: Publication) ->
             or consent.instruction_digest != case.instruction_digest
             or consent.presentation_digest != digest(document)
         ):
-            raise ValueError('Every public case presentation needs current approval.')
+            raise OwnerInputError(
+                'Every public case presentation needs current approval.'
+            )
 
     if any(
         output_approvals[key].content_digest != output.content_digest
         for key, output in outputs.items()
     ):
-        raise ValueError('Every public output needs its exact approved content digest.')
+        raise OwnerInputError(
+            'Every public output needs its exact approved content digest.'
+        )
 
 
 def validate_rendered(publication: Publication, output: RenderedOutput) -> None:
@@ -345,7 +354,7 @@ def validate_rendered(publication: Publication, output: RenderedOutput) -> None:
         or not output.approved_public
         or publication.approval is None
     ):
-        raise ValueError('A rendered output must match its approved presentation.')
+        raise OwnerInputError('A rendered output must match its approved presentation.')
 
     validate_render_approval(publication, output.output_key, output.content)
 
@@ -356,7 +365,7 @@ def validate_render_approval(
     approval = publication.approval
 
     if approval is None:
-        raise ValueError('Every public publication needs explicit approval.')
+        raise OwnerInputError('Every public publication needs explicit approval.')
 
     consent = next(
         (row for row in approval.outputs if row.output_key == output_key), None
@@ -368,7 +377,7 @@ def validate_render_approval(
         or consent.render_digest
         != digest({'render': publication.presentation.render, 'content': content})
     ):
-        raise ValueError('Every public rendered output needs current approval.')
+        raise OwnerInputError('Every public rendered output needs current approval.')
 
 
 def validate_publication(

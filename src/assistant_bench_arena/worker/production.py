@@ -4,6 +4,7 @@ import html
 import time
 
 from js import Response as NativeResponse
+from pyodide.ffi import JsNull
 from workers import Request, Response, WorkerEntrypoint
 
 from assistant_bench_arena.admission import InvalidToken
@@ -13,9 +14,10 @@ from assistant_bench_arena.management_models import (
     RpcError,
     RpcFailure,
     RpcSuccess,
+    Status,
     parse_request,
 )
-from assistant_bench_arena.transport import CommandRejected
+from assistant_bench_arena.transport import CommandRejected, OwnerInputError
 from assistant_bench_arena.worker.api import (
     RequestRejected,
     header,
@@ -33,7 +35,6 @@ from assistant_bench_arena.worker.http import INGRESS, Ingress
 from assistant_bench_arena.worker.owner import AppBindings, owner
 
 
-VOTE_PATHS = frozenset({'/vote', '/vote/'})
 _DIRECTIVES = (
     "connect-src 'self'; base-uri 'none'; form-action 'none'; "
     "frame-ancestors 'none'; object-src 'none'"
@@ -96,21 +97,30 @@ class Default(OwnerEntrypoint):
                     self.env,
                 )
             else:
-                if method != 'GET' or path not in VOTE_PATHS:
+                if method != 'GET' or path != '/vote/':
                     raise RequestRejected
 
                 stage = 'assets'
                 asset = await self.owner.bindings.ASSETS.fetch(native)
-                body = await asset.text()
-                origin = html.escape(
-                    self.owner.settings.profile.render_origin, quote=True
-                )
-                body = body.replace(
-                    '</head>',
-                    f'<meta name="bench-render-origin" content="{origin}"></head>',
-                    1,
-                )
-                response = NativeResponse.new(body, asset.js_object)
+
+                if asset.status == 200:
+                    body = await asset.text()
+                    origin = html.escape(
+                        self.owner.settings.profile.render_origin, quote=True
+                    )
+                    body = body.replace(
+                        '</head>',
+                        f'<meta name="bench-render-origin" content="{origin}"></head>',
+                        1,
+                    )
+                    response = NativeResponse.new(body, asset.js_object)
+                else:
+                    stream = asset.js_object.body
+                    response = NativeResponse.new(
+                        None if isinstance(stream, JsNull) else stream,
+                        asset.js_object,
+                    )
+
                 response.headers.set(
                     'Content-Security-Policy',
                     f'frame-src {self.owner.settings.profile.render_origin} '
@@ -172,7 +182,10 @@ class Management(OwnerEntrypoint):
     async def command(self, serialized: str) -> str:
         try:
             request = parse_request(serialized)
-            await self.owner.auth.ensure_ready()
+
+            if not isinstance(request, Status):
+                await self.owner.auth.ensure_ready()
+
             result = await execute(
                 self.owner.ledger, request, time.time_ns() // 1_000_000
             )
@@ -181,7 +194,7 @@ class Management(OwnerEntrypoint):
             return RpcFailure(error=RpcError(reason=error.reason)).model_dump_json(
                 exclude_none=True
             )
-        except ValueError as error:
+        except OwnerInputError as error:
             rejected(error)
             return RpcFailure(
                 error=RpcError(reason='invalid_request', detail=str(error))

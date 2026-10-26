@@ -155,26 +155,41 @@ class TestNativeRuntime:
                 assert worker_rejected['status'] == 400
                 assert body(worker_rejected) == {'error': 'invalid_request'}
 
-                for path in ('/vote', '/vote/'):
-                    page = await transport.http(path)
-                    assert page['status'] == 200, path
-                    assert str(page['body']).count('bench-render-origin') == 1, path
-                    page_headers = page['headers']
-                    assert isinstance(page_headers, dict)
-                    policy = str(page_headers['content-security-policy'])
-                    assert policy.split('; ')[0] == (
-                        'frame-src https://render.example.com '
-                        'https://challenges.cloudflare.com'
-                    ), path
-                    for directive in (
-                        "connect-src 'self'",
-                        "base-uri 'none'",
-                        "form-action 'none'",
-                        "frame-ancestors 'none'",
-                        "object-src 'none'",
-                    ):
-                        assert directive in policy, (path, directive)
-                    assert page_headers.get('cache-control') != 'no-store', path
+                page = await transport.http('/vote/')
+                assert page['status'] == 200
+                assert str(page['body']).count('bench-render-origin') == 1
+                page_headers = page['headers']
+                assert isinstance(page_headers, dict)
+                policy = str(page_headers['content-security-policy'])
+                assert policy.split('; ')[0] == (
+                    'frame-src https://render.example.com '
+                    'https://challenges.cloudflare.com'
+                )
+                for directive in (
+                    "connect-src 'self'",
+                    "base-uri 'none'",
+                    "form-action 'none'",
+                    "frame-ancestors 'none'",
+                    "object-src 'none'",
+                ):
+                    assert directive in policy, directive
+                assert (
+                    page_headers['cache-control']
+                    == 'public, max-age=0, must-revalidate'
+                )
+
+                cross_site = await transport.http('/vote/', sec_fetch_site='cross-site')
+                assert cross_site['status'] == 200
+                assert 'bench-render-origin' in str(cross_site['body'])
+
+                rejected = await transport.http('/vote/', body={'choice': 'a'})
+                assert rejected['status'] == 400
+                assert body(rejected) == {'error': 'invalid_request'}
+
+                api_cross_site = await transport.http(
+                    '/api/families', sec_fetch_site='cross-site'
+                )
+                assert api_cross_site['status'] == 400
 
                 static = await transport.http('/')
                 assert static['status'] == 200
@@ -183,6 +198,7 @@ class TestNativeRuntime:
                 assert isinstance(static_headers, dict)
                 static_policy = str(static_headers['content-security-policy'])
                 assert static_policy.split('; ')[0] == "frame-src 'none'"
+                assert static_policy.split('; ')[1:] == policy.split('; ')[1:]
                 assert static_headers['referrer-policy'] == 'no-referrer'
                 assert static_headers['x-content-type-options'] == 'nosniff'
 
@@ -610,7 +626,7 @@ class TestNativeRuntime:
                     f'Native coverage missed {relative}:{returned}.'
                 )
 
-    def test_charges_real_native_budgets_before_serving_or_rejecting_requests(
+    def test_charges_native_budgets_only_for_valid_api_requests(
         self, tmp_path: Path
     ) -> None:
         async def scenario(runtime: NativeRuntime) -> None:
@@ -709,16 +725,13 @@ class TestNativeRuntime:
                     else:
                         assert body(response) == {'status': 'admission_required'}
 
-                for path in ('/vote', '/vote/'):
-                    response = await transport.http(path)
-                    assert response['status'] == 200, path
-                    recorded = await transport.call({'operation': 'ingress_events'})
-                    events = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
-                        recorded['events']
-                    )
-                    assert events and all(
-                        event == {'kind': 'validate'} for event in events
-                    ), (path, events)
+                response = await transport.http('/vote/')
+                assert response['status'] == 200
+                recorded = await transport.call({'operation': 'ingress_events'})
+                events = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
+                    recorded['events']
+                )
+                assert events == [{'kind': 'validate'}]
 
                 assert runtime.provider.calls == []
 
