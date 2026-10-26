@@ -216,7 +216,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
             className={cn(
               scroll,
               'flex flex-col gap-3 text-base',
-              stacked ? 'max-h-[25dvh]' : 'max-xl:max-h-[25dvh]',
+              stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
             <Markdown text={pair.instruction} />
