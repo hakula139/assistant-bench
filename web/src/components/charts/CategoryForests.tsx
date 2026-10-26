@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import { ForestPlot } from '@/components/charts/ForestPlot';
-import { legendMarks, sharedDomain, type LegendMark } from '@/lib/forest';
+import { legendMarks, onAxis, sharedDomain, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import { isPreliminary } from '@/lib/ranking';
 import type { CategoryBoard, VotesRules } from '@/lib/report';
@@ -31,7 +31,7 @@ export function categoryMarks(
       preliminary: isPreliminary(refit, rules),
     })),
   );
-  return legendMarks(rows, domain, domain[0] <= anchorScore && anchorScore <= domain[1]);
+  return legendMarks(rows, domain, onAxis(domain, anchorScore));
 }
 
 /** One forest plot per category, on an axis every category shares. */

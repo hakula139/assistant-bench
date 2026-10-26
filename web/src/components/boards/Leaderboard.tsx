@@ -1,4 +1,3 @@
-import type * as Plot from '@observablehq/plot';
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -11,11 +10,9 @@ import {
 } from '@tanstack/react-table';
 import { cn } from 'cn';
 import { ArrowDown, ArrowUp, CircleHelp } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 
-import { grid, referenceRule } from '@/components/charts/chart-marks';
-import { forestMarks } from '@/components/charts/forest-marks';
-import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { ScoreTrack, TrackAxis } from '@/components/site/ScoreTrack';
 import { Hint, StatusMark } from '@/components/site/Term';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,14 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  clip,
-  forestDomain,
-  forestTicks,
-  labelledTicks,
-  legendMarks,
-  type LegendMark,
-} from '@/lib/forest';
+import { forestDomain, legendMarks, onAxis, type LegendMark } from '@/lib/forest';
 import { formatCount, formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
 import type { Standing } from '@/lib/report';
@@ -68,9 +58,6 @@ interface LeaderboardProps {
   gateFailures: Term;
 }
 
-const ROW_HEIGHT = 48;
-const FOREST_MARGIN = 22;
-
 interface ColumnMeta {
   numeric?: boolean;
   forest?: boolean;
@@ -88,30 +75,6 @@ const features = tableFeatures({
 });
 const helper = createColumnHelper<typeof features, LeaderboardRow>();
 
-function forestScale(domain: [number, number]): Plot.ScaleOptions {
-  return { domain, insetLeft: FOREST_MARGIN, insetRight: FOREST_MARGIN };
-}
-
-function ForestAxis({ domain }: { domain: [number, number] }) {
-  const plot = useCallback(
-    ({ width }: PlotFrame): Plot.PlotOptions => ({
-      margin: 0,
-      marginTop: 20,
-      x: {
-        ...forestScale(domain),
-        axis: 'top',
-        ticks: labelledTicks(domain, width - 2 * FOREST_MARGIN),
-        tickFormat: formatScore,
-        tickSize: 0,
-        label: null,
-      },
-      marks: [],
-    }),
-    [domain],
-  );
-  return <PlotFigure plot={plot} height={28} />;
-}
-
 function ScoreCell({
   row,
   domain,
@@ -121,28 +84,10 @@ function ScoreCell({
   domain: [number, number];
   anchor: number | undefined;
 }) {
-  const plot = useCallback(
-    (): Plot.PlotOptions => ({
-      margin: 0,
-      x: { ...forestScale(domain), axis: null },
-      y: { axis: null, domain: [0, 1] },
-      color: { type: 'identity' },
-      marks: [
-        grid('x', forestTicks(domain)),
-        anchor === undefined ? null : referenceRule(anchor),
-        forestMarks(
-          [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
-          domain,
-        ),
-      ],
-    }),
-    [row, domain, anchor],
-  );
-
   const summary = `${row.name}: ${formatScore(row.score)}`;
   return (
-    <div role="img" aria-label={summary} title={summary}>
-      <PlotFigure plot={plot} height={ROW_HEIGHT} />
+    <div role="img" aria-label={summary} title={summary} className="absolute inset-0">
+      <ScoreTrack domain={domain} anchorScore={anchor} estimate={row} />
     </div>
   );
 }
@@ -176,6 +121,9 @@ const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
 
 /** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
 export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): LegendMark[] {
+  const domain = forestDomain(rows);
+  const anchor = anchorScore(rows, anchorSystem);
+
   return legendMarks(
     rows.map((row) => ({
       system: row.system,
@@ -183,8 +131,8 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
       estimate: row,
       preliminary: row.preliminary,
     })),
-    forestDomain(rows),
-    anchorScore(rows, anchorSystem) !== undefined,
+    domain,
+    anchor !== undefined && onAxis(domain, anchor),
   );
 }
 
@@ -244,7 +192,7 @@ export function Leaderboard({
       }),
       helper.display({
         id: 'point',
-        header: () => <ForestAxis domain={domain} />,
+        header: () => <TrackAxis domain={domain} anchorScore={anchor} />,
         cell: ({ row }) => <ScoreCell row={row.original} domain={domain} anchor={anchor} />,
         meta: { forest: true },
       }),
@@ -355,7 +303,7 @@ export function Leaderboard({
                   key={cell.id}
                   numeric={numeric}
                   className={cn(
-                    forest && 'p-0 max-lg:hidden',
+                    forest && 'relative p-0 max-lg:hidden',
                     wraps && 'whitespace-normal',
                     detail && 'max-md:hidden',
                   )}

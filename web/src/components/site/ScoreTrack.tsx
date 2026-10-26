@@ -1,0 +1,131 @@
+import { cn } from 'cn';
+
+import { clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
+import { formatScore } from '@/lib/format';
+
+/** A placed system's point score, drawn hollow while its coverage is preliminary. */
+export interface TrackScore {
+  score: number;
+  preliminary: boolean;
+}
+
+const middle = 'absolute top-1/2 -translate-y-1/2';
+
+/** The track's extent within its cell, inset so a mark at either axis end stays whole. */
+const extent = 'absolute inset-x-3 inset-y-0';
+
+const rule = 'absolute inset-y-0 w-px';
+
+/** Matches the minimum tick spacing in `labelledTicks`. */
+const axisFits: Record<number, string> = {
+  1: '@max-[2.5rem]:hidden',
+  2: '@max-[5rem]:hidden',
+  3: '@max-[7.5rem]:hidden',
+  4: '@max-[10rem]:hidden',
+  5: '@max-[12.5rem]:hidden',
+  6: '@max-[15rem]:hidden',
+  7: '@max-[17.5rem]:hidden',
+};
+
+const position =
+  ([start, stop]: [number, number]) =>
+  (value: number) =>
+    `${(((value - start) / (stop - start)) * 100).toFixed(2)}%`;
+
+/** A point score, centered at `left` within a positioned parent. */
+export function ScoreDot({ preliminary, left }: { preliminary: boolean; left: string }) {
+  return (
+    <span
+      className={cn(
+        middle,
+        'size-3.5 -translate-x-1/2 rounded-full border-2',
+        preliminary ? 'border-chart-series bg-background' : 'border-background bg-chart-series',
+      )}
+      style={{ left }}
+    />
+  );
+}
+
+/** The arrowhead at the axis start for a score the axis cuts off. */
+export function CutArrow() {
+  return (
+    <svg viewBox="0 0 6 10" className={cn(middle, 'left-0 h-2.5 w-1.5 fill-chart-series')}>
+      <path d="M6 0 0 5l6 5z" />
+    </svg>
+  );
+}
+
+/** The rule at the anchor score, at `left` within a positioned parent. */
+export function AnchorRule({ left }: { left: string }) {
+  return <span className={cn(rule, 'bg-chart-reference')} style={{ left }} />;
+}
+
+/**
+ * The score labels above a column of tracks on `domain`, keeping only the ends and an anchor
+ * label where the column is too narrow for every tick's label.
+ */
+export function TrackAxis({
+  domain,
+  anchorScore,
+}: {
+  domain: [number, number];
+  anchorScore?: number;
+}) {
+  const ticks = forestTicks(domain);
+  const sparse = new Set(sparseTicks(domain, anchorScore));
+  const at = position(domain);
+
+  return (
+    <div aria-hidden="true" className="relative h-6">
+      <div className={cn(extent, '@container')}>
+        {ticks.map((tick) => (
+          <span
+            key={tick}
+            className={cn(
+              'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
+              !sparse.has(tick) && axisFits[ticks.length - 1],
+            )}
+            style={{ left: at(tick) }}
+          >
+            {formatScore(tick)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One system's score on a shared axis, with the axis gridlines and the anchor rule, filling a
+ * positioned parent so that the rules of stacked rows join. A system without `estimate` leaves the
+ * track empty.
+ */
+export function ScoreTrack({
+  domain,
+  anchorScore,
+  estimate,
+}: {
+  domain: [number, number];
+  anchorScore?: number;
+  estimate?: TrackScore;
+}) {
+  const at = position(domain);
+  const clipped = estimate && { ...clip(estimate, domain), preliminary: estimate.preliminary };
+
+  return (
+    <span aria-hidden="true" data-slot="score-track" className={extent}>
+      {forestTicks(domain).map((tick) => (
+        <span key={tick} className={cn(rule, 'bg-chart-grid')} style={{ left: at(tick) }} />
+      ))}
+      {anchorScore !== undefined && onAxis(domain, anchorScore) && (
+        <AnchorRule left={at(anchorScore)} />
+      )}
+      {clipped &&
+        (clipped.offScale ? (
+          <CutArrow />
+        ) : (
+          <ScoreDot preliminary={clipped.preliminary} left={at(clipped.score)} />
+        ))}
+    </span>
+  );
+}

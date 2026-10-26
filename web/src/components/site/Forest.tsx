@@ -1,6 +1,13 @@
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 
+import {
+  AnchorRule,
+  CutArrow,
+  ScoreDot,
+  ScoreTrack,
+  TrackAxis,
+} from '@/components/site/ScoreTrack';
 import { Hint } from '@/components/site/Term';
 import {
   Table,
@@ -10,14 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  clip,
-  forestTicks,
-  legendMarks,
-  sparseTicks,
-  type ForestRow,
-  type LegendMark,
-} from '@/lib/forest';
+import { legendMarks, onAxis, type ForestRow, type LegendMark } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
@@ -53,40 +53,11 @@ function details(row: ForestRow): Term {
   };
 }
 
-const middle = 'absolute top-1/2 -translate-y-1/2';
-const dot = cn(middle, 'size-3.5 -translate-x-1/2 rounded-full border-2');
-const solidDot = 'border-background bg-chart-series';
-const hollowDot = 'border-chart-series bg-background';
-const anchorRule = 'bg-faint/40';
-
-/** Matches the minimum tick spacing in `labelledTicks`. */
-const axisFits: Record<number, string> = {
-  1: '@max-[2.5rem]:hidden',
-  2: '@max-[5rem]:hidden',
-  3: '@max-[7.5rem]:hidden',
-  4: '@max-[10rem]:hidden',
-  5: '@max-[12.5rem]:hidden',
-  6: '@max-[15rem]:hidden',
-  7: '@max-[17.5rem]:hidden',
-};
-
-function Arrow() {
-  return (
-    <svg viewBox="0 0 6 10" className={cn(middle, 'left-0 h-2.5 w-1.5 fill-chart-series')}>
-      <path d="M6 0 0 5l6 5z" />
-    </svg>
-  );
-}
-
 const legendKey: Record<LegendMark, { label: string; mark: ReactNode; width?: string }> = {
-  score: { label: 'Point score', mark: <span className={cn(dot, solidDot, 'left-1/2')} /> },
-  preliminary: { label: 'Preliminary', mark: <span className={cn(dot, hollowDot, 'left-1/2')} /> },
-  cut: { label: 'Score below the axis', mark: <Arrow /> },
-  anchor: {
-    label: 'Anchor',
-    mark: <span className={cn('absolute inset-0', anchorRule)} />,
-    width: 'w-px',
-  },
+  score: { label: 'Point score', mark: <ScoreDot preliminary={false} left="50%" /> },
+  preliminary: { label: 'Preliminary', mark: <ScoreDot preliminary left="50%" /> },
+  cut: { label: 'Score below the axis', mark: <CutArrow /> },
+  anchor: { label: 'Anchor', mark: <AnchorRule left="0" />, width: 'w-px' },
 };
 
 export function drawnMarks(
@@ -94,11 +65,7 @@ export function drawnMarks(
   domain: [number, number],
   anchorScore?: number,
 ): LegendMark[] {
-  return legendMarks(
-    rows,
-    domain,
-    anchorScore !== undefined && domain[0] <= anchorScore && anchorScore <= domain[1],
-  );
+  return legendMarks(rows, domain, anchorScore !== undefined && onAxis(domain, anchorScore));
 }
 
 export function ForestLegend({
@@ -137,11 +104,6 @@ export function ForestLegend({
 }
 
 export function Forest({ rows, domain, caption, anchorScore, large = false }: ForestProps) {
-  const ticks = forestTicks(domain);
-  const sparse = new Set(sparseTicks(domain, anchorScore));
-  const position = (value: number) =>
-    `${(((value - domain[0]) / (domain[1] - domain[0])) * 100).toFixed(2)}%`;
-
   return (
     <Table className="table-fixed">
       <caption className="sr-only">{caption}</caption>
@@ -155,75 +117,40 @@ export function Forest({ rows, domain, caption, anchorScore, large = false }: Fo
           <TableHead className="sr-only">System</TableHead>
           <TableHead className="h-6 p-0 font-normal">
             <span className="sr-only">Point score axis</span>
-            <div aria-hidden="true" className="@container relative h-6">
-              {ticks.map((tick) => (
-                <span
-                  key={tick}
-                  className={cn(
-                    'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
-                    !sparse.has(tick) && axisFits[ticks.length - 1],
-                  )}
-                  style={{ left: position(tick) }}
-                >
-                  {formatScore(tick)}
-                </span>
-              ))}
-            </div>
+            <TrackAxis domain={domain} anchorScore={anchorScore} />
           </TableHead>
           <TableHead className="sr-only">Score</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row) => {
-          const clipped = 'estimate' in row ? clip(row.estimate, domain) : undefined;
-          const preliminary = 'estimate' in row && row.preliminary;
-
-          return (
-            <TableRow key={row.system}>
-              <TableHead scope="row" className="h-auto font-normal text-balance whitespace-normal">
-                {row.href ? <a href={row.href}>{row.name}</a> : row.name}
-              </TableHead>
-              <TableCell className={cn('relative p-0', large ? 'h-11' : 'h-9')}>
-                <span className="sr-only">{scoreText(row)}</span>
-                <span aria-hidden="true">
-                  {ticks.map((tick) => (
-                    <span
-                      key={tick}
-                      className={cn('absolute inset-y-0 w-px', 'bg-chart-grid')}
-                      style={{ left: position(tick) }}
-                    />
-                  ))}
-                  {anchorScore !== undefined &&
-                    domain[0] <= anchorScore &&
-                    anchorScore <= domain[1] && (
-                      <span
-                        className={cn('absolute inset-y-0 w-px', anchorRule)}
-                        style={{ left: position(anchorScore) }}
-                      />
-                    )}
-                  {clipped &&
-                    (clipped.offScale ? (
-                      <Arrow />
-                    ) : (
-                      <span
-                        className={cn(dot, preliminary ? hollowDot : solidDot)}
-                        style={{ left: position(clipped.score) }}
-                      />
-                    ))}
-                </span>
-              </TableCell>
-              <TableCell numeric>
-                <Hint term={details(row)}>
-                  {'estimate' in row ? (
-                    formatScore(row.estimate.score)
-                  ) : (
-                    <span className="text-xs text-faint">{unplacedText[row.unplaced]}</span>
-                  )}
-                </Hint>
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {rows.map((row) => (
+          <TableRow key={row.system}>
+            <TableHead scope="row" className="h-auto font-normal text-balance whitespace-normal">
+              {row.href ? <a href={row.href}>{row.name}</a> : row.name}
+            </TableHead>
+            <TableCell className={cn('relative p-0', large ? 'h-11' : 'h-9')}>
+              <span className="sr-only">{scoreText(row)}</span>
+              <ScoreTrack
+                domain={domain}
+                anchorScore={anchorScore}
+                estimate={
+                  'estimate' in row
+                    ? { score: row.estimate.score, preliminary: row.preliminary }
+                    : undefined
+                }
+              />
+            </TableCell>
+            <TableCell numeric>
+              <Hint term={details(row)}>
+                {'estimate' in row ? (
+                  formatScore(row.estimate.score)
+                ) : (
+                  <span className="text-xs text-faint">{unplacedText[row.unplaced]}</span>
+                )}
+              </Hint>
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );

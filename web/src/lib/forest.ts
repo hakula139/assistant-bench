@@ -88,7 +88,7 @@ export function sparseTicks(domain: [number, number], anchorScore?: number): num
 
 /**
  * The axis width each interval between ticks needs, in CSS pixels, for every tick to keep its label
- * apart from its neighbors'. The static forest's `axisFits` variants in `Forest.tsx` match it.
+ * apart from its neighbors'. The `axisFits` variants in `ScoreTrack.tsx` match it.
  */
 const INTERVAL_WIDTH = 40;
 
@@ -109,6 +109,10 @@ export interface Clipped {
   /** Whether the score itself lies below the axis start. */
   offScale: boolean;
 }
+
+/** Whether `value` falls on the axis, as a reference rule must to be drawn. */
+export const onAxis = ([start, stop]: [number, number], value: number) =>
+  start <= value && value <= stop;
 
 /** Clips an estimate to an axis from `forestDomain`, which never cuts the top end. */
 export function clip({ score }: Estimate, [start]: [number, number]): Clipped {

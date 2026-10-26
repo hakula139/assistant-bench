@@ -5,11 +5,15 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { VotesBoard } from '@/components/boards/VotesBoard';
+import { Forest } from '@/components/site/Forest';
+import { forestDomain, roundRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
 import { reportSchema } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
+import { reportNames } from '@/lib/systems';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
+import { trackDrawing, type TrackDrawing } from '@/test/track';
 
 const search = vi.hoisted(() => new URLSearchParams());
 vi.mock('@/lib/use-search-param', () => ({
@@ -63,13 +67,15 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
 
 const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
 
-function verticalRules(row: Element): number[] {
-  return [...row.querySelectorAll('g[aria-label="rule"] line')]
-    .filter((line) => line.getAttribute('y1') !== line.getAttribute('y2'))
-    .map((line) => Number(line.getAttribute('x1')));
-}
-
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
+
+/** Each drawn row's score track, keyed by the system name it links. */
+const tracks = (html: string): Record<string, TrackDrawing> =>
+  Object.fromEntries(
+    [...parse(html).querySelectorAll('tbody tr')]
+      .filter((row) => row.querySelector('[data-slot="score-track"]'))
+      .map((row) => [row.querySelector('a')?.textContent ?? '', trackDrawing(row)]),
+  );
 
 /** The round summary's figures as `[label, value]`, read as the page shows them. */
 const stats = (html: string) =>
@@ -340,10 +346,12 @@ describe('VotesBoard', () => {
     );
   });
 
-  test("labels each system's point with its display name and score", async () => {
+  test("labels and titles each system's point with its display name and score", async () => {
     const html = render(await load());
 
-    expect(html).toContain('aria-label="Acme Pro: 1,004"');
+    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,004"]');
+    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,004');
+    expect(point?.querySelector('[data-slot="score-track"]')).not.toBeNull();
   });
 
   test.each(['all', 'message'])(
@@ -394,9 +402,12 @@ describe('VotesBoard', () => {
   test('drops the rank column in a category and marks the columns that stay family-wide', async () => {
     search.set('category', 'message');
 
-    const html = render(await load());
+    const header = parse(render(await load())).querySelector('thead');
+    for (const axis of header?.querySelectorAll('[aria-hidden="true"]') ?? []) {
+      axis.remove();
+    }
 
-    expect(text(head(html))).toBe(
+    expect(text(header?.innerHTML ?? '')).toBe(
       ' System Point score Score Votes What Votes means Both bad all categories What Both bad means Gate failures all categories What Gate failures means ',
     );
   });
@@ -507,58 +518,70 @@ describe('VotesBoard', () => {
     },
   );
 
-  test("draws the anchor's score as one rule through every row", async () => {
-    const { round, results, systems, closed_at } = await load();
-    results.reference = 'acme-new';
-    systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
-    stubPlotFrame();
+  test("draws each system's score, coverage, and cut before hydration, with the anchor's rule through every row", async () => {
+    const round = await load();
+    round.results.reference = 'acme-new';
+    round.systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
 
-    const { container } = renderInDom(
-      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
+    const drawn = tracks(render(round));
+
+    const anchor = drawn['Acme Large'].dotAt;
+    expect(anchor).not.toBeNull();
+    expect(Object.values(drawn).map(({ ruleAt }) => ruleAt)).toEqual(
+      Object.values(drawn).map(() => anchor),
     );
-    const rows = await vi.waitFor(() => {
-      const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
-        row.querySelector('svg'),
-      );
-      expect(drawn).toHaveLength(results.standings.length);
-      return drawn;
-    });
-
-    const anchorRow = rows.find((row) => row.querySelector(`a[href="${BOARD}${results.anchor}/"]`));
-    const anchorScore = Number(
-      anchorRow?.querySelector('g[aria-label="dot"] circle')?.getAttribute('cx'),
-    );
-
-    expect(rows.map(verticalRules)).toEqual(rows.map(() => [anchorScore]));
-    expect(rows.map((row) => row.querySelector('svg.bench-plot')?.getAttribute('height'))).toEqual(
-      rows.map((row) =>
-        row.querySelector('svg.bench-plot')?.parentElement?.style.minHeight.replace('px', ''),
+    expect(
+      Object.fromEntries(
+        Object.entries(drawn).map(([name, { dot, arrows }]) => [name, { dot, arrows }]),
       ),
-    );
+    ).toEqual({
+      'Acme Pro': { dot: 'filled', arrows: [] },
+      'Acme Large': { dot: 'filled', arrows: [] },
+      'Acme Small': { dot: 'filled', arrows: [] },
+      'Acme Flash': { dot: 'filled', arrows: [] },
+      'Acme Mini': { dot: 'filled', arrows: [] },
+      'Acme Tiny': { dot: 'none', arrows: ['start'] },
+    });
   });
 
+  test.each(['report', 'report-early'] as const)(
+    'draws each system of the %s fixture as the static forest draws it',
+    async (fixture) => {
+      const round = await load(fixture);
+      const { results } = round;
+      const forest = renderToString(
+        <Forest
+          caption="Example"
+          domain={forestDomain(results.standings)}
+          anchorScore={results.method.anchor_score}
+          rows={roundRows(() => '/', results, reportNames(round.systems), results.rules)}
+        />,
+      );
+
+      const board = tracks(render(round));
+
+      expect(Object.keys(board)).not.toEqual([]);
+      expect(board).toEqual(
+        Object.fromEntries(
+          Object.entries(tracks(forest)).filter(([name]) => Object.hasOwn(board, name)),
+        ),
+      );
+    },
+  );
+
   test('draws no anchor rule in a category that leaves the anchor out', async () => {
-    const { round, results, systems, closed_at } = await load();
-    const message = results.categories.find((board) => board.category === 'message');
+    const round = await load();
+    const message = round.results.categories.find((board) => board.category === 'message');
     if (!message) {
       throw new Error('the fixture has a message category');
     }
-    message.standings = message.standings.filter((refit) => refit.system !== results.anchor);
+    message.standings = message.standings.filter((refit) => refit.system !== round.results.anchor);
     search.set('category', 'message');
-    stubPlotFrame();
 
-    const { container } = renderInDom(
-      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
-    );
-    const rows = await vi.waitFor(() => {
-      const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
-        row.querySelector('svg'),
-      );
-      expect(drawn).toHaveLength(message.standings.length);
-      return drawn;
-    });
+    const drawn = Object.values(tracks(render(round)));
 
-    expect(rows.map(verticalRules)).toEqual(rows.map(() => []));
+    expect(drawn).toHaveLength(message.standings.length);
+    expect(drawn.map(({ ruleAt }) => ruleAt)).toEqual(drawn.map(() => null));
   });
 
   test('keeps every category row and the systems only the category ranks', async () => {

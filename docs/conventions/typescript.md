@@ -19,7 +19,7 @@ web/src/
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture, JSON Schema, and chart stub helpers, and the page and built-site tests
+├── test/                                   # The fixture, JSON Schema, chart stub, and score track helpers, and the page and built-site tests
 └── vote/vote.astro                         # The vote page, routed by the integration
 ```
 
@@ -58,7 +58,7 @@ web/src/
 - Pick log-axis ticks with `logTicks` and label them through the axis mark's `text` option, because Plot's log tick format blanks labels on spans under a decade.
 - Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series and emphasis hues were checked as a pair for lightness, chroma, color-vision separation, and contrast against the surface in both themes, so recheck both before changing either.
 - Give every Plot chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows. The static `Forest` is its own table twin.
-- Draw score points through `forestMarks` on a domain from `forestDomain`, or from `sharedDomain` for several boards on one axis, so every point plot cuts and marks outliers by the same rule. Use each report's frozen method, rules and public identity map for closed rounds.
+- Draw one score per table row, as the static `Forest` and the leaderboard do, with `ScoreTrack` under a `TrackAxis`, which render without JavaScript. Draw score points in Plot charts through `forestMarks`. Put both on a domain from `forestDomain`, or from `sharedDomain` for several boards on one axis, so every point plot cuts and marks outliers by the same rule. Use each report's frozen method, rules and public identity map for closed rounds.
 
 ## The Vote Page
 
