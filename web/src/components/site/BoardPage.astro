@@ -50,7 +50,10 @@ const round = named ?? newest;
     </div>
     {newest && round !== newest && (
       <p class={note}>
-        This is an earlier round. The latest is <a href={boardPath(family)}>{newest.round}</a>.
+        This is an earlier round.{' '}
+        <span class="text-nowrap">
+          The latest is <a href={boardPath(family)}>{newest.round}</a>.
+        </span>
       </p>
     )}
   </PageHeader>

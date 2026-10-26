@@ -1027,20 +1027,23 @@ describe('round pages', () => {
         path,
         document.title,
         note?.textContent ?? null,
+        note?.querySelector('.text-nowrap')?.textContent ?? null,
         note?.querySelector('a')?.getAttribute('href') ?? null,
       ];
     });
     expect(notes).toEqual([
-      ['/writing/arena/', 'Writing · Arena Writing | HAKULA†BENCH', null, null],
+      ['/writing/arena/', 'Writing · Arena Writing | HAKULA†BENCH', null, null, null],
       [
         '/writing/arena/rounds/2026-10-07/',
         'Writing · Arena Writing, round 2026-10-07 | HAKULA†BENCH',
         'This is an earlier round. The latest is 2026-10-21.',
+        'The latest is 2026-10-21.',
         '/writing/arena/',
       ],
       [
         '/writing/arena/rounds/2026-10-21/',
         'Writing · Arena Writing, round 2026-10-21 | HAKULA†BENCH',
+        null,
         null,
         null,
       ],
