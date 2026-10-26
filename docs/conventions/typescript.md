@@ -42,7 +42,7 @@ web/src/
 
 - Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy and adjust it in place. Preserve keyboard behavior, available-space limits, and control contrast when changing a component.
 - Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component like `Section`, or a shared class constant like `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
-- Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every page's top level. Space stacked blocks with flex `gap` and no margins on the blocks, as `stack`, `PageHeader`, `Section`, and `Part` do, since Astro wraps each hydrated island in a `display: contents` element that `space-y` margins skip.
+- Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every results page's top level. Space stacked blocks with flex `gap` and no margins on the blocks, as `stack`, `PageHeader`, `Section`, and `Part` do, since Astro wraps each hydrated island in a `display: contents` element that `space-y` margins skip.
 - Hydrate a component only where the page is interactive. Tables render as static React components unless a cell opens a hint, and island props stay serializable, which is why `DotRangePlot` takes a named format.
 - Pass filter state through `useSearchParam` so each filter lands in the URL. When each value of a choice would add its own data to the page, as a family's rounds do, give each value a static route and link the routes, so island props hold only what the page shows.
 
@@ -57,6 +57,7 @@ web/src/
 ## The Vote Page
 
 - The integration routes `/vote/` in every build. Its island fetches personalized data only at runtime.
+- The vote client validates with `zod/mini` and imports no module that loads classic Zod, such as `lib/report.ts`, so the vote page's bundle carries only the mini build.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
 - The voting runtime applies the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so output text cannot load a remote image.
 - HTML outputs load by URL in `<iframe sandbox="allow-scripts" referrerPolicy="no-referrer">` from the configured separate render origin. Never use `srcdoc`, which inherits the vote page's policy.

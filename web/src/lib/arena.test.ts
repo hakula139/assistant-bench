@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { z } from 'astro/zod';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { z } from 'zod/mini';
 
 import * as arena from '@/lib/arena';
 import { COMMAND_ID, makeSession, VOTE_FAMILY } from '@/test/arena';
@@ -43,6 +43,10 @@ const contracts = [
 ] as const;
 
 describe('arena contracts', () => {
+  test("parses without the eval probe the vote page's policy reports", () => {
+    expect(z.config().jitless).toBe(true);
+  });
+
   test.each([
     ['a', true],
     ['family-1', true],

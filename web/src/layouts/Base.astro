@@ -1,6 +1,4 @@
 ---
-import { cn } from 'cn';
-
 import Head from '@/components/site/Head.astro';
 import Header from '@/components/site/Header.astro';
 import { container, stack } from '@/components/site/PageParts';
@@ -12,9 +10,14 @@ interface Props {
   description?: string;
   /** The header link the page sits under. */
   section?: HeaderSection;
+  /**
+   * The vote page's layout: the wide header over a footerless `main` that fills the screen from
+   * `md`, where the content sets its own column and scrolling.
+   */
+  wide?: boolean;
 }
 
-const { title, section, description = SITE_DESCRIPTION } = Astro.props;
+const { title, section, description = SITE_DESCRIPTION, wide = false } = Astro.props;
 ---
 
 <!doctype html>
@@ -24,23 +27,33 @@ const { title, section, description = SITE_DESCRIPTION } = Astro.props;
       title={title === undefined ? SITE_NAME : `${title} | ${SITE_NAME}`}
       description={description}
     />
+    <slot name="head" />
   </head>
-  <body class="flex min-h-dvh flex-col">
+  <body class:list={['flex min-h-dvh flex-col', wide && 'md:h-dvh']}>
     <a
       href="#main"
       class="sr-only rounded-md bg-background px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
     >
       Skip to content
     </a>
-    <Header section={section} />
-    <main id="main" tabindex="-1" class={cn(container, 'flex-1 pt-8 pb-16 outline-none', stack)}>
+    <Header section={section} wide={wide} />
+    <main
+      id="main"
+      tabindex="-1"
+      class:list={[
+        'flex-1 outline-none',
+        wide ? 'flex flex-col md:min-h-0' : [container, 'pt-8 pb-16', stack],
+      ]}
+    >
       <slot />
     </main>
-    <footer class="border-t">
-      <p class={cn(container, 'py-6 text-sm text-muted-foreground')}>
-        {SITE_NAME} is a <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code, cases,
-        and reports on <a href={REPOSITORY}>GitHub</a>.
-      </p>
-    </footer>
+    {!wide && (
+      <footer class="border-t">
+        <p class:list={[container, 'py-6 text-sm text-muted-foreground']}>
+          {SITE_NAME} is a <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code,
+          cases, and reports on <a href={REPOSITORY}>GitHub</a>.
+        </p>
+      </footer>
+    )}
   </body>
 </html>

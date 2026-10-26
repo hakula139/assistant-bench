@@ -1,8 +1,6 @@
 ---
-import Head from '@/components/site/Head.astro';
-import Header from '@/components/site/Header.astro';
 import { VoteApp } from '@/components/vote/VoteApp';
-import { SITE_NAME } from '@/lib/site';
+import Base from '@/layouts/Base.astro';
 
 const csp = Astro.csp;
 if (csp === undefined) {
@@ -13,16 +11,7 @@ csp.insertScriptResource("'self'");
 csp.insertScriptResource('https://challenges.cloudflare.com');
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <Head title={`Vote | ${SITE_NAME}`} description="Blind pairwise voting on assistant outputs." />
-    <meta name="robots" content="noindex" />
-  </head>
-  <body class="flex min-h-dvh flex-col md:h-dvh">
-    <Header section="vote" wide />
-    <main class="flex flex-1 flex-col md:min-h-0">
-      <VoteApp client:only="react" />
-    </main>
-  </body>
-</html>
+<Base title="Vote" description="Blind pairwise voting on assistant outputs." section="vote" wide>
+  <meta slot="head" name="robots" content="noindex" />
+  <VoteApp client:only="react" />
+</Base>

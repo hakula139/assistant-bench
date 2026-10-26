@@ -1,23 +1,22 @@
-import { z } from 'astro/zod';
+import { z } from 'zod/mini';
 
 import { defects } from '@/lib/defects';
 
 // The vote document's policy forbids Zod's eval-based parser optimization.
 z.config({ jitless: true });
 
-export const identifier = z.string().min(1).max(256);
+export const identifier = z.string().check(z.minLength(1), z.maxLength(256));
 /** Mirrors the shared JSON Schema's true-end constraint across validators. */
 export const familyName = z
   .string()
-  .max(256)
-  .regex(/^[a-z0-9][a-z0-9-]*(?![\s\S])/);
+  .check(z.maxLength(256), z.regex(/^[a-z0-9][a-z0-9-]*(?![\s\S])/));
 
 const command = { command_id: z.uuid() };
-const capability = z.string().min(1).max(2048);
+const capability = z.string().check(z.minLength(1), z.maxLength(2048));
 export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
 export const taggedDefects = z.strictObject({
-  a: z.array(z.enum(defects)).default([]),
-  b: z.array(z.enum(defects)).default([]),
+  a: z._default(z.array(z.enum(defects)), []),
+  b: z._default(z.array(z.enum(defects)), []),
 });
 export const pane = z.discriminatedUnion('render', [
   z.strictObject({ render: z.literal('text'), text: z.string() }),
@@ -34,17 +33,17 @@ export const pairView = z.strictObject({
 });
 export const familyView = z.strictObject({
   name: familyName,
-  aspect: z.string().nullable(),
+  aspect: z.nullable(z.string()),
   display_name: z.string(),
   defects: z.array(z.enum(defects)),
 });
 export const sessionView = z.strictObject({
   id: identifier,
   family: familyView,
-  votes: z.int().nonnegative(),
-  remaining: z.int().nonnegative(),
-  undo_acknowledgment: identifier.nullable(),
-  pair: pairView.nullable(),
+  votes: z.int().check(z.nonnegative()),
+  remaining: z.int().check(z.nonnegative()),
+  undo_acknowledgment: z.nullable(identifier),
+  pair: z.nullable(pairView),
 });
 export const statusView = z.strictObject({
   status: z.enum(['admission_required', 'renewal_required', 'ready']),
@@ -57,7 +56,7 @@ export const admissionView = z.strictObject({
 export const admissionRequest = z.strictObject({ ...command, proof: capability });
 export const admissionReplay = z.strictObject({
   ...command,
-  proof: capability.nullable().optional(),
+  proof: z.optional(z.nullable(capability)),
 });
 export const startSessionRequest = z.strictObject({ ...command, family: familyName });
 export const resumeSessionRequest = z.strictObject({ ...command, session_id: identifier });
@@ -65,9 +64,9 @@ export const receiptQuery = z.strictObject({
   ...command,
   lease_id: identifier,
   choice: choiceSchema,
-  defects: taggedDefects.default({ a: [], b: [] }),
+  defects: z._default(taggedDefects, { a: [], b: [] }),
 });
-export const voteRequest = receiptQuery.extend({ capability });
+export const voteRequest = z.extend(receiptQuery, { capability });
 export const voteAcknowledgment = z.strictObject({
   acknowledgment: identifier,
   session_id: identifier,
@@ -133,7 +132,7 @@ export class NetworkError extends Error {
 }
 
 export async function request<T>(
-  schema: z.ZodType<T>,
+  schema: z.ZodMiniType<T>,
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,

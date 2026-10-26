@@ -100,7 +100,13 @@ describe('built vote document', () => {
       await readFile(fileURLToPath(new URL('../../public/arena-families.json', import.meta.url))),
     );
     expect(document.title).toContain('Vote');
+    expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe(
+      'noindex',
+    );
     expect(document.querySelector('header nav')).not.toBeNull();
+    expect(document.querySelector('a[href="#main"]')?.textContent.trim()).toBe('Skip to content');
+    const island = document.querySelector('main#main astro-island[component-export="VoteApp"]');
+    expect(island).not.toBeNull();
     const styles = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')];
     expect(styles.length).toBeGreaterThan(0);
     for (const style of styles) {
