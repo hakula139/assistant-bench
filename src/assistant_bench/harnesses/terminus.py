@@ -338,6 +338,10 @@ class Terminus(Terminus2):
                     context.metadata['cache_write_tokens'] = sum(
                         result['cache_write_tokens'] for result in results
                     )
+                    reasoning = [result['reasoning_tokens'] for result in results]
+                    context.metadata['reasoning_tokens'] = (
+                        None if None in reasoning else sum(reasoning)
+                    )
                 else:
                     context.n_input_tokens = None
                     context.n_cache_tokens = None

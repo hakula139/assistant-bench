@@ -30,7 +30,7 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from assistant_bench import jobs
-from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
+from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import load_family
 from assistant_bench.generation import generation_version
 from assistant_bench.harnesses import options
@@ -44,6 +44,7 @@ from assistant_bench.harnesses.messages import (
 )
 from assistant_bench.harnesses.responses import ResponsesChat, ResponsesLLM
 from assistant_bench.harnesses.terminus import Terminus
+from assistant_bench.outputs import Output
 from support import (
     StubEndpoint,
     completion,
@@ -205,6 +206,42 @@ def messages_agent(
     )
     yield agent
     asyncio.run(agent.close())
+
+
+def run_and_collect(
+    system: System,
+    endpoint: StubEndpoint,
+    terminal_session: TmuxSession,
+    tmp_path: Path,
+    families_dir: Path,
+    data_dir: Path,
+) -> tuple[AgentContext, Output]:
+    """Run Terminus on a one-task family, then record and collect its trial."""
+    write_task_family(families_dir, 'echo', systems=(system.name,))
+    family = load_family('f')
+    config = jobs.job(family, [system], [])
+    agent = NativeProbe(
+        logs_dir=tmp_path,
+        model_name=f'openai/{system.route}',
+        extra_env=endpoint.env,
+        **options.terminus(system),
+    )
+    context = AgentContext()
+
+    asyncio.run(agent.execute(terminal_session, context))
+    write_trial(
+        data_dir / 'jobs' / family.name / 'job-1',
+        'echo__1',
+        config.agents[0],
+        task=f'{family.name}/echo',
+        version='1.0.0',
+        instruction=None,
+        context=context,
+        environment=config.environment,
+        verifier_disabled=config.verifier.disable,
+    )
+    (collected,) = jobs.collect(family, {system.name: system})
+    return context, collected
 
 
 class TestTerminus:
@@ -518,30 +555,10 @@ class TestTerminus:
                 context_window=131072,
                 price=Price(input=2.0, output=10.0, cache_read=0.2),
             )
-            write_task_family(families_dir, 'echo', systems=(system.name,))
-            family = load_family('f')
-            config = jobs.job(family, [system], [])
-            agent = NativeProbe(
-                logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
-                extra_env=endpoint.env,
-                **options.terminus(system),
-            )
-            context = AgentContext()
 
-            asyncio.run(agent.execute(terminal_session, context))
-            write_trial(
-                data_dir / 'jobs' / family.name / 'job-1',
-                'echo__1',
-                config.agents[0],
-                task=f'{family.name}/echo',
-                version='1.0.0',
-                instruction=None,
-                context=context,
-                environment=config.environment,
-                verifier_disabled=config.verifier.disable,
+            context, collected = run_and_collect(
+                system, endpoint, terminal_session, tmp_path, families_dir, data_dir
             )
-            (collected,) = jobs.collect(family, {system.name: system})
 
             assert (
                 collected.input_tokens,
@@ -555,6 +572,43 @@ class TestTerminus:
                 result['cache_write_tokens'] for result in context.metadata['responses']
             ] == [10, 10]
             assert len(endpoint.requests) == 2
+
+        @pytest.mark.parametrize(
+            ('reported', 'total'),
+            [((25, 30), 55), ((0, 0), 0), ((25, None), None), ((None, 30), None)],
+            ids=['reported', 'zero', 'missing-last', 'missing-first'],
+        )
+        def test_sums_reasoning_tokens_only_when_every_response_reports_them(
+            self,
+            endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            families_dir: Path,
+            data_dir: Path,
+            reported: tuple[int | None, ...],
+            total: int | None,
+        ) -> None:
+            payloads: list[dict[str, Any]] = []
+            for count in reported:
+                payload = terminus_completion()
+                details = payload['usage']['completion_tokens_details']
+                if count is None:
+                    del details['reasoning_tokens']
+                else:
+                    details['reasoning_tokens'] = count
+                payloads.append(payload)
+            endpoint.responses = payloads
+            system = make_system(
+                harness='terminus-2', max_output_tokens=32768, context_window=131072
+            )
+
+            _, collected = run_and_collect(
+                system, endpoint, terminal_session, tmp_path, families_dir, data_dir
+            )
+
+            assert len(endpoint.requests) == 2
+            assert collected.output_tokens == 80
+            assert collected.reasoning_tokens == total
 
         def test_failed_native_attempts_keep_their_artifacts_when_the_caller_retries(
             self,
