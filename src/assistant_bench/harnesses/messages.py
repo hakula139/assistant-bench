@@ -3,6 +3,7 @@
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from importlib import metadata
 from pathlib import Path
 from typing import Any, cast, override
@@ -78,7 +79,7 @@ class MessageResult:
             else []
         )
 
-    @property
+    @cached_property
     def details(self) -> dict[str, Any]:
         message = self.message
         stop = message.stop_reason if message else None

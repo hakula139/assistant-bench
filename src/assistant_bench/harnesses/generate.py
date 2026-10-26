@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from assistant_bench.catalog import load_export
-from assistant_bench.generation import generation_version
+from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
@@ -46,7 +46,7 @@ class Generate(BaseAgent):
     @override
     def version(self) -> str:
         assert isinstance(self.options, GenerateOptions)
-        return generation_version('generate', self.options.api)
+        return load_generation().version('generate', self.options.api)
 
     @classmethod
     @override

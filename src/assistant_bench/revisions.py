@@ -13,11 +13,23 @@ from assistant_bench.catalog import (
     parse_system_configs,
     resolve_identity,
 )
-from assistant_bench.families import family_names, load_family
+from assistant_bench.families import Family, family_names, load_family
 from assistant_bench.generation import parse_generation
 from assistant_bench.jobs import family_systems
 from assistant_bench.messages import code
 from assistant_bench.paths import REPO_ROOT
+
+
+def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
+    """Return the systems a family lists, refusing a name `systems.toml` lacks."""
+    unknown = [name for name in family.settings.systems if name not in systems]
+    if unknown:
+        raise ValueError(
+            f'Family `{family.name}` lists {code(unknown)}, which '
+            f'`{SYSTEMS_FILE}` does not define. Fix '
+            f'`families/{family.name}/family.toml` or add the system table.'
+        )
+    return [systems[name] for name in family.settings.systems]
 
 
 def current_systems(systems: dict[str, System]) -> dict[str, System]:
@@ -25,14 +37,7 @@ def current_systems(systems: dict[str, System]) -> dict[str, System]:
     resolved: dict[str, System] = {}
     for name in family_names():
         family = load_family(name)
-        unknown = [name for name in family.settings.systems if name not in systems]
-        if unknown:
-            raise ValueError(
-                f'Family `{family.name}` lists {code(unknown)}, which '
-                f'`{SYSTEMS_FILE}` does not define. Fix '
-                f'`families/{family.name}/family.toml` or add the system table.'
-            )
-        listed = [systems[name] for name in family.settings.systems]
+        listed = listed_systems(family, systems)
         for system in family_systems(family, listed):
             resolved[f'{name}/{system.name}'] = system
     return resolved
@@ -98,8 +103,8 @@ def systems_at(revision: str, selected: set[str]) -> dict[str, SystemIdentity]:
         )
     return {
         f'{family}/{name}': resolve_identity(
-            name, configs[name], export, generation
-        ).model_copy(update={'harness': harness})
+            name, configs[name], export, generation, harness
+        )
         for family, (harness, names) in selections.items()
         for name in names
     }

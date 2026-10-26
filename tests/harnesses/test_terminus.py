@@ -32,7 +32,7 @@ from openai.types.responses import Response
 from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import load_family
-from assistant_bench.generation import generation_version
+from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.host import HostEnvironment
@@ -326,7 +326,7 @@ class TestTerminus:
         assert agent.client.get_model_context_limit() == 98304
         assert agent.client.get_model_output_limit() == 32768
         assert agent.options.max_turns is None
-        assert agent.version() == generation_version('terminus-2')
+        assert agent.version() == load_generation().version('terminus-2')
         assert endpoint.requests == []
 
     class TestPreflight:

@@ -393,16 +393,10 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
 def _family_systems(family: Family) -> list[System]:
     listed: list[System] = []
     if family.settings.systems:
-        known = _load_systems()
-        unknown = [name for name in family.settings.systems if name not in known]
-        if unknown:
-            _fail(
-                f'Family `{family.name}` lists {code(unknown)}, which '
-                f'`{SYSTEMS_FILE}` does not define. Add a table to '
-                f'`{SYSTEMS_FILE}` or fix the name in '
-                f'`families/{family.name}/family.toml`.'
-            )
-        listed = [known[name] for name in family.settings.systems]
+        try:
+            listed = revisions.listed_systems(family, _load_systems())
+        except ValueError as error:
+            _fail(str(error))
 
     try:
         jobs.check_systems(family, listed)
@@ -484,16 +478,10 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         for name, recorded, current in drifted
     )
     _fail(
-        dedent(
-            """
-            Family `{family}` has systems that changed their fingerprints:
-            {detail}
-            Give a changed system a new name, or keep its old resolution on a `route`
-            table, as `{systems_doc}` describes.
-            """
-        )
-        .strip()
-        .format(family=family.name, detail=detail, systems_doc=SYSTEMS_DOC)
+        f'Family `{family.name}` has systems that changed their fingerprints:\n'
+        f'{detail}\n'
+        'Give a changed system a new name and keep the old name only in closed '
+        f'reports, as `{SYSTEMS_DOC}` describes.'
     )
 
 
