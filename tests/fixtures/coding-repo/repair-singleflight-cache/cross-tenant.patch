@@ -1,0 +1,19 @@
+--- a/tenantcache/cache.py
++++ b/tenantcache/cache.py
+@@ -42,7 +42,7 @@
+                 self._loads.pop(identity)
+
+     async def get(self, tenant: str, key: str, loader: Callable[[], Awaitable[T]]) -> T:
+-        identity = (tenant, key)
++        identity = ('', key)
+         cached = self._values.get(identity)
+         if cached is not None and self.clock() < cached[0]:
+             return cached[1]
+@@ -59,6 +59,6 @@
+         return await asyncio.shield(future)
+
+     def invalidate(self, tenant: str, key: str) -> None:
+-        identity = (tenant, key)
++        identity = ('', key)
+         self._values.pop(identity, None)
+         self._loads.pop(identity, None)

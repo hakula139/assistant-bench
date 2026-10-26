@@ -1,0 +1,12 @@
+--- a/ledgerload/importer.py
++++ b/ledgerload/importer.py
+@@ -67,7 +67,8 @@
+                     checkpoint = index
+                     batch_processed += 1
+
+-                if batch_processed:
++            if batch_processed:
++                with store.connection:
+                     store.connection.execute(
+                         'UPDATE sources SET checkpoint = ? WHERE source_id = ?',
+                         (checkpoint, source_id),

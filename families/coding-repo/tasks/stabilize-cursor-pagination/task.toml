@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/stabilize-cursor-pagination"
 description = "Provide snapshot-bound event pagination through repository and CLI"
-version = "1.0.0"
+version = "2.0.0"
 
 [metadata]
 category = "bug-fix"

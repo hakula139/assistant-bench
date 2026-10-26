@@ -1,11 +1,13 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
 import tomllib
 from pathlib import Path
+from shlex import quote
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -19,6 +21,9 @@ from assistant_bench.families import Case, case_task, load_cases, load_family
 from assistant_bench.paths import REPO_ROOT
 
 
+CODING = REPO_ROOT / 'families' / 'coding-repo'
+CODING_TASKS = sorted(path.parent for path in (CODING / 'tasks').glob('*/task.toml'))
+CODING_FIXTURES = REPO_ROOT / 'tests' / 'fixtures' / 'coding-repo'
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
@@ -101,20 +106,133 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
 
 @pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT))
 def test_coding_tasks_copy_their_shared_files(shared: Path) -> None:
-    family = REPO_ROOT / 'families' / 'coding-repo'
-    canonical = (family / 'shared' / shared).read_bytes()
-    tasks = sorted((family / 'tasks').glob('*/task.toml'))
+    canonical = (CODING / 'shared' / shared).read_bytes()
 
-    for metadata in tasks:
-        copy = metadata.parent / shared
+    for task in CODING_TASKS:
+        copy = task / shared
 
         assert copy.read_bytes() == canonical, f'`{copy}` needs regeneration'
 
 
 def test_coding_tasks_hold_no_symlinks() -> None:
-    tasks = REPO_ROOT / 'families' / 'coding-repo' / 'tasks'
+    assert [path for path in (CODING / 'tasks').rglob('*') if path.is_symlink()] == []
 
-    assert [path for path in tasks.rglob('*') if path.is_symlink()] == []
+
+@pytest.mark.parametrize('task', CODING_TASKS, ids=lambda task: task.name)
+def test_coding_references_ship_their_changes_and_the_packages_they_change(
+    task: Path,
+) -> None:
+    starter = task / 'environment' / 'app'
+    solution = task / 'solution' / 'app'
+    shipped = {
+        path.relative_to(solution) for path in solution.rglob('*') if path.is_file()
+    }
+
+    changed = {
+        path
+        for path in shipped
+        if not (starter / path).is_file()
+        or (starter / path).read_bytes() != (solution / path).read_bytes()
+    }
+    packages = {
+        path.parts[0]
+        for path in changed
+        if path.suffix == '.py' and len(path.parts) > 1 and path.parts[0] != 'tests'
+    }
+    typed = {
+        path.relative_to(starter)
+        for package in packages
+        for path in (starter / package).rglob('*.py')
+    }
+
+    assert shipped == changed | typed
+
+
+def test_coding_fixture_directories_match_tasks() -> None:
+    assert {path.name for path in CODING_FIXTURES.iterdir()} <= {
+        task.name for task in CODING_TASKS
+    }
+
+
+@pytest.mark.parametrize(
+    ('task', 'candidate'),
+    [
+        pytest.param(task, candidate, id=f'{task.name}-{candidate}')
+        for task in CODING_TASKS
+        for candidate in (
+            'starter',
+            'reference',
+            *(
+                path.stem
+                for path in sorted((CODING_FIXTURES / task.name).glob('*.patch'))
+            ),
+        )
+    ],
+)
+def test_coding_verifiers_reward_only_the_reference(
+    task: Path, candidate: str, tmp_path: Path
+) -> None:
+    workspace = tmp_path / 'app'
+    shutil.copytree(task / 'environment' / 'app', workspace)
+    if candidate != 'starter':
+        solve = (task / 'solution' / 'solve.sh').read_text()
+        solve = solve.replace(
+            '"${BASH_SOURCE[0]}"', quote(str(task / 'solution' / 'solve.sh'))
+        ).replace(' /app\n', f' {quote(str(workspace))}\n')
+        subprocess.run(
+            ['bash', '-s'],
+            input=solve,
+            cwd=workspace,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+    if candidate not in {'starter', 'reference'}:
+        patch = CODING_FIXTURES / task.name / f'{candidate}.patch'
+        subprocess.run(['git', 'init', '--quiet'], cwd=workspace, check=True)
+        subprocess.run(['git', 'apply', str(patch)], cwd=workspace, check=True)
+    verifier = tmp_path / 'tests'
+    shutil.copytree(task / 'tests', verifier)
+    verify = verifier / 'verify.py'
+    verify.write_text(
+        verify.read_text().replace(
+            "pathlib.Path('/app')", f'pathlib.Path({str(workspace)!r})'
+        )
+    )
+    logs = tmp_path / 'logs'
+    script = (
+        (verifier / 'test.sh')
+        .read_text()
+        .replace('/tests/verify.py', quote(str(verify)))
+        .replace('/logs/verifier', quote(str(logs)))
+    )
+
+    result = subprocess.run(
+        ['bash', '-s'],
+        input=script,
+        cwd=workspace,
+        env={
+            'PATH': os.pathsep.join(
+                [str(Path(sys.executable).parent), os.environ['PATH']]
+            ),
+            'TMPDIR': str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=180,
+    )
+
+    accepted = candidate == 'reference'
+    output = result.stdout + result.stderr
+    assert (logs / 'reward.txt').read_text() == f'{int(accepted)}\n', output
+    verdict = 'PASS' if accepted else 'FAIL'
+    assert f'{verdict} the hidden behavior tests pass' in output, output
+    if not accepted:
+        assert '\nFAIL: ' in output, output
+        assert not re.search(
+            r'\b(ImportError|ModuleNotFoundError|NameError|SyntaxError)\b', output
+        ), output
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:

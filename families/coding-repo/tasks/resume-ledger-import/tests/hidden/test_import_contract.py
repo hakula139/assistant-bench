@@ -10,9 +10,9 @@ from pathlib import Path
 
 from ledgerload import (
     ConflictError,
-    ImportError,
     ImportResult,
     LedgerRow,
+    SourceError,
     Store,
     import_file,
 )
@@ -143,7 +143,7 @@ class ImportFileTest(unittest.TestCase):
         self.write_rows([('a', '1.00', 'first'), ('b', 'invalid', '')])
         original_digest = hashlib.sha256(self.csv_path.read_bytes()).hexdigest()
 
-        with self.assertRaises(ImportError) as caught:
+        with self.assertRaises(SourceError) as caught:
             import_file(self.db, self.csv_path, source_id='bound', batch_size=2)
 
         self.assertEqual(caught.exception.record_index, 2)
@@ -154,7 +154,7 @@ class ImportFileTest(unittest.TestCase):
 
         self.write_rows([('a', '1.00', 'first'), ('b', '2.00', '')])
 
-        with self.assertRaises(ImportError) as changed:
+        with self.assertRaises(SourceError) as changed:
             import_file(self.db, self.csv_path, source_id='bound', batch_size=2)
 
         self.assertEqual(changed.exception.record_index, 0)
@@ -191,7 +191,7 @@ class ImportFileTest(unittest.TestCase):
                     [('first', '-92233720368547758.08', 'quoted\nrecord'), row]
                 )
 
-                with self.assertRaises(ImportError) as caught:
+                with self.assertRaises(SourceError) as caught:
                     import_file(db, self.csv_path, source_id='invalid', batch_size=2)
 
                 self.assertEqual(caught.exception.record_index, 2)
@@ -211,7 +211,7 @@ class ImportFileTest(unittest.TestCase):
                 db = self.root / f'file-{index}.db'
                 self.csv_path.write_bytes(content)
 
-                with self.assertRaises(ImportError) as caught:
+                with self.assertRaises(SourceError) as caught:
                     import_file(db, self.csv_path, source_id='invalid-file')
 
                 self.assertEqual(caught.exception.record_index, 0)

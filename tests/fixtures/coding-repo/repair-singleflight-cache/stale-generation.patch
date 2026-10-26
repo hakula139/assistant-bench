@@ -1,0 +1,12 @@
+--- a/tenantcache/cache.py
++++ b/tenantcache/cache.py
+@@ -33,8 +33,7 @@
+         except Exception as exc:
+             future.set_exception(exc)
+         else:
+-            if self._loads.get(identity) is future:
+-                self._values[identity] = (self.clock() + self.ttl, value)
++            self._values[identity] = (self.clock() + self.ttl, value)
+
+             future.set_result(value)
+         finally:

@@ -1,0 +1,15 @@
+--- a/eventfeed/service.py
++++ b/eventfeed/service.py
+@@ -20,10 +20,9 @@
+     with Store(db) as store:
+         snapshot = store.highwater() if previous is None else previous.snapshot
+         statement = (
+-            'SELECT id, occurred_at, tag FROM events '
+-            'WHERE seq <= ? AND (? IS NULL OR tag = ?)'
++            'SELECT id, occurred_at, tag FROM events WHERE (? IS NULL OR tag = ?)'
+         )
+-        parameters: tuple[object, ...] = (snapshot, tag, tag)
++        parameters: tuple[object, ...] = (tag, tag)
+         if previous is not None:
+             statement += (
+                 ' AND (occurred_at > ? OR (occurred_at = ? AND id COLLATE BINARY > ?))'

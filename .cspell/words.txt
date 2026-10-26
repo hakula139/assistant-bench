@@ -2,6 +2,7 @@ acompletion
 anyio
 asciinema
 asgi
+asyncio
 Atoi
 basedpyright
 BFGS

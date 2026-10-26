@@ -1,0 +1,10 @@
+--- a/dispatchbox/orders.py
++++ b/dispatchbox/orders.py
+@@ -33,6 +33,7 @@
+             store.connection.execute(
+                 'INSERT INTO orders VALUES (?, ?)', (order_id, amount_cents)
+             )
++            store.connection.commit()
+             store.connection.execute(
+                 'INSERT INTO outbox (order_id, idempotency_key, payload) '
+                 'VALUES (?, ?, ?)',
