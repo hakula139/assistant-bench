@@ -99,7 +99,7 @@ A local task is a directory under the data directory's `cases/<family>/`, which 
 
 ## Systems
 
-[`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key ends in the snapshot, as in `deepseek-v4.1-flash-1017`:
+[`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key includes the snapshot, as in `deepseek-v4.1-flash-1017-high`:
 
 ```toml
 ["opus-5.5-high"]
