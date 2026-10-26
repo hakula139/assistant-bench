@@ -59,6 +59,15 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeTarget:
     return runtime.load_target('production', manifest_path=manifest)
 
 
+class TestRouting:
+    def test_routes_only_the_vote_page_and_api_to_the_native_owner(self) -> None:
+        manifest = tomllib.loads(runtime.CONFIG.read_text())
+
+        for name in ('staging', 'production'):
+            assets = manifest['env'][name]['assets']
+            assert assets['run_worker_first'] == ['/api/*', '/vote', '/vote/']
+
+
 class TestDeploy:
     def test_checks_all_native_bundles_before_deploying_the_same_descriptors(
         self, target: RuntimeTarget, monkeypatch: pytest.MonkeyPatch

@@ -18,7 +18,7 @@ class FamilyState(Record):
     """Latest numerical-input revision, excluding point/presentation refreshes."""
 
     revision: NonNegativeInt
-    """Latest guarded control or evidence transition."""
+    """Latest guarded control transition. Ordinary votes do not change it."""
 
 
 class OwnedSession(Record):

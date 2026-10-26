@@ -1289,6 +1289,44 @@ class TestLedger:
 
             asyncio.run(scenario())
 
+        def test_a_vote_during_staging_does_not_make_the_activation_stale(
+            self, d1_runtime: D1Runtime
+        ) -> None:
+            async def scenario() -> None:
+                async with d1_runtime.client() as (ledger, transport):
+                    await prepare(ledger, transport)
+                    lease = await ledger.issue(
+                        Context(command_id='issue', principal='actor', now=10),
+                        issue(),
+                    )
+                    before = await ledger.freeze('before', 'writing', 20)
+                    refreshed = make_release(suffix='next')
+                    await publish_presentation(ledger, refreshed)
+                    await ledger.accept(
+                        Context(command_id='accept', principal='actor', now=25),
+                        Accept(
+                            lease_id=lease.id,
+                            acknowledgment='ack',
+                            choice='b',
+                            attribution=attribution(25),
+                        ),
+                    )
+
+                    await ledger.activate(
+                        Context(command_id='activate:next', principal='admin', now=30),
+                        'writing',
+                        before.family_revision,
+                        refreshed.evaluation.id,
+                        refreshed.publication.id,
+                        refreshed.points.id,
+                    )
+
+                    current = await ledger.read.family('writing')
+                    assert current is not None
+                    assert current.publication_id == refreshed.publication.id
+
+            asyncio.run(scenario())
+
         def test_policy_activation_marks_the_previous_analysis_stale(
             self, d1_runtime: D1Runtime
         ) -> None:

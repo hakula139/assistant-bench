@@ -74,8 +74,16 @@ class Management:
 
         if isinstance(envelope, RpcFailure):
             reason = envelope.error.reason
+
+            if reason == 'invalid_request':
+                raise ValueError(
+                    envelope.error.detail or 'The arena owner refused the command.'
+                )
+
             if reason == 'unavailable':
-                raise ValueError('The arena owner is unavailable.')
+                raise ValueError(
+                    envelope.error.detail or 'The arena owner is unavailable.'
+                )
 
             raise CommandRejected(_REJECTION.validate_python(reason))
 

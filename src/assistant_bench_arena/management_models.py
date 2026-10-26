@@ -181,7 +181,9 @@ def parse_request(payload: str) -> Request:
 
 
 class RpcError(Record):
-    reason: Rejection | Literal['unavailable']
+    reason: Rejection | Literal['invalid_request', 'unavailable']
+    detail: str | None = None
+    """The owner's diagnosis for an invalid command or a bridge failure."""
 
 
 class RpcFailure(Record):

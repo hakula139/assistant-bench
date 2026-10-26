@@ -4,7 +4,6 @@ import html
 import time
 
 from js import Response as NativeResponse
-from pyodide.ffi import JsNull
 from workers import Request, Response, WorkerEntrypoint
 
 from assistant_bench_arena.admission import InvalidToken
@@ -25,9 +24,26 @@ from assistant_bench_arena.worker.api import (
 )
 from assistant_bench_arena.worker.authentication import ApiError
 from assistant_bench_arena.worker.bindings import RateLimited
-from assistant_bench_arena.worker.diagnostics import FailureStage, failure
+from assistant_bench_arena.worker.diagnostics import (
+    FailureStage,
+    failure,
+    rejected,
+)
 from assistant_bench_arena.worker.http import INGRESS, Ingress
 from assistant_bench_arena.worker.owner import AppBindings, owner
+
+
+VOTE_PATHS = frozenset({'/vote', '/vote/'})
+_DIRECTIVES = (
+    "connect-src 'self'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'; object-src 'none'"
+)
+
+
+def _error_response(status: int, body: str) -> NativeResponse:
+    return Response(
+        body, status=status, headers={'Content-Type': 'application/json'}
+    ).js_object
 
 
 class OwnerEntrypoint(WorkerEntrypoint):
@@ -51,26 +67,27 @@ class Default(OwnerEntrypoint):
 
     async def fetch(self, request: Request) -> NativeResponse:
         token = None
-        stage: FailureStage = 'preflight'
+        stage: FailureStage = 'validation'
+        private = True
 
         try:
             native = request.js_object
-            now = time.time_ns() // 1_000_000
-            network = await self.owner.auth.preflight(
-                header(native, 'CF-Connecting-IP') or '', now
-            )
-            token = INGRESS.set(Ingress(now, network, header(native, 'Cookie') or ''))
-            stage = 'validation'
+            method = native.method
 
-            if header(native, 'CF-Worker') is not None:
+            if method not in {'GET', 'POST'} or header(native, 'CF-Worker') is not None:
                 raise RequestRejected
 
-            if native.method not in {'GET', 'POST'}:
-                raise RequestRejected
-
-            path = validate_request(native, self.owner.settings.profile, native.method)
+            path = validate_request(native, self.owner.settings.profile, method)
 
             if path.startswith('/api/'):
+                now = time.time_ns() // 1_000_000
+                stage = 'preflight'
+                network = await self.owner.auth.preflight(
+                    header(native, 'CF-Connecting-IP') or '', now
+                )
+                token = INGRESS.set(
+                    Ingress(now, network, header(native, 'Cookie') or '')
+                )
                 stage = 'http'
                 response = await serve_http(
                     await self.owner.browser(),
@@ -78,74 +95,46 @@ class Default(OwnerEntrypoint):
                     self.owner.settings.profile,
                     self.env,
                 )
-
             else:
-                if native.method != 'GET' or path == '/api':
+                if method != 'GET' or path not in VOTE_PATHS:
                     raise RequestRejected
 
                 stage = 'assets'
                 asset = await self.owner.bindings.ASSETS.fetch(native)
-                content_type = asset.headers.get('Content-Type')
-
-                if isinstance(content_type, str) and content_type.startswith(
-                    'text/html'
-                ):
-                    body = await asset.text()
-                    origin = html.escape(
-                        self.owner.settings.profile.render_origin, quote=True
-                    )
-                    body = body.replace(
-                        '</head>',
-                        f'<meta name="bench-render-origin" content="{origin}"></head>',
-                        1,
-                    )
-                    response = NativeResponse.new(body, asset.js_object)
-                    frames = self.owner.settings.profile.render_origin
-
-                    if path in {'/vote', '/vote/'}:
-                        frames += ' https://challenges.cloudflare.com'
-
-                    response.headers.set(
-                        'Content-Security-Policy',
-                        f'frame-src {frames}; '
-                        "connect-src 'self'; base-uri 'none'; form-action 'none'; "
-                        "frame-ancestors 'none'; object-src 'none'",
-                    )
-                else:
-                    stream = asset.js_object.body
-                    response = NativeResponse.new(
-                        None if isinstance(stream, JsNull) else stream, asset.js_object
-                    )
+                body = await asset.text()
+                origin = html.escape(
+                    self.owner.settings.profile.render_origin, quote=True
+                )
+                body = body.replace(
+                    '</head>',
+                    f'<meta name="bench-render-origin" content="{origin}"></head>',
+                    1,
+                )
+                response = NativeResponse.new(body, asset.js_object)
+                response.headers.set(
+                    'Content-Security-Policy',
+                    f'frame-src {self.owner.settings.profile.render_origin} '
+                    f'https://challenges.cloudflare.com; {_DIRECTIVES}',
+                )
+                private = False
         except ApiError as error:
-            response = Response(
-                ErrorView(error=error.code).model_dump_json(),
-                status=error.status,
-                headers={'Content-Type': 'application/json'},
-            ).js_object
+            response = _error_response(
+                error.status, ErrorView(error=error.code).model_dump_json()
+            )
         except RateLimited:
-            response = Response(
-                '{"error":"rate_limited"}',
-                status=429,
-                headers={'Content-Type': 'application/json'},
-            ).js_object
+            response = _error_response(429, '{"error":"rate_limited"}')
         except RequestRejected:
-            response = Response(
-                '{"error":"invalid_request"}',
-                status=400,
-                headers={'Content-Type': 'application/json'},
-            ).js_object
+            response = _error_response(400, '{"error":"invalid_request"}')
         except Exception as error:
             failure(stage, error)
-            response = Response(
-                '{"error":"unavailable"}',
-                status=503,
-                headers={'Content-Type': 'application/json'},
-            ).js_object
+            response = _error_response(503, '{"error":"unavailable"}')
         finally:
             if token is not None:
                 INGRESS.reset(token)
 
-        response.headers.set('Cache-Control', 'no-store')
+        if private:
+            response.headers.set('Cache-Control', 'no-store')
+
         response.headers.set('Referrer-Policy', 'no-referrer')
         response.headers.set('X-Content-Type-Options', 'nosniff')
         return response
@@ -174,7 +163,9 @@ class RenderLookup(OwnerEntrypoint):
             return RpcSuccess[None](result=None).model_dump_json()
         except Exception as error:
             failure('render_lookup', error)
-            return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json()
+            return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json(
+                exclude_none=True
+            )
 
 
 class Management(OwnerEntrypoint):
@@ -187,7 +178,16 @@ class Management(OwnerEntrypoint):
             )
             return RpcSuccess(result=result).model_dump_json()
         except CommandRejected as error:
-            return RpcFailure(error=RpcError(reason=error.reason)).model_dump_json()
+            return RpcFailure(error=RpcError(reason=error.reason)).model_dump_json(
+                exclude_none=True
+            )
+        except ValueError as error:
+            rejected(error)
+            return RpcFailure(
+                error=RpcError(reason='invalid_request', detail=str(error))
+            ).model_dump_json(exclude_none=True)
         except Exception as error:
             failure('management', error)
-            return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json()
+            return RpcFailure(error=RpcError(reason='unavailable')).model_dump_json(
+                exclude_none=True
+            )

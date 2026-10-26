@@ -29,7 +29,7 @@ TURNSTILE_SITEKEY = "0x4AAAAAAFlKZW7ZlfptMhwH"
 [env.production.assets]
 binding = "ASSETS"
 directory = "web/dist"
-run_worker_first = true
+run_worker_first = ["/api/*", "/vote", "/vote/"]
 not_found_handling = "404-page"
 
 [[env.production.d1_databases]]
@@ -77,7 +77,7 @@ TURNSTILE_SITEKEY = "0x4AAAAAAFk4uKFs7GuqFW55"
 [env.staging.assets]
 binding = "ASSETS"
 directory = "web/dist"
-run_worker_first = true
+run_worker_first = ["/api/*", "/vote", "/vote/"]
 not_found_handling = "404-page"
 
 [[env.staging.d1_databases]]

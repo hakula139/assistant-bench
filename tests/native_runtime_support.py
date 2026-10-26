@@ -521,6 +521,7 @@ class NativeRuntime:
         (self.directory / 'src' / 'test_renderer.py').write_text(renderer_source)
         assets = self.directory / 'assets'
         assets.mkdir()
+        shutil.copyfile(ROOT / 'web' / 'public' / '_headers', assets / '_headers')
         (assets / 'arena-families.json').write_text(
             json.dumps(
                 [

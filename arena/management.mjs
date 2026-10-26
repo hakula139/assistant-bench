@@ -32,8 +32,13 @@ try {
 
       const response = await management.command(JSON.stringify(request.request));
       envelope = JSON.parse(response);
-    } catch {
-      envelope = { error: { reason: 'unavailable' } };
+    } catch (error) {
+      envelope = {
+        error: {
+          reason: 'unavailable',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
 
     process.stdout.write(JSON.stringify({ id, ...envelope }) + '\n');
