@@ -1161,18 +1161,32 @@ class TestTerminus:
             ] * (1 if prior_usage is None else 2)
             assert client.max_retries == 0
 
-        def test_keeps_http_failure_usage_unknown_through_native_retries(
+        @pytest.mark.parametrize(
+            'recovered', [False, True], ids=['all-failed', 'recovered']
+        )
+        def test_counts_only_completed_native_requests_through_http_failure_retries(
             self,
             endpoint: StubEndpoint,
             responses_agent: NativeProbe,
             terminal_session: TmuxSession,
+            recovered: bool,
         ) -> None:
-            endpoint.status = 503
-            endpoint.response = {'error': {'message': 'Unavailable.'}}
+            if recovered:
+                reply = json.dumps(
+                    {'analysis': '', 'plan': '', 'commands': [], 'task_complete': True}
+                )
+                endpoint.statuses = [503]
+                endpoint.response = response(reply)
+            else:
+                endpoint.status = 503
+                endpoint.response = {'error': {'message': 'Unavailable.'}}
             context = AgentContext()
 
-            with pytest.raises(openai.InternalServerError):
+            if recovered:
                 asyncio.run(responses_agent.execute(terminal_session, context))
+            else:
+                with pytest.raises(openai.InternalServerError):
+                    asyncio.run(responses_agent.execute(terminal_session, context))
 
             assert len(endpoint.requests) == 3
             assert (
@@ -1180,15 +1194,19 @@ class TestTerminus:
                 context.n_cache_tokens,
                 context.n_output_tokens,
                 context.cost_usd,
-            ) == (None, None, None, None)
+            ) == ((240, 200, 80, None) if recovered else (None, None, None, None))
             assert context.metadata is not None
             assert [
                 call['response_status'] for call in context.metadata['responses']
-            ] == [
-                'request_failed',
-                'request_failed',
-                'request_failed',
-            ]
+            ] == (['completed', 'completed'] if recovered else [])
+            assert [
+                call['response_status']
+                for call in context.metadata['response_attempts']
+            ] == (
+                ['request_failed', 'completed', 'completed']
+                if recovered
+                else ['request_failed'] * 3
+            )
 
         def test_maps_the_provider_context_error_to_native_context_management(
             self, endpoint: StubEndpoint, responses_agent: NativeProbe
@@ -1742,10 +1760,13 @@ class TestTerminus:
                 asyncio.run(agent.run('Go.', MagicMock(spec=BaseEnvironment), context))
 
             assert is_closed()
-            assert context.metadata == {
+            expected: dict[str, Any] = {
                 'n_episodes': 1,
                 'nixos_config_rev': export.rev,
                 'harbor_version': metadata.version('harbor'),
                 'responses': [],
                 'cache_write_unpriced': False,
             }
+            if api == 'openai-responses':
+                expected['response_attempts'] = []
+            assert context.metadata == expected

@@ -199,6 +199,7 @@ class ResponsesLLM(BaseLLM):
         self.temperature = temperature
         self.logs_dir = logs_dir
         self.results: list[dict[str, Any]] = []
+        self.attempts: list[dict[str, Any]] = []
 
     @override
     def get_model_context_limit(self) -> int:
@@ -234,7 +235,7 @@ class ResponsesLLM(BaseLLM):
                 ),
             )
         except APIError as error:
-            self.results.append(
+            self.attempts.append(
                 {
                     'response_status': 'request_failed',
                     'latency_sec': round(time.monotonic() - started, 3),
@@ -255,6 +256,7 @@ class ResponsesLLM(BaseLLM):
         if usage is not None:
             details |= usage.details
         self.results.append(details)
+        self.attempts.append(details)
         artifact = self.logs_dir / f'response-{len(self.results)}.json'
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text(result.response.model_dump_json(indent=2))
