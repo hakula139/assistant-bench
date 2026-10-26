@@ -1,6 +1,6 @@
 import { z } from 'astro/zod';
 
-import { defects } from '@/lib/report';
+import { defects } from '@/lib/defects';
 
 // The vote document's policy forbids Zod's eval-based parser optimization.
 z.config({ jitless: true });

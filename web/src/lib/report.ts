@@ -1,19 +1,8 @@
 import { z } from 'astro/zod';
 
-// ── Shared ──
+import { defects } from '@/lib/defects';
 
-export const defects = [
-  'facts',
-  'mechanics',
-  'tone',
-  'formulaic',
-  'length',
-  'scope',
-  'conventions',
-  'complexity',
-  'testing',
-  'clarity',
-] as const;
+// ── Shared ──
 
 const publicSystem = z.strictObject({
   display_name: z.string().refine((name) => name.trim().length > 0),
@@ -353,7 +342,6 @@ export const reportSchema = z
     }
   });
 
-export type Defect = (typeof defects)[number];
 export type PublicSystem = z.infer<typeof publicSystem>;
 export type VotesMethod = z.infer<typeof votesMethod>;
 export type VotesRules = z.infer<typeof votesRules>;
