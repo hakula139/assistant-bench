@@ -51,7 +51,7 @@ class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
     name: str
-    apis: list[Api] | None = None
+    apis: list[str]
     vendor: str | None = Field(default=None, min_length=1)
     max_output_tokens: int = Field(alias='maxTokens', gt=0)
     context_window: int = Field(alias='contextWindow', gt=0)
@@ -177,7 +177,7 @@ class SystemIdentity(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     route: str
-    api: Api = 'openai-chat-completions'
+    api: Api
     max_output_tokens: int = Field(gt=0)
     """Configured completion allowance, including reasoning tokens."""
 
@@ -187,7 +187,7 @@ class SystemIdentity(BaseModel):
     effort: str | None
     thinking_mode: ThinkingMode | None = None
     prompt: str | None
-    harness: str = 'generate'
+    harness: str
     generation: Generation
     """Captured revision metadata, unchanged when another runtime resolves systems."""
 
@@ -195,10 +195,8 @@ class SystemIdentity(BaseModel):
     def _check_capacity(self) -> Self:
         if self.max_output_tokens >= self.context_window:
             raise ValueError('`max_output_tokens` must be less than `context_window`')
-        if self.api == 'anthropic-messages':
-            if self.thinking_mode is None:
-                raise ValueError('Native Messages identity requires its thinking mode.')
-            self.generation.version(self.harness, self.api)
+        if self.api == 'anthropic-messages' and self.thinking_mode is None:
+            raise ValueError('Native Messages identity requires its thinking mode.')
         return self
 
     @property
@@ -232,7 +230,6 @@ class System(SystemIdentity):
     name: str
     """Table name used by data and URLs, excluded from the fingerprint."""
 
-    generation: Generation = Field(default_factory=load_generation)
     display_name: str
     """Public label, excluded from the fingerprint."""
 
@@ -243,13 +240,11 @@ class System(SystemIdentity):
 def load_systems(
     export: NixosConfigExport, path: Path = REPO_ROOT / SYSTEMS_FILE
 ) -> dict[str, System]:
-    return parse_systems(export, path.read_text())
+    return parse_systems(export, path.read_text(), load_generation())
 
 
 def parse_systems(
-    export: NixosConfigExport,
-    document: str,
-    generation: Generation | None = None,
+    export: NixosConfigExport, document: str, generation: Generation
 ) -> dict[str, System]:
     """Resolve every table of a `systems.toml` document.
 
@@ -291,7 +286,7 @@ def resolve_system(
     name: str,
     config: SystemConfig,
     export: NixosConfigExport,
-    generation: Generation | None = None,
+    generation: Generation,
 ) -> System:
     """Resolve a system, defaulting effort from the catalog where it is required.
 
@@ -301,9 +296,9 @@ def resolve_system(
         The model, its channel, the effort, or the prompt is unknown or ambiguous.
     """
     entry = _catalog_model(name, config, export)
-    identity = _identity(name, config, entry, export, generation or load_generation())
+    identity = _identity(name, config, entry, export, generation, 'generate')
     if entry is not None:
-        if entry.apis is None:
+        if not entry.apis:
             raise ValueError(
                 f'System `{name}`: the catalog model declares no supported APIs.'
             )
@@ -329,11 +324,15 @@ def resolve_system(
 
 
 def resolve_identity(
-    name: str, config: SystemConfig, export: NixosConfigExport, generation: Generation
+    name: str,
+    config: SystemConfig,
+    export: NixosConfigExport,
+    generation: Generation,
+    harness: str,
 ) -> SystemIdentity:
     """Project generation facts from explicitly supplied revision-owned inputs."""
     return _identity(
-        name, config, _catalog_model(name, config, export), export, generation
+        name, config, _catalog_model(name, config, export), export, generation, harness
     )
 
 
@@ -370,6 +369,7 @@ def _identity(
     entry: CatalogModel | None,
     export: NixosConfigExport,
     generation: Generation,
+    harness: str,
 ) -> SystemIdentity:
     if entry is None:
         assert config.route is not None
@@ -407,6 +407,7 @@ def _identity(
         effort=effort,
         thinking_mode=thinking_mode,
         prompt=_prompt(name, config.prompt, export),
+        harness=harness,
     )
 
 

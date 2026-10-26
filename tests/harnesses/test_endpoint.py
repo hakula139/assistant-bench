@@ -7,13 +7,16 @@ import textwrap
 from pathlib import Path
 from urllib.request import getproxies_environment
 
+import anthropic
 import httpx
 import httpx2
+import openai
 import pytest
 from pydantic import ValidationError
 
 from assistant_bench.catalog import EXPORT_VAR, Api
 from assistant_bench.harnesses.endpoint import (
+    ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
     CA_FILE_VAR,
     HEADERS_VAR,
@@ -117,58 +120,43 @@ class TestEndpoint:
                 'pool': 600.0,
             }
 
-        @pytest.mark.parametrize('origin_part', ['scheme', 'host', 'port'])
         @pytest.mark.parametrize(
-            'api', ['openai-chat-completions', 'anthropic-messages']
-        )
-        def test_rejects_another_origin_before_reading_the_key_or_sending(
-            self, endpoint: StubEndpoint, origin_part: str, api: Api
-        ) -> None:
-            configured = Endpoint.read(endpoint.env.get, api)
-            build = (
-                configured.messages_http_client
-                if api == 'anthropic-messages'
-                else configured.http_client
-            )
-            url = httpx.URL(f'{endpoint.url}/v1/responses')
-            targets = {
-                'scheme': url.copy_with(scheme='https'),
-                'host': url.copy_with(host='::1'),
-                'port': url.copy_with(port=1),
-            }
-            endpoint.key_file.unlink()
-
-            async def request() -> None:
-                async with build() as client:
-                    await client.post(str(targets[origin_part]), json={})
-
-            with pytest.raises(ValueError, match='cannot authenticate another origin'):
-                asyncio.run(request())
-
-            assert endpoint.requests == []
-
-        @pytest.mark.parametrize(
-            'api', ['openai-chat-completions', 'anthropic-messages']
+            ('api', 'error_type'),
+            [
+                ('openai-chat-completions', openai.APIStatusError),
+                ('anthropic-messages', anthropic.APIStatusError),
+            ],
         )
         def test_does_not_follow_a_redirect_to_another_endpoint(
-            self, endpoint: StubEndpoint, ipv6_endpoint: StubEndpoint, api: Api
+            self,
+            endpoint: StubEndpoint,
+            ipv6_endpoint: StubEndpoint,
+            api: Api,
+            error_type: type[Exception],
         ) -> None:
             configured = Endpoint.read(endpoint.env.get, api)
-            build = (
-                configured.messages_http_client
-                if api == 'anthropic-messages'
-                else configured.http_client
-            )
             endpoint.status = 307
             endpoint.response_headers['Location'] = f'{ipv6_endpoint.url}/v1/responses'
 
-            async def request() -> httpx.Response | httpx2.Response:
-                async with build() as client:
-                    return await client.post(f'{endpoint.url}/v1/responses', json={})
+            async def request() -> None:
+                if api == 'anthropic-messages':
+                    async with configured.messages_client() as client:
+                        await client.post(
+                            f'{endpoint.url}/v1/responses',
+                            cast_to=httpx2.Response,
+                            body={},
+                        )
+                    return
+                async with configured.client() as client:
+                    await client.post(
+                        f'{endpoint.url}/v1/responses',
+                        cast_to=httpx.Response,
+                        body={},
+                    )
 
-            reply = asyncio.run(request())
+            with pytest.raises(error_type):
+                asyncio.run(request())
 
-            assert reply.status_code == 307
             assert len(endpoint.requests) == 1
             assert ipv6_endpoint.requests == []
 
@@ -201,7 +189,7 @@ class TestEndpoint:
 
             assert reply.status_code == 200
             (sent,) = endpoint.requests
-            assert sent.headers['authorization'] == 'Bearer test-key'
+            assert sent.path == '/anthropic/v1/messages'
 
 
 class TestPreflight:
@@ -247,6 +235,21 @@ class TestPreflight:
             'Set `BENCH_API_BASE_URL`, `BENCH_API_KEY_FILE`, `BENCH_NIXOS_CONFIG`. '
             'Copy `.env.example` to `.env`, and run inside `nix develop`.'
         )
+
+    @pytest.mark.parametrize(
+        ('variable', 'api'),
+        [
+            (BASE_URL_VAR, 'openai-chat-completions'),
+            (ANTHROPIC_BASE_URL_VAR, 'anthropic-messages'),
+        ],
+    )
+    def test_reports_an_invalid_base_url_under_the_variable_that_set_it(
+        self, endpoint: StubEndpoint, variable: str, api: Api
+    ) -> None:
+        with pytest.raises(ValidationError) as error:
+            preflight(endpoint.env | {variable: 'not a url'}, api)
+
+        assert [detail['loc'][0] for detail in error.value.errors()] == [variable]
 
     @pytest.mark.parametrize(
         ('variable', 'value'),

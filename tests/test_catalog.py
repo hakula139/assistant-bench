@@ -18,7 +18,7 @@ from assistant_bench.catalog import (
     resolve_system,
 )
 from assistant_bench.generation import Generation
-from support import make_system
+from support import GENERATION, make_generation, make_system
 
 
 class TestPrice:
@@ -117,6 +117,13 @@ class TestSystemConfig:
 
 
 class TestSystem:
+    def test_requires_captured_generation_metadata(self) -> None:
+        fields = make_system().model_dump()
+        del fields['generation']
+
+        with pytest.raises(ValidationError):
+            System.model_validate(fields)
+
     @pytest.mark.parametrize(
         ('limit', 'value'),
         [
@@ -195,17 +202,21 @@ class TestSystem:
             ('changed', 'expected'),
             [
                 pytest.param(
-                    Generation(protocol=2, harbor='0.24.0'), (True, True), id='protocol'
+                    make_generation(protocol=2, harbor='0.24.0'),
+                    (True, True),
+                    id='protocol',
                 ),
                 pytest.param(
-                    Generation(protocol=1, harbor='0.25.0'), (False, True), id='harbor'
+                    make_generation(protocol=1, harbor='0.25.0'),
+                    (False, True),
+                    id='harbor',
                 ),
             ],
         )
         def test_versions_invalidate_only_the_outputs_they_shape(
             self, changed: Generation, expected: tuple[bool, bool]
         ) -> None:
-            base = Generation(protocol=1, harbor='0.24.0')
+            base = make_generation(protocol=1, harbor='0.24.0')
 
             differences = tuple(
                 make_system(harness=harness, generation=base).fingerprint
@@ -383,7 +394,7 @@ class TestResolveIdentity:
         )
 
         with pytest.raises(ValueError):
-            resolve_identity('native', config, missing_mode, versions)
+            resolve_identity('native', config, missing_mode, versions, 'generate')
 
     @pytest.mark.parametrize(
         ('api', 'effort', 'required', 'expected'),
@@ -411,11 +422,11 @@ class TestResolveIdentity:
     ) -> None:
         document = export.model_dump(by_alias=True)
         entry = document['catalog']['models']['acme-large']
-        entry.pop('apis')
+        entry['apis'] = []
         entry['thinking']['requiresEffort'] = required
         old = NixosConfigExport.model_validate(document)
         config = SystemConfig(model='acme-large', api=api, effort=effort)
-        versions = Generation(protocol=1, harbor='0.23.0')
+        versions = make_generation(protocol=1, harbor='0.23.0')
 
         def unexpected(*args: object, **kwargs: object) -> Any:
             pytest.fail('Historical identity attempted to read current runtime state')
@@ -424,7 +435,7 @@ class TestResolveIdentity:
         monkeypatch.setattr('assistant_bench.catalog.load_export', unexpected)
         monkeypatch.setattr(metadata, 'version', unexpected)
 
-        identity = resolve_identity('large', config, old, versions)
+        identity = resolve_identity('large', config, old, versions, 'generate')
 
         assert identity.fingerprint == expected
         with pytest.raises(ValueError, match='declares no supported APIs'):
@@ -439,7 +450,7 @@ class TestResolveIdentity:
         document = export.model_dump(by_alias=True)
         entry = document['catalog']['models']['acme-large']
         config = SystemConfig(model='acme-large')
-        versions = Generation(protocol=1, harbor='0.23.0')
+        versions = make_generation(protocol=1, harbor='0.23.0')
         if change == 'price':
             entry['channelCost'] = {}
         elif change == 'display-name':
@@ -453,7 +464,7 @@ class TestResolveIdentity:
             document['rev'] = 'another-revision'
         changed = NixosConfigExport.model_validate(document)
 
-        identity = resolve_identity('large', config, changed, versions)
+        identity = resolve_identity('large', config, changed, versions, 'generate')
 
         assert identity.fingerprint == '46256f5027af8dc1'
 
@@ -466,7 +477,7 @@ class TestResolveSystem:
                 {'apis': ['openai-chat-completions']},
                 'API `anthropic-messages` is not one of',
             ),
-            ({'apis': None}, 'declares no supported APIs'),
+            ({'apis': []}, 'declares no supported APIs'),
             ({'thinking': {'efforts': []}}, 'effort `high` is not one of'),
             ({'thinking': {'mode': 'effort'}}, 'requires adaptive thinking metadata'),
         ],
@@ -493,7 +504,30 @@ class TestResolveSystem:
         )
 
         with pytest.raises(ValueError, match=message):
-            resolve_system('native', config, configured)
+            resolve_system('native', config, configured, GENERATION)
+
+    def test_ignores_apis_the_bench_cannot_select(
+        self, export: NixosConfigExport
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        model = document['catalog']['models']['acme-large']
+        model['apis'].append('google-generate-content')
+        configured = NixosConfigExport.model_validate(document)
+
+        system = resolve_system(
+            'large', SystemConfig(model='acme-large'), configured, GENERATION
+        )
+
+        assert system.api == 'openai-chat-completions'
+
+        model['apis'] = ['google-generate-content']
+        configured = NixosConfigExport.model_validate(document)
+        with pytest.raises(
+            ValueError, match='API `openai-chat-completions` is not one of'
+        ):
+            resolve_system(
+                'large', SystemConfig(model='acme-large'), configured, GENERATION
+            )
 
     def test_resolves_native_capacities_and_thinking_from_catalog_metadata(
         self, export: NixosConfigExport
@@ -502,7 +536,7 @@ class TestResolveSystem:
             model='acme-large', api='anthropic-messages', effort='high'
         )
 
-        resolved = resolve_system('native', config, export)
+        resolved = resolve_system('native', config, export, GENERATION)
 
         assert resolved == make_system(
             name='native',
@@ -547,9 +581,9 @@ class TestResolveSystem:
             with pytest.raises(
                 ValueError, match='effort `max` is not one of `low`, `medium`, `high`'
             ):
-                resolve_system('large', config, resolved_export)
+                resolve_system('large', config, resolved_export, GENERATION)
         else:
-            system = resolve_system('large', config, resolved_export)
+            system = resolve_system('large', config, resolved_export, GENERATION)
 
             assert system.api == config.api
             assert system.effort == expected
@@ -562,7 +596,9 @@ class TestResolveSystem:
             model.pop('vendor')
         historical = NixosConfigExport.model_validate(document)
 
-        system = resolve_system('large', SystemConfig(model='acme-large'), historical)
+        system = resolve_system(
+            'large', SystemConfig(model='acme-large'), historical, GENERATION
+        )
 
         assert system.vendor is None
         assert system.fingerprint == make_system().fingerprint
@@ -570,14 +606,18 @@ class TestResolveSystem:
     def test_applies_the_default_effort_a_model_requires(
         self, export: NixosConfigExport
     ) -> None:
-        system = resolve_system('large', SystemConfig(model='acme-large'), export)
+        system = resolve_system(
+            'large', SystemConfig(model='acme-large'), export, GENERATION
+        )
 
         assert system == make_system(name='large')
 
     def test_leaves_an_optional_effort_to_the_model(
         self, export: NixosConfigExport
     ) -> None:
-        system = resolve_system('small', SystemConfig(model='acme-small'), export)
+        system = resolve_system(
+            'small', SystemConfig(model='acme-small'), export, GENERATION
+        )
 
         assert system.route == 'acme/small'
         assert system.effort is None
@@ -585,7 +625,10 @@ class TestResolveSystem:
 
     def test_keeps_an_accepted_effort(self, export: NixosConfigExport) -> None:
         system = resolve_system(
-            'small', SystemConfig(model='acme-small', effort='low'), export
+            'small',
+            SystemConfig(model='acme-small', effort='low'),
+            export,
+            GENERATION,
         )
 
         assert system.effort == 'low'
@@ -593,7 +636,9 @@ class TestResolveSystem:
     def test_reports_a_zero_priced_channel_as_unpriced(
         self, export: NixosConfigExport
     ) -> None:
-        system = resolve_system('local', SystemConfig(model='local-model'), export)
+        system = resolve_system(
+            'local', SystemConfig(model='local-model'), export, GENERATION
+        )
 
         assert system.route == 'local/model'
         assert system.vendor == 'other'
@@ -615,6 +660,7 @@ class TestResolveSystem:
                 display_name='Acme X',
             ),
             export,
+            GENERATION,
         )
 
         assert (system.display_name, system.route, system.effort, system.price) == (
@@ -634,6 +680,7 @@ class TestResolveSystem:
             'large',
             SystemConfig(model='acme-large', display_name='Acme Large 0901'),
             export,
+            GENERATION,
         )
 
         assert system.display_name == 'Acme Large 0901'
@@ -645,6 +692,7 @@ class TestResolveSystem:
             'large',
             SystemConfig(model='acme-large', prompt='nixos-config:claudeCode'),
             export,
+            GENERATION,
         )
 
         assert system.prompt == '# CLAUDE.md\n\nBe direct.'
@@ -705,6 +753,6 @@ class TestResolveSystem:
         self, export: NixosConfigExport, config: SystemConfig, message: str
     ) -> None:
         with pytest.raises(ValueError) as error:
-            resolve_system('x', config, export)
+            resolve_system('x', config, export, GENERATION)
 
         assert str(error.value) == message

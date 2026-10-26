@@ -8,14 +8,26 @@ import pytest
 from assistant_bench import revisions
 from assistant_bench.generation import Generation
 from assistant_bench.paths import REPO_ROOT
-from support import EXPORT_FILE, make_system, write_case_family, write_task_family
+from support import (
+    EXPORT_FILE,
+    make_generation,
+    make_system,
+    write_case_family,
+    write_task_family,
+)
 
 
 PROJECT = """\
 [tool.assistant-bench]
 generation-protocol = 1
+messages-protocol = 1
+anthropic-api-version = "2023-06-01"
 """
 LOCK = """\
+[[package]]
+name = "anthropic"
+version = "2.3.0"
+
 [[package]]
 name = "harbor"
 version = "0.23.0"
@@ -103,7 +115,7 @@ class TestSystemsAt:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         calls = self.fake_git(monkeypatch)
-        historical = Generation(protocol=1, harbor='0.23.0')
+        historical = make_generation(protocol=1, harbor='0.23.0')
 
         systems = revisions.systems_at(
             'origin/main', {'writing/large', 'coding/large', 'new/large'}
@@ -129,7 +141,7 @@ class TestSystemsAt:
     ) -> None:
         document = json.loads(EXPORT_FILE.read_text())
         for model in document['catalog']['models'].values():
-            model.pop('apis', None)
+            model['apis'] = []
         old_export = tmp_path / 'old-export.json'
         old_export.write_text(json.dumps(document))
         self.fake_git(
@@ -138,7 +150,7 @@ class TestSystemsAt:
             export_path=old_export,
         )
         current = make_system(
-            name='large', generation=Generation(protocol=1, harbor='0.23.0')
+            name='large', generation=make_generation(protocol=1, harbor='0.23.0')
         )
 
         old = revisions.systems_at('origin/main', {'writing/large'})
@@ -161,7 +173,7 @@ class TestSystemsAt:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self.fake_git(monkeypatch)
-        generation = Generation(protocol=1, harbor='0.23.0')
+        generation = make_generation(protocol=1, harbor='0.23.0')
         head = {
             'writing/large': make_system(
                 name='large', generation=generation, api='openai-responses'
@@ -185,26 +197,38 @@ class TestSystemsAt:
 
         assert revisions.changed_fingerprints(responses_base, head) == []
 
-    def test_requires_a_new_name_when_a_shared_cohort_has_no_declared_protocol(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('project', 'missing'),
+        [
+            (
+                '[tool.assistant-bench]\nmessages-protocol = 1\n',
+                'generation-protocol',
+            ),
+            (
+                '[tool.assistant-bench]\ngeneration-protocol = 1\n',
+                'messages-protocol',
+            ),
+        ],
+        ids=['generation-protocol', 'messages-protocol'],
+    )
+    def test_names_the_generation_key_a_shared_cohort_lacks(
+        self, monkeypatch: pytest.MonkeyPatch, project: str, missing: str
     ) -> None:
-        self.fake_git(monkeypatch, project='')
+        self.fake_git(monkeypatch, project=project)
 
-        with pytest.raises(
-            ValueError, match='no declared generation protocol.*new names'
-        ):
+        with pytest.raises(ValueError, match=rf'lacks `{missing}`.*new names'):
             revisions.systems_at('origin/main', {'writing/large'})
 
     @pytest.mark.parametrize(
         ('generation', 'expected'),
         [
             pytest.param(
-                Generation(protocol=1, harbor='0.24.0'),
+                make_generation(protocol=1, harbor='0.24.0'),
                 ['coding/large'],
                 id='harbor-native-prompts',
             ),
             pytest.param(
-                Generation(protocol=2, harbor='0.23.0'),
+                make_generation(protocol=2, harbor='0.23.0'),
                 ['writing/large', 'coding/large'],
                 id='generation-protocol',
             ),

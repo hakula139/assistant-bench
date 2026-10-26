@@ -42,6 +42,7 @@ from harbor.trial.regrade import local_task_name
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Defect, TaskTestsSettings
+from assistant_bench.generation import Generation
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -165,12 +166,28 @@ def write_task_family(
 # ── Systems and Trials ──
 
 
+def make_generation(protocol: int = 2, harbor: str = '0.24.0') -> Generation:
+    return Generation(
+        protocol=protocol,
+        harbor=harbor,
+        messages_protocol=1,
+        anthropic_api_version='2023-06-01',
+        anthropic='2.3.0',
+    )
+
+
+GENERATION = make_generation()
+
+
 def make_system(**overrides: Any) -> System:
     fields: dict[str, Any] = {
         'name': 'acme-large',
         'display_name': 'Acme Large',
         'vendor': 'acme',
         'route': 'acme/large',
+        'api': 'openai-chat-completions',
+        'harness': 'generate',
+        'generation': GENERATION,
         'max_output_tokens': 64,
         'context_window': 8192,
         'effort': 'medium',

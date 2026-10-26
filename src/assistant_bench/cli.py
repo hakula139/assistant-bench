@@ -37,6 +37,10 @@ from assistant_bench.outputs import Output
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
 HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
+SYSTEM_RENAME_GUIDE = (
+    'Give a changed system a new name and keep the old name only in closed '
+    f'reports, as `{SYSTEMS_DOC}` describes.'
+)
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(arena_app, name='arena', help='Prepare and manage frozen arena evidence.')
@@ -265,8 +269,7 @@ def fingerprints(
         name = head_systems[key].name
         typer.echo(
             f'System `{name}` changed its fingerprint since `{base}` in '
-            f'`{key.split("/")[0]}`. Give the changed system a new name and keep '
-            f'the old name only in closed reports, as `{SYSTEMS_DOC}` describes.',
+            f'`{key.split("/")[0]}`. {SYSTEM_RENAME_GUIDE}',
             err=True,
         )
     if changed:
@@ -393,16 +396,10 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
 def _family_systems(family: Family) -> list[System]:
     listed: list[System] = []
     if family.settings.systems:
-        known = _load_systems()
-        unknown = [name for name in family.settings.systems if name not in known]
-        if unknown:
-            _fail(
-                f'Family `{family.name}` lists {code(unknown)}, which '
-                f'`{SYSTEMS_FILE}` does not define. Add a table to '
-                f'`{SYSTEMS_FILE}` or fix the name in '
-                f'`families/{family.name}/family.toml`.'
-            )
-        listed = [known[name] for name in family.settings.systems]
+        try:
+            listed = jobs.listed_systems(family, _load_systems())
+        except ValueError as error:
+            _fail(str(error))
 
     try:
         jobs.check_systems(family, listed)
@@ -488,12 +485,11 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
             """
             Family `{family}` has systems that changed their fingerprints:
             {detail}
-            Give a changed system a new name, or keep its old resolution on a `route`
-            table, as `{systems_doc}` describes.
+            {guide}
             """
         )
         .strip()
-        .format(family=family.name, detail=detail, systems_doc=SYSTEMS_DOC)
+        .format(family=family.name, detail=detail, guide=SYSTEM_RENAME_GUIDE)
     )
 
 

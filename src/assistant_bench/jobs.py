@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
@@ -26,7 +27,7 @@ from harbor.publisher.packager import Packager
 from harbor.trial.network_policy import resolve_trial_network_plan
 from pydantic import BaseModel, Field, ValidationError
 
-from assistant_bench.catalog import NixosConfigExport, System
+from assistant_bench.catalog import SYSTEMS_FILE, NixosConfigExport, System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -148,6 +149,18 @@ def check_harness(family: Family) -> None:
             f'Family `{family.name}`: harness `{harness}` makes one request and '
             f"never acts in a task's environment, so choose among {code(agents)}."
         )
+
+
+def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
+    """Return the systems a family lists, refusing a name `systems.toml` lacks."""
+    unknown = [name for name in family.settings.systems if name not in systems]
+    if unknown:
+        raise ValueError(
+            f'Family `{family.name}` lists {code(unknown)}, which '
+            f'`{SYSTEMS_FILE}` does not define. Fix '
+            f'`families/{family.name}/family.toml` or add the system table.'
+        )
+    return [systems[name] for name in family.settings.systems]
 
 
 def check_systems(family: Family, systems: list[System]) -> None:

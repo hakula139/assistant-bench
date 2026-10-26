@@ -596,8 +596,8 @@ class TestCheck:
         assert (result.exit_code, result.stdout, result.stderr) == (
             1,
             '',
-            'Family `f` lists `ghost`, which `systems.toml` does not define. Add a '
-            'table to `systems.toml` or fix the name in `families/f/family.toml`.\n',
+            'Family `f` lists `ghost`, which `systems.toml` does not define. Fix '
+            '`families/f/family.toml` or add the system table.\n',
         )
 
     def test_rejects_a_systems_table_that_fails_to_validate(
@@ -951,8 +951,8 @@ class TestRun:
             1,
             'Family `f` has systems that changed their fingerprints:\n'
             'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves '
-            f'to `{current}`.\nGive a changed system a new name, or keep its old '
-            'resolution on a `route`\ntable, as `docs/guide/authoring.md#systems` '
+            f'to `{current}`.\nGive a changed system a new name and keep the old '
+            'name only in closed reports, as `docs/guide/authoring.md#systems` '
             'describes.\n',
         )
         assert submitted == []
@@ -1427,7 +1427,7 @@ class TestFingerprints:
         assert result.stdout == ''
         assert result.stderr == (
             'System `opus-5.5-high` changed its fingerprint since `origin/main` in '
-            '`writing-en`. Give the changed system a new name and keep the old '
+            '`writing-en`. Give a changed system a new name and keep the old '
             'name only in closed reports, as `docs/guide/authoring.md#systems` '
             'describes.\n'
         )

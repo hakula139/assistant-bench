@@ -16,7 +16,7 @@ from openai.types.responses import Response
 from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
 from assistant_bench.families import Gate, VotesSettings, load_cases, load_family
-from assistant_bench.generation import generation_version
+from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import options
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
@@ -69,7 +69,7 @@ class TestGenerate:
 
             version = agent.version()
 
-            assert version == generation_version('generate')
+            assert version == load_generation().version('generate')
 
     class TestPreflight:
         def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:

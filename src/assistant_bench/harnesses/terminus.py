@@ -21,7 +21,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 from tenacity import retry_if_not_exception_type
 
 from assistant_bench.catalog import load_export
-from assistant_bench.generation import generation_version
+from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import (
@@ -139,7 +139,7 @@ class Terminus(Terminus2):
     def version(self) -> str:
         assert isinstance(self.options, TerminusOptions)
         api = 'openai-responses' if self.options.use_responses_api else self.options.api
-        return generation_version('terminus-2', api)
+        return load_generation().version('terminus-2', api)
 
     @classmethod
     @override
