@@ -195,10 +195,8 @@ class SystemIdentity(BaseModel):
     def _check_capacity(self) -> Self:
         if self.max_output_tokens >= self.context_window:
             raise ValueError('`max_output_tokens` must be less than `context_window`')
-        if self.api == 'anthropic-messages':
-            if self.thinking_mode is None:
-                raise ValueError('Native Messages identity requires its thinking mode.')
-            self.generation.version(self.harness, self.api)
+        if self.api == 'anthropic-messages' and self.thinking_mode is None:
+            raise ValueError('Native Messages identity requires its thinking mode.')
         return self
 
     @property
@@ -232,7 +230,6 @@ class System(SystemIdentity):
     name: str
     """Table name used by data and URLs, excluded from the fingerprint."""
 
-    generation: Generation
     display_name: str
     """Public label, excluded from the fingerprint."""
 

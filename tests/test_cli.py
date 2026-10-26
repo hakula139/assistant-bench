@@ -1427,7 +1427,7 @@ class TestFingerprints:
         assert result.stdout == ''
         assert result.stderr == (
             'System `opus-5.5-high` changed its fingerprint since `origin/main` in '
-            '`writing-en`. Give the changed system a new name and keep the old '
+            '`writing-en`. Give a changed system a new name and keep the old '
             'name only in closed reports, as `docs/guide/authoring.md#systems` '
             'describes.\n'
         )

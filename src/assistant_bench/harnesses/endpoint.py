@@ -9,6 +9,7 @@ import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -47,9 +48,8 @@ class Endpoint(BaseModel):
 
     model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
 
-    base_url: HttpUrl | None = Field(default=None, validation_alias=BASE_URL_VAR)
-    anthropic_base_url: HttpUrl | None = Field(
-        default=None, validation_alias=ANTHROPIC_BASE_URL_VAR
+    base_url: HttpUrl = Field(
+        validation_alias=AliasChoices(BASE_URL_VAR, ANTHROPIC_BASE_URL_VAR)
     )
 
     key_file: FilePath = Field(validation_alias=KEY_FILE_VAR)
@@ -68,10 +68,13 @@ class Endpoint(BaseModel):
         cls, env: Callable[[str], str | None], api: Api = 'openai-chat-completions'
     ) -> Endpoint:
         """Validate the value `env` returns for each endpoint variable."""
-        base_var = (
-            ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
+        names = (
+            _base_var(api),
+            KEY_FILE_VAR,
+            CA_FILE_VAR,
+            HEADERS_VAR,
+            LOCAL_ADDRESS_VAR,
         )
-        names = (base_var, KEY_FILE_VAR, CA_FILE_VAR, HEADERS_VAR, LOCAL_ADDRESS_VAR)
         values = {name: value for name in names if (value := env(name))}
         return cls.model_validate(values)
 
@@ -84,7 +87,6 @@ class Endpoint(BaseModel):
 
     def client(self) -> AsyncOpenAI:
         """Build the native client, bound to the local address if set."""
-        assert self.base_url is not None
         return AsyncOpenAI(
             base_url=str(self.base_url),
             api_key=self.api_key(),
@@ -114,9 +116,8 @@ class Endpoint(BaseModel):
 
     def messages_client(self) -> AsyncAnthropic:
         _check_messages_environment(os.environ.get)
-        assert self.anthropic_base_url is not None
         return AsyncAnthropic(
-            base_url=str(self.anthropic_base_url),
+            base_url=str(self.base_url),
             api_key=self.api_key(),
             max_retries=0,
             open_telemetry=False,
@@ -161,8 +162,7 @@ def preflight(
     if api == 'anthropic-messages':
         _check_messages_environment(lookup)
 
-    base_var = ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
-    required = (base_var, KEY_FILE_VAR, EXPORT_VAR)
+    required = (_base_var(api), KEY_FILE_VAR, EXPORT_VAR)
     missing = [var for var in required if not lookup(var)]
     if missing:
         raise ValueError(
@@ -170,6 +170,10 @@ def preflight(
             '`nix develop`.'
         )
     Endpoint.read(lookup, api).verify()
+
+
+def _base_var(api: Api) -> str:
+    return ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
 
 
 def _check_messages_environment(env: Callable[[str], str | None]) -> None:

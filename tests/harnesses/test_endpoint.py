@@ -7,8 +7,10 @@ import textwrap
 from pathlib import Path
 from urllib.request import getproxies_environment
 
+import anthropic
 import httpx
 import httpx2
+import openai
 import pytest
 from pydantic import ValidationError
 
@@ -119,27 +121,42 @@ class TestEndpoint:
             }
 
         @pytest.mark.parametrize(
-            'api', ['openai-chat-completions', 'anthropic-messages']
+            ('api', 'error_type'),
+            [
+                ('openai-chat-completions', openai.APIStatusError),
+                ('anthropic-messages', anthropic.APIStatusError),
+            ],
         )
         def test_does_not_follow_a_redirect_to_another_endpoint(
-            self, endpoint: StubEndpoint, ipv6_endpoint: StubEndpoint, api: Api
+            self,
+            endpoint: StubEndpoint,
+            ipv6_endpoint: StubEndpoint,
+            api: Api,
+            error_type: type[Exception],
         ) -> None:
             configured = Endpoint.read(endpoint.env.get, api)
-            build = (
-                configured.messages_http_client
-                if api == 'anthropic-messages'
-                else configured.http_client
-            )
             endpoint.status = 307
             endpoint.response_headers['Location'] = f'{ipv6_endpoint.url}/v1/responses'
 
-            async def request() -> httpx.Response | httpx2.Response:
-                async with build() as client:
-                    return await client.post(f'{endpoint.url}/v1/responses', json={})
+            async def request() -> None:
+                if api == 'anthropic-messages':
+                    async with configured.messages_client() as client:
+                        await client.post(
+                            f'{endpoint.url}/v1/responses',
+                            cast_to=httpx2.Response,
+                            body={},
+                        )
+                    return
+                async with configured.client() as client:
+                    await client.post(
+                        f'{endpoint.url}/v1/responses',
+                        cast_to=httpx.Response,
+                        body={},
+                    )
 
-            reply = asyncio.run(request())
+            with pytest.raises(error_type):
+                asyncio.run(request())
 
-            assert reply.status_code == 307
             assert len(endpoint.requests) == 1
             assert ipv6_endpoint.requests == []
 

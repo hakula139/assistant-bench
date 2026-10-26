@@ -197,14 +197,26 @@ class TestSystemsAt:
 
         assert revisions.changed_fingerprints(responses_base, head) == []
 
-    def test_requires_a_new_name_when_a_shared_cohort_has_no_declared_protocol(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('project', 'missing'),
+        [
+            (
+                '[tool.assistant-bench]\nmessages-protocol = 1\n',
+                'generation-protocol',
+            ),
+            (
+                '[tool.assistant-bench]\ngeneration-protocol = 1\n',
+                'messages-protocol',
+            ),
+        ],
+        ids=['generation-protocol', 'messages-protocol'],
+    )
+    def test_names_the_generation_key_a_shared_cohort_lacks(
+        self, monkeypatch: pytest.MonkeyPatch, project: str, missing: str
     ) -> None:
-        self.fake_git(monkeypatch, project='')
+        self.fake_git(monkeypatch, project=project)
 
-        with pytest.raises(
-            ValueError, match='no declared generation protocol.*new names'
-        ):
+        with pytest.raises(ValueError, match=rf'lacks `{missing}`.*new names'):
             revisions.systems_at('origin/main', {'writing/large'})
 
     @pytest.mark.parametrize(

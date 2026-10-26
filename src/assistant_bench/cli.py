@@ -37,6 +37,10 @@ from assistant_bench.outputs import Output
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
 HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
+SYSTEM_RENAME_GUIDE = (
+    'Give a changed system a new name and keep the old name only in closed '
+    f'reports, as `{SYSTEMS_DOC}` describes.'
+)
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(arena_app, name='arena', help='Prepare and manage frozen arena evidence.')
@@ -265,8 +269,7 @@ def fingerprints(
         name = head_systems[key].name
         typer.echo(
             f'System `{name}` changed its fingerprint since `{base}` in '
-            f'`{key.split("/")[0]}`. Give the changed system a new name and keep '
-            f'the old name only in closed reports, as `{SYSTEMS_DOC}` describes.',
+            f'`{key.split("/")[0]}`. {SYSTEM_RENAME_GUIDE}',
             err=True,
         )
     if changed:
@@ -394,7 +397,7 @@ def _family_systems(family: Family) -> list[System]:
     listed: list[System] = []
     if family.settings.systems:
         try:
-            listed = revisions.listed_systems(family, _load_systems())
+            listed = jobs.listed_systems(family, _load_systems())
         except ValueError as error:
             _fail(str(error))
 
@@ -478,10 +481,15 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         for name, recorded, current in drifted
     )
     _fail(
-        f'Family `{family.name}` has systems that changed their fingerprints:\n'
-        f'{detail}\n'
-        'Give a changed system a new name and keep the old name only in closed '
-        f'reports, as `{SYSTEMS_DOC}` describes.'
+        dedent(
+            """
+            Family `{family}` has systems that changed their fingerprints:
+            {detail}
+            {guide}
+            """
+        )
+        .strip()
+        .format(family=family.name, detail=detail, guide=SYSTEM_RENAME_GUIDE)
     )
 
 

@@ -13,23 +13,11 @@ from assistant_bench.catalog import (
     parse_system_configs,
     resolve_identity,
 )
-from assistant_bench.families import Family, family_names, load_family
+from assistant_bench.families import family_names, load_family
 from assistant_bench.generation import parse_generation
-from assistant_bench.jobs import family_systems
+from assistant_bench.jobs import family_systems, listed_systems
 from assistant_bench.messages import code
 from assistant_bench.paths import REPO_ROOT
-
-
-def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
-    """Return the systems a family lists, refusing a name `systems.toml` lacks."""
-    unknown = [name for name in family.settings.systems if name not in systems]
-    if unknown:
-        raise ValueError(
-            f'Family `{family.name}` lists {code(unknown)}, which '
-            f'`{SYSTEMS_FILE}` does not define. Fix '
-            f'`families/{family.name}/family.toml` or add the system table.'
-        )
-    return [systems[name] for name in family.settings.systems]
 
 
 def current_systems(systems: dict[str, System]) -> dict[str, System]:
@@ -77,8 +65,8 @@ def systems_at(revision: str, selected: set[str]) -> dict[str, SystemIdentity]:
         )
     except KeyError as error:
         raise ValueError(
-            f'Revision `{revision}` has no declared generation protocol for '
-            'its shared runnable systems. Give those systems new names.'
+            f'Revision `{revision}` lacks `{error.args[0]}` in its generation '
+            'metadata for its shared runnable systems. Give those systems new names.'
         ) from error
 
     systems = _output('git', 'show', f'{commit}:{SYSTEMS_FILE}')
