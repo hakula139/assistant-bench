@@ -1,6 +1,5 @@
 """Explicitly approved numerical and rendering projections for an arena release."""
 
-import tomllib
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
@@ -8,7 +7,7 @@ from pydantic import JsonValue
 
 from assistant_bench.families import Case, Family, VotesSettings
 from assistant_bench.outputs import Output as CollectedOutput
-from assistant_bench.paths import REPO_ROOT
+from assistant_bench.report import INFERENCE, METHOD, RULES
 from assistant_bench.scoring.length import text_length
 from assistant_bench_arena.ledger_models import (
     Case as FrozenCase,
@@ -42,9 +41,13 @@ from assistant_bench_arena.snapshots import (
 )
 
 
-def load_policy() -> AnalysisPolicy:
-    with (REPO_ROOT / 'arena' / 'analysis.toml').open('rb') as file:
-        return AnalysisPolicy.model_validate(tomllib.load(file))
+POLICY = AnalysisPolicy.model_validate(
+    {
+        'method': METHOD.model_dump(),
+        'rules': RULES.model_dump(),
+        'inference': INFERENCE.model_dump(),
+    }
+)
 
 
 def public_catalog(releases: Sequence[Release]) -> tuple[FamilyView, ...]:
@@ -118,7 +121,6 @@ def prepare(
     source_digests: Mapping[str, str],
     system_names: Mapping[str, str],
     system_fingerprints: Mapping[str, str],
-    policy: AnalysisPolicy,
     approval: PublicApproval,
 ) -> Release:
     """Prepare the exact explicitly approved public subset.
@@ -273,7 +275,7 @@ def prepare(
         categories=tuple(settings.categories),
         defects=tuple(settings.defects),
     )
-    manifest = EvaluationManifest(family=definition, policy=policy)
+    manifest = EvaluationManifest(family=definition, policy=POLICY)
     numerics = settlements(frozen_outputs)
     evaluation_id = evaluation_identity(
         manifest, selected_cases, systems, frozen_outputs, numerics
@@ -289,10 +291,10 @@ def prepare(
     publication_id = publication_identity(
         evaluation_id, presentation, approval, rendered
     )
-    policy_id = digest(policy)
+    policy_id = digest(POLICY)
     points = {system.id: Point(score=None, component=None) for system in systems}
     return Release(
-        policy=policy,
+        policy=POLICY,
         evaluation=Evaluation(
             id=evaluation_id,
             family=family.name,

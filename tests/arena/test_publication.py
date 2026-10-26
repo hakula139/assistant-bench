@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from assistant_bench.arena.publication import (
     case_key,
-    load_policy,
     output_key,
     prepare,
 )
@@ -41,7 +40,6 @@ class Inputs:
             source_digests=self.sources,
             system_names=self.names,
             system_fingerprints=self.fingerprints,
-            policy=load_policy(),
             approval=self.approve() if approval is None else approval,
         )
 

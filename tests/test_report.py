@@ -11,16 +11,16 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench import report
-from assistant_bench.arena.snapshots import HumanEvidence, OutputMeasurement
-from assistant_bench.families import load_family
+from assistant_bench.families import Choice, load_family
 from assistant_bench.outputs import write_outputs
 from assistant_bench.report import (
+    HumanEvidence,
+    OutputMeasurement,
     Report,
     write_report,
 )
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.weighting import actor_weights
-from assistant_bench_arena.models import Choice
 from snapshot_support import make_analysis, make_capped_analysis, make_evidence
 from support import (
     AT,
@@ -332,11 +332,7 @@ class TestVotesResults:
             ),
             replace(make_evidence(1, systems=('b', 'a')), defects_b=('facts',)),
         )
-        analysis = make_analysis(rows)
-        analysis = replace(
-            analysis,
-            family=analysis.family.model_copy(update={'defects': PROSE_DEFECTS}),
-        )
+        analysis = replace(make_analysis(rows), defects=PROSE_DEFECTS)
         outputs = tuple(
             OutputMeasurement(
                 case=f'case-{index}',
@@ -695,7 +691,7 @@ class TestVotesResults:
                     )
                     actors.append(actor)
 
-        weights = actor_weights(actors, 100)
+        weights = actor_weights(actors)
         ordinary = tuple(
             replace(row, comparison=row.comparison._replace(weight=weight))
             for row, weight in zip(rows, weights, strict=True)

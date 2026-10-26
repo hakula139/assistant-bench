@@ -4,7 +4,7 @@ from harbor.models.job.lock import TrialLock
 from pydantic import Field
 
 from assistant_bench import jobs
-from assistant_bench.arena.publication import load_policy, prepare, publication_settings
+from assistant_bench.arena.publication import prepare, publication_settings
 from assistant_bench.arena.sources import prove_task
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.families import case_task, load_cases, load_family
@@ -85,6 +85,5 @@ def prepare_selection(selection: Preparation) -> Release:
         source_digests=sources,
         system_names={system.name: system.display_name for system in systems},
         system_fingerprints={system.name: system.fingerprint for system in systems},
-        policy=load_policy(),
         approval=selection.approval,
     )

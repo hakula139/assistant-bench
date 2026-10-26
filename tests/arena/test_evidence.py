@@ -6,7 +6,7 @@ import pytest
 
 from arena_support import BASE_MS, RETENTION_MS, native_management, vote_capture
 from assistant_bench.arena.exports import capture_export
-from assistant_bench.arena.publication import load_policy
+from assistant_bench.arena.publication import POLICY
 from assistant_bench.arena.publishing import publish_release
 from assistant_bench.arena.snapshots import analyze_export
 from assistant_bench_arena.ledger import Ledger
@@ -90,7 +90,7 @@ class TestReplay:
         async def scenario() -> None:
             async with native_management(runtime) as management:
                 ledger = management.ledger
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 capture = await vote_capture(management, release)
                 original = Receipt.model_validate_json(

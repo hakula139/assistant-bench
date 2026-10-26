@@ -1,13 +1,19 @@
 """Frozen numerical evidence, independent of current files and live projections."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
 
 from pydantic import BaseModel
 
 from assistant_bench.arena.evidence import replay
 from assistant_bench.arena.exports import FrozenExport
+from assistant_bench.arena.publication import POLICY
+from assistant_bench.report import (
+    AnalysisInput,
+    HumanEvidence,
+    LedgerProvenance,
+    OutputMeasurement,
+)
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.ranking import Comparison
 from assistant_bench.scoring.weighting import actor_weights
@@ -27,78 +33,22 @@ from assistant_bench_arena.ledger_models import (
     Session,
     System,
 )
-from assistant_bench_arena.models import Choice, Defect
 from assistant_bench_arena.releases import (
     EvaluationBundle,
     point_snapshot,
     validate_presentation,
 )
 from assistant_bench_arena.serialization import canonical, digest
-from assistant_bench_arena.snapshots import (
-    AnalysisPolicy,
-    CappedHumanWeights,
-    FamilyDefinition,
-    LedgerProvenance,
-    Provenance,
-    Settlement,
-    UnrecordedProvenance,
-)
-
-
-@dataclass(frozen=True)
-class HumanEvidence:
-    receipt: str
-    actor: str
-    session: str
-    choice: Choice
-    defects_a: tuple[Defect, ...]
-    defects_b: tuple[Defect, ...]
-    length_a: int
-    length_b: int
-    comparison: Comparison
-    """Weight assigned once over the complete eligible family evaluation."""
-
-    repeat_of: str | None = None
-
-    @property
-    def systems(self) -> tuple[str, str]:
-        return self.comparison.left, self.comparison.right
-
-
-@dataclass(frozen=True)
-class OutputMeasurement:
-    case: str
-    system: str
-    errored: bool
-    verdict: Literal['pass', 'fail', 'ungraded']
-    cost_usd: float | None
-    latency_sec: float | None
-    output_tokens: int | None
-
-
-@dataclass(frozen=True)
-class AnalysisInput:
-    family: FamilyDefinition
-    policy: AnalysisPolicy
-    provenance: Provenance
-    categories: tuple[tuple[str, str | None], ...]
-    """Every frozen case, with None marking an explicitly uncategorized case."""
-    ordinary: tuple[HumanEvidence, ...]
-    repeats: tuple[HumanEvidence, ...]
-    settlements: tuple[Comparison, ...]
-    outputs: tuple[OutputMeasurement, ...]
-    sessions: tuple[str, ...]
-    """Eligible session IDs ordered by their frozen start time and stable ID."""
-
-    accepted: int
-    """Every accepted choice, including repeats and inactive receipts."""
+from assistant_bench_arena.snapshots import AnalysisPolicy, Settlement
 
 
 @dataclass(frozen=True)
 class SnapshotAnalysis:
     analysis: AnalysisInput
-    inventory: EvaluationBundle
-    publication: Publication
+    fingerprints: dict[str, str]
+    system_names: dict[str, str]
+    """Public display names the release recorded for its systems."""
+
     points: PointSnapshot
 
 
@@ -157,9 +107,8 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
     ):
         raise ValueError('The export registration does not bind its sealed inventory.')
 
-    weights = policy.method.human_weights
-    if not isinstance(weights, CappedHumanWeights):
-        raise ValueError('Ledger exports require the complete actor cap policy.')
+    if policy != POLICY:
+        raise ValueError('The export names an unsupported analysis policy.')
 
     observations = _records(capture, 'receipts', Receipt)
     events = _records(capture, 'events', Event)
@@ -207,9 +156,11 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
             and a.content_digest != b.content_digest
         )
 
-    ordinary = tuple(row for row in selected if row.repeat_of is None and eligible(row))
-    ordinary_map = {row.seq: row for row in ordinary}
-    repeats: list[Receipt] = []
+    ordinary_rows = tuple(
+        row for row in selected if row.repeat_of is None and eligible(row)
+    )
+    ordinary_map = {row.seq: row for row in ordinary_rows}
+    repeat_rows: list[Receipt] = []
     for row in selected:
         if row.repeat_of is None or not eligible(row):
             continue
@@ -220,9 +171,7 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
             and row.a_output == original.b_output
             and row.b_output == original.a_output
         ):
-            repeats.append(row)
-
-    assigned = actor_weights([row.actor_id for row in ordinary], weights.cap)
+            repeat_rows.append(row)
 
     def human(row: Receipt, weight: float) -> HumanEvidence:
         return HumanEvidence(
@@ -237,38 +186,98 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
             comparison=Comparison(
                 row.a_system,
                 row.b_system,
-                {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}[row.choice],
+                ranking.LEFT_SCORE[row.choice],
                 row.case_key,
                 weight,
             ),
             repeat_of=None if row.repeat_of is None else str(row.repeat_of),
         )
 
+    assigned = actor_weights([row.actor_id for row in ordinary_rows])
+    ordinary = tuple(
+        human(row, weight) for row, weight in zip(ordinary_rows, assigned, strict=True)
+    )
+    repeats = tuple(human(row, 0.0) for row in repeat_rows)
     numerical = tuple(
         Settlement.model_validate_json(canonical(row.value)) for row in numerics
     )
+    settlements = tuple(
+        Comparison(
+            output_map[row.a_output].system_id,
+            output_map[row.b_output].system_id,
+            row.score,
+            row.case_key,
+            row.weight,
+            sided=False,
+        )
+        for row in numerical
+    )
     family = evaluation.manifest.family
-    selected_sessions = {row.session_id for row in ordinary}
+    evidence_digest = digest(
+        {
+            'export_digest': capture.content_digest,
+            'ordinary': [
+                {
+                    'receipt': row.receipt,
+                    'actor': row.actor,
+                    'weight': row.comparison.weight,
+                }
+                for row in ordinary
+            ],
+            'repeats': [row.receipt for row in repeats],
+        }
+    )
+    points = {system.id: Point(score=None, component=None) for system in systems}
+    for component in ranking.rate_components(
+        [row.comparison for row in ordinary] + list(settlements),
+        family.systems,
+        family.reference,
+    ):
+        ratings = component.ratings
+        identity = digest(list(ratings.systems))
+        points.update(
+            {
+                system: Point(score=float(ratings.score[index]), component=identity)
+                for index, system in enumerate(ratings.systems)
+            }
+        )
+
+    fitted_points = point_snapshot(
+        evaluation.id,
+        header.policy_id,
+        points,
+        source_export_id=header.id,
+        source_export_digest=capture.content_digest,
+        weighted_evidence_digest=evidence_digest,
+    )
+    selected_sessions = {row.session for row in ordinary}
     analysis = AnalysisInput(
-        family=family,
-        policy=policy,
-        provenance=UnrecordedProvenance(status='unrecorded'),
+        family=family.name,
+        reference=family.reference,
+        systems=family.systems,
+        defects=family.defects,
+        provenance=LedgerProvenance(
+            status='ledger',
+            schema_version=header.schema_version,
+            export_id=header.id,
+            export_digest=capture.content_digest,
+            namespace=header.namespace,
+            captured_at=datetime.fromtimestamp(header.created_at / 1000, UTC),
+            event_cutoff=header.event_cutoff,
+            receipt_cutoff=header.receipt_cutoff,
+            family_revision=header.family_revision,
+            analysis_sequence=header.analysis_sequence,
+            evaluation_id=evaluation.id,
+            publication_id=publication.id,
+            policy_id=header.policy_id,
+            sampling_point_snapshot_id=sampling_points.id,
+            weighted_evidence_digest=evidence_digest,
+            fitted_point_snapshot_id=fitted_points.id,
+        ),
         categories=tuple((case.key, case.category) for case in cases),
-        ordinary=tuple(
-            human(row, weight) for row, weight in zip(ordinary, assigned, strict=True)
-        ),
-        repeats=tuple(human(row, 0.0) for row in repeats),
-        settlements=tuple(
-            Comparison(
-                output_map[row.a_output].system_id,
-                output_map[row.b_output].system_id,
-                row.score,
-                row.case_key,
-                row.weight,
-                sided=False,
-            )
-            for row in numerical
-        ),
+        ordinary=ordinary,
+        repeats=repeats,
+        settlements=settlements,
         outputs=tuple(
             OutputMeasurement(
                 case=row.case_key,
@@ -288,99 +297,9 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
         ),
         accepted=len(observations),
     )
-    evidence_digest = digest(
-        {
-            'export_digest': capture.content_digest,
-            'ordinary': [
-                {
-                    'receipt': row.receipt,
-                    'actor': row.actor,
-                    'weight': row.comparison.weight,
-                }
-                for row in analysis.ordinary
-            ],
-            'repeats': [row.receipt for row in analysis.repeats],
-        }
-    )
-    points = {system.id: Point(score=None, component=None) for system in systems}
-    for fitted in fit_points(analysis):
-        component = digest(list(fitted.systems))
-        points.update(
-            {
-                system: Point(score=float(fitted.score[index]), component=component)
-                for index, system in enumerate(fitted.systems)
-            }
-        )
-
-    fitted_points = point_snapshot(
-        evaluation.id,
-        header.policy_id,
-        points,
-        source_export_id=header.id,
-        source_export_digest=capture.content_digest,
-        weighted_evidence_digest=evidence_digest,
-    )
-    provenance = LedgerProvenance(
-        status='ledger',
-        schema_version=header.schema_version,
-        export_id=header.id,
-        export_digest=capture.content_digest,
-        namespace=header.namespace,
-        captured_at=datetime.fromtimestamp(header.created_at / 1000, UTC),
-        event_cutoff=header.event_cutoff,
-        receipt_cutoff=header.receipt_cutoff,
-        family_revision=header.family_revision,
-        analysis_sequence=header.analysis_sequence,
-        evaluation_id=evaluation.id,
-        publication_id=publication.id,
-        policy_id=header.policy_id,
-        sampling_point_snapshot_id=sampling_points.id,
-        weighted_evidence_digest=evidence_digest,
-        fitted_point_snapshot_id=fitted_points.id,
-    )
     return SnapshotAnalysis(
-        analysis=replace(analysis, provenance=provenance),
-        inventory=inventory,
-        publication=publication,
+        analysis=analysis,
+        fingerprints=fingerprints,
+        system_names=publication.presentation.systems,
         points=fitted_points,
     )
-
-
-def fit_points(analysis: AnalysisInput) -> tuple[ranking.PointRatings, ...]:
-    """Fit each component, with the overall weighted root's component first.
-
-    The reference anchors its component. Other components anchor independently
-    at their own weighted roots, so their scores cannot be compared.
-    """
-    method = analysis.policy.method
-    if (
-        method.l2_penalty != ranking.L2_PENALTY
-        or method.points_per_logit != ranking.ELO_PER_LOGIT
-        or method.anchor_score != ranking.ANCHOR
-    ):
-        raise ValueError('The snapshot names an unsupported point-fit policy.')
-
-    comparisons = [row.comparison for row in analysis.ordinary] + list(
-        analysis.settlements
-    )
-    if not comparisons:
-        return ()
-
-    matchups = ranking.Matchups.build(comparisons)
-    order = analysis.family.systems
-    overall_root = matchups.root(order)
-    remaining = set(matchups.systems)
-    fitted: list[ranking.PointRatings] = []
-
-    for system in (overall_root, *matchups.systems):
-        if system not in remaining:
-            continue
-
-        component = matchups.component(system)
-        root = component.root(order)
-        reference = analysis.family.reference
-        anchor = reference if reference in component.systems else root
-        fitted.append(ranking.rate_point(component, root).anchored(anchor))
-        remaining.difference_update(component.systems)
-
-    return tuple(fitted)

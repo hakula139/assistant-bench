@@ -2,13 +2,15 @@
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
 import numpy.typing as npt
 from scipy import optimize, sparse, special, stats
 from threadpoolctl import threadpool_limits
+
+from assistant_bench.families import Choice
 
 
 type Floats = npt.NDArray[np.float64]
@@ -18,6 +20,7 @@ ELO_PER_LOGIT = 400 / math.log(10)
 ANCHOR = 1000.0
 # Keeps the strength of a system that wins every vote finite.
 L2_PENALTY = 0.01
+LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 
 
 class Comparison(NamedTuple):
@@ -128,10 +131,16 @@ class PointRatings:
     score: Floats
     position: float
 
-    def anchored(self, system: str) -> PointRatings:
-        """Shift every score so `system` sits at `ANCHOR`."""
-        shift = ANCHOR - self.score[self.systems.index(system)]
-        return replace(self, score=self.score + shift)
+
+@dataclass(frozen=True)
+class Component:
+    """The point fit of one connected component."""
+
+    root: str
+    """System incident on the component's greatest effective human weight."""
+    anchor: str
+    """System at `ANCHOR`, the reference when the component holds it, else the root."""
+    ratings: PointRatings
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
@@ -159,9 +168,36 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     return _fit(theta, len(matchups.systems))
 
 
-def rate_point(matchups: Matchups, root: str) -> PointRatings:
-    """Place the root system's point score at `ANCHOR`."""
-    return _point_ratings(matchups.systems, fit(matchups), root)
+def rate_point(matchups: Matchups, anchor: str) -> PointRatings:
+    """Place the anchor system's point score at `ANCHOR`."""
+    return _point_ratings(matchups.systems, fit(matchups), anchor)
+
+
+def rate_components(
+    comparisons: Sequence[Comparison], order: Sequence[str], reference: str
+) -> tuple[Component, ...]:
+    """Fit each connected component, the overall weighted root's component first.
+
+    `order` breaks ties between roots. The reference anchors its own component and
+    each other component anchors at its root, so their scores cannot be compared.
+    """
+    if not comparisons:
+        return ()
+
+    matchups = Matchups.build(comparisons)
+    remaining = set(matchups.systems)
+    components: list[Component] = []
+    for system in (matchups.root(order), *matchups.systems):
+        if system not in remaining:
+            continue
+
+        component = matchups.component(system)
+        root = component.root(order)
+        anchor = reference if reference in component.systems else root
+        components.append(Component(root, anchor, rate_point(component, anchor)))
+        remaining.difference_update(component.systems)
+
+    return tuple(components)
 
 
 def rank_agreement(first: Floats, second: Floats) -> float | None:
@@ -173,8 +209,8 @@ def rank_agreement(first: Floats, second: Floats) -> float | None:
     return None if np.isnan(statistic) else statistic
 
 
-def _point_ratings(systems: tuple[str, ...], point: Fit, root: str) -> PointRatings:
-    shift = point.strength[systems.index(root)]
+def _point_ratings(systems: tuple[str, ...], point: Fit, anchor: str) -> PointRatings:
+    shift = point.strength[systems.index(anchor)]
     return PointRatings(
         systems=systems,
         score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),

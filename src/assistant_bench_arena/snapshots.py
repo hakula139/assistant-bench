@@ -3,7 +3,6 @@
 from typing import Annotated, Literal, Self
 
 from pydantic import (
-    AwareDatetime,
     Field,
     field_validator,
     model_validator,
@@ -67,37 +66,6 @@ class AnalysisPolicy(Record):
     method: VotesMethod
     rules: VotesRules
     inference: UnavailableInference
-
-
-class UnrecordedProvenance(Record):
-    status: Literal['unrecorded']
-
-
-class SnapshotProvenance(Record):
-    schema_version: Literal[1]
-    export_id: Annotated[str, Field(min_length=1)]
-    export_digest: Annotated[str, Field(min_length=1)]
-    namespace: Annotated[str, Field(min_length=1)]
-    captured_at: AwareDatetime
-    event_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    receipt_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    family_revision: Annotated[int, Field(strict=True, ge=0)]
-    analysis_sequence: Annotated[int, Field(strict=True, ge=0)]
-    evaluation_id: Annotated[str, Field(min_length=1)]
-    publication_id: Annotated[str, Field(min_length=1)]
-    policy_id: Annotated[str, Field(min_length=1)]
-    sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
-
-
-class LedgerProvenance(SnapshotProvenance):
-    status: Literal['ledger']
-    weighted_evidence_digest: Annotated[str, Field(min_length=1)]
-    fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
-
-
-type Provenance = Annotated[
-    UnrecordedProvenance | LedgerProvenance, Field(discriminator='status')
-]
 
 
 class FamilyDefinition(Record):

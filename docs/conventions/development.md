@@ -46,7 +46,7 @@ Commands stay minimal, and settings live in config files:
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
 | Repeat share, seed votes, and sampling policy                                 | `src/assistant_bench_arena/scheduler.py`                                                                              |
 | The voting runtime's origins, namespace, and D1 bindings                      | `wrangler.toml`                                                                                                       |
-| Point-fit parameters and diagnostic coverage rules                            | `scoring/ranking.py` and `report.py`, frozen in each voted report                                                     |
+| Point-fit parameters, the actor cap, and diagnostic coverage rules            | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, sealed into each release and recorded in each report   |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |

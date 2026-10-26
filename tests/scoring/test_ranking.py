@@ -16,6 +16,7 @@ from assistant_bench.scoring.ranking import (
     Matchups,
     fit,
     rank_agreement,
+    rate_components,
     rate_point,
 )
 
@@ -201,11 +202,11 @@ class TestFit:
 
 
 class TestRatePoint:
-    def test_anchors_the_reference_and_preserves_score_gaps(self) -> None:
+    def test_anchors_the_named_system_and_preserves_score_gaps(self) -> None:
         matchups = Matchups.build(simulate(600))
 
         ratings = rate_point(matchups, 'medium')
-        shifted = ratings.anchored('large')
+        shifted = rate_point(matchups, 'large')
 
         assert ratings.systems == ('large', 'medium', 'small')
         assert ratings.score[1] == pytest.approx(ANCHOR)
@@ -246,6 +247,49 @@ class TestRatePoint:
         assert threads == [1]
         assert after == 2
         assert thread_limit == 8
+
+
+class TestRateComponents:
+    ORDER = ('a', 'b', 'x', 'y')
+
+    def test_fits_every_component_after_the_weighted_human_root(self) -> None:
+        shared = [Comparison('a', 'b', 1.0, f'ab-{i}', 0.4) for i in range(250)]
+        many = [Comparison('x', 'y', 1.0, f'xy-{i}') for i in range(101)]
+
+        components = rate_components(shared + many, self.ORDER, 'b')
+
+        assert [(c.ratings.systems, c.root, c.anchor) for c in components] == [
+            (('x', 'y'), 'x', 'x'),
+            (('a', 'b'), 'a', 'b'),
+        ]
+        for component, rows in zip(components, (many, shared), strict=True):
+            expected = rate_point(Matchups.build(rows), component.anchor)
+            assert component.ratings.score == pytest.approx(expected.score)
+
+    def test_keeps_settlement_mass_out_of_root_selection(self) -> None:
+        settled = [
+            Comparison('a', 'b', 1.0, f'settled-{i}', 0.25, sided=False)
+            for i in range(20)
+        ]
+
+        components = rate_components(
+            [Comparison('x', 'y', 1.0, 'voted'), *settled], self.ORDER, 'a'
+        )
+
+        assert [c.ratings.systems for c in components] == [('x', 'y'), ('a', 'b')]
+        expected = rate_point(Matchups.build(settled), 'a')
+        assert components[1].ratings.score == pytest.approx(expected.score)
+
+    def test_supports_settlement_only_and_unrated_startup(self) -> None:
+        settled = [Comparison('a', 'b', 0.0, 'settled', 0.25, sided=False)]
+
+        startup = rate_components([], self.ORDER, 'a')
+        (component,) = rate_components(settled, self.ORDER, 'a')
+
+        assert startup == ()
+        assert component.ratings.systems == ('a', 'b')
+        assert component.ratings.score[0] == pytest.approx(ANCHOR)
+        assert component.ratings.score[1] > ANCHOR
 
 
 class TestRankAgreement:
