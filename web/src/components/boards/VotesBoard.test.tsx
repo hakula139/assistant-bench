@@ -132,12 +132,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={await load()}
-        categories={[...CATEGORIES]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={await load()} categories={[...CATEGORIES]} labels={CASES} />,
     );
 
     expect(screen.queryByRole('status')).toBeNull();
@@ -169,12 +164,7 @@ describe('VotesBoard', () => {
     }
     const draw = (round: VotesRound) =>
       renderToString(
-        <VotesBoard
-          base={BOARD}
-          round={round}
-          categories={[...CATEGORIES]}
-          labels={CASES}
-        />,
+        <VotesBoard base={BOARD} round={round} categories={[...CATEGORIES]} labels={CASES} />,
       );
 
     const historical = draw(earlier);
