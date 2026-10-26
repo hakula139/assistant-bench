@@ -134,9 +134,12 @@ class NativeProbe(Terminus):
         assert isinstance(self._llm, NativeClient)
         return self._llm
 
+    async def call(self, prompt: str) -> LLMResponse:
+        return await self.client.call(prompt, **self._llm_call_kwargs)
+
     async def request(self, prompt: str) -> LLMResponse:
         try:
-            return await self.client.call(prompt, **self._llm_call_kwargs)
+            return await self.call(prompt)
         finally:
             await self.close()
 
@@ -1161,32 +1164,18 @@ class TestTerminus:
             ] * (1 if prior_usage is None else 2)
             assert client.max_retries == 0
 
-        @pytest.mark.parametrize(
-            'recovered', [False, True], ids=['all-failed', 'recovered']
-        )
-        def test_counts_only_completed_native_requests_through_http_failure_retries(
+        def test_keeps_http_failure_usage_unknown_through_native_retries(
             self,
             endpoint: StubEndpoint,
             responses_agent: NativeProbe,
             terminal_session: TmuxSession,
-            recovered: bool,
         ) -> None:
-            if recovered:
-                reply = json.dumps(
-                    {'analysis': '', 'plan': '', 'commands': [], 'task_complete': True}
-                )
-                endpoint.statuses = [503]
-                endpoint.response = response(reply)
-            else:
-                endpoint.status = 503
-                endpoint.response = {'error': {'message': 'Unavailable.'}}
+            endpoint.status = 503
+            endpoint.response = {'error': {'message': 'Unavailable.'}}
             context = AgentContext()
 
-            if recovered:
+            with pytest.raises(openai.InternalServerError):
                 asyncio.run(responses_agent.execute(terminal_session, context))
-            else:
-                with pytest.raises(openai.InternalServerError):
-                    asyncio.run(responses_agent.execute(terminal_session, context))
 
             assert len(endpoint.requests) == 3
             assert (
@@ -1194,19 +1183,45 @@ class TestTerminus:
                 context.n_cache_tokens,
                 context.n_output_tokens,
                 context.cost_usd,
-            ) == ((240, 200, 80, None) if recovered else (None, None, None, None))
+            ) == (None, None, None, None)
             assert context.metadata is not None
-            assert [
-                call['response_status'] for call in context.metadata['responses']
-            ] == (['completed', 'completed'] if recovered else [])
+            assert context.metadata['responses'] == []
             assert [
                 call['response_status']
                 for call in context.metadata['response_attempts']
-            ] == (
-                ['request_failed', 'completed', 'completed']
-                if recovered
-                else ['request_failed'] * 3
+            ] == ['request_failed'] * 3
+
+        def test_counts_usage_from_completed_requests_after_a_retry(
+            self,
+            endpoint: StubEndpoint,
+            responses_agent: NativeProbe,
+            terminal_session: TmuxSession,
+        ) -> None:
+            endpoint.statuses = [503]
+            endpoint.response = response(
+                json.dumps(
+                    {'analysis': '', 'plan': '', 'commands': [], 'task_complete': True}
+                )
             )
+            context = AgentContext()
+
+            asyncio.run(responses_agent.execute(terminal_session, context))
+
+            assert len(endpoint.requests) == 3
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+                context.cost_usd,
+            ) == (240, 200, 80, None)
+            assert context.metadata is not None
+            assert [
+                call['response_status'] for call in context.metadata['responses']
+            ] == ['completed', 'completed']
+            assert [
+                call['response_status']
+                for call in context.metadata['response_attempts']
+            ] == ['request_failed', 'completed', 'completed']
 
         def test_maps_the_provider_context_error_to_native_context_management(
             self, endpoint: StubEndpoint, responses_agent: NativeProbe
@@ -1224,6 +1239,37 @@ class TestTerminus:
                 asyncio.run(responses_agent.request('Greet me.'))
 
             assert len(endpoint.requests) == 1
+
+        def test_records_a_recovered_context_error_as_a_failed_attempt(
+            self, endpoint: StubEndpoint, responses_agent: NativeProbe
+        ) -> None:
+            endpoint.status = 400
+            endpoint.response = {
+                'error': {
+                    'code': 'context_length_exceeded',
+                    'message': 'The input context is full.',
+                    'type': 'invalid_request_error',
+                }
+            }
+
+            with pytest.raises(ContextLengthExceededError):
+                asyncio.run(responses_agent.call('Greet me.'))
+
+            endpoint.status = 200
+            endpoint.response = response('Hello there.')
+
+            reply = asyncio.run(responses_agent.call('Greet me again.'))
+
+            assert reply.usage is not None
+            llm = responses_agent.client
+            assert isinstance(llm, ResponsesLLM)
+            assert [attempt['response_status'] for attempt in llm.attempts] == [
+                'request_failed',
+                'completed',
+            ]
+            assert [result['response_status'] for result in llm.results] == [
+                'completed'
+            ]
 
         def test_native_budget_reissue_preserves_partial_items_and_all_reported_usage(
             self,
