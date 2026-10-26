@@ -22,6 +22,7 @@ from assistant_bench.harnesses.endpoint import (
     HEADERS_VAR,
     KEY_FILE_VAR,
     LOCAL_ADDRESS_VAR,
+    SDK_HEADERS_VAR,
     Endpoint,
     preflight,
 )
@@ -197,7 +198,7 @@ class TestPreflight:
         self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(
-            'ANTHROPIC_CUSTOM_HEADERS',
+            SDK_HEADERS_VAR,
             'x-ambient-header: ambient-value\nanthropic-beta: ambient-beta',
         )
         configured = Endpoint.read(endpoint.env.get, 'anthropic-messages')

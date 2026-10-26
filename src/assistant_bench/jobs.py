@@ -526,7 +526,8 @@ def job_path(config: JobConfig) -> Path:
 def run_job(config: JobConfig) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
-    Harbor inherits the process environment, which must hold `HARBOR_ENV`.
+    Harbor inherits the process environment, which must hold `HARBOR_ENV` and
+    lack `ANTHROPIC_CUSTOM_HEADERS`, as `bench` arranges.
 
     Raises
     ------

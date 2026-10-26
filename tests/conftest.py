@@ -13,7 +13,7 @@ from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
-from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, Endpoint
+from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
 from support import EXPORT_FILE, StubEndpoint, serve_stub
 
@@ -139,7 +139,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     for name in ENDPOINT_VARS:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv('ANTHROPIC_CUSTOM_HEADERS', raising=False)
+    monkeypatch.delenv(SDK_HEADERS_VAR, raising=False)
     for name in PROXY_VARS:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
