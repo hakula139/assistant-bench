@@ -158,18 +158,34 @@ const votesResults = z.strictObject({
 
 // ── Tests Results ──
 
+const share = z.number().min(0).max(1);
+
+const passRate = z.strictObject({ rate: share, lower: share, upper: share });
+
 const testsStanding = z.strictObject({
   system: z.string(),
-  trials: z.int(),
-  errored: z.int(),
-  pass_rate: z.number(),
+  tasks: z.int().min(1),
+  trials: z.int().min(1),
+  errored: z.int().nonnegative(),
+  pass_rate: passRate,
+  pass_hat_k: share.nullable(),
   mean_cost_usd: z.number().nullable(),
   p50_latency_sec: z.number().nullable(),
 });
 
+const testsCategory = z.strictObject({
+  category: z.string(),
+  standings: z.array(
+    z.strictObject({ system: z.string(), tasks: z.int().min(1), pass_rate: passRate }),
+  ),
+});
+
 const testsResults = z.strictObject({
   scorer: z.literal('tests'),
-  standings: z.array(testsStanding),
+  samples: z.int().min(1),
+  standings: z.array(testsStanding).min(1),
+  categories: z.array(testsCategory),
+  decision: z.strictObject({ leader: z.string(), tied: z.array(z.string()) }),
 });
 
 // ── Report ──
@@ -322,6 +338,30 @@ export const reportSchema = z
       }
     }
 
+    if (results.scorer === 'tests') {
+      if (results.standings.some((row) => (row.pass_hat_k === null) !== (results.samples === 1))) {
+        reject('pass^k is present exactly when tasks run several times');
+      }
+
+      const standing = new Set(results.standings.map((row) => row.system));
+      const { leader, tied } = results.decision;
+      if (
+        !standing.has(leader) ||
+        new Set(tied).size !== tied.length ||
+        tied.some((system) => system === leader || !standing.has(system))
+      ) {
+        reject('The decision must name standing systems once');
+      }
+
+      const categories = results.categories.map(({ category }) => category);
+      if (
+        new Set(categories).size !== categories.length ||
+        results.categories.some((board) => board.standings.some((row) => !standing.has(row.system)))
+      ) {
+        reject('Categories must be unique and list standing systems');
+      }
+    }
+
     const ids = Object.keys(systems);
 
     if (
@@ -352,5 +392,7 @@ export type HeadToHead = z.infer<typeof headToHead>;
 export type CategoryStanding = z.infer<typeof categoryStanding>;
 export type CategoryBoard = z.infer<typeof categoryBoard>;
 export type VotesResults = z.infer<typeof votesResults>;
+export type PassRate = z.infer<typeof passRate>;
+export type TestsStanding = z.infer<typeof testsStanding>;
 export type TestsResults = z.infer<typeof testsResults>;
 export type Report = z.infer<typeof reportSchema>;

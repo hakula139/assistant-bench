@@ -50,7 +50,7 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.messages import MessageCompletionError
 from assistant_bench.harnesses.responses import ResponseCompletionError
 from assistant_bench.messages import code, error_lines
-from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.outputs import Output, tests_pass, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
@@ -885,15 +885,14 @@ def _gate_failures(
 ) -> list[Gate] | None:
     """Return the gates a voted output fails, or `None` when it has no verdict.
 
-    A task's tests give the verdict even when its agent errored, as on a timeout,
-    since Harbor still runs the verifier.
+    A task's tests give the verdict even when its agent errored.
     """
     match family.settings:
         case VotesSettings():
             if family.source == 'tasks':
                 if reward is None:
                     return None
-                return [Gate.TESTS] if reward < 1 else []
+                return [] if tests_pass(reward) else [Gate.TESTS]
             if errored:
                 return None
 

@@ -8,7 +8,7 @@ import socket
 import ssl
 import textwrap
 import threading
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -59,6 +59,7 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 EXPORT_FILE = FIXTURES / 'nixos-config.json'
 REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
+TESTS_REPORT_FIXTURE = FIXTURES / 'report-tests.json'
 REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
 
@@ -118,13 +119,20 @@ def write_task_family(
     systems: tuple[str, ...] = (),
     author_vendor: str = 'acme',
     defects: tuple[Defect, ...] = CODE_DEFECTS,
+    samples: int = 1,
+    categories: Mapping[str, str] | None = None,
 ) -> None:
-    """Write a task family in the `smoke` category, copying the echo task per ID.
+    """Write a task family, copying the echo task per ID.
 
     A family that lists systems is scored by votes, tagged with `defects`, and
-    runs them as terminus-2, and one without is scored by tests. A `cases.toml`
-    already written for the same name is removed, since a family has one source.
+    runs them as terminus-2, and one without is scored by tests. `categories`
+    maps every task ID to its category, and the family allows only `smoke`
+    without it. A `cases.toml` already written for the same name is removed,
+    since a family has one source.
     """
+    if categories is None:
+        categories = dict.fromkeys(task_ids, 'smoke')
+    allowed = sorted(set(categories.values())) or ['smoke']
     directory = families_dir / name
     (directory / 'cases.toml').unlink(missing_ok=True)
     (directory / 'tasks').mkdir(parents=True)
@@ -145,8 +153,8 @@ def write_task_family(
         + textwrap.dedent(
             f"""\
             display_name = "Family {name}"
-            samples = 1
-            categories = ["smoke"]
+            samples = {samples}
+            categories = {json.dumps(allowed)}
             """
         )
     )
@@ -154,7 +162,11 @@ def write_task_family(
         target = directory / 'tasks' / task_id
         shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
         config = target / 'task.toml'
-        config.write_text(config.read_text().replace('smoke/echo', f'{name}/{task_id}'))
+        config.write_text(
+            config.read_text()
+            .replace('smoke/echo', f'{name}/{task_id}')
+            .replace('category = "smoke"', f'category = "{categories[task_id]}"')
+        )
         if systems:
             config.write_text(
                 config.read_text().replace(

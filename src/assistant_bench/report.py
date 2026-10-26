@@ -7,7 +7,7 @@ instruction, output text, route, or request ID.
 import math
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,9 +32,14 @@ from assistant_bench.families import (
     TaskTestsSettings,
     load_cases,
 )
-from assistant_bench.outputs import Output, read_outputs
+from assistant_bench.outputs import (
+    Output,
+    read_outputs,
+    system_fingerprints,
+    tests_pass,
+)
 from assistant_bench.paths import REPORTS_DIR, write_atomically
-from assistant_bench.scoring import ranking, weighting
+from assistant_bench.scoring import pass_rates, ranking, weighting
 
 
 SWAPPED: dict[Choice, Choice] = {
@@ -419,22 +424,85 @@ class VotesResults(_Model):
 # ── Tests Schema ──
 
 
+type Share = Annotated[float, Field(ge=0, le=1)]
+
+
+class PassRate(_Model):
+    """A mean of per-task shares with its 95% Clopper-Pearson interval over tasks."""
+
+    rate: Share
+    lower: Share
+    upper: Share
+
+
 class TestsStanding(_Model):
-    """One system's pass rate, with cost and latency over its error-free trials."""
+    """One system's pass rates, with cost and latency over its error-free trials."""
 
     system: str
-    trials: int
-    errored: int
-    pass_rate: float
+    tasks: Annotated[int, Field(ge=1)]
+    trials: Annotated[int, Field(ge=1)]
+    errored: Annotated[int, Field(ge=0)]
+    pass_rate: PassRate
+    pass_hat_k: Share | None
+    """Share of tasks whose `samples` trials all passed, null for one sample."""
+
     mean_cost_usd: float | None
     p50_latency_sec: float | None
 
 
+class TestsCategoryStanding(_Model):
+    system: str
+    tasks: Annotated[int, Field(ge=1)]
+    pass_rate: PassRate
+
+
+class TestsCategory(_Model):
+    category: str
+    standings: list[TestsCategoryStanding]
+
+
+class TestsDecision(_Model):
+    """The top pass rate and the systems a paired sign test cannot separate from it."""
+
+    leader: str
+    tied: list[str]
+
+
 class TestsResults(_Model):
-    """Pass rates on Harbor task tests, where an errored trial fails."""
+    """Pass rates on Harbor task tests, where every system ran every task."""
 
     scorer: Literal['tests']
-    standings: list[TestsStanding]
+    samples: Annotated[int, Field(ge=1)]
+    """Trials the family runs per task and system, the k of pass^k."""
+
+    standings: Annotated[list[TestsStanding], Field(min_length=1)]
+    categories: list[TestsCategory]
+    decision: TestsDecision
+
+    @model_validator(mode='after')
+    def validate_rates(self) -> TestsResults:
+        if any(
+            (row.pass_hat_k is None) != (self.samples == 1) for row in self.standings
+        ):
+            raise ValueError('pass^k is present exactly when tasks run several times.')
+
+        systems = {row.system for row in self.standings}
+        leader, tied = self.decision.leader, self.decision.tied
+        if (
+            leader not in systems
+            or len(set(tied)) != len(tied)
+            or not set(tied) <= systems - {leader}
+        ):
+            raise ValueError('The decision must name standing systems once.')
+
+        names = [board.category for board in self.categories]
+        if len(set(names)) != len(names) or any(
+            not {row.system for row in board.standings} <= systems
+            for board in self.categories
+        ):
+            raise ValueError('Categories must be unique and list standing systems.')
+
+        return self
 
 
 # ── Reports ──
@@ -524,8 +592,9 @@ def close(
     if not outputs:
         raise ValueError(f'Family `{family.name}` has no outputs on its current cases.')
 
-    fingerprints = _fingerprints(outputs)
-    results = _tests_results(outputs)
+    fingerprints = system_fingerprints(outputs)
+    _require_every_trial(outputs, categories, family.settings.samples)
+    results = _tests_results(outputs, categories, family.settings.samples)
 
     return Report(
         family=family.name,
@@ -670,29 +739,6 @@ def _closed(family: str) -> list[Report]:
             )
         reports.append(report)
     return reports
-
-
-def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:
-    """Map each system with outputs to the one fingerprint they all carry.
-
-    Raises
-    ------
-    ValueError
-        A system has outputs under several fingerprints.
-    """
-    by_system: defaultdict[str, set[str | None]] = defaultdict(set)
-    for output in outputs:
-        by_system[output.system].add(output.fingerprint)
-
-    for system, fingerprints in sorted(by_system.items()):
-        if len(fingerprints) > 1:
-            raise ValueError(
-                f'System `{system}` has outputs under several fingerprints. Give '
-                'the changed system a new name, as `docs/guide/authoring.md#systems` '
-                'describes.'
-            )
-
-    return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
 
 
 # ── Votes Inputs ──
@@ -1045,27 +1091,142 @@ def _rater_agreement(
 # ── Tests Results ──
 
 
-def _tests_results(outputs: list[Output]) -> TestsResults:
-    by_system: defaultdict[str, list[Output]] = defaultdict(list)
-    for output in outputs:
-        by_system[output.system].append(output)
+def _require_every_trial(
+    outputs: Sequence[Output], tasks: Collection[str], samples: int
+) -> None:
+    """Refuse a round in which a system lacks `samples` trials of a current task.
 
-    standings: list[TestsStanding] = []
-    for system, trials in sorted(by_system.items()):
-        finished = [output for output in trials if output.error is None]
-        standings.append(
-            TestsStanding(
-                system=system,
-                trials=len(trials),
-                errored=len(trials) - len(finished),
-                pass_rate=sum(output.reward or 0.0 for output in finished)
-                / len(trials),
-                mean_cost_usd=_mean(output.cost_usd for output in finished),
-                p50_latency_sec=_median(output.latency_sec for output in finished),
-            )
+    Ranking systems over different tasks or trial counts would compare unlike
+    evidence, and the sign test assumes equal trials per shared task.
+    """
+    trials = Counter((output.system, output.case) for output in outputs)
+    missing = {
+        system: short
+        for system in sorted({output.system for output in outputs})
+        if (short := sorted(task for task in tasks if trials[system, task] < samples))
+    }
+    if missing:
+        listed = '; '.join(
+            f'`{system}` on {", ".join(f"`{task}`" for task in short)}'
+            for system, short in missing.items()
+        )
+        raise ValueError(
+            f'Every system needs {samples} trials of each current task before '
+            f'closing, but these lack some: {listed}. Run `uv run bench run '
+            '--system <name>` for each, then close again.'
         )
 
-    return TestsResults(scorer='tests', standings=standings)
+
+def _tests_results(
+    outputs: list[Output], categories: Mapping[str, str], samples: int
+) -> TestsResults:
+    by_system: defaultdict[str, defaultdict[str, list[Output]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for output in outputs:
+        by_system[output.system][output.case].append(output)
+
+    shares = {
+        system: {task: _pass_share(trials) for task, trials in tasks.items()}
+        for system, tasks in by_system.items()
+    }
+    standings = sorted(
+        (
+            _tests_standing(system, tasks, shares[system], samples)
+            for system, tasks in by_system.items()
+        ),
+        key=lambda row: (-row.pass_rate.rate, row.system),
+    )
+    leader = standings[0].system
+
+    return TestsResults(
+        scorer='tests',
+        samples=samples,
+        standings=standings,
+        categories=_tests_categories(standings, shares, categories),
+        decision=TestsDecision(
+            leader=leader,
+            tied=[
+                row.system
+                for row in standings[1:]
+                if not _separated(shares[leader], shares[row.system])
+            ],
+        ),
+    )
+
+
+def _tests_standing(
+    system: str,
+    tasks: Mapping[str, list[Output]],
+    shares: Mapping[str, float],
+    samples: int,
+) -> TestsStanding:
+    """Summarize one system's trials, keyed by task, and its pass share per task."""
+    trials = [output for outputs in tasks.values() for output in outputs]
+    finished = [output for output in trials if output.error is None]
+
+    return TestsStanding(
+        system=system,
+        tasks=len(tasks),
+        trials=len(trials),
+        errored=len(trials) - len(finished),
+        pass_rate=_pass_rate(shares.values()),
+        pass_hat_k=(
+            statistics.fmean(share == 1 for share in shares.values())
+            if samples > 1
+            else None
+        ),
+        mean_cost_usd=_mean(output.cost_usd for output in finished),
+        p50_latency_sec=_median(output.latency_sec for output in finished),
+    )
+
+
+def _tests_categories(
+    standings: Sequence[TestsStanding],
+    shares: Mapping[str, Mapping[str, float]],
+    categories: Mapping[str, str],
+) -> list[TestsCategory]:
+    boards: list[TestsCategory] = []
+    for category in sorted(
+        {categories[task] for row in shares.values() for task in row}
+    ):
+        rows: list[TestsCategoryStanding] = []
+        for standing in standings:
+            mine = [
+                share
+                for task, share in shares[standing.system].items()
+                if categories[task] == category
+            ]
+            if mine:
+                rows.append(
+                    TestsCategoryStanding(
+                        system=standing.system,
+                        tasks=len(mine),
+                        pass_rate=_pass_rate(mine),
+                    )
+                )
+        boards.append(TestsCategory(category=category, standings=rows))
+
+    return boards
+
+
+def _separated(leader: Mapping[str, float], other: Mapping[str, float]) -> bool:
+    shared = sorted(leader.keys() & other.keys())
+    return pass_rates.separates(
+        [leader[task] for task in shared], [other[task] for task in shared]
+    )
+
+
+def _pass_share(trials: Sequence[Output]) -> float:
+    return sum(tests_pass(output.reward) for output in trials) / len(trials)
+
+
+def _pass_rate(shares: Iterable[float]) -> PassRate:
+    """Average task shares and bound the mean by its interval over tasks."""
+    values = list(shares)
+    rate = statistics.fmean(values)
+    lower, upper = pass_rates.clopper_pearson(rate, len(values))
+    return PassRate(rate=rate, lower=lower, upper=upper)
 
 
 # ── Aggregates ──

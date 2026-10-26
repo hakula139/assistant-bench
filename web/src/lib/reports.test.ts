@@ -70,16 +70,21 @@ describe('publicFamilies', () => {
       systems: { retired: { display_name: 'Retired System', fingerprint: null } },
       results: {
         scorer: 'tests',
+        samples: 1,
         standings: [
           {
             system: 'retired',
+            tasks: 4,
             trials: 4,
             errored: 1,
-            pass_rate: 0.5,
+            pass_rate: { rate: 0.5, lower: 0.15, upper: 0.85 },
+            pass_hat_k: null,
             mean_cost_usd: null,
             p50_latency_sec: null,
           },
         ],
+        categories: [],
+        decision: { leader: 'retired', tied: [] },
       },
     };
     const [family] = publicFamilies([{ name: 'writing-prose', config: votes(true) }], [closed], {});

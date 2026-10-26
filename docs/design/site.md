@@ -17,7 +17,9 @@ A votes board shows one round, with its category filter kept in the URL:
 - **Categories:** point plots share an axis starting at the lowest of their own cuts. Rows follow the family board's order, followed by systems ranked only in that category.
 - **Cost and latency:** point scores against mean cost per output and p50 latency, with a labelled Pareto frontier. Each metric uses a log axis when every value is positive and a linear axis when it includes zero. A chart without priced or timed systems is omitted.
 
-Each system's page uses its latest appearance for the heading, point score, rank, votes, head-to-head results, categories, output distributions and tagged issues. Each history row retains its own label, fingerprint, reference, anchor, method and rules. Compare scores within one family's round because the anchor can change. Tests-scored families show descriptive pass-rate tables with their report's frozen labels.
+Each system's page uses its latest appearance for the heading, point score, rank, votes, head-to-head results, categories, output distributions and tagged issues. Each history row retains its own label, fingerprint, reference, anchor, method and rules. Compare scores within one family's round because the anchor can change.
+
+A tests board shows its latest round's pass rates with their 95% intervals on one axis from 0 to 100%, above a table with the same values, pass^k, task and trial counts, cost and latency. A category selection, kept in the URL, shows that category's pass rates and task counts. A note names the leader and the systems its paired test cannot separate from it.
 
 Every chart has a table twin with the same values, and its tooltips use values the twin also shows. Static point plots are tables themselves. Token and latency ranges show observed output percentiles. Charts read colors from CSS variables so theme changes need no re-render.
 

@@ -142,45 +142,14 @@ const text = (html: string) =>
     .replace(/&#(?:x27|39);/g, "'")
     .replace(/\s+/g, ' ');
 
-function testsFamily(): Family {
-  const report = reportSchema.parse({
-    family: 'writing-smoke',
-    round: '2026-10-21',
-    closed_at: '2026-10-21T18:00:00Z',
-    systems: Object.fromEntries(
-      ['acme-small', 'acme-pro'].map((system) => [
-        system,
-        { display_name: FIXTURE_NAMES[system], fingerprint: null },
-      ]),
-    ),
-    results: {
-      scorer: 'tests',
-      standings: [
-        {
-          system: 'acme-small',
-          trials: 4,
-          errored: 0,
-          pass_rate: 0.25,
-          mean_cost_usd: null,
-          p50_latency_sec: null,
-        },
-        {
-          system: 'acme-pro',
-          trials: 4,
-          errored: 1,
-          pass_rate: 0.75,
-          mean_cost_usd: null,
-          p50_latency_sec: null,
-        },
-      ],
-    },
-  });
+async function testsFamily(): Promise<Family> {
+  const report = reportSchema.parse(await readFixture('report-tests'));
   return listedFamily(
-    'writing-smoke',
+    report.family,
     {
       scorer: 'tests',
-      aspect: 'writing',
-      display_name: 'Smoke Tasks',
+      aspect: 'coding',
+      display_name: 'Tasks',
       systems: ['acme-pro', 'acme-small'],
       public: true,
     },
@@ -289,7 +258,7 @@ describe('family page', () => {
     ['family page', FamilyPage, { boards: [] }],
     ['family panel', FamilyPanel, {}],
   ])("names a tests family's systems on the %s before its first round", async (_, page, props) => {
-    const empty: Family = { ...testsFamily(), rounds: [] };
+    const empty: Family = { ...(await testsFamily()), rounds: [] };
     const none: Family = { ...empty, config: { ...empty.config, systems: [] } };
 
     const [html, noneHtml] = await Promise.all(
@@ -313,13 +282,13 @@ describe('family page', () => {
   });
 
   test("draws a tests family's steps and its pass rates", async () => {
-    const html = await render(FamilyPage, { family: testsFamily(), boards: [] });
+    const html = await render(FamilyPage, { family: await testsFamily(), boards: [] });
 
     expect(text(html)).toContain(
       "Run same tasks for all Tests each task's own tests Pass rate share of trials passed",
     );
     expect(stepHints(html)).toHaveLength(3);
-    expect(text(html)).toContain('Acme Pro 75% 4 1');
+    expect(text(html)).toContain('Acme Pro 92% 44–100% 83% 6 12 1');
   });
 
   test("draws a coding family's steps and names its gate-failure column for the tests", async () => {
@@ -337,7 +306,7 @@ describe('family page', () => {
   test.each([
     ['with rounds', family],
     ['before its first round', async () => ({ ...(await family()), rounds: [] })],
-    ['scored by tests', () => Promise.resolve(testsFamily())],
+    ['scored by tests', testsFamily],
     ['on coding', codingFamily],
   ])('names the family and its systems by display name %s', async (_, load) => {
     const loaded = await load();
@@ -351,7 +320,7 @@ describe('family page', () => {
 
   test.each([
     ['votes', family, 'votes', 'Cases', 'Ranked by blind pairwise votes'],
-    ['tests', () => Promise.resolve(testsFamily()), 'tests', 'Tasks', 'Scored by automated tests'],
+    ['tests', testsFamily, 'tests', 'Tasks', 'Scored by automated tests'],
     [
       'coding',
       codingFamily,
@@ -424,7 +393,7 @@ describe('methodology page', () => {
 
 describe('home page', () => {
   test("keys the shared legend to the marks the families' panels draw", async () => {
-    listed.families = [{ ...(await family()), rounds: [] }, testsFamily()];
+    listed.families = [{ ...(await family()), rounds: [] }, await testsFamily()];
 
     const html = await render(HomePage, {});
 
@@ -488,7 +457,7 @@ describe('family panel', () => {
   test.each([
     ['with rounds', family],
     ['before its first round', async () => ({ ...(await family()), rounds: [] })],
-    ['scored by tests', () => Promise.resolve(testsFamily())],
+    ['scored by tests', testsFamily],
   ])('names the family and its systems by display name %s', async (_, load) => {
     const loaded = await load();
 
@@ -499,9 +468,11 @@ describe('family panel', () => {
   });
 
   test("lists a tests family's systems by pass rate, best first", async () => {
-    const html = await render(FamilyPanel, { family: testsFamily() });
+    const html = await render(FamilyPanel, { family: await testsFamily() });
 
-    expect(text(html)).toContain('System Pass rate Acme Pro 75% Acme Small 25%');
+    expect(text(html)).toContain(
+      'System Pass rate 95% interval Acme Pro 92% 44–100% Acme Mini 83% 36–100% Acme Small 17% 0–64%',
+    );
   });
 });
 
@@ -759,7 +730,7 @@ describe('stacks', () => {
 
   test.each([
     ['votes family page', FamilyPage, family],
-    ['tests family page', FamilyPage, () => Promise.resolve(testsFamily())],
+    ['tests family page', FamilyPage, testsFamily],
     ['system page', SystemPage, family],
   ])(
     'keep vertical margins off the blocks of each stack on the %s',
@@ -985,8 +956,8 @@ function islandRounds(html: string): string[] {
 }
 
 /** A tests family with an earlier round before the one `testsFamily` closes. */
-function testsFamilyWithHistory(): Family {
-  const tested = testsFamily();
+async function testsFamilyWithHistory(): Promise<Family> {
+  const tested = await testsFamily();
   const [latest] = tested.rounds;
   const earlier = { ...structuredClone(latest), round: '2026-10-07' };
   earlier.closed_at = '2026-10-07T18:00:00Z';
@@ -1018,7 +989,7 @@ async function boardPages(loaded: Family): Promise<Map<string, string>> {
 describe('round pages', () => {
   test.each([
     ['votes', family, '/writing/arena/'],
-    ['tests', () => Promise.resolve(testsFamilyWithHistory()), '/writing/smoke/'],
+    ['tests', testsFamilyWithHistory, '/coding/tasks/'],
   ])(
     'give each closed round of a %s family a page that serializes only that round',
     async (_, load, board) => {

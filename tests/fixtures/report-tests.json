@@ -1,0 +1,139 @@
+{
+  "family": "coding-tasks",
+  "round": "2026-10-21",
+  "closed_at": "2026-10-21T09:00:00Z",
+  "systems": {
+    "acme-mini": {
+      "display_name": "Acme Mini",
+      "fingerprint": "acme-mini-fingerprint"
+    },
+    "acme-pro": {
+      "display_name": "Acme Pro",
+      "fingerprint": "acme-pro-fingerprint"
+    },
+    "acme-small": {
+      "display_name": "Acme Small",
+      "fingerprint": "acme-small-fingerprint"
+    }
+  },
+  "results": {
+    "scorer": "tests",
+    "samples": 2,
+    "standings": [
+      {
+        "system": "acme-pro",
+        "tasks": 6,
+        "trials": 12,
+        "errored": 1,
+        "pass_rate": {
+          "rate": 0.9166666666666666,
+          "lower": 0.44194322639075173,
+          "upper": 0.9999215001516338
+        },
+        "pass_hat_k": 0.8333333333333334,
+        "mean_cost_usd": 0.2,
+        "p50_latency_sec": 30.0
+      },
+      {
+        "system": "acme-mini",
+        "tasks": 6,
+        "trials": 12,
+        "errored": 0,
+        "pass_rate": {
+          "rate": 0.8333333333333334,
+          "lower": 0.3587654210023252,
+          "upper": 0.9957892554855106
+        },
+        "pass_hat_k": 0.6666666666666666,
+        "mean_cost_usd": 0.05000000000000001,
+        "p50_latency_sec": 12.5
+      },
+      {
+        "system": "acme-small",
+        "tasks": 6,
+        "trials": 12,
+        "errored": 1,
+        "pass_rate": {
+          "rate": 0.16666666666666666,
+          "lower": 0.004210744514489473,
+          "upper": 0.6412345789976748
+        },
+        "pass_hat_k": 0.0,
+        "mean_cost_usd": 0.01,
+        "p50_latency_sec": 9.0
+      }
+    ],
+    "categories": [
+      {
+        "category": "bug-fix",
+        "standings": [
+          {
+            "system": "acme-pro",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 1.0,
+              "lower": 0.29240177382128674,
+              "upper": 1.0
+            }
+          },
+          {
+            "system": "acme-mini",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 0.8333333333333334,
+              "lower": 0.1767360971312574,
+              "upper": 0.9998493639745635
+            }
+          },
+          {
+            "system": "acme-small",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 0.3333333333333333,
+              "lower": 0.008403758659612643,
+              "upper": 0.9057006759497539
+            }
+          }
+        ]
+      },
+      {
+        "category": "feature",
+        "standings": [
+          {
+            "system": "acme-pro",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 0.8333333333333334,
+              "lower": 0.1767360971312574,
+              "upper": 0.9998493639745635
+            }
+          },
+          {
+            "system": "acme-mini",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 0.8333333333333334,
+              "lower": 0.1767360971312574,
+              "upper": 0.9998493639745635
+            }
+          },
+          {
+            "system": "acme-small",
+            "tasks": 3,
+            "pass_rate": {
+              "rate": 0.0,
+              "lower": 0.0,
+              "upper": 0.7075982261787133
+            }
+          }
+        ]
+      }
+    ],
+    "decision": {
+      "leader": "acme-pro",
+      "tied": [
+        "acme-mini"
+      ]
+    }
+  }
+}

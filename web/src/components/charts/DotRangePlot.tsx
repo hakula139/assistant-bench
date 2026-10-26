@@ -24,6 +24,8 @@ interface DotRangePlotProps {
   format: ValueFormat;
   /** A reference value drawn as a rule, such as an even win rate. */
   baseline?: number;
+  /** The x axis extent for a bounded measure, such as a rate from 0 to 1. */
+  domain?: [number, number];
 }
 
 const ROW_HEIGHT = 32;
@@ -34,7 +36,7 @@ const formats: Record<ValueFormat, (value: number) => string> = {
   seconds: formatSeconds,
 };
 
-export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProps) {
+export function DotRangePlot({ rows, label, format, baseline, domain }: DotRangePlotProps) {
   const height = rows.length * ROW_HEIGHT + 48;
   const tick = formats[format];
 
@@ -52,7 +54,7 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         ),
         marginRight: 24,
         marginBottom: 40,
-        x: { label, tickFormat: tick, nice: true, ticks },
+        x: { label, domain, tickFormat: tick, nice: true, ticks },
         y: {
           domain: rows.map((row) => row.label),
           label: null,
@@ -93,7 +95,7 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         ],
       };
     },
-    [rows, label, tick, baseline],
+    [rows, label, tick, baseline, domain],
   );
 
   return <PlotFigure plot={plot} height={height} label={label} />;

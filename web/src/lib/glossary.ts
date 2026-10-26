@@ -85,11 +85,22 @@ export const terms = {
   },
   passRate: {
     term: 'Pass rate',
-    definition: 'The share of trials whose tests pass, counting errored trials as failures.',
+    definition:
+      'The share of trials whose tests pass, averaged over tasks so that each task counts once. A trial whose tests never ran fails.',
+  },
+  passInterval: {
+    term: '95% interval',
+    definition:
+      'The range of pass rates on new tasks like these that the results support, from an exact Clopper-Pearson interval over tasks. More trials of the same tasks cannot narrow it.',
+  },
+  tasks: {
+    term: 'Tasks',
+    definition: 'The tasks the system ran, which set how wide its interval is.',
   },
   errored: {
     term: 'Errored',
-    definition: 'Trials that ended in an error, which count as failures.',
+    definition:
+      'Trials that ended in an error. One still passes when its tests ran and passed, as after a timeout.',
   },
   testsCostLatency: {
     term: 'Cost / trial and p50 latency',
@@ -172,6 +183,14 @@ export function fallbackAnchor(
   return {
     ...terms.anchor,
     definition: `The most-voted system, ${anchorName}, fixed at ${formatScore(method.anchor_score)} in place of the reference ${referenceName}, which that round could not rank.`,
+  };
+}
+
+/** pass^k for a tests round that runs `k` trials of each task, or for any `k`. */
+export function passHatKTerm(k: number | 'k'): Term {
+  return {
+    term: `pass^${k}`,
+    definition: `The share of tasks whose ${k} trials all passed, which shows how reliably a system repeats its passes.`,
   };
 }
 

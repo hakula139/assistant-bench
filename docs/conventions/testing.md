@@ -7,7 +7,7 @@ Where tests live, when they merge or go, how they reach models and Harbor, and w
 - Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
 - The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. Checks that need the built site go in `site.test.ts` there, which builds it once, because concurrent `astro build` runs of one root race on its cache. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom, and `web/src/test/track.ts` reads how a row's `ScoreTrack` draws its system.
 - `test_repository.py` checks committed data and lockfiles, and `test_harbor_smoke.py` holds the trials that need Docker.
-- Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
+- Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `write_task_family`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
 
 ## Merging and Dropping Tests
@@ -28,7 +28,7 @@ Drop a test once another covers everything it checks.
 ## Cross-Checks and the Report Fixture
 
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss or the design that moves the estimates fails. The penalty barely moves those estimates, so the test of a system that wins every vote bounds its gap tightly enough that a tenfold change to the penalty in either direction fails.
-- `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render, and `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. Their tests fail when a model or ranking change leaves a file stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
+- `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten sessions and after one, `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all three. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
 
 ## Accessibility
 

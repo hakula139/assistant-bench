@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from assistant_bench import report
 from assistant_bench.families import Choice, load_family
-from assistant_bench.outputs import write_outputs
+from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.report import (
     HumanEvidence,
     OutputMeasurement,
@@ -20,6 +20,7 @@ from assistant_bench.report import (
     write_report,
 )
 from assistant_bench.scoring import ranking
+from assistant_bench.scoring.pass_rates import clopper_pearson
 from assistant_bench.scoring.weighting import actor_weights
 from snapshot_support import make_analysis, make_capped_analysis, make_evidence
 from support import (
@@ -28,13 +29,90 @@ from support import (
     PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
+    TESTS_REPORT_FIXTURE,
     make_output,
+    write_task_family,
 )
+
+
+TESTS_CATEGORIES = {
+    'parse-dates': 'bug-fix',
+    'retry-uploads': 'bug-fix',
+    'trim-cache': 'bug-fix',
+    'export-csv': 'feature',
+    'page-results': 'feature',
+    'tag-releases': 'feature',
+}
+"""Each task of the synthetic tests round, with its category."""
+
+TESTS_PASSES = {
+    'acme-pro': (2, 2, 2, 2, 2, 1),
+    'acme-mini': (2, 2, 1, 2, 1, 2),
+    'acme-small': (1, 0, 1, 0, 0, 0),
+}
+"""Each system's passing trials of two per task, in `TESTS_CATEGORIES` order."""
+
+TESTS_USAGE = {
+    'acme-pro': (0.2, 30.0),
+    'acme-mini': (0.05, 12.0),
+    'acme-small': (0.01, 8.0),
+}
 
 
 @pytest.fixture(scope='module')
 def capped_results() -> report.VotesResults:
     return report.votes_results(make_capped_analysis())
+
+
+def close_tests_round(families_dir: Path) -> Report:
+    """Close the synthetic tests round, where two trials errored.
+
+    Acme Small's first `retry-uploads` trial errored before its tests ran, and
+    Acme Pro's second `export-csv` trial timed out after its tests passed.
+    """
+
+    def trial(system: str, task: str, index: int, passed: int) -> Output:
+        untested = (system, task, index) == ('acme-small', 'retry-uploads', 0)
+        timed_out = (system, task, index) == ('acme-pro', 'export-csv', 1)
+        cost, latency = TESTS_USAGE[system]
+        return make_output(
+            case=task,
+            system=system,
+            fingerprint=f'{system}-fingerprint',
+            trial=f'{task}-{index}',
+            error='AgentTimeoutError' if untested or timed_out else None,
+            reward=None if untested else float(index < passed),
+            cost_usd=cost,
+            latency_sec=latency + index,
+        )
+
+    write_task_family(
+        families_dir,
+        *TESTS_CATEGORIES,
+        name='coding-tasks',
+        samples=2,
+        categories=TESTS_CATEGORIES,
+    )
+    write_outputs(
+        'coding-tasks',
+        [
+            trial(system, task, index, passed)
+            for system, passes in TESTS_PASSES.items()
+            for task, passed in zip(TESTS_CATEGORIES, passes, strict=True)
+            for index in range(2)
+        ],
+    )
+
+    return report.close(
+        load_family('coding-tasks'),
+        AT,
+        system_names={
+            'acme-pro': 'Acme Pro',
+            'acme-mini': 'Acme Mini',
+            'acme-small': 'Acme Small',
+        },
+        previous_reports=[],
+    )
 
 
 class TestReport:
@@ -198,7 +276,46 @@ class TestReport:
         assert closed.results.rules.rater_agreement_floor == 0.5
 
     @pytest.mark.parametrize(
-        'fixture', [REPORT_FIXTURE, EARLY_REPORT_FIXTURE], ids=['full', 'early']
+        ('path', 'value'),
+        [
+            (('standings',), []),
+            (('standings', 0, 'pass_rate', 'upper'), 1.5),
+            (('samples',), 1),
+            (('standings', 0, 'pass_hat_k'), None),
+            (('decision', 'leader'), 'acme-new'),
+            (('decision', 'tied'), ['acme-pro']),
+            (('decision', 'tied'), ['acme-mini', 'acme-mini']),
+            (('categories', 0, 'standings', 0, 'system'), 'acme-new'),
+            (('categories', 1, 'category'), 'bug-fix'),
+        ],
+        ids=[
+            'no-standings',
+            'interval-above-one',
+            'pass-k-with-one-sample',
+            'pass-k-missing',
+            'leader-outside-standings',
+            'leader-tied-with-itself',
+            'repeated-tie',
+            'category-system',
+            'repeated-category',
+        ],
+    )
+    def test_rejects_inconsistent_tests_results(
+        self, path: tuple[str | int, ...], value: Any
+    ) -> None:
+        payload = json.loads(TESTS_REPORT_FIXTURE.read_text())
+        parent = payload['results']
+        for key in path[:-1]:
+            parent = parent[key]
+        parent[path[-1]] = value
+
+        with pytest.raises(ValidationError):
+            Report.model_validate(payload)
+
+    @pytest.mark.parametrize(
+        'fixture',
+        [REPORT_FIXTURE, EARLY_REPORT_FIXTURE, TESTS_REPORT_FIXTURE],
+        ids=['full', 'early', 'tests'],
     )
     def test_committed_fixture_validates_against_the_json_schema(
         self, fixture: Path
@@ -214,6 +331,33 @@ class TestReport:
 
         if json.loads(REPORT_SCHEMA_FIXTURE.read_text()) != schema:
             stale_fixture(REPORT_SCHEMA_FIXTURE, f'{json.dumps(schema, indent=2)}\n')
+
+    def test_committed_tests_round_contains_each_rate_and_leads_with_the_top(
+        self,
+    ) -> None:
+        closed = Report.model_validate_json(TESTS_REPORT_FIXTURE.read_text())
+
+        assert closed.results.scorer == 'tests'
+        rates = [
+            row.pass_rate
+            for row in closed.results.standings
+            + [row for board in closed.results.categories for row in board.standings]
+        ]
+        assert all(rate.lower <= rate.rate <= rate.upper for rate in rates)
+        top = max(row.pass_rate.rate for row in closed.results.standings)
+        assert closed.results.standings[0].pass_rate.rate == top
+        assert closed.results.standings[0].system == closed.results.decision.leader
+
+    def test_matches_the_committed_tests_round(
+        self, families_dir: Path, stale_fixture: Callable[[Path, str], None]
+    ) -> None:
+        written = f'{close_tests_round(families_dir).model_dump_json(indent=2)}\n'
+
+        if (
+            not TESTS_REPORT_FIXTURE.exists()
+            or TESTS_REPORT_FIXTURE.read_text() != written
+        ):
+            stale_fixture(TESTS_REPORT_FIXTURE, written)
 
 
 class TestClose:
@@ -311,13 +455,98 @@ class TestClose:
 
         assert results.scorer == 'tests'
         (standing,) = results.standings
-        assert (standing.trials, standing.errored) == (3, 1)
-        assert standing.pass_rate == pytest.approx(1 / 3)
+        assert (standing.tasks, standing.trials, standing.errored) == (1, 3, 1)
+        assert standing.pass_rate.rate == pytest.approx(2 / 3)
+        assert standing.pass_hat_k is None
         assert standing.mean_cost_usd == pytest.approx(0.01)
         assert standing.p50_latency_sec == 3.0
         assert closed.systems['large'].display_name == 'Public large'
-        assert set(results.model_dump()) == {'scorer', 'standings'}
         assert 'fingerprint' not in standing.model_dump()
+
+    def test_bounds_task_means_by_their_exact_interval_over_tasks(
+        self, families_dir: Path
+    ) -> None:
+        closed = close_tests_round(families_dir)
+        results = closed.results
+
+        assert results.scorer == 'tests'
+        pro, mini, small = results.standings
+        assert [pro.system, mini.system, small.system] == [
+            'acme-pro',
+            'acme-mini',
+            'acme-small',
+        ]
+        assert (pro.tasks, pro.trials, pro.errored, small.errored) == (6, 12, 1, 1)
+        assert pro.pass_rate.rate == pytest.approx(11 / 12)
+        assert (pro.pass_rate.lower, pro.pass_rate.upper) == pytest.approx(
+            clopper_pearson(11 / 12, 6)
+        )
+        assert pro.pass_hat_k == pytest.approx(5 / 6)
+        assert small.pass_rate.rate == pytest.approx(2 / 12)
+
+    def test_ties_the_leader_with_systems_it_beats_on_too_few_tasks(
+        self, families_dir: Path
+    ) -> None:
+        closed = close_tests_round(families_dir)
+
+        assert closed.results.scorer == 'tests'
+        assert closed.results.decision == report.TestsDecision(
+            leader='acme-pro', tied=['acme-mini']
+        )
+
+    def test_rates_each_category_over_its_own_tasks(self, families_dir: Path) -> None:
+        closed = close_tests_round(families_dir)
+
+        assert closed.results.scorer == 'tests'
+        rows = [
+            (board.category, row)
+            for board in closed.results.categories
+            for row in board.standings
+        ]
+        assert {row.tasks for _, row in rows} == {3}
+        assert {
+            (category, row.system): row.pass_rate.rate for category, row in rows
+        } == pytest.approx(
+            {
+                ('bug-fix', 'acme-pro'): 1.0,
+                ('bug-fix', 'acme-mini'): 5 / 6,
+                ('bug-fix', 'acme-small'): 1 / 3,
+                ('feature', 'acme-pro'): 5 / 6,
+                ('feature', 'acme-mini'): 5 / 6,
+                ('feature', 'acme-small'): 0.0,
+            }
+        )
+
+    def test_refuses_a_round_until_every_system_has_every_trial(
+        self, families_dir: Path
+    ) -> None:
+        write_task_family(families_dir, 'a', 'b', samples=2)
+        write_outputs(
+            'f',
+            [
+                make_output(case=case, system=system, trial=trial, reward=1.0)
+                for case, system, trial in [
+                    ('a', 'large', '1'),
+                    ('a', 'large', '2'),
+                    ('b', 'large', '1'),
+                    ('a', 'small', '1'),
+                    ('a', 'small', '2'),
+                    ('b', 'small', '1'),
+                    ('b', 'small', '2'),
+                ]
+            ],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r'lack some: `large` on `b`\. Run `uv run bench run --system <name>`',
+        ):
+            report.close(
+                load_family('f'),
+                AT,
+                system_names={'large': 'Public large', 'small': 'Public small'},
+                previous_reports=[],
+            )
 
 
 class TestVotesResults:

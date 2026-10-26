@@ -31,6 +31,16 @@ export const formatCountOf = (value: number, noun: string) =>
 export const formatPercent = (value: number | null) =>
   value === null ? MISSING : percent.format(value);
 
+/** Prints an interval of shares as whole percents, as in "52–99%". */
+export const formatPercentRange = ({ lower, upper }: { lower: number; upper: number }) => {
+  const from = percent
+    .formatToParts(lower)
+    .filter((part) => part.type !== 'percentSign')
+    .map((part) => part.value)
+    .join('');
+  return `${from}–${percent.format(upper)}`;
+};
+
 export const formatCost = (value: number | null) => (value === null ? MISSING : cost.format(value));
 export const formatSeconds = (value: number | null) =>
   value === null ? MISSING : seconds.format(value);
