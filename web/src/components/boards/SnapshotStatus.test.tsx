@@ -18,7 +18,6 @@ function stubFetch(response: Promise<Response>) {
 describe('SnapshotStatus', () => {
   afterEach(() => {
     cleanup();
-    vi.unstubAllGlobals();
   });
 
   test('renders only the capture time before hydration', () => {
