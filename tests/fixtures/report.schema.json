@@ -39,13 +39,27 @@
       "title": "CappedHumanWeights",
       "type": "object"
     },
+    "Category": {
+      "enum": [
+        "bug-fix",
+        "docs",
+        "essay",
+        "feature",
+        "fiction",
+        "message",
+        "refactor",
+        "reply",
+        "review",
+        "smoke"
+      ],
+      "type": "string"
+    },
     "CategoryBoard": {
       "additionalProperties": false,
       "description": "A category point fit in the overall anchor's connected component.",
       "properties": {
         "category": {
-          "title": "Category",
-          "type": "string"
+          "$ref": "#/$defs/Category"
         },
         "votes": {
           "minimum": 0,

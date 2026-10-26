@@ -1,5 +1,6 @@
 import { z } from 'astro/zod';
 
+import { categories } from '@/lib/categories';
 import { defects } from '@/lib/defects';
 
 // ── Shared ──
@@ -59,7 +60,7 @@ const categoryStanding = z.strictObject({
 });
 
 const categoryBoard = z.strictObject({
-  category: z.string(),
+  category: z.enum(categories),
   votes: z.int().nonnegative(),
   effective_votes: z.number().nonnegative(),
   standings: z.array(categoryStanding),

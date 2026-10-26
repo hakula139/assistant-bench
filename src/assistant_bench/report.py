@@ -25,6 +25,7 @@ from pydantic import (
 )
 
 from assistant_bench.families import (
+    Category,
     Choice,
     Defect,
     Family,
@@ -245,7 +246,7 @@ class CategoryStanding(_Model):
 class CategoryBoard(_Model):
     """A category point fit in the overall anchor's connected component."""
 
-    category: str
+    category: Category
     votes: Annotated[int, Field(ge=0)]
     effective_votes: Annotated[float, Field(ge=0)]
     standings: list[CategoryStanding]
@@ -740,7 +741,7 @@ class AnalysisInput:
 
     defects: tuple[Defect, ...]
     provenance: LedgerProvenance
-    categories: tuple[tuple[str, str | None], ...]
+    categories: tuple[tuple[str, Category | None], ...]
     """Every frozen case, with None marking an explicitly uncategorized case."""
 
     ordinary: tuple[HumanEvidence, ...]
@@ -919,24 +920,24 @@ def _head_to_head(
 
 
 def _categories(
-    categories: Mapping[str, str | None],
+    categories: Mapping[str, Category | None],
     anchor: str,
     votes: list[HumanEvidence],
     comparisons: list[ranking.Comparison],
     outputs: list[OutputMeasurement],
 ) -> list[CategoryBoard]:
     """Refit each category in the board anchor's component, anchored there too."""
-    category_votes: defaultdict[str, list[HumanEvidence]] = defaultdict(list)
+    category_votes: defaultdict[Category, list[HumanEvidence]] = defaultdict(list)
     for row in votes:
         if (category := categories[row.comparison.case]) is not None:
             category_votes[category].append(row)
 
-    by_category: defaultdict[str, list[ranking.Comparison]] = defaultdict(list)
+    by_category: defaultdict[Category, list[ranking.Comparison]] = defaultdict(list)
     for comparison in comparisons:
         if (category := categories[comparison.case]) is not None:
             by_category[category].append(comparison)
 
-    entrants: defaultdict[str, set[str]] = defaultdict(set)
+    entrants: defaultdict[Category, set[str]] = defaultdict(set)
     for output in outputs:
         if (category := categories[output.case]) is not None:
             entrants[category].add(output.system)

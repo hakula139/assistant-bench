@@ -86,7 +86,7 @@ def make_analysis(
             fitted_point_snapshot_id='points-after',
         ),
         categories=(
-            tuple((row.case, 'main') for row in comparisons)
+            tuple((row.case, 'docs') for row in comparisons)
             if categories is None
             else categories
         ),
@@ -129,11 +129,11 @@ def make_capped_analysis() -> AnalysisInput:
     categories = tuple(
         (
             row.comparison.case,
-            'remote'
+            'review'
             if index in range(200, 250)
-            else 'main'
+            else 'docs'
             if index < 10 or index in range(250, 255)
-            else 'other',
+            else 'message',
         )
         for index, row in enumerate(weighted)
     )
