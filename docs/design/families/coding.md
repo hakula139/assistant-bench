@@ -41,7 +41,7 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
   It also fails a workspace whose top-level module or regular package shadows a standard-library one, since `python3 -m unittest` would otherwise import the workspace's own `unittest`.
 
-- **Shared files:** author `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to copy them into each task. Each affected task needs a version bump after it has run.
+- **Shared files:** author each file under `families/coding-repo/shared/` at the path it takes in a task, such as `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile`, then run `uv run python -m assistant_bench.task_assets` to copy every file there into each task. Each affected task needs a version bump after it has run.
 
 - **Tests:** hidden tests assert documented behavior through the application's real callers, persisted state and controlled concurrency. Root integration tests run the real verifier against reference solutions, starters and deliberately wrong source variants under `tests/broken/`. Candidates add focused regression tests without test-count, helper-name or patch-shape requirements.
 

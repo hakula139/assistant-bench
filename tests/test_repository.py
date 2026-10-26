@@ -99,8 +99,8 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     jobs.check_tasks(family, tasks)
 
 
-@pytest.mark.parametrize('shared', task_assets.SHARED_FILES)
-def test_coding_tasks_copy_their_shared_files(shared: str) -> None:
+@pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT))
+def test_coding_tasks_copy_their_shared_files(shared: Path) -> None:
     family = REPO_ROOT / 'families' / 'coding-repo'
     canonical = (family / 'shared' / shared).read_bytes()
     tasks = sorted((family / 'tasks').glob('*/task.toml'))

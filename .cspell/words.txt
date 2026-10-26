@@ -104,7 +104,6 @@ unscored
 unstub
 untabled
 usize
-uvicorn
 venv
 virtualenv
 WakaTime

@@ -1,11 +1,17 @@
 """Regenerate the shared files in the authored coding tasks."""
 
+import argparse
 from pathlib import Path
 
 from assistant_bench.paths import REPO_ROOT
 
 
-SHARED_FILES = ('environment/Dockerfile', 'tests/test.sh', 'tests/verify_lib.py')
+def shared_files(root: Path) -> list[Path]:
+    """Return each shared file, relative to the coding family's directory."""
+    shared = root / 'families' / 'coding-repo' / 'shared'
+    return sorted(
+        path.relative_to(shared) for path in shared.rglob('*') if path.is_file()
+    )
 
 
 def sync(root: Path) -> list[Path]:
@@ -13,7 +19,7 @@ def sync(root: Path) -> list[Path]:
     family = root / 'families' / 'coding-repo'
     updated: list[Path] = []
 
-    for shared in SHARED_FILES:
+    for shared in shared_files(root):
         content = (family / 'shared' / shared).read_bytes()
         for metadata in sorted((family / 'tasks').glob('*/task.toml')):
             destination = metadata.parent / shared
@@ -29,6 +35,7 @@ def sync(root: Path) -> list[Path]:
 
 def main() -> None:
     """Copy each shared file into every authored coding task."""
+    argparse.ArgumentParser(description=__doc__).parse_args()
     updated = sync(REPO_ROOT)
 
     for path in updated:

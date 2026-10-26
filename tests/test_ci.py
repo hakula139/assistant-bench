@@ -98,6 +98,9 @@ class TestSelectedTasks:
                 id='shared-file-generator',
             ),
             pytest.param(
+                {'src/assistant_bench/ci.py': 'Selector'}, None, id='selector'
+            ),
+            pytest.param(
                 {'src/assistant_bench_arena/models.py': 'Shared model'},
                 None,
                 id='arena-model',
@@ -145,9 +148,6 @@ class TestSelectedTasks:
                 {'.github/actions/setup-nix/action.yml': 'Setup'},
                 None,
                 id='setup-action',
-            ),
-            pytest.param(
-                {'src/assistant_bench/ci.py': 'Selector'}, None, id='selector'
             ),
         ],
     )
