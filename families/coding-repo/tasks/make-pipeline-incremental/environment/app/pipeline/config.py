@@ -4,7 +4,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 
 CONFIG_NAME = 'pipeline.toml'
@@ -51,7 +51,10 @@ def load(root: Path) -> Pipeline:
     if not isinstance(tables, dict) or not tables:
         raise ConfigError(f'{path} defines no [steps.NAME] tables.')
 
-    steps = {name: _step(name, table) for name, table in tables.items()}
+    steps = {
+        name: _step(name, table)
+        for name, table in cast(dict[str, object], tables).items()
+    }
     owners: dict[str, str] = {}
     for step in steps.values():
         for output in step.outputs:
@@ -63,12 +66,13 @@ def load(root: Path) -> Pipeline:
     return Pipeline(root, steps)
 
 
-def _step(name: str, table: object) -> StepSpec:
+def _step(name: str, value: object) -> StepSpec:
     if not _STEP_NAME.fullmatch(name):
         raise ConfigError(f'Invalid step name {name!r}.')
-    if not isinstance(table, dict):
+    if not isinstance(value, dict):
         raise ConfigError(f'[steps.{name}] must be a table.')
 
+    table = cast(dict[str, object], value)
     run = table.get('run')
     if not isinstance(run, str) or not _CALLABLE.fullmatch(run):
         raise ConfigError(f'[steps.{name}] run must name a module:function.')
@@ -85,16 +89,17 @@ def _step(name: str, table: object) -> StepSpec:
         run=run,
         inputs=_paths(name, 'inputs', table.get('inputs', [])),
         outputs=outputs,
-        params=params,
+        params=cast(dict[str, Any], params),
     )
 
 
 def _paths(name: str, key: str, value: object) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    items = cast(list[object], value) if isinstance(value, list) else None
+    if items is None or not all(isinstance(item, str) for item in items):
         raise ConfigError(f'[steps.{name}] {key} must be a list of strings.')
 
     paths: list[str] = []
-    for item in value:
+    for item in cast(list[str], items):
         path = PurePosixPath(item)
         if path.is_absolute() or '..' in path.parts or not path.parts:
             raise ConfigError(f'[steps.{name}] {key} must stay inside the project.')

@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Any, Self
 
 from .config import StepSpec
 
@@ -47,17 +47,13 @@ class State:
     def load(cls, root: Path) -> Self:
         """Read the records, starting afresh when they are missing or unreadable."""
         try:
-            document = json.loads((root / STATE_PATH).read_text())
+            document: dict[str, Any] = json.loads((root / STATE_PATH).read_text())
         except FileNotFoundError, json.JSONDecodeError:
             return cls(root)
 
-        match document:
-            case {'version': version, 'steps': dict() as steps} if (
-                version == STATE_VERSION
-            ):
-                return cls(root, cast(dict[str, dict[str, Any]], steps))
-            case _:
-                return cls(root)
+        if document.get('version') != STATE_VERSION:
+            return cls(root)
+        return cls(root, document['steps'])
 
     def fresh(self, spec: StepSpec, current: str) -> bool:
         """Whether a step last succeeded as `current` and its outputs are unchanged."""

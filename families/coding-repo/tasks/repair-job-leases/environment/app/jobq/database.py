@@ -1,7 +1,7 @@
 """The SQLite file that holds a queue."""
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -55,7 +55,7 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 @contextmanager
-def transaction(db: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+def transaction(db: sqlite3.Connection) -> Generator[sqlite3.Connection]:
     """Run a write transaction that holds SQLite's write lock from its start."""
     db.execute('BEGIN IMMEDIATE')
     try:

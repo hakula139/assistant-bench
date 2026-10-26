@@ -225,7 +225,7 @@ class RangeTest(ServerCase):
 
     def test_connections_stay_usable_across_range_responses(self) -> None:
         connection = self.connect()
-        exchanges = [
+        exchanges: list[tuple[dict[str, str], int, bytes | None]] = [
             ({'Range': 'bytes=0-9'}, 206, BINARY[:10]),
             ({'Range': 'bytes=5000-'}, 416, None),
             ({}, 200, BINARY),

@@ -35,10 +35,11 @@ class LeaseTest(unittest.TestCase):
         leases: list[Lease | None] = []
         blocker = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(blocker.close)
-        threads = [
-            threading.Thread(target=lambda q=queue: leases.append(q.claim('w')))
-            for queue in queues
-        ]
+
+        def claim(queue: Queue) -> None:
+            leases.append(queue.claim('w'))
+
+        threads = [threading.Thread(target=claim, args=(queue,)) for queue in queues]
 
         blocker.execute('BEGIN IMMEDIATE')
         for thread in threads:
