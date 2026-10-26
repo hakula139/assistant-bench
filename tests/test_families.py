@@ -714,6 +714,81 @@ class TestLoadCases:
             f'and `{local}:cases.1`.'
         )
 
+    @pytest.mark.parametrize(
+        ('written', 'reported'),
+        [
+            pytest.param(
+                ('writing_zh.toml',), ('writing_zh.toml',), id='unknown-family'
+            ),
+            pytest.param(
+                ('smoke-text.jsonl',), ('smoke-text.jsonl',), id='unconverted-cases'
+            ),
+            pytest.param(
+                ('smoke/notes.md',), ('smoke/notes.md',), id='file-beside-tasks'
+            ),
+            pytest.param(
+                ('old-family/task.toml',), ('old-family',), id='removed-family'
+            ),
+            pytest.param(
+                ('a.toml', 'b.toml'), ('a.toml', 'b.toml'), id='several-entries'
+            ),
+        ],
+    )
+    def test_rejects_data_case_entries_that_no_family_reads(
+        self,
+        data_dir: Path,
+        written: tuple[str, ...],
+        reported: tuple[str, ...],
+    ) -> None:
+        root = data_dir / 'cases'
+        for name in written:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('cases = []\n')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('smoke-text'))
+
+        entries = ', '.join(f'`{root / name}`' for name in reported)
+        assert str(error.value) == (
+            f"No family reads {entries} under the data directory's `cases/`. A "
+            '`cases.toml` family reads `cases/<family>.toml` and a `tasks/` family '
+            'reads `cases/<family>/<task>/`, so move each entry to one of those '
+            'paths, out of `cases/`, or under a hidden directory such as '
+            '`cases/.<name>/`.'
+        )
+
+    @pytest.mark.parametrize(
+        'relative',
+        [
+            pytest.param('writing-zh.toml', id='another-case-family'),
+            pytest.param('smoke/held/task.toml', id='another-task-family'),
+            pytest.param('.converted-backup/writing_zh.toml', id='hidden-backup'),
+            pytest.param('smoke/.notes', id='hidden-file-beside-tasks'),
+        ],
+    )
+    def test_accepts_data_case_entries_that_a_family_reads(
+        self, data_dir: Path, relative: str
+    ) -> None:
+        local = data_dir / 'cases' / relative
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text('cases = []\n')
+
+        cases = load_cases(load_family('smoke-text'))
+
+        assert [case.id for case in cases] == ['en-greeting', 'zh-greeting']
+
+    def test_ignores_a_hidden_directory_beside_local_tasks(
+        self, data_dir: Path
+    ) -> None:
+        backup = data_dir / 'cases' / 'smoke' / '.backup'
+        backup.mkdir(parents=True)
+        (backup / 'notes.md').write_text('Notes.')
+
+        cases = load_cases(load_family('smoke'))
+
+        assert [case.id for case in cases] == ['echo']
+
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
         path = write_case_family(families_dir, ['large'])
         path.write_text(case_entry('a') + '\n' + case_entry('a'))

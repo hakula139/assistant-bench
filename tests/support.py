@@ -122,9 +122,11 @@ def write_task_family(
     """Write a task family in the `smoke` category, copying the echo task per ID.
 
     A family that lists systems is scored by votes, tagged with `defects`, and
-    runs them as terminus-2, and one without is scored by tests.
+    runs them as terminus-2, and one without is scored by tests. A `cases.toml`
+    already written for the same name is removed, since a family has one source.
     """
     directory = families_dir / name
+    (directory / 'cases.toml').unlink(missing_ok=True)
     (directory / 'tasks').mkdir(parents=True)
     scoring = (
         f"""\
