@@ -1491,6 +1491,7 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir, 'a', name='g', systems=('acme-large',))
+        write_case_family(families_dir, ['acme-large'], name='f')
         task_family = load_family('g')
         record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
