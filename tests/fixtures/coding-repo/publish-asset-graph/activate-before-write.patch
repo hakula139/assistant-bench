@@ -1,0 +1,17 @@
+--- a/siteassets/builder.py
++++ b/siteassets/builder.py
+@@ -60,12 +60,12 @@
+     directory = begin(output)
+
+     try:
++        activate(output, directory)
++
+         for name, content in files.items():
+             destination = directory / name
+             destination.parent.mkdir(parents=True, exist_ok=True)
+             destination.write_bytes(content)
+-
+-        activate(output, directory)
+     except BaseException:
+         discard(directory)
+         raise

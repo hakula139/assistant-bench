@@ -1,0 +1,21 @@
+--- a/dispatchbox/delivery.py
++++ b/dispatchbox/delivery.py
+@@ -1,5 +1,6 @@
+ """Deliver pending records without hiding database failures."""
+
++import json
+ from pathlib import Path
+
+ from .models import DeliveryError, DispatchResult, Transport
+@@ -19,7 +20,10 @@
+             attempted += 1
+
+             try:
+-                transport.send(notification.key, notification.payload)
++                transport.send(
++                    notification.key,
++                    json.dumps(json.loads(notification.payload)).encode(),
++                )
+             except DeliveryError:
+                 failed += 1
+                 continue

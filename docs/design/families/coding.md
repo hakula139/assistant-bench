@@ -37,19 +37,19 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
 - **Sandbox:** no network for the agent or the verifier, two CPUs, and 2,048 MB of memory per container. The verifier runs in its own container, which receives only `/app`, so the agent cannot reach the interpreter or `/tests`, and a tests-only fix regrades every recorded trial without a model call.
 
-- **Verifier:** `tests/test.sh` runs `tests/verify.py` and writes reward 1 only when every check passes, or 0 when verification fails. `tests/verify_lib.py` copies `/app` to a scratch directory, adds the hidden test modules from `tests/hidden/`, and runs `python3 -m unittest` with a 60-second timeout inside the separate 600-second verifier limit.
+- **Verifier:** `tests/test.sh` runs `tests/verify.py` and writes reward 1 only when every check passes, or 0 when verification fails. `verify.py` runs the workspace's own tests in one scratch copy of `/app`. In a second copy it replaces the `tests` package with the modules from `tests/hidden/`, so no workspace test module loads beside the hidden tests. Each run is `python3 -m unittest` with a 60-second timeout inside the separate 600-second verifier limit.
 
   It also fails a workspace whose top-level module or regular package shadows a standard-library one, since `python3 -m unittest` would otherwise import the workspace's own `unittest`.
 
-- **Shared files:** author each file under `families/coding-repo/shared/` at the path it takes in a task, such as `tests/verify_lib.py`, `tests/test.sh`, and `environment/Dockerfile`, then run `uv run python -m assistant_bench.task_assets` to copy every file there into each task. Each affected task needs a version bump after it has run.
+- **Shared files:** author `environment/Dockerfile`, `solution/solve.sh`, `tests/test.sh`, and `tests/verify.py` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to copy every file there into each task. Each affected task needs a version bump after it has run.
 
-- **Tests:** hidden tests assert documented behavior through the application's real callers, persisted state and controlled concurrency. Root integration tests run the real verifier against reference solutions, starters and deliberately wrong source variants under `tests/broken/`. Candidates add focused regression tests without test-count, helper-name or patch-shape requirements.
+- **Reference:** `solve.sh` copies `solution/app/` over `/app`. It holds the files the reference changes or adds, plus the unchanged modules of each application package it changes, since basedpyright resolves a regular package from one search path. A starter edit to one of those modules needs the same edit in its copy.
 
-- **Style:** starters, references, hidden tests, verifier scripts and wrong variants share the root formatting, spelling and strict Python 3.14 typing policy. Each task has an import environment resolving its completed reference package, and starters retain their local package imports.
+- **Tests:** hidden tests assert documented behavior through the application's real callers, persisted state and controlled concurrency. `tests/test_repository.py` runs the real verifier against each starter, its reference, and the broken variants of the reference stored as patches under `tests/fixtures/coding-repo/<task>/`, and only the reference may pass the hidden tests. Candidates add focused regression tests.
 
-The solution's own code runs inside the verifier's unittest process, beside the hidden tests, so it can still patch the runner or the checks it shares that process with.
+- **Style:** starters, references, hidden tests and verifier scripts share the root formatting, spelling and strict Python 3.14 typing policy. Each task adds a `[tool.basedpyright] executionEnvironments` entry whose `extraPaths` names its `solution/app`, so its hidden tests resolve the reference package.
 
-A passing reward still needs review because candidate modules execute alongside the hidden tests.
+Application modules still run inside the hidden tests' process and can patch the runner or the checks they share it with, so a passing reward still needs review.
 
 ## Scoring
 

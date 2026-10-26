@@ -106,7 +106,7 @@ class TestSelectedTasks:
                 id='arena-model',
             ),
             pytest.param(
-                {'families/coding-repo/shared/tests/verify_lib.py': 'Verifier'},
+                {'families/coding-repo/shared/tests/verify.py': 'Verifier'},
                 None,
                 id='shared-verifier',
             ),

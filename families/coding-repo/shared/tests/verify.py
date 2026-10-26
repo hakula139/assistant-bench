@@ -1,4 +1,4 @@
-"""Run bounded behavior tests in a scratch copy of the candidate workspace."""
+"""Run the workspace tests and the hidden behavior tests in separate scratch copies."""
 
 import os
 import pathlib
@@ -8,48 +8,44 @@ import sys
 import tempfile
 
 
-APP = pathlib.Path(os.environ.get('BENCH_APP_DIR', '/app'))
-TESTS = pathlib.Path(__file__).resolve().parent
+APP = pathlib.Path('/app')
+HIDDEN = pathlib.Path(__file__).resolve().parent / 'hidden'
 TIMEOUT_SEC = 60
 
 _failures: list[str] = []
 
 
-def check(ok: bool, label: str, detail: str = '') -> bool:
+def check(ok: bool, label: str, detail: str) -> None:
     print(('PASS ' if ok else 'FAIL ') + label, flush=True)
     if not ok:
         _failures.append(label)
-        if detail:
-            print(detail[-4000:], flush=True)
-    return ok
+        print(detail[-4000:], flush=True)
 
 
-def copy_workspace(hidden: tuple[str, ...] = ()) -> pathlib.Path:
-    """Copy the workspace to a scratch directory and add the hidden test modules."""
+def copy_workspace() -> pathlib.Path:
+    """Copy the workspace to a scratch directory without its caches and history."""
     dst = pathlib.Path(tempfile.mkdtemp()) / 'ws'
     shutil.copytree(APP, dst, ignore=shutil.ignore_patterns('__pycache__', '.git'))
-    (dst / 'tests').mkdir(exist_ok=True)
-    for name in hidden:
-        target = f'test_hidden_{name.removeprefix("test_")}'
-        shutil.copy(TESTS / 'hidden' / name, dst / 'tests' / target)
     return dst
 
 
-def run_unittest(ws: pathlib.Path, pattern: str = 'test*.py') -> tuple[bool, str]:
+def copy_hidden() -> pathlib.Path:
+    """Copy the workspace with its `tests` package replaced by the hidden tests.
+
+    The workspace's own test modules and `tests/__init__.py` never load beside
+    the hidden tests, so only the application's modules run in their process.
+    """
+    dst = copy_workspace()
+    shutil.rmtree(dst / 'tests', ignore_errors=True)
+    shutil.copytree(HIDDEN, dst / 'tests')
+    (dst / 'tests' / '__init__.py').touch()
+    return dst
+
+
+def run_unittest(ws: pathlib.Path) -> tuple[bool, str]:
     """Run unittest discovery under `ws/tests`, failing when no test ran."""
     proc = subprocess.run(
-        [
-            sys.executable,
-            '-m',
-            'unittest',
-            'discover',
-            '-s',
-            'tests',
-            '-t',
-            '.',
-            '-p',
-            pattern,
-        ],
+        [sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.'],
         cwd=ws,
         capture_output=True,
         text=True,
@@ -60,7 +56,7 @@ def run_unittest(ws: pathlib.Path, pattern: str = 'test*.py') -> tuple[bool, str
     return proc.returncode == 0 and 'Ran 0 tests' not in out, out
 
 
-def _check_shadowing() -> None:
+def check_shadowing() -> None:
     """Fail on a top-level module or package named like a standard-library one.
 
     `python3 -m unittest` puts the working directory first on `sys.path`, so a
@@ -81,7 +77,17 @@ def _check_shadowing() -> None:
     )
 
 
-def finish() -> None:
-    _check_shadowing()
+def main() -> None:
+    ok, out = run_unittest(copy_workspace())
+    check(ok, 'the workspace tests pass', out)
+
+    ok, out = run_unittest(copy_hidden())
+    check(ok, 'the hidden behavior tests pass', out)
+
+    check_shadowing()
     print(f'{len(_failures)} check(s) failed' if _failures else 'all checks passed')
     sys.exit(1 if _failures else 0)
+
+
+if __name__ == '__main__':
+    main()

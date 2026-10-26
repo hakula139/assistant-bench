@@ -1,0 +1,16 @@
+--- a/siteassets/builder.py
++++ b/siteassets/builder.py
+@@ -45,11 +45,11 @@
+
+             content = text.encode('utf-8')
+
++        digest = hashlib.sha256(node.content).hexdigest()[:12]
+         name = (
+             relative_path
+             if entry
+-            else PurePosixPath('assets')
+-            / f'{path.stem}.{hashlib.sha256(content).hexdigest()[:12]}{path.suffix}'
++            else PurePosixPath('assets') / f'{path.stem}.{digest}{path.suffix}'
+         )
+         emitted[path] = name
+         files[name] = content

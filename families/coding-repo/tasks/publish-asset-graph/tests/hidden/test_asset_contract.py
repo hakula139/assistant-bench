@@ -353,7 +353,7 @@ class TestAssetPublication(unittest.TestCase):
             [
                 sys.executable,
                 '-m',
-                'tests.test_hidden_limited_build',
+                'tests.limited_build',
                 str(source),
                 str(output),
                 '4096',

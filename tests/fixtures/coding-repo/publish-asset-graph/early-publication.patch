@@ -1,0 +1,20 @@
+--- a/siteassets/builder.py
++++ b/siteassets/builder.py
+@@ -14,6 +14,8 @@
+ def build(source_root: Path, output_root: Path) -> BuildResult:
+     root = source_root.resolve()
+     output = output_root.resolve()
++    directory = begin(output)
++    activate(output, directory)
+     nodes = discover(root, output)
+     emitted: dict[Path, PurePosixPath] = {}
+     manifest: dict[str, str] = {}
+@@ -57,8 +59,6 @@
+         if not entry:
+             manifest[relative_path.as_posix()] = name.as_posix()
+
+-    directory = begin(output)
+-
+     try:
+         for name, content in files.items():
+             destination = directory / name

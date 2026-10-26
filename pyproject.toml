@@ -133,33 +133,21 @@ executionEnvironments = [
   { root = "src/assistant_bench_arena/worker", reportMissingModuleSource = false },
   { root = "families/coding-repo/tasks/deliver-transactional-outbox", extraPaths = [
     "families/coding-repo/tasks/deliver-transactional-outbox/solution/app",
-    "families/coding-repo/tasks/deliver-transactional-outbox/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "families/coding-repo/tasks/migrate-customer-store", extraPaths = [
     "families/coding-repo/tasks/migrate-customer-store/solution/app",
-    "families/coding-repo/tasks/migrate-customer-store/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "families/coding-repo/tasks/publish-asset-graph", extraPaths = [
     "families/coding-repo/tasks/publish-asset-graph/solution/app",
-    "families/coding-repo/tasks/publish-asset-graph/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "families/coding-repo/tasks/repair-singleflight-cache", extraPaths = [
     "families/coding-repo/tasks/repair-singleflight-cache/solution/app",
-    "families/coding-repo/tasks/repair-singleflight-cache/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "families/coding-repo/tasks/resume-ledger-import", extraPaths = [
     "families/coding-repo/tasks/resume-ledger-import/solution/app",
-    "families/coding-repo/tasks/resume-ledger-import/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "families/coding-repo/tasks/stabilize-cursor-pagination", extraPaths = [
     "families/coding-repo/tasks/stabilize-cursor-pagination/solution/app",
-    "families/coding-repo/tasks/stabilize-cursor-pagination/tests",
-    "families/coding-repo/shared/tests",
   ] },
   { root = "." },
 ]
