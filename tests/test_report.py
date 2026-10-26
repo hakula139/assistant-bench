@@ -579,6 +579,7 @@ class TestVotesResults:
                 system=system,
                 errored=index == 1 and system == 'a',
                 verdict='fail' if index == 1 else 'pass',
+                reward=None,
                 cost_usd=100.0 if index == 1 else 0.01,
                 latency_sec=100.0 if index == 1 else 2.0,
                 output_tokens=100 if index == 1 else 20,
@@ -608,6 +609,36 @@ class TestVotesResults:
         assert standings['a'].output_tokens is not None
         assert standings['a'].output_tokens.p50 == 20.0
         assert standings['b'].mean_cost_usd == pytest.approx(50.005)
+        assert standings['a'].pass_rate is None
+
+    def test_rates_test_passes_per_task_when_outputs_carry_rewards(self) -> None:
+        analysis = make_analysis((make_evidence(0), make_evidence(1)))
+        trials = [
+            ('case-0', 'a', False, 1.0),
+            ('case-0', 'a', False, 0.0),
+            ('case-1', 'a', True, 1.0),
+            ('case-0', 'b', False, 1.0),
+            ('case-1', 'b', True, None),
+        ]
+        outputs = tuple(
+            OutputMeasurement(
+                case=case,
+                system=system,
+                errored=errored,
+                verdict='ungraded' if reward is None else 'pass',
+                reward=reward,
+                cost_usd=None,
+                latency_sec=None,
+                output_tokens=None,
+            )
+            for case, system, errored, reward in trials
+        )
+
+        results = report.votes_results(replace(analysis, outputs=outputs))
+
+        standings = {row.system: row for row in results.standings}
+        assert standings['a'].pass_rate == pytest.approx((1 / 2 + 1) / 2)
+        assert standings['b'].pass_rate == pytest.approx(1 / 2)
 
     @pytest.mark.parametrize('choice', ['a', 'b', 'tie', 'both_bad'])
     def test_compares_swapped_repeats_without_adding_them_to_the_fit(

@@ -31,6 +31,7 @@ const standing = z.strictObject({
   both_bad_rate: z.number().nullable(),
   outputs: z.int(),
   gate_failure_rate: z.number().nullable(),
+  pass_rate: z.number().nullable(),
   mean_cost_usd: z.number().nullable(),
   p50_latency_sec: z.number().nullable(),
   output_tokens: distribution.nullable(),

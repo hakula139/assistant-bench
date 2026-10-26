@@ -376,10 +376,9 @@ describe('methodology page', () => {
       [...row.querySelectorAll('td')].map((cell) => cell.textContent),
     );
     expect(rows).toEqual(
-      [terms.failedTests, terms.solutionCostLatency, terms.diffLengthBias].map((term) => [
-        term.term,
-        term.definition,
-      ]),
+      [terms.failedTests, terms.passRate, terms.solutionCostLatency, terms.diffLengthBias].map(
+        (term) => [term.term, term.definition],
+      ),
     );
   });
 

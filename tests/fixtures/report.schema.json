@@ -580,6 +580,18 @@
           "description": "Failure share among outputs with a verdict, including errored agents.",
           "title": "Gate Failure Rate"
         },
+        "pass_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Task-test pass rate as tests results define it, null for untested families.",
+          "title": "Pass Rate"
+        },
         "mean_cost_usd": {
           "anyOf": [
             {
@@ -647,6 +659,7 @@
         "both_bad_rate",
         "outputs",
         "gate_failure_rate",
+        "pass_rate",
         "mean_cost_usd",
         "p50_latency_sec",
         "output_tokens",

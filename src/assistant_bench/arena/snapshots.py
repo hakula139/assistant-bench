@@ -285,6 +285,7 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
                 system=row.system_id,
                 errored=row.metadata.errored,
                 verdict=row.verdict,
+                reward=row.metadata.reward,
                 cost_usd=row.metadata.cost_usd,
                 latency_sec=row.metadata.latency_sec,
                 output_tokens=row.metadata.output_tokens,

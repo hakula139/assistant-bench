@@ -44,6 +44,24 @@ async function load(
   };
 }
 
+const PASS_RATES: Record<string, number | null> = {
+  'acme-mini': 0.9,
+  'acme-flash': 0.75,
+  'acme-pro': 0.5,
+  'acme-small': 0.25,
+  'acme-large': 0,
+  'acme-tiny': null,
+};
+
+/** Loads the round as a family whose outputs carry task-test rewards reports it. */
+async function loadTested(): Promise<VotesRound> {
+  const round = await load();
+  for (const standing of round.results.standings) {
+    standing.pass_rate = PASS_RATES[standing.system];
+  }
+  return round;
+}
+
 const BOARD = '/writing/arena/';
 
 const CASES = boardLabels({ render: 'text' });
@@ -412,6 +430,39 @@ describe('VotesBoard', () => {
     );
   });
 
+  test('adds a family-wide pass rate column for a tested family', async () => {
+    search.set('category', 'message');
+
+    const html = render(await loadTested());
+
+    expect(text(head(html))).toMatch(
+      / Gate failures all categories What Gate failures means Pass rate all categories What Pass rate means $/,
+    );
+  });
+
+  test('sorts a tested family by pass rate with the highest first and missing rates last', async () => {
+    stubPlotFrame();
+    const { container } = renderInDom(
+      <VotesBoard base={BOARD} rounds={[await loadTested()]} labels={CASES} />,
+    );
+    const rows = () =>
+      [...(container.querySelector('table')?.querySelectorAll('tbody tr') ?? [])].map((row) => [
+        row.querySelector('a')?.getAttribute('href')?.slice(BOARD.length, -1),
+        row.lastElementChild?.textContent,
+      ]);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Pass rate' }));
+
+    expect(rows()).toEqual([
+      ['acme-mini', '90%'],
+      ['acme-flash', '75%'],
+      ['acme-pro', '50%'],
+      ['acme-small', '25%'],
+      ['acme-large', '0%'],
+      ['acme-tiny', '–'],
+    ]);
+  });
+
   test('shows the family board for a category the round does not have', async () => {
     search.set('category', 'missing');
 
@@ -483,9 +534,10 @@ describe('VotesBoard', () => {
     ['Votes', 'max-md:hidden'],
     ['Both bad', 'max-md:hidden'],
     ['Gate failures', 'max-md:hidden'],
+    ['Pass rate', 'max-md:hidden'],
     ['Score', null],
   ])('hides the %s column on narrow screens with %s', async (name, hidden) => {
-    const leaderboard = parse(render(await load())).querySelector('table');
+    const leaderboard = parse(render(await loadTested())).querySelector('table');
 
     const columns = [...(leaderboard?.querySelectorAll('thead th') ?? [])].map((cell) =>
       text(cell.innerHTML).trim(),
@@ -519,14 +571,28 @@ describe('VotesBoard', () => {
   });
 
   test.each([
-    ['all', '1,004', 'text', '114 votes, both bad 5%, gate failures 2%.'],
-    ['message', '972', 'text', '34 votes, both bad 5%, gate failures 2% across all categories.'],
-    ['all', '1,004', 'diff', '114 votes, both bad 5%, failed tests 2%.'],
+    ['all', '1,004', 'text', load, '114 votes, both bad 5%, gate failures 2%.'],
+    [
+      'message',
+      '972',
+      'text',
+      load,
+      '34 votes, both bad 5%, gate failures 2% across all categories.',
+    ],
+    ['all', '1,004', 'diff', load, '114 votes, both bad 5%, failed tests 2%.'],
+    [
+      'all',
+      '1,004',
+      'tested diff',
+      loadTested,
+      '114 votes, both bad 5%, failed tests 2%, pass rate 50%.',
+    ],
   ] as const)(
     "opens a system's votes and rates from its score on the %s board of a %s family",
-    async (category, score, render, details) => {
+    async (category, score, family, loadRound, details) => {
       search.set('category', category);
-      const { round, results, systems, closed_at } = await load();
+      const render = family === 'text' ? 'text' : 'diff';
+      const { round, results, systems, closed_at } = await loadRound();
       stubPlotFrame();
       renderInDom(
         <VotesBoard

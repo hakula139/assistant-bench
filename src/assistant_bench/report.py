@@ -215,6 +215,8 @@ class Standing(_Model):
     """Outputs that finished without an error."""
     gate_failure_rate: float | None
     """Failure share among outputs with a verdict, including errored agents."""
+    pass_rate: float | None
+    """Task-test pass rate as tests results define it, null for untested families."""
 
     mean_cost_usd: float | None
     p50_latency_sec: float | None
@@ -771,6 +773,9 @@ class OutputMeasurement:
     system: str
     errored: bool
     verdict: Literal['pass', 'fail', 'ungraded']
+    reward: float | None
+    """The task tests' reward, absent for rendered cases and untested trials."""
+
     cost_usd: float | None
     latency_sec: float | None
     output_tokens: int | None
@@ -814,6 +819,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     if not comparisons:
         raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
 
+    tested = any(output.reward is not None for output in outputs)
     board, *_ = ranking.rate_components(
         comparisons, analysis.systems, analysis.reference
     )
@@ -838,6 +844,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             [vote for vote in votes if system in vote.systems],
             [output for output in outputs if output.system == system],
             analysis.defects,
+            tested=tested,
         )
         for i, system in enumerate(ratings.systems)
     ]
@@ -885,7 +892,13 @@ def _standing(
     votes: list[HumanEvidence],
     outputs: list[OutputMeasurement],
     listed: Sequence[Defect],
+    *,
+    tested: bool,
 ) -> Standing:
+    """Summarize one system's votes and outputs.
+
+    `tested` marks a family whose outputs carry task-test rewards.
+    """
     choices = Counter(vote.choice for vote in votes)
     defects = Counter(
         defect
@@ -920,6 +933,11 @@ def _standing(
         ),
         outputs=len(finished),
         gate_failure_rate=_share(output.verdict == 'fail' for output in graded),
+        pass_rate=(
+            _task_mean((output.case, tests_pass(output.reward)) for output in outputs)
+            if tested and outputs
+            else None
+        ),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
@@ -1247,6 +1265,15 @@ def _pass_rate(shares: Iterable[float]) -> PassRate:
 def _share(flags: Iterable[bool]) -> float | None:
     values = list(flags)
     return sum(values) / len(values) if values else None
+
+
+def _task_mean(passes: Iterable[tuple[str, bool]]) -> float:
+    """Average each task's share of passing trials over `(task, passed)` pairs."""
+    by_task: defaultdict[str, list[bool]] = defaultdict(list)
+    for task, passed in passes:
+        by_task[task].append(passed)
+
+    return statistics.fmean(sum(flags) / len(flags) for flags in by_task.values())
 
 
 def _mean(values: Iterable[float | None]) -> float | None:

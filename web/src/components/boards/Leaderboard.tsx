@@ -108,8 +108,16 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
  * The figures of a row's `detail` columns, which its score opens on tap, click, or Enter, since
  * narrow screens leave those columns out.
  */
-function rowDetails(row: LeaderboardRow, ranked: boolean, gateFailures: Term): Term {
-  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}`;
+function rowDetails(
+  row: LeaderboardRow,
+  ranked: boolean,
+  gateFailures: Term,
+  tested: boolean,
+): Term {
+  const passes = tested
+    ? `, ${terms.passRate.term.toLowerCase()} ${formatPercent(row.standing?.pass_rate ?? null)}`
+    : '';
+  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}${passes}`;
   return {
     term: row.name,
     definition: `${formatCountOf(row.votes, 'vote')}, ${rates}${ranked ? '' : ' across all categories'}.`,
@@ -144,6 +152,7 @@ export function Leaderboard({
 }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
   const anchor = anchorScore(rows, anchorSystem);
+  const tested = rows.some((row) => (row.standing?.pass_rate ?? null) !== null);
 
   const columns = useMemo(() => {
     const familyWide = (label: string) =>
@@ -198,7 +207,7 @@ export function Leaderboard({
         sortDescFirst: true,
         cell: ({ row }) => (
           <span className="flex flex-col items-end leading-tight">
-            <Hint term={rowDetails(row.original, ranked, gateFailures)}>
+            <Hint term={rowDetails(row.original, ranked, gateFailures, tested)}>
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
           </span>
@@ -227,8 +236,29 @@ export function Leaderboard({
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
         meta: { numeric: true, term: gateFailures, detail: true },
       }),
+      ...(tested
+        ? [
+            helper.accessor((row) => row.standing?.pass_rate ?? undefined, {
+              id: 'pass-rate',
+              header: familyWide(terms.passRate.term),
+              sortDescFirst: true,
+              sortUndefined: 'last',
+              cell: ({ getValue }) => formatPercent(getValue() ?? null),
+              meta: { numeric: true, term: terms.passRate, detail: true },
+            }),
+          ]
+        : []),
     ]);
-  }, [ranked, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, gateFailures]);
+  }, [
+    ranked,
+    tested,
+    domain,
+    anchor,
+    anchorSystem,
+    anchorTerm,
+    preliminaryTerm,
+    gateFailures,
+  ]);
 
   const table = useTable({
     features,
