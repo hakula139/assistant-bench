@@ -55,12 +55,7 @@ function render(round: VotesRound, names?: Record<string, string>, labels = CASE
       )
     : round.systems;
   return renderToString(
-    <VotesBoard
-      base={BOARD}
-      round={{ ...round, systems, results: reversed }}
-      rounds={[{ round: round.round, href: BOARD }]}
-      labels={labels}
-    />,
+    <VotesBoard base={BOARD} round={{ ...round, systems, results: reversed }} labels={labels} />,
   );
 }
 
@@ -119,16 +114,7 @@ describe('VotesBoard', () => {
     vi.stubGlobal('fetch', fetch);
     stubPlotFrame();
 
-    const round = await load();
-
-    renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={round}
-        rounds={[{ round: round.round, href: BOARD }]}
-        labels={CASES}
-      />,
-    );
+    renderInDom(<VotesBoard base={BOARD} round={await load()} labels={CASES} />);
 
     expect(screen.queryByRole('status')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
@@ -158,17 +144,7 @@ describe('VotesBoard', () => {
       pro.decisive_votes = 13;
     }
     const draw = (round: VotesRound) =>
-      renderToString(
-        <VotesBoard
-          base={BOARD}
-          round={round}
-          rounds={[
-            { round: current.round, href: BOARD },
-            { round: earlier.round, href: `${BOARD}rounds/${earlier.round}/` },
-          ]}
-          labels={CASES}
-        />,
-      );
+      renderToString(<VotesBoard base={BOARD} round={round} labels={CASES} />);
 
     const historical = draw(earlier);
 
@@ -198,14 +174,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
     const user = userEvent.setup();
 
-    const { container } = renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={round}
-        rounds={[{ round: round.round, href: BOARD }]}
-        labels={CASES}
-      />,
-    );
+    const { container } = renderInDom(<VotesBoard base={BOARD} round={round} labels={CASES} />);
     const table = container.querySelector('table');
     const systems = () =>
       [...(table?.querySelectorAll('tbody a') ?? [])].map((link) =>
@@ -340,12 +309,7 @@ describe('VotesBoard', () => {
     systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={{ round, results, systems, closed_at }}
-        rounds={[{ round, href: BOARD }]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
@@ -444,12 +408,7 @@ describe('VotesBoard', () => {
       stubPlotFrame();
       const user = userEvent.setup();
       renderInDom(
-        <VotesBoard
-          base={BOARD}
-          round={{ round, results, systems, closed_at }}
-          rounds={[{ round, href: BOARD }]}
-          labels={CASES}
-        />,
+        <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
       );
       const select = screen.getByLabelText<HTMLSelectElement>('Category');
       const option = screen.getByRole<HTMLOptionElement>('option', { name: category });
@@ -523,7 +482,6 @@ describe('VotesBoard', () => {
         <VotesBoard
           base={BOARD}
           round={{ round, results, systems, closed_at }}
-          rounds={[{ round, href: BOARD }]}
           labels={boardLabels({ render })}
         />,
       );
@@ -543,12 +501,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={{ round, results, systems, closed_at }}
-        rounds={[{ round, href: BOARD }]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -582,12 +535,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={{ round, results, systems, closed_at }}
-        rounds={[{ round, href: BOARD }]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>

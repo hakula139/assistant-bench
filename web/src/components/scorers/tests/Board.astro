@@ -3,7 +3,7 @@ import { TestsBoard } from '@/components/boards/TestsBoard';
 import Systems from '@/components/scorers/tests/Systems.astro';
 import { note } from '@/components/site/PageParts';
 import type { Report } from '@/lib/report';
-import { roundLinks, testsRound, type Family } from '@/lib/reports';
+import { testsRound, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
@@ -16,7 +16,7 @@ const round = report && testsRound(report);
 ---
 
 {round ? (
-  <TestsBoard client:visible round={round} rounds={roundLinks(family)} />
+  <TestsBoard client:visible round={round} />
 ) : (
   <div class="flex flex-col gap-4">
     <p class={note}>No round has closed yet.</p>

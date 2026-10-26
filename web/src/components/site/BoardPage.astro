@@ -5,10 +5,11 @@ import { scorerViews } from '@/components/scorers';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { MethodStrip } from '@/components/site/Method';
 import { note, PageHeader } from '@/components/site/PageParts';
+import { RoundSwitcher } from '@/components/site/RoundSwitcher';
 import Base from '@/layouts/Base.astro';
 import { boardGuide } from '@/lib/method';
 import type { Report } from '@/lib/report';
-import { boardPath, latest, type BoardLink, type Family } from '@/lib/reports';
+import { boardPath, latest, roundLinks, type BoardLink, type Family } from '@/lib/reports';
 import { REPOSITORY } from '@/lib/site';
 
 interface Props {
@@ -48,6 +49,9 @@ const round = named ?? newest;
         {guide.inputs}
       </a>
     </div>
+    {round && (
+      <RoundSwitcher client:load rounds={roundLinks(family, named?.round)} shown={round.round} />
+    )}
     {newest && round !== newest && (
       <p class={note}>
         This is an earlier round.{' '}

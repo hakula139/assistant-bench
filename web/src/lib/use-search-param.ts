@@ -13,6 +13,18 @@ function subscribe(onChange: () => void) {
 }
 
 /**
+ * Reads the whole query string as filters write it, for links that carry the filters to another
+ * page. The static render sees no query string, so it reads the empty string until hydration.
+ */
+export function useSearch(): string {
+  return useSyncExternalStore(
+    subscribe,
+    () => window.location.search,
+    () => '',
+  );
+}
+
+/**
  * Reads and writes one query parameter, so filters survive reloads and shared links.
  *
  * The static render sees no query string, so it shows `fallback` until hydration reads the URL.

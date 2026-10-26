@@ -2,7 +2,7 @@ import { cn } from 'cn';
 import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 
-import { Filter, RoundFilter } from '@/components/boards/Filter';
+import { Filter } from '@/components/boards/Filter';
 import {
   Leaderboard,
   leaderboardMarks,
@@ -52,7 +52,7 @@ import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { isPreliminary } from '@/lib/ranking';
 import type { Standing, VotesResults } from '@/lib/report';
-import type { RoundLink, VotesRound } from '@/lib/reports';
+import type { VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
 
@@ -61,8 +61,6 @@ interface VotesBoardProps {
   base: string;
   /** The closed round the board shows. */
   round: VotesRound;
-  /** Every closed round's page, newest first, which the Round filter moves between. */
-  rounds: RoundLink[];
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
@@ -170,7 +168,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, round, rounds, labels }: VotesBoardProps) {
+export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const [category, setCategory] = useSearchParam('category', null);
 
   const { systems, results } = round;
@@ -225,22 +223,19 @@ export function VotesBoard({ base, round, rounds, labels }: VotesBoardProps) {
 
   return (
     <div className={stack}>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <RoundFilter rounds={rounds} current={round.round} />
-        {categories.length > 0 && (
-          <Filter
-            label="Category"
-            value={activeCategory === null ? ALL : categoryOption(activeCategory)}
-            onChange={(value) => {
-              setCategory(value === ALL ? null : value.slice('category:'.length));
-            }}
-            options={[
-              { value: ALL, label: 'All categories' },
-              ...categories.map((name) => ({ value: categoryOption(name), label: name })),
-            ]}
-          />
-        )}
-      </div>
+      {categories.length > 0 && (
+        <Filter
+          label="Category"
+          value={activeCategory === null ? ALL : categoryOption(activeCategory)}
+          onChange={(value) => {
+            setCategory(value === ALL ? null : value.slice('category:'.length));
+          }}
+          options={[
+            { value: ALL, label: 'All categories' },
+            ...categories.map((name) => ({ value: categoryOption(name), label: name })),
+          ]}
+        />
+      )}
 
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
       {results.provenance?.status === 'ledger' && (

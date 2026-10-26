@@ -43,7 +43,7 @@ web/src/
 - Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home, such as a component variant, a component like `Section`, or a shared class constant like `note` in `components/site/PageParts.tsx`, so the class list is not repeated.
 - Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every page's top level. Space stacked blocks with flex `gap` and no margins on the blocks, as `stack`, `PageHeader`, `Section`, and `Part` do, since Astro wraps each hydrated island in a `display: contents` element that `space-y` margins skip.
 - Hydrate a component only where the page is interactive. Tables render as static React components unless a cell opens a hint, and island props stay serializable, which is why `DotRangePlot` takes a named format.
-- Pass filter state through `useSearchParam` so each filter lands in the URL. A filter whose values would each add their data to the page, such as the Round filter over a family's rounds, navigates between static routes, one per value, so island props hold only what the page shows.
+- Pass filter state through `useSearchParam` so each filter lands in the URL. When each value of a choice would add its own data to the page, as a family's rounds do, give each value a static route and link the routes, so island props hold only what the page shows.
 
 ## Charts
 

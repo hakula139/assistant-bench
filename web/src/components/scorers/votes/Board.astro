@@ -5,7 +5,7 @@ import { note } from '@/components/site/PageParts';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
 import type { Report } from '@/lib/report';
-import { boardPath, configOf, roundLinks, votesRound, type Family } from '@/lib/reports';
+import { boardPath, configOf, votesRound, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
@@ -33,11 +33,5 @@ const rows =
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard
-    client:load
-    base={boardPath(family)}
-    round={round}
-    rounds={roundLinks(family)}
-    labels={boardLabels(config)}
-  />
+  <VotesBoard client:load base={boardPath(family)} round={round} labels={boardLabels(config)} />
 )}

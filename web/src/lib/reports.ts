@@ -192,33 +192,35 @@ export interface BoardLink {
   current: boolean;
 }
 
-/** A link to one of a family's closed rounds, which the board's Round filter navigates to. */
+/** A link to one of a family's closed rounds. */
 export interface RoundLink {
   round: string;
   href: string;
 }
 
-/** Returns links to a family's closed rounds, newest first, where the latest links the board. */
-export function roundLinks(family: Family): RoundLink[] {
+/**
+ * Returns links to a family's closed rounds, newest first, for the page of the round `named`, or
+ * for the board's path, which shows the latest. The latest links the board's path except on its
+ * own round page, so the round on screen always links the page itself.
+ */
+export function roundLinks(family: Family, named?: string): RoundLink[] {
   return family.rounds.toReversed().map(({ round }, index) => ({
     round,
-    href: index === 0 ? boardPath(family) : roundPath(family, round),
+    href: index === 0 && round !== named ? boardPath(family) : roundPath(family, round),
   }));
 }
 
-/** Returns links to the boards of each family's aspect, keyed by family name. */
-function aspectBoards(families: Family[]): Map<string, BoardLink[]> {
+/**
+ * Returns a function listing the boards of a family's aspect for one of the family's pages at
+ * `page`, which the family's own entry links.
+ */
+function aspectBoards(families: Family[]): (family: Family, page: string) => BoardLink[] {
   const byAspect = Map.groupBy(families, (family) => family.aspect);
-  return new Map(
-    families.map((family) => [
-      family.name,
-      (byAspect.get(family.aspect) ?? []).map((item): BoardLink => ({
-        href: boardPath(item),
-        label: item.config.display_name,
-        current: item.name === family.name,
-      })),
-    ]),
-  );
+  return (family, page) =>
+    (byAspect.get(family.aspect) ?? []).map((item): BoardLink => {
+      const current = item.name === family.name;
+      return { href: current ? page : boardPath(item), label: item.config.display_name, current };
+    });
 }
 
 /** Returns each family page's params and props: the family and its aspect's boards. */
@@ -226,7 +228,7 @@ export function familyPaths(families: Family[]) {
   const boards = aspectBoards(families);
   return families.map((family) => ({
     params: boardParams(family),
-    props: { family, boards: boards.get(family.name) ?? [] },
+    props: { family, boards: boards(family, boardPath(family)) },
   }));
 }
 
@@ -239,7 +241,7 @@ export function roundPaths(families: Family[]) {
   return families.flatMap((family) =>
     family.rounds.map((round) => ({
       params: { ...boardParams(family), round: round.round },
-      props: { family, boards: boards.get(family.name) ?? [], round },
+      props: { family, boards: boards(family, roundPath(family, round.round)), round },
     })),
   );
 }

@@ -14,8 +14,6 @@ import { reportSchema } from '@/lib/report';
 import {
   boardPath,
   familyPaths,
-  roundLinks,
-  roundPath,
   roundPaths,
   systemPath,
   systemPaths,
@@ -917,6 +915,21 @@ describe('board switcher', () => {
     ]);
   });
 
+  test('links the current board to the round page it shows from that page', async () => {
+    const families = await boards();
+
+    const html = await render(
+      RoundPage,
+      propsAt(roundPaths(families), { aspect: 'writing', board: 'arena', round: '2026-10-07' }),
+    );
+
+    expect(navLinks(html, 'Writing boards')).toEqual([
+      ['/writing/arena/rounds/2026-10-07/', 'Arena Writing', 'page'],
+      ['/writing/arena-en/', 'Arena English', null],
+      ['/writing/arena-ja/', 'Arena Japanese', null],
+    ]);
+  });
+
   test('stays off a page whose aspect lists one board', async () => {
     const arena = await family();
 
@@ -1001,16 +1014,48 @@ describe('round pages', () => {
     },
   );
 
-  test('links each round in the Round filter to a page that shows it, newest first', async () => {
+  test("links every round from each page, newest first, marking the page's own", async () => {
     const arena = await family();
+
     const pages = await boardPages(arena);
 
-    const links = roundLinks(arena);
-
-    expect(links.map(({ round }) => round)).toEqual(['2026-10-21', '2026-10-07']);
-    for (const { round, href } of links) {
-      expect(islandRounds(pages.get(href) ?? ''), href).toEqual([round]);
+    const links = new Map([...pages].map(([path, html]) => [path, navLinks(html, 'Rounds')]));
+    expect([...links]).toEqual([
+      [
+        '/writing/arena/',
+        [
+          ['/writing/arena/', '2026-10-21 (latest)', 'page'],
+          ['/writing/arena/rounds/2026-10-07/', '2026-10-07', null],
+        ],
+      ],
+      [
+        '/writing/arena/rounds/2026-10-07/',
+        [
+          ['/writing/arena/', '2026-10-21 (latest)', null],
+          ['/writing/arena/rounds/2026-10-07/', '2026-10-07', 'page'],
+        ],
+      ],
+      [
+        '/writing/arena/rounds/2026-10-21/',
+        [
+          ['/writing/arena/rounds/2026-10-21/', '2026-10-21 (latest)', 'page'],
+          ['/writing/arena/rounds/2026-10-07/', '2026-10-07', null],
+        ],
+      ],
+    ]);
+    for (const [href, label] of [...links.values()].flat()) {
+      expect(islandRounds(pages.get(href) ?? ''), href).toEqual([label.split(' ')[0]]);
     }
+  });
+
+  test("names a single round's page without linking it", async () => {
+    const arena = await family();
+    const single: Family = { ...arena, rounds: arena.rounds.slice(1) };
+
+    const html = await render(FamilyPage, { family: single, boards: [] });
+
+    expect(navLinks(html, 'Rounds')).toEqual([]);
+    expect(text(html)).toContain('Round 2026-10-21');
   });
 
   test("titles an earlier round's page by its round and links the latest from it", async () => {
@@ -1050,23 +1095,19 @@ describe('round pages', () => {
     ]);
   });
 
-  test("draws the earlier round's own scores on its page", async () => {
+  test("links a system page's round to the page of the round it last appeared in", async () => {
     const arena = await family();
-
-    const pages = await boardPages(arena);
-
-    expect(text(pages.get('/writing/arena/rounds/2026-10-07/') ?? '')).toContain('Acme Pro 900');
-    expect(text(pages.get('/writing/arena/') ?? '')).toContain('Acme Pro 1,004');
-  });
-
-  test("links a system page's round to the page of the round it shows", async () => {
-    const arena = await family();
+    const later = arena.rounds[1].results;
+    if (later.scorer !== 'votes') {
+      throw new Error('the fixture is a votes report');
+    }
+    later.standings = later.standings.filter((standing) => standing.system !== 'acme-pro');
     const pages = await boardPages(arena);
 
     const html = await render(SystemPage, { family: arena, system: 'acme-pro', boards: [] });
 
     const href = new JSDOM(html).window.document.querySelector('header dl a')?.getAttribute('href');
-    expect(href).toBe(roundPath(arena, '2026-10-21'));
-    expect(islandRounds(pages.get(href ?? '') ?? '')).toEqual(['2026-10-21']);
+    expect(href).toBe('/writing/arena/rounds/2026-10-07/');
+    expect(islandRounds(pages.get(href ?? '') ?? '')).toEqual(['2026-10-07']);
   });
 });
