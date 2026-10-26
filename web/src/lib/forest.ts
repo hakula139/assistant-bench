@@ -122,7 +122,7 @@ export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
  * Why a row has no estimate: the pre-round anchor, a system whose votes do not yet connect it to
  * the anchor, or a system with no votes.
  */
-export type Unplaced = 'anchor' | 'unranked' | 'no-votes';
+type Unplaced = 'anchor' | 'unranked' | 'no-votes';
 
 /** One system's row in a static forest plot, labelled by its display `name`. */
 export type ForestRow = { system: string; name: string; href?: string } & (

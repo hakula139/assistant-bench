@@ -327,6 +327,19 @@ describe('VotesBoard', () => {
     );
   });
 
+  test("groups the digits of each system's vote count", async () => {
+    const round = await load();
+    round.results.standings[0].votes = 1234;
+
+    const row = [...parse(render(round)).querySelectorAll('tbody tr')].find((item) =>
+      item.textContent.includes('Acme Pro'),
+    );
+
+    expect([...(row?.querySelectorAll('td') ?? [])].map((cell) => cell.textContent)).toContain(
+      '1,234',
+    );
+  });
+
   test("labels each system's point with its display name and score", async () => {
     const html = render(await load());
 

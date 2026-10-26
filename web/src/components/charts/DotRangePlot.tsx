@@ -1,8 +1,9 @@
 import * as Plot from '@observablehq/plot';
 import { useCallback } from 'react';
 
-import { LABEL_GAP, PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { formatCount, formatPercent, formatScore, formatSeconds } from '@/lib/format';
+import { grid, LABEL_GAP, labelMargin, referenceRule, tip } from '@/components/charts/chart-marks';
+import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { formatCount, formatPercent, formatSeconds } from '@/lib/format';
 
 export interface DotRange {
   label: string;
@@ -14,7 +15,7 @@ export interface DotRange {
 }
 
 /** Named so that Astro pages, which pass only serializable props to islands, can choose one. */
-export type ValueFormat = 'score' | 'percent' | 'tokens' | 'seconds';
+type ValueFormat = 'percent' | 'tokens' | 'seconds';
 
 interface DotRangePlotProps {
   rows: DotRange[];
@@ -28,7 +29,6 @@ interface DotRangePlotProps {
 const ROW_HEIGHT = 32;
 
 const formats: Record<ValueFormat, (value: number) => string> = {
-  score: formatScore,
   percent: formatPercent,
   tokens: formatCount,
   seconds: formatSeconds,
@@ -43,12 +43,16 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
       const color = (row: DotRange) =>
         row.emphasis ? 'var(--chart-emphasis)' : 'var(--chart-series)';
       const ranged = rows.filter((row) => row.range !== undefined);
+      const ticks = Math.ceil(width / 160);
 
       return {
-        marginLeft: Math.max(...rows.map((row) => measure(row.label))) + LABEL_GAP,
+        marginLeft: labelMargin(
+          rows.map((row) => row.label),
+          measure,
+        ),
         marginRight: 24,
         marginBottom: 40,
-        x: { label, tickFormat: tick, grid: true, nice: true, ticks: Math.ceil(width / 160) },
+        x: { label, tickFormat: tick, nice: true, ticks },
         y: {
           domain: rows.map((row) => row.label),
           label: null,
@@ -57,9 +61,8 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
         },
         color: { type: 'identity' },
         marks: [
-          baseline === undefined
-            ? null
-            : Plot.ruleX([baseline], { stroke: 'var(--faint)', strokeOpacity: 0.8 }),
+          grid('x', ticks),
+          baseline === undefined ? null : referenceRule(baseline),
           Plot.ruleY(ranged, {
             y: 'label',
             x1: (row: DotRange) => row.range?.lower,
@@ -76,7 +79,7 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
             stroke: 'var(--background)',
             strokeWidth: 2,
           }),
-          Plot.tip(
+          tip(
             rows,
             Plot.pointerY({
               x: 'value',
@@ -85,7 +88,6 @@ export function DotRangePlot({ rows, label, format, baseline }: DotRangePlotProp
                 row.range
                   ? `${row.label}\n${tick(row.value)} (${tick(row.range.lower)}–${tick(row.range.upper)})`
                   : `${row.label}\n${tick(row.value)}`,
-              fontFamily: 'inherit',
             }),
           ),
         ],

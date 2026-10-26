@@ -48,7 +48,8 @@ web/src/
 
 ## Charts
 
-- Render every chart through `PlotFigure`, which sizes it to its container and measures labels in the chart's font. Size label margins from those measurements, never from a fixed width.
+- Render every chart through `PlotFigure`, which sizes it to its container and measures labels in the chart's font. Size label margins from those measurements with `labelMargin`, never from a fixed width.
+- Draw gridlines, reference rules, and tooltips through `grid`, `referenceRule`, and `tip` in `components/charts/chart-marks.ts`, so every chart draws them alike.
 - Pick log-axis ticks with `logTicks` and label them through the axis mark's `text` option, because Plot's log tick format blanks labels on spans under a decade.
 - Take chart colors from the CSS variables in `global.css`, such as the `--chart-*` set, never from literal values, so dark mode needs no re-render. The series and emphasis hues were checked as a pair for lightness, chroma, color-vision separation, and contrast against the surface in both themes, so recheck both before changing either.
 - Give every Plot chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows. The static `Forest` is its own table twin.

@@ -1,4 +1,4 @@
-const score = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
+const whole = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
 const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0 });
 
 const cost = new Intl.NumberFormat('en', {
@@ -15,19 +15,18 @@ const seconds = new Intl.NumberFormat('en', {
 });
 
 const tau = new Intl.NumberFormat('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const count = new Intl.NumberFormat('en', { maximumFractionDigits: 0 });
 const bias = new Intl.NumberFormat('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** Shown wherever a report holds no value, as for an unpriced route. */
 export const MISSING = '–';
 
-export const formatScore = (value: number) => score.format(value);
+export const formatScore = (value: number) => whole.format(value);
 export const formatTau = (value: number | null) => (value === null ? MISSING : tau.format(value));
-export const formatCount = (value: number) => count.format(value);
+export const formatCount = (value: number) => whole.format(value);
 
 /** Counts a regular English noun, as in "1 vote" and "34 votes". */
 export const formatCountOf = (value: number, noun: string) =>
-  `${count.format(value)} ${value === 1 ? noun : `${noun}s`}`;
+  `${whole.format(value)} ${value === 1 ? noun : `${noun}s`}`;
 
 export const formatPercent = (value: number | null) =>
   value === null ? MISSING : percent.format(value);

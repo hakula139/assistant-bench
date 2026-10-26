@@ -16,11 +16,6 @@ export interface ForestDatum {
 const SERIES = 'var(--chart-series)';
 const SURFACE = 'var(--background)';
 
-/** The rule a forest plot draws at the anchor score, as the static `Forest` draws it. */
-export function anchorRule(score: number): Plot.Markish {
-  return Plot.ruleX([score], { stroke: 'var(--faint)', strokeOpacity: 0.4 });
-}
-
 /** Hollow points mark preliminary coverage. A clipped point keeps an arrowhead. */
 export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plot.Markish[] {
   return [
