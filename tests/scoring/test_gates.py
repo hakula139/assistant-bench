@@ -266,11 +266,18 @@ class TestDetectLanguage:
                     <code>English identifiers
                     ```
 
-                    构建通过
+                    构建通过 </code>
                     """
                 ),
                 'zh',
             ),
+            (
+                '不要写 <style>。\n\n'
+                '<span title="Open the deployment guide in a new browser tab">'
+                '指南</span>',
+                'zh',
+            ),
+            ('<pre>English words left open </code>', 'en'),
         ],
         ids=[
             'nested-block',
@@ -289,18 +296,53 @@ class TestDetectLanguage:
             'code-containing-fenced-comment',
             'code-containing-prose-fence',
             'isolated-prose-fence-state',
+            'style-then-attributes',
+            'stray-end-tag',
         ],
     )
     def test_reads_visible_html_prose(self, text: str, language: str) -> None:
         assert detect_language(text) == language
 
+    @pytest.mark.parametrize(
+        'markup',
+        [
+            'Use the <code>x flag.',
+            'Note <pre> here.',
+            'Avoid a <script> tag in replies.',
+            'Avoid a <style> tag in replies.',
+            '<pre>\nEnglish identifiers\n',
+        ],
+        ids=['code', 'pre', 'script', 'style', 'block'],
+    )
+    def test_reads_prose_after_an_unclosed_excluded_element(self, markup: str) -> None:
+        zh = '构建已经通过，部署前还需要检查服务状态和配置文件。'
+
+        assert detect_language(f'{markup}\n\n{zh}') == 'zh'
+
+    def test_parses_markdown_after_an_unclosed_raw_block(self) -> None:
+        text = textwrap.dedent(
+            """\
+            <pre> 标签用于显示预格式化文本。
+
+            示例代码：
+
+            ```python
+            def fetch_records(client, cursor=None, limit=None, timeout=None):
+                response = client.get(endpoint, params=dict(cursor=cursor, limit=limit))
+                return response.json()
+            ```
+            """
+        )
+
+        assert detect_language(text) == 'zh'
+
     def test_does_not_reuse_html_state_across_outputs(self) -> None:
-        hidden = '<code>English words inside an unclosed code element'
-        visible = 'English words in a separate output'
+        opened = '<code>English words inside an element left open'
+        closing = 'English words in a separate output</code>'
 
-        languages = [detect_language(hidden), detect_language(visible)]
+        languages = [detect_language(opened), detect_language(closing)]
 
-        assert languages == [None, 'en']
+        assert languages == ['en', 'en']
 
     def test_reads_english_prose_quoting_chinese(self) -> None:
         text = 'The error message 文件不存在 means the file does not exist yet.'
