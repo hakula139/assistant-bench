@@ -7,6 +7,7 @@ from assistant_bench_arena.ledger_models import (
     RenderedOutput,
     System,
 )
+from assistant_bench_arena.models import Category
 from assistant_bench_arena.releases import (
     Release,
     evaluation_identity,
@@ -114,11 +115,12 @@ def make_release(
     suffix: str = '1',
     cases: int = 3,
     failing_case: int | None = None,
+    category: Category | None = None,
 ) -> Release:
     case_rows = tuple(
         Case(
             key=case_key(index),
-            category='reply',
+            category=category,
             source='synthetic',
             instruction_digest=digest(case_document(index).instruction),
             metadata=CaseMetadata(
@@ -168,7 +170,7 @@ def make_release(
             name=family,
             reference=systems[0],
             systems=systems,
-            categories=('reply',),
+            categories=() if category is None else (category,),
             defects=('tone',),
         ),
         policy=policy,

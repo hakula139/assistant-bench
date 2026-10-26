@@ -49,7 +49,7 @@ def admission(response: dict[str, JsonValue]) -> str:
 
 
 def html_release() -> Release:
-    release = make_release(cases=1)
+    release = make_release(cases=1, category='reply')
     presentation = release.publication.presentation.model_copy(
         update={'render': 'html'}
     )
