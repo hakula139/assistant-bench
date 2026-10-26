@@ -14,14 +14,16 @@ from typer.testing import CliRunner
 
 from arena_support import admit_actor
 from assistant_bench import cli, families, report
+from assistant_bench.arena import snapshots
 from assistant_bench.arena.exports import (
     FrozenExport,
     capture_export,
     read_export,
     write_export,
 )
-from assistant_bench.arena.publication import load_policy
-from assistant_bench.arena.snapshots import analyze_export
+from assistant_bench.arena.publication import POLICY
+from assistant_bench.arena.snapshots import SnapshotAnalysis, analyze_export
+from assistant_bench.report import LedgerProvenance
 from assistant_bench_arena.investigation import LedgerInvestigation
 from assistant_bench_arena.ledger import Ledger
 from assistant_bench_arena.ledger_models import (
@@ -41,7 +43,6 @@ from assistant_bench_arena.ledger_models import (
 from assistant_bench_arena.models import Choice
 from assistant_bench_arena.releases import point_snapshot
 from assistant_bench_arena.serialization import canonical, digest
-from assistant_bench_arena.snapshots import LedgerProvenance
 from assistant_bench_arena.transport import CommandRejected
 from ledger_fixtures import case_key, make_release, output_key
 from ledger_support import D1Runtime, publish_presentation, publish_release
@@ -76,6 +77,16 @@ class Captures:
     after: FrozenExport
     reread: FrozenExport
     first: Receipt
+
+
+def close(snapshot: SnapshotAnalysis) -> report.Report:
+    return report.close_snapshot(
+        snapshot.analysis,
+        AT + timedelta(days=2),
+        fingerprints=snapshot.fingerprints,
+        system_names=snapshot.system_names,
+        previous_reports=[],
+    )
 
 
 def attribution(now: int) -> tuple[Attribution, ...]:
@@ -143,7 +154,7 @@ def captures(tmp_path_factory: pytest.TempPathFactory) -> Captures:
         async with runtime.client() as (ledger, transport):
             await transport.reset()
             await transport.bootstrap(configuration('synthetic-export'))
-            release = make_release(family=FAMILY, cases=130, policy=load_policy())
+            release = make_release(family=FAMILY, cases=130, policy=POLICY)
             await publish_release(ledger, release)
             await ledger.activate(
                 Context(command_id='activate', principal='admin', now=BASE_MS),
@@ -277,8 +288,7 @@ class TestSamplingPoints:
             async with runtime.client() as (ledger, transport):
                 await transport.reset()
                 await transport.bootstrap(configuration('synthetic-points'))
-                policy = load_policy()
-                release = make_release(family=FAMILY, cases=2, policy=policy)
+                release = make_release(family=FAMILY, cases=2, policy=POLICY)
                 await publish_release(ledger, release)
                 await ledger.activate(
                     Context(command_id='initial', principal='admin', now=BASE_MS),
@@ -356,7 +366,7 @@ class TestSamplingPoints:
                         )
 
                 refresh = make_release(
-                    family=FAMILY, cases=2, policy=policy, suffix='refreshed'
+                    family=FAMILY, cases=2, policy=POLICY, suffix='refreshed'
                 )
                 await publish_presentation(ledger, refresh)
 
@@ -443,6 +453,17 @@ class TestAnalyzeExport:
         with pytest.raises(ValueError):
             analyze_export(capture)
 
+    def test_rejects_a_sealed_policy_other_than_the_fixed_one(
+        self, captures: Captures, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rules = POLICY.rules.model_copy(update={'rater_agreement_floor': 0.8})
+        monkeypatch.setattr(
+            snapshots, 'POLICY', POLICY.model_copy(update={'rules': rules})
+        )
+
+        with pytest.raises(ValueError, match='unsupported analysis policy'):
+            analyze_export(captures.before)
+
     def test_matches_the_committed_genuine_capped_report(
         self,
         captures: Captures,
@@ -450,9 +471,7 @@ class TestAnalyzeExport:
     ) -> None:
         snapshot = analyze_export(captures.before)
 
-        closed = report.close_snapshot(
-            snapshot, AT + timedelta(days=2), previous_reports=[]
-        )
+        closed = close(snapshot)
 
         written = closed.model_dump_json(indent=2) + '\n'
         if not REPORT_FIXTURE.exists():
@@ -559,10 +578,7 @@ class TestAnalyzeExport:
         path = tmp_path / 'capture.json'
         write_export(captures.before, path)
 
-        snapshot = analyze_export(read_export(path))
-        closed = report.close_snapshot(
-            snapshot, AT + timedelta(days=2), previous_reports=[]
-        )
+        closed = close(analyze_export(read_export(path)))
 
         assert closed.results.scorer == 'votes'
         assert closed.results.votes == 150

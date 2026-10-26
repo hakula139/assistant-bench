@@ -31,7 +31,7 @@ class TestActorWeights:
             for _ in range(count)
         )
 
-        weights = actor_weights(actors, 100)
+        weights = actor_weights(actors)
 
         assert weights == pytest.approx(aligned)
         assert sum(weights) == pytest.approx(sum(min(count, 100) for count in counts))
@@ -43,8 +43,8 @@ class TestActorWeights:
         )
         reordered = tuple(actors[index] for index in permutation)
 
-        original = actor_weights(actors, 100)
-        changed = actor_weights(reordered, 100)
+        original = actor_weights(actors)
+        changed = actor_weights(reordered)
 
         assert changed == tuple(original[index] for index in permutation)
         totals: defaultdict[str, float] = defaultdict(float)
@@ -54,10 +54,3 @@ class TestActorWeights:
         assert totals == pytest.approx(
             {'frequent': 100.0, 'occasional': 25.0, 'single': 1.0}
         )
-
-    def test_uses_the_recorded_cap(self) -> None:
-        actors = ('owner',) * 50
-
-        weights = actor_weights(actors, 20)
-
-        assert weights == (0.4,) * 50

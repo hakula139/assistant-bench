@@ -41,7 +41,7 @@ from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import TaskTestsSettings
+from assistant_bench.families import Defect, TaskTestsSettings
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -52,7 +52,6 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import render_task_config
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
-from assistant_bench_arena.models import Defect
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'

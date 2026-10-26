@@ -3,25 +3,16 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from assistant_bench.arena.snapshots import (
+from assistant_bench.families import Choice
+from assistant_bench.report import (
     AnalysisInput,
     HumanEvidence,
+    LedgerProvenance,
     OutputMeasurement,
 )
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.ranking import Comparison
 from assistant_bench.scoring.weighting import actor_weights
-from assistant_bench_arena.models import Choice
-from assistant_bench_arena.snapshots import (
-    AnalysisPolicy,
-    CappedHumanWeights,
-    FamilyDefinition,
-    LedgerProvenance,
-    SettledWeights,
-    UnavailableInference,
-    VotesMethod,
-    VotesRules,
-)
 
 
 def make_evidence(
@@ -35,8 +26,6 @@ def make_evidence(
     length_a: int = 10,
     length_b: int = 10,
 ) -> HumanEvidence:
-    score = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}[choice]
-
     return HumanEvidence(
         receipt=f'receipt-{index}',
         actor=actor,
@@ -46,7 +35,9 @@ def make_evidence(
         defects_b=(),
         length_a=length_a,
         length_b=length_b,
-        comparison=Comparison(*systems, score, f'case-{index}', weight),
+        comparison=Comparison(
+            *systems, ranking.LEFT_SCORE[choice], f'case-{index}', weight
+        ),
     )
 
 
@@ -72,40 +63,10 @@ def make_analysis(
         for system in (row.left, row.right)
     )
     return AnalysisInput(
-        family=FamilyDefinition(
-            name='f',
-            reference='a',
-            systems=('a', 'b', 'x', 'y', 'unrated'),
-            categories=('main', 'other', 'remote'),
-            defects=('facts',),
-        ),
-        policy=AnalysisPolicy(
-            method=VotesMethod(
-                name='bradley-terry',
-                version=1,
-                l2_penalty=ranking.L2_PENALTY,
-                points_per_logit=ranking.ELO_PER_LOGIT,
-                anchor_score=ranking.ANCHOR,
-                human_weights=CappedHumanWeights(
-                    name='actor-proportional-cap',
-                    version=1,
-                    cap=100,
-                    scope='family-evaluation',
-                    repeat_handling='excluded',
-                ),
-                settled_weights=SettledWeights(name='sample-pair-share', version=1),
-            ),
-            rules=VotesRules(
-                preliminary_decisive_votes=40,
-                preliminary_decisive_vote_unit='raw-votes',
-                rater_agreement_floor=0.7,
-            ),
-            inference=UnavailableInference(
-                status='unavailable',
-                target='new-cases-and-voters',
-                reason='population-method-not-validated',
-            ),
-        ),
+        family='f',
+        reference='a',
+        systems=('a', 'b', 'x', 'y', 'unrated'),
+        defects=('facts',),
         provenance=LedgerProvenance(
             status='ledger',
             schema_version=1,
@@ -160,7 +121,7 @@ def make_capped_analysis() -> AnalysisInput:
         )
         for index in range(25)
     )
-    weights = actor_weights(('owner',) * 250 + ('visitor',) * 25, 100)
+    weights = actor_weights(('owner',) * 250 + ('visitor',) * 25)
     weighted = tuple(
         replace(row, comparison=row.comparison._replace(weight=weight))
         for row, weight in zip(ordinary, weights, strict=True)

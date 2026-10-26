@@ -4,7 +4,7 @@ from collections.abc import Iterator
 import pytest
 
 from arena_support import native_management, vote_capture
-from assistant_bench.arena.publication import load_policy
+from assistant_bench.arena.publication import POLICY
 from assistant_bench.arena.publishing import (
     publish_points,
     publish_release,
@@ -59,7 +59,7 @@ class TestPublishRelease:
     ) -> None:
         async def scenario() -> None:
             async with native_management(runtime) as management:
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 capture = await vote_capture(management, release)
                 fitted = analyze_export(capture).points
@@ -112,7 +112,7 @@ class TestPublishPoints:
     ) -> None:
         async def scenario() -> None:
             async with native_management(runtime) as management:
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 fitted = analyze_export(await vote_capture(management, release)).points
                 replacement = make_release(cases=3, policy=release.policy)

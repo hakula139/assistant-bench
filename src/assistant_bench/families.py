@@ -17,7 +17,35 @@ from pydantic import (
 
 from assistant_bench.messages import code, error_lines, sentence
 from assistant_bench.paths import FAMILIES_DIR, data_dir
-from assistant_bench_arena.models import Defect
+
+
+# ── Names and Votes ──
+
+
+# Python JSON Schema validators accept a final newline with $.
+type FamilyName = Annotated[
+    str,
+    Field(
+        pattern=r'^[a-z0-9][a-z0-9-]*$',
+        max_length=256,
+        json_schema_extra={'pattern': r'^[a-z0-9][a-z0-9-]*(?![\s\S])'},
+    ),
+]
+
+type Choice = Literal['a', 'b', 'tie', 'both_bad']
+
+type Defect = Literal[
+    'facts',
+    'mechanics',
+    'tone',
+    'formulaic',
+    'length',
+    'scope',
+    'conventions',
+    'complexity',
+    'testing',
+    'clarity',
+]
 
 
 # ── Settings ──

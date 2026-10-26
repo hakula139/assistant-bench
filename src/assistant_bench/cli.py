@@ -33,7 +33,6 @@ from assistant_bench.families import (
 )
 from assistant_bench.messages import code
 from assistant_bench.outputs import Output
-from assistant_bench.paths import REPORTS_DIR, write_atomically
 
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
@@ -203,13 +202,15 @@ def close(
     if snapshot is not None:
         try:
             frozen = analyze_export(read_export(snapshot))
-            if frozen.analysis.family.name != family:
+            if frozen.analysis.family != family:
                 raise ValueError('The snapshot belongs to another family.')
 
             closed_at = datetime.now(UTC)
             closed = report.close_snapshot(
-                frozen,
+                frozen.analysis,
                 closed_at,
+                fingerprints=frozen.fingerprints,
+                system_names=frozen.system_names,
                 previous_reports=report.read_reports(family, closed_at),
             )
         except (OSError, ValueError) as error:
@@ -239,24 +240,6 @@ def close(
         _fail(str(error))
 
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
-
-
-@arena_app.command()
-def points(
-    snapshot: Annotated[Path, typer.Argument(help='A saved ledger export.')],
-    output: Annotated[Path, typer.Argument(help='The fitted point snapshot to write.')],
-) -> None:
-    """Fit every connected component from a saved export without a running owner."""
-    try:
-        if output.resolve().is_relative_to(REPORTS_DIR.resolve()):
-            raise ValueError('Only `bench close` writes under reports/.')
-
-        frozen = analyze_export(read_export(snapshot))
-        write_atomically(output, f'{frozen.points.model_dump_json(indent=2)}\n')
-    except (OSError, ValueError) as error:
-        _fail(str(error))
-
-    typer.echo(f'Point snapshot written to `{output}`.')
 
 
 @app.command()

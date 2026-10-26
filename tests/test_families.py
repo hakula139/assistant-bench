@@ -4,7 +4,9 @@ from typing import TypedDict
 
 import pytest
 import tomli_w
+from pydantic import TypeAdapter, ValidationError
 
+from assistant_bench import families
 from assistant_bench.families import (
     Family,
     TaskTestsSettings,
@@ -14,6 +16,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
+from assistant_bench_arena import models
 from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
 
 
@@ -78,6 +81,68 @@ def write_task(
         )
     if instruction is not None:
         (directory / 'instruction.md').write_text(instruction)
+
+
+def accepts(adapter: TypeAdapter[str], value: str) -> bool:
+    try:
+        adapter.validate_python(value)
+    except ValidationError:
+        return False
+    return True
+
+
+class TestVoteTypes:
+    @pytest.mark.parametrize(
+        ('offline', 'contract'),
+        [
+            (TypeAdapter(families.FamilyName), TypeAdapter(models.FamilyName)),
+            (TypeAdapter(families.Choice), TypeAdapter(models.Choice)),
+            (TypeAdapter(families.Defect), TypeAdapter(models.Defect)),
+        ],
+        ids=['family-name', 'choice', 'defect'],
+    )
+    def test_match_the_voting_contract(
+        self, offline: TypeAdapter[str], contract: TypeAdapter[str]
+    ) -> None:
+        offline_schema = offline.json_schema()
+        contract_schema = contract.json_schema()
+
+        assert offline_schema == contract_schema
+
+    @pytest.mark.parametrize(
+        ('name', 'valid'),
+        [
+            ('a', True),
+            ('9x', True),
+            ('a-', True),
+            ('a' * 256, True),
+            ('-a', False),
+            ('A', False),
+            ('a\n', False),
+            ('a' * 257, False),
+        ],
+        ids=[
+            'letter',
+            'leading-digit',
+            'trailing-hyphen',
+            'longest',
+            'leading-hyphen',
+            'uppercase',
+            'final-newline',
+            'too-long',
+        ],
+    )
+    def test_family_names_validate_like_the_voting_contract(
+        self, name: str, valid: bool
+    ) -> None:
+        adapters = {
+            'offline': TypeAdapter(families.FamilyName),
+            'contract': TypeAdapter(models.FamilyName),
+        }
+
+        accepted = {side: accepts(adapter, name) for side, adapter in adapters.items()}
+
+        assert accepted == {'offline': valid, 'contract': valid}
 
 
 class TestLoadFamily:

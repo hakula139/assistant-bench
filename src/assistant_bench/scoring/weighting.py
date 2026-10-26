@@ -4,11 +4,14 @@ from collections import Counter
 from collections.abc import Sequence
 
 
-def actor_weights(actors: Sequence[str], cap: int) -> tuple[float, ...]:
-    """Weight aligned ordinary choices using an already validated positive cap.
+CAP = 100
+
+
+def actor_weights(actors: Sequence[str]) -> tuple[float, ...]:
+    """Weight aligned ordinary choices so each actor's total is at most `CAP`.
 
     Pass the complete eligible family evaluation before taking any subset.
     Repeats and inactive choices do not belong in `actors`.
     """
     counts = Counter(actors)
-    return tuple(min(1.0, cap / counts[actor]) for actor in actors)
+    return tuple(min(1.0, CAP / counts[actor]) for actor in actors)

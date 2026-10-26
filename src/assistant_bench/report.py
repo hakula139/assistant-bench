@@ -1,4 +1,4 @@
-"""The report schema, with one results variant per scorer, and the writer of rounds.
+"""The report schema and inputs, the fixed votes method, and the writer of rounds.
 
 A report holds aggregates under public system names and nothing else: no case,
 instruction, output text, route, or request ID.
@@ -8,6 +8,7 @@ import math
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -23,35 +24,19 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench.arena.snapshots import (
-    AnalysisInput,
-    HumanEvidence,
-    OutputMeasurement,
-    SnapshotAnalysis,
-    fit_points,
-)
 from assistant_bench.families import (
+    Choice,
+    Defect,
     Family,
+    FamilyName,
     TaskTestsSettings,
     load_cases,
 )
 from assistant_bench.outputs import Output, read_outputs
 from assistant_bench.paths import REPORTS_DIR, write_atomically
-from assistant_bench.scoring import ranking
-from assistant_bench_arena.models import Choice, Defect, FamilyName
-from assistant_bench_arena.snapshots import (
-    CappedHumanWeights,
-    LedgerProvenance,
-    Provenance,
-    UnavailableInference,
-    UnitHumanWeights,
-    UnrecordedProvenance,
-    VotesMethod,
-    VotesRules,
-)
+from assistant_bench.scoring import ranking, weighting
 
 
-LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 SWAPPED: dict[Choice, Choice] = {
     'a': 'b',
     'b': 'a',
@@ -89,7 +74,118 @@ class Distribution(_Model):
     p90: float
 
 
+# ── Votes Method ──
+
+
+class UnitHumanWeights(_Model):
+    name: Literal['unit']
+    version: Literal[1]
+    repeat_handling: Literal['included']
+
+
+class CappedHumanWeights(_Model):
+    name: Literal['actor-proportional-cap']
+    version: Literal[1]
+    cap: Annotated[int, Field(strict=True, gt=0)]
+    scope: Literal['family-evaluation']
+    repeat_handling: Literal['excluded']
+
+
+type HumanWeights = Annotated[
+    UnitHumanWeights | CappedHumanWeights, Field(discriminator='name')
+]
+
+
+class SettledWeights(_Model):
+    name: Literal['sample-pair-share']
+    version: Literal[1]
+
+
+class VotesMethod(_Model):
+    name: Literal['bradley-terry']
+    version: Literal[1]
+
+    l2_penalty: Annotated[float, Field(gt=0)]
+    """Penalty on system logits, excluding the sided intercept."""
+
+    points_per_logit: Annotated[float, Field(gt=0)]
+    anchor_score: float
+    human_weights: HumanWeights
+    settled_weights: SettledWeights
+
+
+class VotesRules(_Model):
+    preliminary_decisive_votes: Annotated[int, Field(strict=True, gt=0)]
+    """Raw coverage threshold, independent of inference availability."""
+
+    preliminary_decisive_vote_unit: Literal['raw-votes']
+    rater_agreement_floor: Annotated[float, Field(ge=0, le=1)]
+
+
+class UnavailableInference(_Model):
+    status: Literal['unavailable']
+    target: Literal['new-cases-and-voters']
+    reason: Literal['population-method-not-validated']
+
+
+METHOD = VotesMethod(
+    name='bradley-terry',
+    version=1,
+    l2_penalty=ranking.L2_PENALTY,
+    points_per_logit=ranking.ELO_PER_LOGIT,
+    anchor_score=ranking.ANCHOR,
+    human_weights=CappedHumanWeights(
+        name='actor-proportional-cap',
+        version=1,
+        cap=weighting.CAP,
+        scope='family-evaluation',
+        repeat_handling='excluded',
+    ),
+    settled_weights=SettledWeights(name='sample-pair-share', version=1),
+)
+
+RULES = VotesRules(
+    preliminary_decisive_votes=40,
+    preliminary_decisive_vote_unit='raw-votes',
+    rater_agreement_floor=0.7,
+)
+
+INFERENCE = UnavailableInference(
+    status='unavailable',
+    target='new-cases-and-voters',
+    reason='population-method-not-validated',
+)
+
+
 # ── Votes Schema ──
+
+
+class UnrecordedProvenance(_Model):
+    status: Literal['unrecorded']
+
+
+class LedgerProvenance(_Model):
+    schema_version: Literal[1]
+    export_id: Annotated[str, Field(min_length=1)]
+    export_digest: Annotated[str, Field(min_length=1)]
+    namespace: Annotated[str, Field(min_length=1)]
+    captured_at: AwareDatetime
+    event_cutoff: Annotated[int, Field(strict=True, ge=0)]
+    receipt_cutoff: Annotated[int, Field(strict=True, ge=0)]
+    family_revision: Annotated[int, Field(strict=True, ge=0)]
+    analysis_sequence: Annotated[int, Field(strict=True, ge=0)]
+    evaluation_id: Annotated[str, Field(min_length=1)]
+    publication_id: Annotated[str, Field(min_length=1)]
+    policy_id: Annotated[str, Field(min_length=1)]
+    sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
+    status: Literal['ledger']
+    weighted_evidence_digest: Annotated[str, Field(min_length=1)]
+    fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
+
+
+type Provenance = Annotated[
+    UnrecordedProvenance | LedgerProvenance, Field(discriminator='status')
+]
 
 
 class Standing(_Model):
@@ -448,25 +544,26 @@ def close(
 
 
 def close_snapshot(
-    snapshot: SnapshotAnalysis,
+    analysis: AnalysisInput,
     closed_at: datetime,
     *,
+    fingerprints: Mapping[str, str],
+    system_names: Mapping[str, str],
     previous_reports: Sequence[Report],
 ) -> Report:
-    """Close frozen ledger evidence using only its recorded public metadata."""
+    """Close frozen evidence under the fingerprints and names its release recorded."""
     closed_at = TypeAdapter(AwareDatetime).validate_python(closed_at).astimezone(UTC)
-    family = snapshot.analysis.family.name
-    results = votes_results(snapshot.analysis)
+    results = votes_results(analysis)
     return Report(
-        family=family,
+        family=analysis.family,
         round=closed_at.date().isoformat(),
         closed_at=closed_at,
         systems=_public_systems(
             _referenced_systems(results),
-            {system.id: system.fingerprint for system in snapshot.inventory.systems},
-            snapshot.publication.presentation.systems,
+            fingerprints,
+            system_names,
             previous_reports,
-            family,
+            analysis.family,
             closed_at,
         ),
         results=results,
@@ -575,24 +672,80 @@ def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:
     return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
 
 
+# ── Votes Inputs ──
+
+
+@dataclass(frozen=True)
+class HumanEvidence:
+    receipt: str
+    actor: str
+    session: str
+    choice: Choice
+    defects_a: tuple[Defect, ...]
+    defects_b: tuple[Defect, ...]
+    length_a: int
+    length_b: int
+    comparison: ranking.Comparison
+    """Weight assigned once over the complete eligible family evaluation."""
+
+    repeat_of: str | None = None
+
+    @property
+    def systems(self) -> tuple[str, str]:
+        return self.comparison.left, self.comparison.right
+
+
+@dataclass(frozen=True)
+class OutputMeasurement:
+    case: str
+    system: str
+    errored: bool
+    verdict: Literal['pass', 'fail', 'ungraded']
+    cost_usd: float | None
+    latency_sec: float | None
+    output_tokens: int | None
+
+
+@dataclass(frozen=True)
+class AnalysisInput:
+    """One complete frozen family evaluation, closed under `METHOD` and `RULES`."""
+
+    family: str
+    reference: str
+    systems: tuple[str, ...]
+    """Frozen system order, which breaks ties between weighted roots."""
+
+    defects: tuple[Defect, ...]
+    provenance: LedgerProvenance
+    categories: tuple[tuple[str, str | None], ...]
+    """Every frozen case, with None marking an explicitly uncategorized case."""
+
+    ordinary: tuple[HumanEvidence, ...]
+    repeats: tuple[HumanEvidence, ...]
+    settlements: tuple[ranking.Comparison, ...]
+    outputs: tuple[OutputMeasurement, ...]
+    sessions: tuple[str, ...]
+    """Eligible session IDs ordered by their frozen start time and stable ID."""
+
+    accepted: int
+    """Every accepted choice, including repeats and inactive receipts."""
+
+
 # ── Votes Results ──
 
 
 def votes_results(analysis: AnalysisInput) -> VotesResults:
     """Fit one complete frozen evaluation without reading current source files."""
-    family = analysis.family
     votes = list(analysis.ordinary)
     outputs = list(analysis.outputs)
     comparisons = [row.comparison for row in votes] + list(analysis.settlements)
     if not comparisons:
-        raise ValueError(f'Family `{family.name}` has no eligible comparisons.')
+        raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
 
-    everything = ranking.Matchups.build(comparisons)
-    root = everything.root(family.systems)
-
-    ratings = fit_points(analysis)[0]
-    anchor = family.reference if family.reference in ratings.systems else root
-    ratings = ratings.anchored(anchor)
+    board, *_ = ranking.rate_components(
+        comparisons, analysis.systems, analysis.reference
+    )
+    ratings = board.ratings
     ranked = set(ratings.systems)
     connected = [row for row in votes if set(row.systems) <= ranked]
     feature = _length_feature(connected)
@@ -612,19 +765,19 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             int((ratings.score > ratings.score[i]).sum()) + 1,
             [vote for vote in votes if system in vote.systems],
             [output for output in outputs if output.system == system],
-            family.defects,
+            analysis.defects,
         )
         for i, system in enumerate(ratings.systems)
     ]
     standings.sort(key=lambda standing: (standing.rank, standing.system))
     return VotesResults(
         scorer='votes',
-        method=analysis.policy.method,
-        rules=analysis.policy.rules,
-        inference=analysis.policy.inference,
+        method=METHOD,
+        rules=RULES,
+        inference=INFERENCE,
         provenance=analysis.provenance,
-        reference=family.reference,
-        anchor=anchor,
+        reference=analysis.reference,
+        anchor=board.anchor,
         votes=len(votes),
         effective_votes=sum(row.comparison.weight for row in votes),
         dropped_votes=analysis.accepted - len(votes),
@@ -635,19 +788,14 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             votes, sorted({system for row in votes for system in row.systems})
         ),
         categories=_categories(
-            dict(analysis.categories),
-            anchor,
-            votes,
-            comparisons,
-            outputs,
-            family.systems,
+            dict(analysis.categories), board.anchor, votes, comparisons, outputs
         ),
         position=ratings.position if connected else None,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
         separability=None,
-        split_half_tau=_split_half_tau(votes, analysis.sessions, root),
+        split_half_tau=_split_half_tau(votes, analysis.sessions, board.root),
         rater_agreement=_rater_agreement(
-            votes, analysis.repeats, analysis.policy.rules.rater_agreement_floor
+            votes, analysis.repeats, RULES.rater_agreement_floor
         ),
         decision=None,
     )
@@ -737,7 +885,9 @@ def _head_to_head(
                     losses=tally['b'],
                     ties=tally['tie'],
                     both_bad=tally['both_bad'],
-                    win_rate=sum(LEFT_SCORE[c] * n for c, n in effective.items())
+                    win_rate=sum(
+                        ranking.LEFT_SCORE[c] * n for c, n in effective.items()
+                    )
                     / mass,
                 )
             )
@@ -751,9 +901,8 @@ def _categories(
     votes: list[HumanEvidence],
     comparisons: list[ranking.Comparison],
     outputs: list[OutputMeasurement],
-    systems: Sequence[str],
 ) -> list[CategoryBoard]:
-    """Refit each category whose own root connects it to the board's anchor."""
+    """Refit each category in the board anchor's component, anchored there too."""
     category_votes: defaultdict[str, list[HumanEvidence]] = defaultdict(list)
     for row in votes:
         if (category := categories[row.comparison.case]) is not None:
@@ -775,9 +924,7 @@ def _categories(
         if anchor not in matchups.systems:
             continue
 
-        matchups = matchups.component(anchor)
-        ratings = ranking.rate_point(matchups, matchups.root(systems))
-        ratings = ratings.anchored(anchor)
+        ratings = ranking.rate_point(matchups.component(anchor), anchor)
 
         standings: list[CategoryStanding] = []
         for i, system in enumerate(ratings.systems):

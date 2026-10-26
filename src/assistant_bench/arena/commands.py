@@ -189,9 +189,7 @@ async def _refresh(target: str, path: Path) -> None:
     frozen = analyze_export(read_export(path))
 
     async with _connection(target) as (management, _):
-        event = await publish_points(
-            management, frozen.analysis.family.name, frozen.points
-        )
+        event = await publish_points(management, frozen.analysis.family, frozen.points)
 
     if event is None:
         typer.echo('The fitted sampling points are already active.')

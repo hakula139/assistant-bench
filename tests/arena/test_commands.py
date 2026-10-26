@@ -20,7 +20,7 @@ from arena_support import (
 from assistant_bench.arena import commands
 from assistant_bench.arena.exports import read_export
 from assistant_bench.arena.management import Management
-from assistant_bench.arena.publication import load_policy
+from assistant_bench.arena.publication import POLICY
 from assistant_bench.arena.publishing import publish_release
 from assistant_bench.arena.runtime import RuntimeTarget, TargetName
 from assistant_bench.arena.snapshots import analyze_export
@@ -283,7 +283,7 @@ class TestExportEvidence:
         async def scenario() -> None:
             async with native_management(runtime) as management:
                 use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 await vote_capture(management, release)
                 path = tmp_path / 'evidence.json'
@@ -344,7 +344,7 @@ class TestHealth:
         async def scenario() -> None:
             async with native_management(runtime) as management:
                 use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 await vote_capture(management, release)
                 management.now = BASE_MS + RETENTION_MS + 2 + lag
@@ -370,7 +370,7 @@ class TestStatus:
         async def scenario() -> None:
             async with native_management(runtime) as management:
                 use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 await vote_capture(management, release)
                 management.now = BASE_MS + RETENTION_MS + 2 + 1_234
@@ -404,7 +404,7 @@ class TestModerate:
         async def scenario() -> None:
             async with native_management(runtime) as management:
                 use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=load_policy())
+                release = make_release(cases=2, policy=POLICY)
                 await publish_release(management, release)
                 capture = await vote_capture(management, release)
                 receipt = Receipt.model_validate_json(

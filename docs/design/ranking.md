@@ -12,7 +12,7 @@ The weighted Bradley-Terry logistic objective uses +1 for A and −1 for B. Huma
 
 ## Point Scores
 
-Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective human weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. Reports freeze these numerical settings in `method`.
+Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective human weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. These settings and the actor cap are constants in `scoring/`, and the rules are constants in `report.py`. Publication seals them into each release, closing refuses an export sealed under other values, and reports record them in `method` and `rules`.
 
 Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
 

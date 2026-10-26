@@ -11,7 +11,7 @@ src/assistant_bench/
 ├── task_assets.py                          # Regeneration of each coding task's shared files
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
 ├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
-├── report.py                               # The report schema, one results variant per scorer, and closing a round
+├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
 │   ├── commands.py                         # Publication, evidence and private administration commands
 │   ├── evidence.py                         # Replay of immutable receipt and control history
@@ -21,7 +21,7 @@ src/assistant_bench/
 │   ├── publication.py                      # Approved numerical and presentation projections
 │   ├── publishing.py                       # Guarded release activation and sampling refresh
 │   ├── runtime.py                          # Named native targets and Service-only configuration
-│   ├── snapshots.py                        # Frozen numerical inputs and offline point fitting
+│   ├── snapshots.py                        # Verified evidence cuts as report inputs and sampling points
 │   └── sources.py                          # Native task hash and agent-input proof
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
@@ -40,7 +40,7 @@ src/assistant_bench/
 │   ├── length.py                           # Shared output length measurement
 │   ├── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 │   └── weighting.py                        # Family-wide cumulative actor caps
-├── families.py                             # family.toml, gate, and case models, and the local case merge
+├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
 ├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
@@ -50,7 +50,7 @@ src/assistant_bench/
 
 ## Import Layers
 
-`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. The offline package imports shared contracts for family validation, release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
+`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. Only the offline `arena` modules import its shared contracts, for release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
 
 ```text
 src/assistant_bench_arena/
@@ -91,15 +91,16 @@ src/assistant_bench_arena/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`, `ci`, and `task_assets`
-2. `arena.commands`, `revisions`, and `report`
+2. `arena.commands` and `revisions`
 3. `arena.preparation` and `jobs`
 4. The remaining offline `arena` modules
-5. `outputs`, `harnesses`, and `scoring`
-6. `families` and `catalog`
-7. `generation`, `messages`, `paths`, and `diffs`
-8. `assistant_bench_arena`
+5. `report`
+6. `outputs`, `harnesses`, and `scoring`
+7. `families` and `catalog`
+8. `generation`, `messages`, `paths`, and `diffs`
+9. `assistant_bench_arena`
 
-`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from evidence cuts and seals into each release. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 
