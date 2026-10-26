@@ -31,6 +31,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import code
 from assistant_bench.outputs import Output
 
@@ -76,6 +77,9 @@ FamilyNames = Annotated[
 def main() -> None:
     """Run families on the systems under test, vote on their outputs, and report."""
     load_dotenv(find_dotenv(usecwd=True))
+    # An assistant's shell exports its own gateway headers here, while the bench
+    # configures its requests only through `BENCH_API_HEADERS`.
+    os.environ.pop(SDK_HEADERS_VAR, None)
     os.environ.update(jobs.HARBOR_ENV)
 
 

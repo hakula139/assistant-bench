@@ -27,6 +27,7 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.cli import app
 from assistant_bench.families import Family, Gate, family_names, load_cases, load_family
+from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.outputs import Output
 from support import (
     finish_job,
@@ -82,6 +83,7 @@ class TestMain:
     ) -> None:
         for name in jobs.HARBOR_ENV:
             monkeypatch.delenv(name)
+        monkeypatch.setenv(SDK_HEADERS_VAR, 'x-assistant-header: assistant-value')
 
         result = invoke('check', 'smoke-text')
         assert result.exit_code == 0, result.output
@@ -90,6 +92,7 @@ class TestMain:
             'HARBOR_TELEMETRY': 'off',
             'LITELLM_MODE': 'PRODUCTION',
         }
+        assert SDK_HEADERS_VAR not in os.environ
 
 
 class TestCheck:

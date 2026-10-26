@@ -38,6 +38,8 @@ ENDPOINT_VARS = (
     HEADERS_VAR,
     LOCAL_ADDRESS_VAR,
 )
+# The Anthropic SDK adds these headers to every request it sends.
+SDK_HEADERS_VAR = 'ANTHROPIC_CUSTOM_HEADERS'
 
 REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=30.0, read=None)
 MESSAGES_TIMEOUT = httpx2.Timeout(**REQUEST_TIMEOUT.as_dict())
@@ -177,8 +179,8 @@ def _base_var(api: Api) -> str:
 
 
 def _check_messages_environment(env: Callable[[str], str | None]) -> None:
-    if env('ANTHROPIC_CUSTOM_HEADERS'):
+    if env(SDK_HEADERS_VAR):
         raise ValueError(
-            'Unset `ANTHROPIC_CUSTOM_HEADERS`. Configure native endpoint headers '
-            'with `BENCH_API_HEADERS`.'
+            f'Unset `{SDK_HEADERS_VAR}`. Configure native endpoint headers '
+            f'with `{HEADERS_VAR}`.'
         )
