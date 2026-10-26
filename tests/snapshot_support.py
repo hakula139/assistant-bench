@@ -3,7 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from assistant_bench.families import Choice
+from assistant_bench.families import Category, Choice
 from assistant_bench.report import (
     AnalysisInput,
     HumanEvidence,
@@ -46,7 +46,7 @@ def make_analysis(
     *,
     settlements: tuple[Comparison, ...] = (),
     repeats: tuple[HumanEvidence, ...] = (),
-    categories: tuple[tuple[str, str | None], ...] | None = None,
+    categories: tuple[tuple[str, Category | None], ...] | None = None,
 ) -> AnalysisInput:
     comparisons = tuple(row.comparison for row in ordinary) + settlements
     outputs = tuple(
@@ -126,7 +126,7 @@ def make_capped_analysis() -> AnalysisInput:
         replace(row, comparison=row.comparison._replace(weight=weight))
         for row, weight in zip(ordinary, weights, strict=True)
     )
-    categories = tuple(
+    categories: tuple[tuple[str, Category | None], ...] = tuple(
         (
             row.comparison.case,
             'review'
