@@ -5,6 +5,8 @@ from importlib import metadata
 from pathlib import Path
 
 import pytest
+from harbor.models.trial.paths import TrialPaths
+from harbor.models.trial.result import TrialResult
 
 from assistant_bench import jobs
 from assistant_bench.catalog import NixosConfigExport
@@ -139,7 +141,14 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     assert output.reasoning_tokens == (
         None if api == 'anthropic-messages' else turns * 25
     )
-    assert output.latency_sec is not None and output.latency_sec > 0
+    timing = TrialResult.model_validate_json(
+        TrialPaths(job_dir / output.trial).result_path.read_text()
+    ).agent_execution
+    assert timing is not None
+    assert timing.started_at is not None and timing.finished_at is not None
+    assert output.latency_sec == round(
+        (timing.finished_at - timing.started_at).total_seconds(), 3
+    )
     assert output.cost_usd == pytest.approx(
         turns * (0.000485 if api == 'anthropic-messages' else 0.00046)
     )
