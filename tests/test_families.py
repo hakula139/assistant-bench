@@ -714,6 +714,54 @@ class TestLoadCases:
             f'and `{local}:cases.1`.'
         )
 
+    @pytest.mark.parametrize(
+        ('relative', 'reported'),
+        [
+            pytest.param('writing_zh.toml', True, id='misnamed-family'),
+            pytest.param('smoke-text.jsonl', True, id='unconverted-cases'),
+            pytest.param('smoke/notes.md', True, id='file-beside-local-tasks'),
+            pytest.param('old-family/task.toml', True, id='removed-family'),
+            pytest.param(
+                '.converted-backup/writing_zh.toml', False, id='hidden-backup'
+            ),
+        ],
+    )
+    def test_reports_a_data_case_file_that_no_family_reads(
+        self, data_dir: Path, relative: str, reported: bool
+    ) -> None:
+        local = data_dir / 'cases' / relative
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text('cases = []\n')
+
+        if not reported:
+            cases = load_cases(load_family('smoke-text'))
+
+            assert [case.id for case in cases] == ['en-greeting', 'zh-greeting']
+            return
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('smoke-text'))
+
+        assert str(error.value) == (
+            "The data directory's `cases/` holds files that no family reads: "
+            f'`{local}`. Name each after its family, as in '
+            '`cases/<family>.toml` or `cases/<family>/<task>/`, or move them out '
+            'of `cases/`.'
+        )
+
+    def test_names_every_data_case_file_that_no_family_reads(
+        self, data_dir: Path
+    ) -> None:
+        cases = data_dir / 'cases'
+        cases.mkdir(parents=True)
+        for name in ('a.toml', 'b.toml'):
+            (cases / name).write_text('cases = []\n')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('smoke-text'))
+
+        assert f'`{cases / "a.toml"}`, `{cases / "b.toml"}`' in str(error.value)
+
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
         path = write_case_family(families_dir, ['large'])
         path.write_text(case_entry('a') + '\n' + case_entry('a'))

@@ -19,6 +19,8 @@ A `transcript` case or task passes gitleaks before it enters the local cases, si
 
 Run artifacts live in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs and collected outputs stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs and endpoint metadata. [Running](../guide/running.md#the-data-directory) lists its layout.
 
+The loader refuses any visible file under `cases/` that no family reads, such as a mistyped family name or a leftover `.jsonl`, and names each file, so a run cannot silently drop its cases. Hidden files and directories are ignored, so a backup can stay under `cases/.<name>/`.
+
 Production D1 holds every real vote. Publication sends only the exact approved case and output projections, with source permission and content digests checked before staging. Transcript-derived and held-out material cannot enter the public release. Immutable numerical exports omit network associations and preserve the approved inventory needed to close a round offline. [Arena](../design/arena.md#publication-and-evidence) describes that workflow.
 
 Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leave `XDG_DATA_HOME` alone, since uv keeps its managed interpreters under it and would install a new CPython in `<dir>` and relink `.venv` to it, which breaks once `<dir>` is removed.

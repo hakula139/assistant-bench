@@ -352,11 +352,21 @@ def load_cases(family: Family) -> list[Case]:
     Raises
     ------
     ValueError
-        A case document does not parse or validate, a task has no `task.toml` or
+        The data directory's `cases/` holds a file that no family reads, a case
+        document does not parse or validate, a task has no `task.toml` or
         `instruction.md` or names itself apart from its directory, two cases share
         an ID, within one source or across both, or a case's category is missing
         from the family's `categories`.
     """
+    unread = _unread_case_files(family)
+    if unread:
+        raise ValueError(
+            "The data directory's `cases/` holds files that no family reads: "
+            f'{code(unread)}. Name each after its family, as in '
+            '`cases/<family>.toml` or `cases/<family>/<task>/`, or move them out '
+            'of `cases/`.'
+        )
+
     entries = (
         _task_entries(family) if family.source == 'tasks' else _case_entries(family)
     )
@@ -378,6 +388,50 @@ def load_cases(family: Family) -> list[Case]:
         locations[case.id] = location
 
     return list(cases.values())
+
+
+def _unread_case_files(family: Family) -> list[Path]:
+    """Return each visible file under the data cases directory that no family reads.
+
+    A case family reads `cases/<family>.toml`, while a task family reads everything
+    under each `cases/<family>/<task>/` directory. The family being loaded counts as
+    a reader even without a directory under `families/`. Hidden files and
+    directories are ignored, so a backup can stay in the directory.
+    """
+    root = data_dir() / 'cases'
+    if not root.is_dir():
+        return []
+
+    names = family_names()
+    case_families = {
+        name for name in names if (FAMILIES_DIR / name / 'cases.toml').is_file()
+    }
+    task_families = set(names) - case_families
+    (case_families if family.source == 'cases' else task_families).add(family.name)
+
+    unread: list[Path] = []
+    for entry in sorted(root.iterdir()):
+        if entry.name.startswith('.'):
+            continue
+        if entry.is_file():
+            if entry.suffix != '.toml' or entry.stem not in case_families:
+                unread.append(entry)
+        elif entry.name not in task_families:
+            unread.extend(
+                path
+                for path in sorted(entry.rglob('*'))
+                if path.is_file()
+                and not any(
+                    part.startswith('.') for part in path.relative_to(entry).parts
+                )
+            )
+        else:
+            unread.extend(
+                child
+                for child in sorted(entry.iterdir())
+                if child.is_file() and not child.name.startswith('.')
+            )
+    return unread
 
 
 def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
