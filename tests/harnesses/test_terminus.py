@@ -556,6 +556,63 @@ class TestTerminus:
             ] == [10, 10]
             assert len(endpoint.requests) == 2
 
+        @pytest.mark.parametrize(
+            ('reported', 'total'),
+            [((25, 30), 55), ((0, 0), 0), ((25, None), None)],
+            ids=['reported', 'zero', 'missing'],
+        )
+        def test_sums_reasoning_tokens_only_when_every_response_reports_them(
+            self,
+            endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
+            tmp_path: Path,
+            families_dir: Path,
+            data_dir: Path,
+            reported: tuple[int | None, ...],
+            total: int | None,
+        ) -> None:
+            payloads: list[dict[str, Any]] = []
+            for count in reported:
+                payload = terminus_completion()
+                details = payload['usage']['completion_tokens_details']
+                if count is None:
+                    del details['reasoning_tokens']
+                else:
+                    details['reasoning_tokens'] = count
+                payloads.append(payload)
+            endpoint.responses = payloads
+            system = make_system(
+                harness='terminus-2', max_output_tokens=32768, context_window=131072
+            )
+            write_task_family(families_dir, 'echo', systems=(system.name,))
+            family = load_family('f')
+            config = jobs.job(family, [system], [])
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=f'openai/{system.route}',
+                extra_env=endpoint.env,
+                **options.terminus(system),
+            )
+            context = AgentContext()
+
+            asyncio.run(agent.execute(terminal_session, context))
+            write_trial(
+                data_dir / 'jobs' / family.name / 'job-1',
+                'echo__1',
+                config.agents[0],
+                task=f'{family.name}/echo',
+                version='1.0.0',
+                instruction=None,
+                context=context,
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+            (collected,) = jobs.collect(family, {system.name: system})
+
+            assert len(endpoint.requests) == 2
+            assert collected.output_tokens == 80
+            assert collected.reasoning_tokens == total
+
         def test_failed_native_attempts_keep_their_artifacts_when_the_caller_retries(
             self,
             endpoint: StubEndpoint,

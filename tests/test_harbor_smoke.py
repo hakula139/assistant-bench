@@ -136,6 +136,10 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
         turns * 100,
         turns * 40,
     )
+    assert output.reasoning_tokens == (
+        None if api == 'anthropic-messages' else turns * 25
+    )
+    assert output.latency_sec is not None and output.latency_sec > 0
     assert output.cost_usd == pytest.approx(
         turns * (0.000485 if api == 'anthropic-messages' else 0.00046)
     )
