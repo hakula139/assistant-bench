@@ -18,7 +18,7 @@ RUNTIME_FILES = {
 RUNTIME_DIRS = (
     '.github/actions/setup-nix/',
     'families/coding-repo/shared/',
-    'src/assistant_bench/',
+    'src/',
 )
 TASKS_DIR = Path('families/coding-repo/tasks')
 

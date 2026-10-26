@@ -34,30 +34,34 @@ class TestSelectedTasks:
     @pytest.mark.parametrize(
         ('changes', 'expected'),
         [
-            (
+            pytest.param(
                 {'families/coding-repo/tasks/a/instruction.md': 'Changed'},
                 ['a'],
+                id='one-task',
             ),
-            (
+            pytest.param(
                 {
                     'families/coding-repo/tasks/a/tests/test file.py': 'Changed',
                     'families/coding-repo/tasks/a/instruction.md': 'Changed',
                     'families/coding-repo/tasks/b/task.toml': 'Changed',
                 },
                 ['a', 'b'],
+                id='several-tasks-and-files',
             ),
-            (
+            pytest.param(
                 {'families/coding-repo/tasks/new/instruction.md': 'New'},
                 ['new'],
+                id='added-task',
             ),
-            (
+            pytest.param(
                 {
                     'families/coding-repo/tasks/a/instruction.md': None,
                     'families/coding-repo/tasks/a/task.toml': None,
                 },
                 [],
+                id='deleted-task',
             ),
-            (
+            pytest.param(
                 {
                     'families/coding-repo/tasks/a/instruction.md': None,
                     'families/coding-repo/tasks/a/task.toml': None,
@@ -65,60 +69,86 @@ class TestSelectedTasks:
                     'families/coding-repo/tasks/renamed/task.toml': 'version = "1.0.0"',
                 },
                 ['renamed'],
+                id='renamed-task',
             ),
-            ({'docs/guide/authoring.md': 'Documentation'}, []),
-            ({'tests/test_jobs.py': 'Tests'}, []),
-            ({'web/src/index.ts': 'Site'}, []),
-            ({'families/smoke/tasks/echo/instruction.md': 'Smoke'}, []),
-            ({'src/assistant_bench/jobs.py': 'Job'}, None),
-            ({'src/assistant_bench/families.py': 'Validation'}, None),
-            ({'src/assistant_bench/harnesses/terminus.py': 'Harness'}, None),
-            ({'src/assistant_bench/task_assets.py': 'Generator'}, None),
-            ({'families/coding-repo/shared/tests/verify_lib.py': 'Verifier'}, None),
-            ({'families/coding-repo/shared/environment/Dockerfile': 'Image'}, None),
-            ({'families/coding-repo/shared/tests/test.sh': 'Runner'}, None),
-            ({'families/coding-repo/shared/tests/new_probe.py': 'New asset'}, None),
-            ({'families/coding-repo/shared-notes/README.md': 'Notes'}, []),
-            ({'uv.lock': 'Harbor dependency'}, None),
-            ({'pyproject.toml': 'Runtime dependencies'}, None),
-            ({'.python-version': 'Python'}, None),
-            ({'flake.nix': 'Dev shell'}, None),
-            ({'flake.lock': 'Pinned inputs'}, None),
-            ({'systems.toml': 'Catalog'}, None),
-            ({'families/coding-repo/family.toml': 'Family settings'}, None),
-            ({'.github/workflows/ci.yml': 'Workflow'}, None),
-            ({'.github/actions/setup-nix/action.yml': 'Setup'}, None),
-            ({'src/assistant_bench/ci.py': 'Selector'}, None),
-        ],
-        ids=[
-            'one-task',
-            'several-tasks-and-files',
-            'added-task',
-            'deleted-task',
-            'renamed-task',
-            'documentation',
-            'tests',
-            'site',
-            'another-family',
-            'jobs',
-            'family-validation',
-            'harness',
-            'asset-generator',
-            'shared-verifier',
-            'shared-image',
-            'shared-runner',
-            'new-shared-asset',
-            'neighboring-directory',
-            'harbor',
-            'dependencies',
-            'python',
-            'dev-shell',
-            'nix-inputs',
-            'systems',
-            'family-settings',
-            'workflow',
-            'setup-action',
-            'selector',
+            pytest.param(
+                {'docs/guide/authoring.md': 'Documentation'}, [], id='documentation'
+            ),
+            pytest.param({'tests/test_jobs.py': 'Tests'}, [], id='tests'),
+            pytest.param({'web/src/index.ts': 'Site'}, [], id='site'),
+            pytest.param(
+                {'families/smoke/tasks/echo/instruction.md': 'Smoke'},
+                [],
+                id='another-family',
+            ),
+            pytest.param({'src/assistant_bench/jobs.py': 'Job'}, None, id='jobs'),
+            pytest.param(
+                {'src/assistant_bench/families.py': 'Validation'},
+                None,
+                id='family-validation',
+            ),
+            pytest.param(
+                {'src/assistant_bench/harnesses/terminus.py': 'Harness'},
+                None,
+                id='harness',
+            ),
+            pytest.param(
+                {'src/assistant_bench/task_assets.py': 'Generator'},
+                None,
+                id='shared-file-generator',
+            ),
+            pytest.param(
+                {'src/assistant_bench/ci.py': 'Selector'}, None, id='selector'
+            ),
+            pytest.param(
+                {'src/assistant_bench_arena/models.py': 'Shared model'},
+                None,
+                id='arena-model',
+            ),
+            pytest.param(
+                {'families/coding-repo/shared/tests/verify_lib.py': 'Verifier'},
+                None,
+                id='shared-verifier',
+            ),
+            pytest.param(
+                {'families/coding-repo/shared/environment/Dockerfile': 'Image'},
+                None,
+                id='shared-image',
+            ),
+            pytest.param(
+                {'families/coding-repo/shared/tests/test.sh': 'Runner'},
+                None,
+                id='shared-runner',
+            ),
+            pytest.param(
+                {'families/coding-repo/shared/tests/new_probe.py': 'New asset'},
+                None,
+                id='new-shared-asset',
+            ),
+            pytest.param(
+                {'families/coding-repo/shared-notes/README.md': 'Notes'},
+                [],
+                id='neighboring-directory',
+            ),
+            pytest.param({'uv.lock': 'Harbor dependency'}, None, id='harbor'),
+            pytest.param(
+                {'pyproject.toml': 'Runtime dependencies'}, None, id='dependencies'
+            ),
+            pytest.param({'.python-version': 'Python'}, None, id='python'),
+            pytest.param({'flake.nix': 'Dev shell'}, None, id='dev-shell'),
+            pytest.param({'flake.lock': 'Pinned inputs'}, None, id='nix-inputs'),
+            pytest.param({'systems.toml': 'Catalog'}, None, id='systems'),
+            pytest.param(
+                {'families/coding-repo/family.toml': 'Family settings'},
+                None,
+                id='family-settings',
+            ),
+            pytest.param({'.github/workflows/ci.yml': 'Workflow'}, None, id='workflow'),
+            pytest.param(
+                {'.github/actions/setup-nix/action.yml': 'Setup'},
+                None,
+                id='setup-action',
+            ),
         ],
     )
     def test_selects_current_tasks_affected_since_the_base(
