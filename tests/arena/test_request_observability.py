@@ -9,7 +9,7 @@ from pydantic import JsonValue, SecretBytes
 from rich.text import Text
 
 from assistant_bench_arena.admission import TokenCodec
-from assistant_bench_arena.ledger_models import Statement
+from assistant_bench_arena.ledger_models import Moderation, Statement, Target
 from assistant_bench_arena.policy import configuration
 from assistant_bench_arena.runtime_models import KeyRing, KeyVersion, RenderClaims
 from assistant_bench_arena.voting import RENDER_MS
@@ -55,7 +55,10 @@ class TestDefaultFetch:
                                 result = await transport.call(
                                     {
                                         'operation': 'management',
-                                        'request': {'operation': 'status'},
+                                        'request': {
+                                            'operation': 'family_status',
+                                            'family': 'writing',
+                                        },
                                     }
                                 )
                                 assert result == {'error': {'reason': 'unavailable'}}, (
@@ -258,6 +261,68 @@ class TestDefaultFetch:
             for secret in (canary, *capabilities):
                 assert all(secret not in body for body in responses)
                 assert all(secret not in contents for contents in logs.values())
+
+
+class TestUninitializedDeployment:
+    def test_reports_an_empty_database_through_the_management_entrypoint(
+        self, tmp_path: Path
+    ) -> None:
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
+                result = await transport.call(
+                    {'operation': 'management', 'request': {'operation': 'status'}}
+                )
+
+                assert result == {'result': None}
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
+
+
+class TestManagementRejection:
+    def test_surfaces_and_logs_the_owner_input_diagnosis(self, tmp_path: Path) -> None:
+        detail = 'A moderation plan must name its management principal.'
+
+        async def scenario(runtime: NativeRuntime) -> None:
+            async with runtime.client() as (_, transport):
+                await transport.bootstrap(configuration(NAMESPACE))
+                batch = Moderation(
+                    id='reviewed-plan',
+                    family='writing',
+                    principal='owner',
+                    action='exclude',
+                    reason='Synthetic reviewed correction.',
+                    created_at=0,
+                    targets=(Target(receipt_seq=1, claim_version=0),),
+                )
+
+                result = await transport.call(
+                    {
+                        'operation': 'management',
+                        'request': {
+                            'operation': 'stage_moderation',
+                            'batch': batch.model_dump(mode='json'),
+                        },
+                    }
+                )
+
+                assert result == {
+                    'error': {'reason': 'invalid_request', 'detail': detail}
+                }
+
+        with NativeRuntime(tmp_path).owner() as runtime:
+            asyncio.run(scenario(runtime))
+
+        logs = [
+            Text.from_ansi(path.read_text()).plain
+            for path in runtime.directory.rglob('*.log')
+            if '/' not in path.relative_to(runtime.directory).as_posix()
+        ]
+        assert any(
+            f'Voting management rejected: exception=OwnerInputError message={detail}'
+            in contents
+            for contents in logs
+        )
 
 
 def event(stage: str, exception: str) -> str:

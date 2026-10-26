@@ -155,29 +155,52 @@ class TestNativeRuntime:
                 assert worker_rejected['status'] == 400
                 assert body(worker_rejected) == {'error': 'invalid_request'}
 
-                for path, frames in (
-                    ('/', 'https://render.example.com'),
-                    (
-                        '/vote/',
-                        'https://render.example.com https://challenges.cloudflare.com',
-                    ),
+                page = await transport.http('/vote/')
+                assert page['status'] == 200
+                assert str(page['body']).count('bench-render-origin') == 1
+                page_headers = page['headers']
+                assert isinstance(page_headers, dict)
+                policy = str(page_headers['content-security-policy'])
+                assert policy.split('; ')[0] == (
+                    'frame-src https://render.example.com '
+                    'https://challenges.cloudflare.com'
+                )
+                for directive in (
+                    "connect-src 'self'",
+                    "base-uri 'none'",
+                    "form-action 'none'",
+                    "frame-ancestors 'none'",
+                    "object-src 'none'",
                 ):
-                    page = await transport.http(path)
-                    assert page['status'] == 200, path
-                    assert 'bench-render-origin' in str(page['body']), path
-                    page_headers = page['headers']
-                    assert isinstance(page_headers, dict)
-                    policy = str(page_headers['content-security-policy'])
-                    assert policy.split('; ')[0] == f'frame-src {frames}', path
-                    for directive in (
-                        "connect-src 'self'",
-                        "base-uri 'none'",
-                        "form-action 'none'",
-                        "frame-ancestors 'none'",
-                        "object-src 'none'",
-                    ):
-                        assert directive in policy, (path, directive)
-                    assert page_headers['cache-control'] == 'no-store'
+                    assert directive in policy, directive
+                assert (
+                    page_headers['cache-control']
+                    == 'public, max-age=0, must-revalidate'
+                )
+
+                cross_site = await transport.http('/vote/', sec_fetch_site='cross-site')
+                assert cross_site['status'] == 200
+                assert 'bench-render-origin' in str(cross_site['body'])
+
+                rejected = await transport.http('/vote/', body={'choice': 'a'})
+                assert rejected['status'] == 400
+                assert body(rejected) == {'error': 'invalid_request'}
+
+                api_cross_site = await transport.http(
+                    '/api/families', sec_fetch_site='cross-site'
+                )
+                assert api_cross_site['status'] == 400
+
+                static = await transport.http('/')
+                assert static['status'] == 200
+                assert 'bench-render-origin' not in str(static['body'])
+                static_headers = static['headers']
+                assert isinstance(static_headers, dict)
+                static_policy = str(static_headers['content-security-policy'])
+                assert static_policy.split('; ')[0] == "frame-src 'none'"
+                assert static_policy.split('; ')[1:] == policy.split('; ')[1:]
+                assert static_headers['referrer-policy'] == 'no-referrer'
+                assert static_headers['x-content-type-options'] == 'nosniff'
 
                 families = await transport.http('/api/families')
                 assert families['status'] == 200
@@ -295,8 +318,6 @@ class TestNativeRuntime:
                     cookie(reused).split('=', 1)[1], now
                 ) == flows.decode(flow_cookie.split('=', 1)[1], now)
 
-                retired = await transport.http('/admit')
-                assert retired['status'] == 404
                 request: dict[str, JsonValue] = {
                     'command_id': command,
                     'proof': 'admit-proof',
@@ -605,7 +626,7 @@ class TestNativeRuntime:
                     f'Native coverage missed {relative}:{returned}.'
                 )
 
-    def test_charges_real_native_budgets_before_serving_or_rejecting_requests(
+    def test_charges_native_budgets_only_for_valid_api_requests(
         self, tmp_path: Path
     ) -> None:
         async def scenario(runtime: NativeRuntime) -> None:
@@ -642,7 +663,6 @@ class TestNativeRuntime:
                         400,
                     ),
                     ('198.51.100.21', '/api/sessions', 'x' * 8193, APP_ORIGIN, 400),
-                    ('203.0.113.21', '/', None, APP_ORIGIN, 200),
                 )
 
                 for address, path, payload, origin, expected in cases:
@@ -654,56 +674,64 @@ class TestNativeRuntime:
                     events = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
                         recorded['events']
                     )
-                    assert events and events[0]['kind'] == 'preflight', (
+                    assert events and events[0] == {'kind': 'validate'}, (
                         address,
                         path,
                         events,
                     )
-                    now = events[0]['now']
-                    assert isinstance(now, int)
-                    network = NetworkIdentity(address)
-                    expected_events: list[dict[str, JsonValue]] = [
-                        {'kind': 'preflight', 'address': address, 'now': now}
-                    ]
-                    for scope in ('exact', 'prefix'):
+                    expected_events: list[dict[str, JsonValue]] = [{'kind': 'validate'}]
+
+                    if origin == APP_ORIGIN:
+                        now = events[1]['now']
+                        assert isinstance(now, int)
+                        network = NetworkIdentity(address)
                         expected_events.append(
-                            {
-                                'kind': 'limit',
-                                'scope': scope,
-                                'key': network.quota(
-                                    keys,
-                                    NAMESPACE,
-                                    'request',
-                                    scope,
-                                    now // 60_000 * 60_000,
-                                    60_000,
-                                ),
-                                'success': True,
-                            }
+                            {'kind': 'preflight', 'address': address, 'now': now}
                         )
-                    expected_events.extend(
-                        [
-                            {
-                                'kind': 'limit',
-                                'scope': 'deployment',
-                                'key': NAMESPACE,
-                                'success': True,
-                            },
-                            {'kind': 'validate'},
-                        ]
-                    )
-                    if payload is not None and origin == APP_ORIGIN:
-                        expected_events.append({'kind': 'body'})
+                        for scope in ('exact', 'prefix'):
+                            expected_events.append(
+                                {
+                                    'kind': 'limit',
+                                    'scope': scope,
+                                    'key': network.quota(
+                                        keys,
+                                        NAMESPACE,
+                                        'request',
+                                        scope,
+                                        now // 60_000 * 60_000,
+                                        60_000,
+                                    ),
+                                    'success': True,
+                                }
+                            )
+                        expected_events.extend(
+                            [
+                                {
+                                    'kind': 'limit',
+                                    'scope': 'deployment',
+                                    'key': NAMESPACE,
+                                    'success': True,
+                                },
+                            ]
+                        )
+                        if payload is not None:
+                            expected_events.append({'kind': 'body'})
 
                     assert events == expected_events, (address, path, events)
                     if expected == 400:
                         assert body(response) == {'error': 'invalid_request'}
                     elif expected == 404:
                         assert body(response) == {'error': 'not_found'}
-                    elif path == '/api/status':
-                        assert body(response) == {'status': 'admission_required'}
                     else:
-                        assert 'bench-render-origin' in str(response['body'])
+                        assert body(response) == {'status': 'admission_required'}
+
+                response = await transport.http('/vote/')
+                assert response['status'] == 200
+                recorded = await transport.call({'operation': 'ingress_events'})
+                events = TypeAdapter(list[dict[str, JsonValue]]).validate_python(
+                    recorded['events']
+                )
+                assert events == [{'kind': 'validate'}]
 
                 assert runtime.provider.calls == []
 

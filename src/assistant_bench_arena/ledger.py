@@ -47,7 +47,11 @@ from assistant_bench_arena.serialization import (
     digest,
 )
 from assistant_bench_arena.snapshots import AnalysisPolicy
-from assistant_bench_arena.transport import CommandRejected, Transport
+from assistant_bench_arena.transport import (
+    CommandRejected,
+    OwnerInputError,
+    Transport,
+)
 
 
 _PAGE_ROWS = 250
@@ -104,12 +108,16 @@ class Ledger:
 
     async def stage_policy(self, policy_id: str, policy: AnalysisPolicy) -> None:
         if policy_id != digest(policy):
-            raise ValueError('A policy identity must bind its complete definition.')
+            raise OwnerInputError(
+                'A policy identity must bind its complete definition.'
+            )
 
         weights = policy.method.human_weights
 
         if weights.name != 'actor-proportional-cap' or weights.cap != 100:
-            raise ValueError('A live ledger requires the 100-unit actor weighting cap.')
+            raise OwnerInputError(
+                'A live ledger requires the 100-unit actor weighting cap.'
+            )
 
         body = canonical(policy)
         await self._fact(
@@ -336,7 +344,7 @@ class Ledger:
                 and any(point.score is not None for point in points.points.values())
             )
         ):
-            raise ValueError(
+            raise OwnerInputError(
                 'Points must bind their complete inventory and provenance.'
             )
 
@@ -352,7 +360,7 @@ class Ledger:
             )
 
             if not sources:
-                raise ValueError(
+                raise OwnerInputError(
                     'Fitted points require a matching frozen source export.'
                 )
 
@@ -1055,7 +1063,7 @@ class Ledger:
     ) -> Page:
         """Read immutable keyset pages with at most 250 rows and 1 MiB of JSON."""
         if not 1 <= limit <= _PAGE_ROWS:
-            raise ValueError('An export page must contain between 1 and 250 rows.')
+            raise OwnerInputError('An export page must contain between 1 and 250 rows.')
 
         after = ''
 
@@ -1063,7 +1071,9 @@ class Ledger:
             parsed = Cursor.model_validate_json(cursor)
 
             if parsed.export_id != export_id or parsed.section != section:
-                raise ValueError('An export cursor belongs to a different section.')
+                raise OwnerInputError(
+                    'An export cursor belongs to a different section.'
+                )
 
             after = parsed.key
 
@@ -1098,7 +1108,7 @@ class Ledger:
             last = str(size['row_key'])
 
         if last == after:
-            raise ValueError('An export row exceeds the 1 MiB page boundary.')
+            raise OwnerInputError('An export row exceeds the 1 MiB page boundary.')
 
         encoded = await self._rows(
             f"""

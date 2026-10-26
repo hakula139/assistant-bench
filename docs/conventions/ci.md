@@ -45,7 +45,7 @@ Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/w
 
 Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. Production preserves the purpose-specific encrypted Worker secrets provisioned during setup. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
 
-Arena Health uses the same credentials to check production through its private Management Service every 15 minutes. It also supports manual runs on `main` and fails on an identity mismatch or expired network associations awaiting cleanup. The Worker checks cleanup every minute and reports a failed cron invocation while that backlog remains.
+Arena Health uses the same credentials to check production through its private Management Service every 15 minutes. It also supports manual runs on `main` and fails on an identity mismatch or expired network associations that have awaited cleanup for more than five minutes. The Worker checks cleanup every minute and reports a failed cron invocation while that backlog remains.
 
 ## Workflow Steps
 

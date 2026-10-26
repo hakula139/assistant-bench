@@ -44,6 +44,10 @@ class CommandRejected(Exception):
         super().__init__(reason)
 
 
+class OwnerInputError(ValueError):
+    """An owner-authored command value failed a check, with a message safe to return."""
+
+
 class Transport(Protocol):
     async def execute(self, statement: Statement) -> None:
         """Execute one statement atomically, preserving trigger aborts."""

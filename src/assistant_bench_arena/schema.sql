@@ -1172,8 +1172,7 @@ BEGIN
         json_extract(a.value, '$.tag'), NEW.now_ms, json_extract(a.value, '$.expires_at')
     FROM json_each(NEW.attribution) a JOIN evidence_events e ON e.command_id = NEW.command_id;
 
-    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
-        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE family = (SELECT family FROM pair_leases WHERE id = NEW.lease_id);
 END;
 
@@ -1212,8 +1211,7 @@ BEGIN
     WHERE session_id = NEW.session_id OR current_lease IN (SELECT id FROM pair_leases WHERE status = 'revoked' AND repeat_of = NEW.receipt_seq);
     DELETE FROM session_cases WHERE session_id = NEW.session_id AND receipt_seq = NEW.receipt_seq;
     INSERT INTO refresh_coverage(claim_id) SELECT claim_id FROM vote_receipts WHERE seq = NEW.receipt_seq;
-    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id),
-        revision = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
+    UPDATE family_state SET last_evidence_seq = (SELECT seq FROM evidence_events WHERE command_id = NEW.command_id)
     WHERE family = (SELECT family FROM sessions WHERE id = NEW.session_id);
 END;
 

@@ -38,6 +38,7 @@ from assistant_bench_arena.releases import (
 )
 from assistant_bench_arena.serialization import canonical, digest
 from assistant_bench_arena.snapshots import Settlement
+from assistant_bench_arena.transport import OwnerInputError
 
 
 PRINCIPAL = 'management'
@@ -76,12 +77,14 @@ async def execute(ledger: Ledger, request: Request, now: int) -> JsonValue:
             numerical = request.numerical
 
             if numerical.section != 'settlements':
-                raise ValueError('The numerical section must contain settlements.')
+                raise OwnerInputError('The numerical section must contain settlements.')
 
             settlement = Settlement.model_validate_json(canonical(numerical.value))
 
             if numerical.key != digest(settlement):
-                raise ValueError('A settlement must bind its exact numerical value.')
+                raise OwnerInputError(
+                    'A settlement must bind its exact numerical value.'
+                )
 
             await ledger.stage_numerical(request.evaluation_id, request.numerical)
         case SealEvaluation():
@@ -122,7 +125,7 @@ async def execute(ledger: Ledger, request: Request, now: int) -> JsonValue:
             )
         case StageModeration():
             if request.batch.principal != PRINCIPAL or request.batch.created_at > now:
-                raise ValueError(
+                raise OwnerInputError(
                     'A moderation plan must name its management principal.'
                 )
 

@@ -21,7 +21,7 @@ from assistant_bench_arena.ledger_models import (
 )
 from assistant_bench_arena.models import Record
 from assistant_bench_arena.snapshots import AnalysisPolicy
-from assistant_bench_arena.transport import Rejection
+from assistant_bench_arena.transport import OwnerInputError, Rejection
 
 
 class Status(Record):
@@ -175,13 +175,17 @@ _REQUEST = TypeAdapter[Request](Request.__value__)
 
 def parse_request(payload: str) -> Request:
     if len(payload.encode()) > 1_048_576:
-        raise ValueError('One management operation must fit the native 1 MiB bound.')
+        raise OwnerInputError(
+            'One management operation must fit the native 1 MiB bound.'
+        )
 
     return _REQUEST.validate_json(payload)
 
 
 class RpcError(Record):
-    reason: Rejection | Literal['unavailable']
+    reason: Rejection | Literal['invalid_request', 'unavailable']
+    detail: str | None = None
+    """The owner's diagnosis for an invalid command or a bridge failure."""
 
 
 class RpcFailure(Record):

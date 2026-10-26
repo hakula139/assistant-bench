@@ -52,11 +52,20 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeTarget:
             [env.production.assets]
             binding = "ASSETS"
             directory = "assets"
-            run_worker_first = true
+            run_worker_first = ["/api/*", "/vote/"]
         """)
     )
     monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'synthetic-credential')
     return runtime.load_target('production', manifest_path=manifest)
+
+
+class TestRouting:
+    def test_routes_only_the_vote_page_and_api_to_the_native_owner(self) -> None:
+        manifest = tomllib.loads(runtime.CONFIG.read_text())
+
+        for name in ('staging', 'production'):
+            assets = manifest['env'][name]['assets']
+            assert assets['run_worker_first'] == ['/api/*', '/vote/']
 
 
 class TestDeploy:

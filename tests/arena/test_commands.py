@@ -4,8 +4,10 @@ from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from stat import S_IMODE
+from typing import cast
 
 import pytest
+from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
 from arena_support import (
@@ -49,9 +51,15 @@ def use_management(
     monkeypatch: pytest.MonkeyPatch, management: NativeManagement
 ) -> None:
     @asynccontextmanager
-    async def connection(name: str) -> AsyncGenerator[Management]:
+    async def connection(
+        name: str,
+    ) -> AsyncGenerator[tuple[Management, command.ManagementStatus]]:
         assert name == 'production'
-        yield management
+        status = await management.domain(
+            command.Status(), TypeAdapter(command.ManagementStatus | None)
+        )
+        assert status is not None
+        yield management, status
 
     monkeypatch.setattr(commands, '_connection', connection)
 
@@ -130,18 +138,66 @@ class TestConnection:
                         result.output.strip()
                         == 'The arena has no overdue network associations.'
                     )
-                    assert [row.operation for row in management.operations] == [
-                        'status',
-                        'status',
-                    ]
                 else:
                     assert result.exit_code == 1
-                    assert 'does not match the selected target' in result.output
-                    assert [row.operation for row in management.operations] == [
-                        'status'
-                    ]
+                    assert (
+                        'The arena deployment is not initialized.'
+                        if namespace is None
+                        else 'does not match the selected target'
+                    ) in result.output
+
+                assert [row.operation for row in management.operations] == ['status']
 
         asyncio.run(scenario())
+
+
+class _ReplyProcess:
+    def __init__(self, reply: dict[str, object]) -> None:
+        self.stdin = self
+        self.stdout = self
+        self.reply = (json.dumps(reply) + '\n').encode()
+
+    def write(self, payload: bytes) -> None:
+        return None
+
+    async def drain(self) -> None:
+        return None
+
+    async def readline(self) -> bytes:
+        return self.reply
+
+
+class TestManagementTransport:
+    @pytest.mark.parametrize(
+        ('reason', 'detail', 'message'),
+        [
+            (
+                'invalid_request',
+                'A moderation plan must name its management principal.',
+                'must name its management principal',
+            ),
+            (
+                'unavailable',
+                'The management bridge closed.',
+                'management bridge closed',
+            ),
+        ],
+        ids=['invalid-command', 'bridge-failure'],
+    )
+    def test_surfaces_the_owner_diagnosis(
+        self, reason: str, detail: str, message: str
+    ) -> None:
+        process = _ReplyProcess(
+            {'id': 0, 'error': {'reason': reason, 'detail': detail}}
+        )
+        management = Management(cast(asyncio.subprocess.Process, process))
+
+        with pytest.raises(ValueError, match=message):
+            asyncio.run(
+                management.domain(
+                    command.Status(), TypeAdapter(command.ManagementStatus | None)
+                )
+            )
 
 
 class TestPrepare:
@@ -268,12 +324,22 @@ class TestExportEvidence:
 
 
 class TestHealth:
-    @pytest.mark.parametrize('overdue', [False, True], ids=['current', 'overdue'])
+    @pytest.mark.parametrize(
+        ('lag', 'failed'),
+        [
+            (0, False),
+            (1_234, False),
+            (300_000, False),
+            (300_001, True),
+        ],
+        ids=['current', 'within-grace', 'at-grace', 'overdue'],
+    )
     def test_fails_only_when_native_network_associations_are_overdue(
         self,
         runtime: D1Runtime,
         monkeypatch: pytest.MonkeyPatch,
-        overdue: bool,
+        lag: int,
+        failed: bool,
     ) -> None:
         async def scenario() -> None:
             async with native_management(runtime) as management:
@@ -281,38 +347,17 @@ class TestHealth:
                 release = make_release(cases=2, policy=load_policy())
                 await publish_release(management, release)
                 await vote_capture(management, release)
-
-                if overdue:
-                    management.now = BASE_MS + RETENTION_MS + 2 + 1_234
+                management.now = BASE_MS + RETENTION_MS + 2 + lag
 
                 result = await asyncio.to_thread(
                     runner.invoke, commands.app, ['health', 'production']
                 )
 
-                assert result.exit_code == (1 if overdue else 0), result.output
+                assert result.exit_code == (1 if failed else 0), result.output
                 assert result.output.strip() == (
                     'The arena has expired network associations awaiting cleanup.'
-                    if overdue
+                    if failed
                     else 'The arena has no overdue network associations.'
-                )
-
-        asyncio.run(scenario())
-
-    def test_refuses_uninitialized_native_management_status(
-        self, runtime: D1Runtime, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        async def scenario() -> None:
-            async with runtime.client() as (ledger, transport):
-                await transport.reset()
-                use_management(monkeypatch, NativeManagement(ledger))
-
-                result = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['health', 'production']
-                )
-
-                assert result.exit_code == 1
-                assert (
-                    result.output.strip() == 'The arena deployment is not initialized.'
                 )
 
         asyncio.run(scenario())

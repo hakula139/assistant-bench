@@ -52,6 +52,8 @@ _EVENT = TypeAdapter(Event)
 _NONE = TypeAdapter(type(None))
 _CATALOG = TypeAdapter(tuple[FamilyView, ...])
 
+_CLEANUP_GRACE_MS = 5 * 60_000
+
 Target = Annotated[str, typer.Argument(help='Configured staging or production target.')]
 Artifact = Annotated[
     Path, typer.Argument(help='A reviewed immutable release JSON file.')
@@ -59,19 +61,24 @@ Artifact = Annotated[
 
 
 @asynccontextmanager
-async def _connection(name: str) -> AsyncGenerator[Management]:
+async def _connection(
+    name: str,
+) -> AsyncGenerator[tuple[Management, command.ManagementStatus]]:
     target = load_target(_TARGET.validate_python(name))
 
     with management_config(target) as config:
         async with connect(config) as management:
             status = await management.domain(command.Status(), _STATUS)
 
-            if status is None or status.namespace != target.profile.namespace:
+            if status is None:
+                raise ValueError('The arena deployment is not initialized.')
+
+            if status.namespace != target.profile.namespace:
                 raise ValueError(
                     'The connected arena does not match the selected target.'
                 )
 
-            yield management
+            yield management, status
 
 
 def _run(operation: Coroutine[None, None, None]) -> None:
@@ -130,7 +137,7 @@ def publish(target: Target, release: Artifact) -> None:
 async def _publish(target: str, path: Path) -> None:
     release = Release.model_validate_json(path.read_bytes())
 
-    async with _connection(target) as management:
+    async with _connection(target) as (management, _):
         event = await publish_release(management, release)
 
     if event is None:
@@ -159,7 +166,7 @@ async def _export(target: str, family: str, output: Path) -> None:
     if output.exists():
         raise ValueError('The evidence output already exists.')
 
-    async with _connection(target) as management:
+    async with _connection(target) as (management, _):
         header = await management.domain(
             command.Freeze(export_id=uuid4().hex, family=family), _EXPORT
         )
@@ -181,7 +188,7 @@ def refresh(
 async def _refresh(target: str, path: Path) -> None:
     frozen = analyze_export(read_export(path))
 
-    async with _connection(target) as management:
+    async with _connection(target) as (management, _):
         event = await publish_points(
             management, frozen.analysis.family.name, frozen.points
         )
@@ -199,14 +206,11 @@ def health(target: Target) -> None:
 
 
 async def _health(target: str) -> None:
-    async with _connection(target) as management:
-        current = await management.domain(command.Status(), _STATUS)
-
-    if current is None:
-        raise ValueError('The arena deployment is not initialized.')
-
-    if current.expiry_lag_ms > 0:
-        raise ValueError('The arena has expired network associations awaiting cleanup.')
+    async with _connection(target) as (_, current):
+        if current.expiry_lag_ms > _CLEANUP_GRACE_MS:
+            raise ValueError(
+                'The arena has expired network associations awaiting cleanup.'
+            )
 
     typer.echo('The arena has no overdue network associations.')
 
@@ -221,8 +225,7 @@ def status(
 
 
 async def _status(target: str, family: str) -> None:
-    async with _connection(target) as management:
-        deployment = await management.domain(command.Status(), _STATUS)
+    async with _connection(target) as (management, deployment):
         current = await management.domain(command.FamilyStatus(family=family), _FAMILY)
 
     if current is None:
@@ -231,9 +234,7 @@ async def _status(target: str, family: str) -> None:
     typer.echo(
         json.dumps(
             {
-                'deployment': deployment.model_dump(mode='json')
-                if deployment
-                else None,
+                'deployment': deployment.model_dump(mode='json'),
                 'family': current.model_dump(mode='json'),
             },
             indent=2,
@@ -256,7 +257,7 @@ def investigate(
 async def _investigate(target: str, path: Path, after: int) -> None:
     filters = ReceiptFilter.model_validate_json(path.read_bytes())
 
-    async with _connection(target) as management:
+    async with _connection(target) as (management, _):
         page = await management.domain(
             command.Investigate(filters=filters, after=after), _INVESTIGATION
         )
@@ -276,7 +277,7 @@ def moderate(
 async def _moderate(target: str, path: Path) -> None:
     plan = Moderation.model_validate_json(path.read_bytes())
 
-    async with _connection(target) as management:
+    async with _connection(target) as (management, _):
         await management.domain(command.StageModeration(batch=plan), _NONE)
         await management.domain(command.SealModeration(batch_id=plan.id), _NONE)
 
