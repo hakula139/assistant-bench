@@ -32,7 +32,7 @@ Drop a test once another covers everything it checks.
 
 ## Accessibility
 
-`site.test.ts` serves the built site with `astro preview` and runs every axe-core rule on each page in Chromium under the light and dark color schemes, after the page's islands hydrate. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. Install the browser once per host with `pnpm --filter web exec playwright install --only-shell chromium`, as CI does, since the runner image already carries Chromium's system libraries.
+`site.test.ts` serves the built site's files through Playwright routes and runs every axe-core rule on each page in Chromium under the light and dark color schemes, after the page's islands hydrate. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. Install the browser once per host with `pnpm --filter web exec playwright install --only-shell chromium`, as CI does, since the runner image already carries Chromium's system libraries.
 
 ## Docker Trials
 
