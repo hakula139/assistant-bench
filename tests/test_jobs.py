@@ -1010,6 +1010,7 @@ class TestCollect:
     @pytest.fixture(autouse=True)
     def current_sources(self, families_dir: Path, data_dir: Path) -> None:
         write_case_family(families_dir, ['acme-large'], name='smoke-text')
+        write_case_family(families_dir, ['acme-large'], name='f')
         cases = data_dir / 'cases' / 'smoke-text.toml'
         cases.parent.mkdir(parents=True)
         cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.toml').read_text())
@@ -1491,7 +1492,6 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir, 'a', name='g', systems=('acme-large',))
-        write_case_family(families_dir, ['acme-large'], name='f')
         task_family = load_family('g')
         record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
@@ -1981,6 +1981,10 @@ class TestCollect:
 
 
 class TestReadTrials:
+    @pytest.fixture(autouse=True)
+    def current_sources(self, families_dir: Path) -> None:
+        write_case_family(families_dir, ['acme-large'], name='f')
+
     def test_skips_a_removed_case_without_reading_its_installed_instruction(
         self, data_dir: Path
     ) -> None:
