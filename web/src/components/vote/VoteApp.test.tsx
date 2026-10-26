@@ -13,8 +13,8 @@ import {
   type FamilyView,
   type SessionView,
 } from '@/lib/arena';
+import type { Defect } from '@/lib/defects';
 import { defectTerms } from '@/lib/glossary';
-import type { Defect } from '@/lib/report';
 import { VoteFlow } from '@/lib/vote-flow';
 import { COMMAND_ID, VOTE_FAMILY as FAMILY, makeSession, requestBody } from '@/test/arena';
 import { ADMISSION, stubChallenge } from '@/test/verification';

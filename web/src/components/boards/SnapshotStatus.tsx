@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { note } from '@/components/site/PageParts';
-import { queryFreshness, type Freshness } from '@/lib/freshness';
+import { checkFreshness, type Freshness } from '@/lib/arena';
 
 const capturedTime = new Intl.DateTimeFormat('en', {
   dateStyle: 'medium',
@@ -15,34 +15,32 @@ const messages: Record<Freshness, string> = {
   unknown: 'Current voting evidence could not be checked.',
 };
 
-export function SnapshotStatus({
-  exportId,
-  capturedAt,
-  liveOrigin,
-}: {
-  exportId: string;
-  capturedAt: string;
-  liveOrigin: string | undefined;
-}) {
-  const [status, setStatus] = useState<Freshness>('unknown');
+/** A ledger round's capture time, followed by the vote API's freshness verdict once it answers. */
+export function SnapshotStatus({ exportId, capturedAt }: { exportId: string; capturedAt: string }) {
+  const [status, setStatus] = useState<Freshness | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    void queryFreshness(exportId, liveOrigin, controller.signal).then((value) => {
-      if (!controller.signal.aborted) {
-        setStatus(value);
-      }
-    });
+    void checkFreshness({ export_id: exportId }, controller.signal)
+      .then(
+        (view) => view.status,
+        (): Freshness => 'unknown',
+      )
+      .then((value) => {
+        if (!controller.signal.aborted) {
+          setStatus(value);
+        }
+      });
 
     return () => {
       controller.abort();
     };
-  }, [exportId, liveOrigin]);
+  }, [exportId]);
 
   return (
     <p className={note} role="status">
-      Captured <time dateTime={capturedAt}>{capturedTime.format(new Date(capturedAt))} UTC</time>.{' '}
-      {messages[status]}
+      Captured <time dateTime={capturedAt}>{capturedTime.format(new Date(capturedAt))} UTC</time>.
+      {status !== null && ` ${messages[status]}`}
     </p>
   );
 }

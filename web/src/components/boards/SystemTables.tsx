@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Defect } from '@/lib/defects';
 import { formatCount, formatPercent, formatScore, formatSeconds, MISSING } from '@/lib/format';
 import {
   defectTerms,
@@ -20,7 +21,6 @@ import {
 import { roundMethod } from '@/lib/method';
 import { isPreliminary } from '@/lib/ranking';
 import type {
-  Defect,
   Distribution,
   HeadToHead,
   PublicSystem,

@@ -1,6 +1,6 @@
 import { z } from 'astro/zod';
 
-import { defects } from '@/lib/report';
+import { defects } from '@/lib/defects';
 
 // The vote document's policy forbids Zod's eval-based parser optimization.
 z.config({ jitless: true });
@@ -101,6 +101,7 @@ export type SessionView = z.infer<typeof sessionView>;
 export type AdmissionView = z.infer<typeof admissionView>;
 export type ReceiptQuery = z.infer<typeof receiptQuery>;
 export type VoteAcknowledgment = z.infer<typeof voteAcknowledgment>;
+export type Freshness = z.infer<typeof freshnessView>['status'];
 export type ErrorCode = z.infer<typeof errorView>['error'];
 
 export const errorMessages: Record<ErrorCode, string> = {
@@ -136,6 +137,7 @@ export async function request<T>(
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   let response: Response;
   try {
@@ -144,6 +146,7 @@ export async function request<T>(
       credentials: 'same-origin',
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch {
     throw new NetworkError();
@@ -178,6 +181,8 @@ export const resolveVote = (body: ReceiptQuery) =>
   request(voteAcknowledgment, 'POST', '/votes/resolve', receiptQuery.parse(body));
 export const undoVote = (body: z.infer<typeof withdrawRequest>) =>
   request(z.undefined(), 'POST', '/sessions/withdraw', withdrawRequest.parse(body));
+export const checkFreshness = (body: z.infer<typeof freshnessRequest>, signal: AbortSignal) =>
+  request(freshnessView, 'POST', '/freshness', freshnessRequest.parse(body), signal);
 
 /** HTML capabilities may load only from the runtime's configured, separate renderer. */
 export function validateRenderOrigins(session: SessionView): SessionView {

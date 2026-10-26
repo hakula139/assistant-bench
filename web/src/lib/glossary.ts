@@ -1,5 +1,6 @@
+import type { Defect } from '@/lib/defects';
 import { formatPercent, formatScore } from '@/lib/format';
-import type { Defect, VotesMethod, VotesRules } from '@/lib/report';
+import type { VotesMethod, VotesRules } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
 export interface Term {

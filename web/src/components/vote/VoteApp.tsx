@@ -29,8 +29,8 @@ import {
   type VoteAcknowledgment,
 } from '@/lib/arena';
 import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
+import type { Defect } from '@/lib/defects';
 import { formatCountOf } from '@/lib/format';
-import type { Defect } from '@/lib/report';
 import { VoteFlow } from '@/lib/vote-flow';
 
 const FAMILY_PARAM = 'family';

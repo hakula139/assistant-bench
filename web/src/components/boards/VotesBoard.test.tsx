@@ -107,7 +107,6 @@ describe('VotesBoard', () => {
       'Scores, win rates and both-bad rates use the recorded actor weights.',
     );
     expect(text(html)).toContain('Repeats contribute only to consistency diagnostics.');
-    expect(text(html)).toContain('Current voting evidence could not be checked.');
     expect(text(html)).not.toMatch(/refresh deadline|confidence interval/i);
   });
 
@@ -127,26 +126,14 @@ describe('VotesBoard', () => {
     vi.stubGlobal('fetch', fetch);
     stubPlotFrame();
     search.set('round', earlier.round);
-    const board = () => (
-      <VotesBoard
-        base={BOARD}
-        rounds={[earlier, later]}
-        labels={CASES}
-        liveOrigin={window.location.origin}
-      />
-    );
+    const board = () => <VotesBoard base={BOARD} rounds={[earlier, later]} labels={CASES} />;
     const { rerender } = renderInDom(board());
     await screen.findByText(/The ranking uses the current voting evidence/);
 
     search.set('round', later.round);
     rerender(board());
 
-    expect(screen.getByRole('status').textContent).toContain(
-      'Current voting evidence could not be checked.',
-    );
-    expect(screen.getByRole('status').textContent).not.toContain(
-      'uses the current voting evidence',
-    );
+    expect(screen.getByRole('status').textContent).toMatch(/^Captured [^.]+ UTC\.$/);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch.mock.calls.map(([, options]) => options?.body)).toEqual([
       JSON.stringify({ export_id: 'before' }),
@@ -161,14 +148,7 @@ describe('VotesBoard', () => {
     vi.stubGlobal('fetch', fetch);
     stubPlotFrame();
 
-    renderInDom(
-      <VotesBoard
-        base={BOARD}
-        rounds={[await load()]}
-        labels={CASES}
-        liveOrigin={window.location.origin}
-      />,
-    );
+    renderInDom(<VotesBoard base={BOARD} rounds={[await load()]} labels={CASES} />);
 
     expect(screen.queryByRole('status')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();

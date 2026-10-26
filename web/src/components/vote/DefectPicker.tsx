@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Kbd } from '@/components/ui/kbd';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import type { Defect } from '@/lib/defects';
 import { defectTerms } from '@/lib/glossary';
-import type { Defect } from '@/lib/report';
 
 interface DefectPickerProps {
   side: 'A' | 'B';
