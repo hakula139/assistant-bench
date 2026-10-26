@@ -715,52 +715,79 @@ class TestLoadCases:
         )
 
     @pytest.mark.parametrize(
-        ('relative', 'reported'),
+        ('written', 'reported'),
         [
-            pytest.param('writing_zh.toml', True, id='misnamed-family'),
-            pytest.param('smoke-text.jsonl', True, id='unconverted-cases'),
-            pytest.param('smoke/notes.md', True, id='file-beside-local-tasks'),
-            pytest.param('old-family/task.toml', True, id='removed-family'),
             pytest.param(
-                '.converted-backup/writing_zh.toml', False, id='hidden-backup'
+                ('writing_zh.toml',), ('writing_zh.toml',), id='unknown-family'
+            ),
+            pytest.param(
+                ('smoke-text.jsonl',), ('smoke-text.jsonl',), id='unconverted-cases'
+            ),
+            pytest.param(
+                ('smoke/notes.md',), ('smoke/notes.md',), id='file-beside-tasks'
+            ),
+            pytest.param(
+                ('old-family/task.toml',), ('old-family',), id='removed-family'
+            ),
+            pytest.param(
+                ('a.toml', 'b.toml'), ('a.toml', 'b.toml'), id='several-entries'
             ),
         ],
     )
-    def test_reports_a_data_case_file_that_no_family_reads(
-        self, data_dir: Path, relative: str, reported: bool
+    def test_rejects_data_case_entries_that_no_family_reads(
+        self,
+        data_dir: Path,
+        written: tuple[str, ...],
+        reported: tuple[str, ...],
+    ) -> None:
+        root = data_dir / 'cases'
+        for name in written:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('cases = []\n')
+
+        with pytest.raises(ValueError) as error:
+            load_cases(load_family('smoke-text'))
+
+        entries = ', '.join(f'`{root / name}`' for name in reported)
+        assert str(error.value) == (
+            f"No family reads {entries} under the data directory's `cases/`. A "
+            '`cases.toml` family reads `cases/<family>.toml` and a `tasks/` family '
+            'reads `cases/<family>/<task>/`, so move each entry to one of those '
+            'paths, out of `cases/`, or under a hidden directory such as '
+            '`cases/.<name>/`.'
+        )
+
+    @pytest.mark.parametrize(
+        'relative',
+        [
+            pytest.param('writing-zh.toml', id='another-case-family'),
+            pytest.param('smoke/held/task.toml', id='another-task-family'),
+            pytest.param('.converted-backup/writing_zh.toml', id='hidden-backup'),
+            pytest.param('smoke/.notes', id='hidden-file-beside-tasks'),
+        ],
+    )
+    def test_accepts_data_case_entries_that_a_family_reads(
+        self, data_dir: Path, relative: str
     ) -> None:
         local = data_dir / 'cases' / relative
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text('cases = []\n')
 
-        if not reported:
-            cases = load_cases(load_family('smoke-text'))
+        cases = load_cases(load_family('smoke-text'))
 
-            assert [case.id for case in cases] == ['en-greeting', 'zh-greeting']
-            return
+        assert [case.id for case in cases] == ['en-greeting', 'zh-greeting']
 
-        with pytest.raises(ValueError) as error:
-            load_cases(load_family('smoke-text'))
-
-        assert str(error.value) == (
-            "The data directory's `cases/` holds files that no family reads: "
-            f'`{local}`. Name each after its family, as in '
-            '`cases/<family>.toml` or `cases/<family>/<task>/`, or move them out '
-            'of `cases/`.'
-        )
-
-    def test_names_every_data_case_file_that_no_family_reads(
+    def test_ignores_a_hidden_directory_beside_local_tasks(
         self, data_dir: Path
     ) -> None:
-        cases = data_dir / 'cases'
-        cases.mkdir(parents=True)
-        for name in ('a.toml', 'b.toml'):
-            (cases / name).write_text('cases = []\n')
+        backup = data_dir / 'cases' / 'smoke' / '.backup'
+        backup.mkdir(parents=True)
+        (backup / 'notes.md').write_text('Notes.')
 
-        with pytest.raises(ValueError) as error:
-            load_cases(load_family('smoke-text'))
+        cases = load_cases(load_family('smoke'))
 
-        assert f'`{cases / "a.toml"}`, `{cases / "b.toml"}`' in str(error.value)
+        assert [case.id for case in cases] == ['echo']
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
         path = write_case_family(families_dir, ['large'])
