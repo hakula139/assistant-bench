@@ -34,6 +34,7 @@ import {
   boardPath,
   configOf,
   getFamilies,
+  roundPath,
   systemPaths,
   votesRounds,
   type BoardLink,
@@ -129,7 +130,9 @@ const roundRows = appearances.map(({ round, systems, reference, anchor, results,
       <Stat label="Score">{formatScore(standing.score)}</Stat>
       <Stat label="Rank">{standing.rank}</Stat>
       <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
-      <Stat label="Round">{round}</Stat>
+      <Stat label="Round">
+        <a href={roundPath(family, round)}>{round}</a>
+      </Stat>
     </dl>
   </PageHeader>
 

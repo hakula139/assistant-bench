@@ -1,3 +1,4 @@
+import { RoundFilter } from '@/components/boards/Filter';
 import { Hint } from '@/components/site/Term';
 import {
   Table,
@@ -9,22 +10,24 @@ import {
 } from '@/components/ui/table';
 import { formatCost, formatPercent, formatSeconds } from '@/lib/format';
 import { terms } from '@/lib/glossary';
-import type { TestsRound } from '@/lib/reports';
+import type { RoundLink, TestsRound } from '@/lib/reports';
 import { reportNames, systemName } from '@/lib/systems';
 
 interface TestsBoardProps {
-  /** The latest closed round. */
+  /** The closed round the board shows. */
   round: TestsRound;
+  /** Every closed round's page, newest first, which the Round filter moves between. */
+  rounds: RoundLink[];
 }
 
-/** A family's pass rates on its task tests in the latest round, with each column's meaning on tap. */
-export function TestsBoard({ round: { round, systems, results } }: TestsBoardProps) {
+/** A family's pass rates on its task tests in one round, with each column's meaning on tap. */
+export function TestsBoard({ round: { round, systems, results }, rounds }: TestsBoardProps) {
   const names = reportNames(systems);
   const standings = results.standings.toSorted((a, b) => b.pass_rate - a.pass_rate);
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">Round {round}</p>
+      <RoundFilter rounds={rounds} current={round} />
       <Table>
         <TableHeader>
           <TableRow>

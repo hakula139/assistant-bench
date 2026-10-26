@@ -2,7 +2,7 @@ import { cn } from 'cn';
 import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 
-import { Filter } from '@/components/boards/Filter';
+import { Filter, RoundFilter } from '@/components/boards/Filter';
 import {
   Leaderboard,
   leaderboardMarks,
@@ -52,15 +52,17 @@ import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { isPreliminary } from '@/lib/ranking';
 import type { Standing, VotesResults } from '@/lib/report';
-import type { VotesRound } from '@/lib/reports';
+import type { RoundLink, VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
 
 interface VotesBoardProps {
   /** The board's path, which each system's page extends. */
   base: string;
-  /** Closed rounds, oldest first. */
-  rounds: VotesRound[];
+  /** The closed round the board shows. */
+  round: VotesRound;
+  /** Every closed round's page, newest first, which the Round filter moves between. */
+  rounds: RoundLink[];
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
@@ -168,16 +170,10 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
-  const latest = rounds[rounds.length - 1];
-  const [roundName, setRound] = useSearchParam('round', latest.round);
+export function VotesBoard({ base, round, rounds, labels }: VotesBoardProps) {
   const [category, setCategory] = useSearchParam('category', null);
 
-  const {
-    round: activeRound,
-    systems,
-    results,
-  } = rounds.find((item) => item.round === roundName) ?? latest;
+  const { systems, results } = round;
   const names = useMemo(() => reportNames(systems), [systems]);
   const categories = results.categories.map((board) => board.category);
   const activeCategory = category !== null && categories.includes(category) ? category : null;
@@ -230,15 +226,7 @@ export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
   return (
     <div className={stack}>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <Filter
-          label="Round"
-          value={activeRound}
-          onChange={setRound}
-          options={rounds.toReversed().map((item, i) => ({
-            value: item.round,
-            label: i === 0 ? `${item.round} (latest)` : item.round,
-          }))}
-        />
+        <RoundFilter rounds={rounds} current={round.round} />
         {categories.length > 0 && (
           <Filter
             label="Category"
@@ -257,7 +245,6 @@ export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
       {results.provenance?.status === 'ledger' && (
         <SnapshotStatus
-          key={results.provenance.export_id}
           exportId={results.provenance.export_id}
           capturedAt={results.provenance.captured_at}
         />

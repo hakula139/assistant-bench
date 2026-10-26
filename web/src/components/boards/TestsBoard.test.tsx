@@ -35,11 +35,13 @@ const round: TestsRound = {
   },
 };
 
+const rounds = [{ round: round.round, href: '/coding/smoke/' }];
+
 describe('TestsBoard', () => {
   afterEach(cleanup);
 
   test("lists the round's systems by pass rate, best first", () => {
-    const html = renderToString(<TestsBoard round={round} />);
+    const html = renderToString(<TestsBoard round={round} rounds={rounds} />);
 
     expect(text(html)).toMatch(/Round 2026-10-21 .* Acme Pro 75% 4 0 – – Acme Small 25% 4 0 – – $/);
   });
@@ -50,7 +52,7 @@ describe('TestsBoard', () => {
     ['Cost / trial', terms.testsCostLatency],
     ['p50 latency', terms.testsCostLatency],
   ])("opens the %s column's definition from its header", async (header, term) => {
-    renderInDom(<TestsBoard round={round} />);
+    renderInDom(<TestsBoard round={round} rounds={rounds} />);
 
     await userEvent.setup().click(screen.getByRole('button', { name: header }));
 

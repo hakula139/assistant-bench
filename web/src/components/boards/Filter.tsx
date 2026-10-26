@@ -1,6 +1,7 @@
 import { useId } from 'react';
 
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import type { RoundLink } from '@/lib/reports';
 
 interface FilterProps {
   label: string;
@@ -33,5 +34,28 @@ export function Filter({ label, value, options, onChange }: FilterProps) {
         ))}
       </NativeSelect>
     </div>
+  );
+}
+
+/**
+ * Moves between a family's round pages, given newest first, and keeps the query string so the
+ * board's other filters hold.
+ */
+export function RoundFilter({ rounds, current }: { rounds: RoundLink[]; current: string }) {
+  return (
+    <Filter
+      label="Round"
+      value={current}
+      onChange={(value) => {
+        const link = rounds.find((item) => item.round === value);
+        if (link !== undefined) {
+          window.location.assign(`${link.href}${window.location.search}`);
+        }
+      }}
+      options={rounds.map(({ round }, index) => ({
+        value: round,
+        label: index === 0 ? `${round} (latest)` : round,
+      }))}
+    />
   );
 }

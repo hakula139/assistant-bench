@@ -11,10 +11,20 @@ import type { Defect } from '@/lib/defects';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { defectTerms, terms } from '@/lib/glossary';
 import { reportSchema } from '@/lib/report';
-import { boardPath, familyPaths, systemPath, systemPaths, type Family } from '@/lib/reports';
+import {
+  boardPath,
+  familyPaths,
+  roundLinks,
+  roundPath,
+  roundPaths,
+  systemPath,
+  systemPaths,
+  type Family,
+} from '@/lib/reports';
 import { REPOSITORY } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
+import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -916,5 +926,144 @@ describe('board switcher', () => {
     );
 
     expect(navLinks(html, 'Writing boards')).toEqual([]);
+  });
+});
+
+/** The ID of each closed round serialized into the page's islands, as an object with results. */
+function islandRounds(html: string): string[] {
+  const rounds: string[] = [];
+  const walk = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+    } else if (typeof value === 'object' && value !== null) {
+      // Astro serializes each prop as a `[type, value]` pair, where type 0 is a plain value.
+      if ('results' in value && 'round' in value && Array.isArray(value.round)) {
+        rounds.push(String(value.round[1]));
+      }
+      Object.values(value).forEach(walk);
+    }
+  };
+
+  for (const element of new JSDOM(html).window.document.querySelectorAll('astro-island')) {
+    walk(JSON.parse(element.getAttribute('props') ?? '{}'));
+  }
+
+  return rounds;
+}
+
+/** A tests family with an earlier round before the one `testsFamily` closes. */
+function testsFamilyWithHistory(): Family {
+  const tested = testsFamily();
+  const [latest] = tested.rounds;
+  const earlier = { ...structuredClone(latest), round: '2026-10-07' };
+  earlier.closed_at = '2026-10-07T18:00:00Z';
+  return { ...tested, rounds: [earlier, latest] };
+}
+
+/** Every board and round page that the routes build for a family, by path. */
+async function boardPages(loaded: Family): Promise<Map<string, string>> {
+  const pages = [
+    ...familyPaths([loaded]).map(({ params, props }) => ({
+      path: `/${params.aspect}/${params.board}/`,
+      page: FamilyPage,
+      props,
+    })),
+    ...roundPaths([loaded]).map(({ params, props }) => ({
+      path: `/${params.aspect}/${params.board}/rounds/${params.round}/`,
+      page: RoundPage,
+      props,
+    })),
+  ];
+
+  return new Map(
+    await Promise.all(
+      pages.map(async ({ path, page, props }) => [path, await render(page, props, path)] as const),
+    ),
+  );
+}
+
+describe('round pages', () => {
+  test.each([
+    ['votes', family, '/writing/arena/'],
+    ['tests', () => Promise.resolve(testsFamilyWithHistory()), '/writing/smoke/'],
+  ])(
+    'give each closed round of a %s family a page that serializes only that round',
+    async (_, load, board) => {
+      const loaded = await load();
+
+      const pages = await boardPages(loaded);
+
+      expect([...pages].map(([path, html]) => [path, islandRounds(html)])).toEqual([
+        [board, ['2026-10-21']],
+        [`${board}rounds/2026-10-07/`, ['2026-10-07']],
+        [`${board}rounds/2026-10-21/`, ['2026-10-21']],
+      ]);
+    },
+  );
+
+  test('links each round in the Round filter to a page that shows it, newest first', async () => {
+    const arena = await family();
+    const pages = await boardPages(arena);
+
+    const links = roundLinks(arena);
+
+    expect(links.map(({ round }) => round)).toEqual(['2026-10-21', '2026-10-07']);
+    for (const { round, href } of links) {
+      expect(islandRounds(pages.get(href) ?? ''), href).toEqual([round]);
+    }
+  });
+
+  test("titles an earlier round's page by its round and links the latest from it", async () => {
+    const arena = await family();
+
+    const pages = await boardPages(arena);
+
+    const notes = [...pages].map(([path, html]) => {
+      const document = new JSDOM(html).window.document;
+      const note = [...document.querySelectorAll('header p')].find((item) =>
+        item.textContent.includes('earlier round'),
+      );
+      return [
+        path,
+        document.title,
+        note?.textContent ?? null,
+        note?.querySelector('a')?.getAttribute('href') ?? null,
+      ];
+    });
+    expect(notes).toEqual([
+      ['/writing/arena/', 'Writing · Arena Writing | HAKULA†BENCH', null, null],
+      [
+        '/writing/arena/rounds/2026-10-07/',
+        'Writing · Arena Writing, round 2026-10-07 | HAKULA†BENCH',
+        'This is an earlier round. The latest is 2026-10-21.',
+        '/writing/arena/',
+      ],
+      [
+        '/writing/arena/rounds/2026-10-21/',
+        'Writing · Arena Writing, round 2026-10-21 | HAKULA†BENCH',
+        null,
+        null,
+      ],
+    ]);
+  });
+
+  test("draws the earlier round's own scores on its page", async () => {
+    const arena = await family();
+
+    const pages = await boardPages(arena);
+
+    expect(text(pages.get('/writing/arena/rounds/2026-10-07/') ?? '')).toContain('Acme Pro 900');
+    expect(text(pages.get('/writing/arena/') ?? '')).toContain('Acme Pro 1,004');
+  });
+
+  test("links a system page's round to the page of the round it shows", async () => {
+    const arena = await family();
+    const pages = await boardPages(arena);
+
+    const html = await render(SystemPage, { family: arena, system: 'acme-pro', boards: [] });
+
+    const href = new JSDOM(html).window.document.querySelector('header dl a')?.getAttribute('href');
+    expect(href).toBe(roundPath(arena, '2026-10-21'));
+    expect(islandRounds(pages.get(href ?? '') ?? '')).toEqual(['2026-10-21']);
   });
 });

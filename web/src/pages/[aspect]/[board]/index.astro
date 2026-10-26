@@ -1,15 +1,8 @@
 ---
 import type { GetStaticPaths } from 'astro';
-import { BookOpen, FileText } from 'lucide-react';
 
-import { scorerViews } from '@/components/scorers';
-import { BoardSwitcher } from '@/components/site/BoardSwitcher';
-import { MethodStrip } from '@/components/site/Method';
-import { PageHeader } from '@/components/site/PageParts';
-import Base from '@/layouts/Base.astro';
-import { boardGuide } from '@/lib/method';
+import BoardPage from '@/components/site/BoardPage.astro';
 import { familyPaths, getFamilies, type BoardLink, type Family } from '@/lib/reports';
-import { REPOSITORY } from '@/lib/site';
 
 export const getStaticPaths = (async () =>
   familyPaths(await getFamilies())) satisfies GetStaticPaths;
@@ -21,28 +14,6 @@ interface Props {
 }
 
 const { family, boards } = Astro.props;
-const { config, title } = family;
-const { Board } = scorerViews[config.scorer];
-const guide = boardGuide(config);
 ---
 
-<Base title={title} description={`${title}: ${guide.summary}.`} section="leaderboards">
-  <PageHeader title={title}>
-    <BoardSwitcher aspect={family.aspect} boards={boards} />
-    <MethodStrip client:load scorer={config.scorer} config={config} />
-    <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-      <a href={`/methodology/#${guide.section}`} class="inline-flex items-center gap-2">
-        <BookOpen className="size-4" aria-hidden="true" />
-        How to read this board
-      </a>
-      <a
-        href={`${REPOSITORY}/tree/main/families/${family.name}`}
-        class="inline-flex items-center gap-2"
-      >
-        <FileText className="size-4" aria-hidden="true" />
-        {guide.inputs}
-      </a>
-    </div>
-  </PageHeader>
-  <Board family={family} />
-</Base>
+<BoardPage family={family} boards={boards} />
