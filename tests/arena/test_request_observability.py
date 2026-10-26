@@ -55,7 +55,10 @@ class TestDefaultFetch:
                                 result = await transport.call(
                                     {
                                         'operation': 'management',
-                                        'request': {'operation': 'status'},
+                                        'request': {
+                                            'operation': 'family_status',
+                                            'family': 'writing',
+                                        },
                                     }
                                 )
                                 assert result == {'error': {'reason': 'unavailable'}}, (
@@ -316,7 +319,7 @@ class TestManagementRejection:
             if '/' not in path.relative_to(runtime.directory).as_posix()
         ]
         assert any(
-            f'Voting management rejected: exception=ValueError message={detail}'
+            f'Voting management rejected: exception=OwnerInputError message={detail}'
             in contents
             for contents in logs
         )
