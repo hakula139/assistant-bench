@@ -430,9 +430,11 @@ describe('VotesBoard', () => {
   test('labels each category board, header, and filter option in family order', async () => {
     const html = render(await load());
     const document = parse(html);
-    const options = [...document.querySelectorAll('option')].map((option) =>
-      text(option.innerHTML).trim(),
-    );
+    const options = [...document.querySelectorAll('select')]
+      .map((select) =>
+        [...select.querySelectorAll('option')].map((option) => text(option.innerHTML).trim()),
+      )
+      .find((labels) => labels.includes('All categories'));
     const categoryTable = [...document.querySelectorAll('table')][1];
     const headers = [...(categoryTable?.querySelectorAll('thead th') ?? [])].map((cell) =>
       text(cell.innerHTML).trim(),
