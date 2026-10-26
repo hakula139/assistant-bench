@@ -4,7 +4,7 @@ import tomllib
 from collections.abc import Iterator
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -24,7 +24,7 @@ from assistant_bench_arena.models import Defect
 # ── Settings ──
 
 
-def _unique(values: list[Any]) -> list[Any]:
+def _unique[T: str](values: list[T]) -> list[T]:
     """Reject a list with a repeated value."""
     repeated = sorted({value for value in values if values.count(value) > 1})
     if repeated:

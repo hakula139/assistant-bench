@@ -1,6 +1,6 @@
 import textwrap
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 import tomli_w
@@ -39,9 +39,20 @@ def write_family(
 
 
 def case_entry(
-    case_id: str, source: str = 'synthetic', category: str = 'message'
+    case_id: str,
+    source: str = 'synthetic',
+    category: str = 'message',
+    instruction: str = 'Hi.',
+    checklist: list[str] | None = None,
 ) -> str:
-    case = {'id': case_id, 'category': category, 'source': source, 'instruction': 'Hi.'}
+    case: dict[str, Any] = {
+        'id': case_id,
+        'category': category,
+        'source': source,
+        'instruction': instruction,
+    }
+    if checklist is not None:
+        case['checklist'] = checklist
     return '[[cases]]\n' + tomli_w.dumps(case)
 
 
@@ -57,7 +68,7 @@ def write_task(
 ) -> None:
     """Write a task directory whose fields the caller may leave out.
 
-    The task name defaults to its family and directory names.
+    The task name defaults to the test family `f` and the directory name.
     """
     directory.mkdir(parents=True)
     metadata = {
@@ -67,7 +78,7 @@ def write_task(
     }
     task = {'version': '1.0.0'}
     if task_name:
-        task['name'] = name or f'{directory.parent.parent.name}/{directory.name}'
+        task['name'] = f'f/{directory.name}' if name is None else name
     if task_toml:
         (directory / 'task.toml').write_text(
             tomli_w.dumps({'schema_version': '1.4', 'task': task, 'metadata': metadata})
@@ -534,16 +545,23 @@ class TestLoadFamily:
 
 
 class TestLoadCases:
-    def test_keeps_document_order_and_defaults_the_checklist(
+    def test_keeps_document_order_verbatim_text_and_the_checklist_default(
         self, families_dir: Path
     ) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(case_entry('z-last') + case_entry('a-first'))
+        instruction = '\n  Keep these edges.  \n'
+        checklist = ['  Keep this edge.  ']
+        path.write_text(
+            case_entry('z-last', instruction=instruction, checklist=checklist)
+            + case_entry('a-first')
+        )
 
         cases = load_cases(load_family('f'))
 
         assert [case.id for case in cases] == ['z-last', 'a-first']
-        assert cases[0].checklist == []
+        assert cases[0].instruction == instruction
+        assert cases[0].checklist == checklist
+        assert cases[1].checklist == []
 
     @pytest.mark.parametrize(
         ('text', 'field', 'message'),
@@ -676,12 +694,10 @@ class TestLoadCases:
         write_task_family(families_dir)
         write_task(
             families_dir / 'f' / 'tasks' / 'a',
-            name='f/a',
             instruction='Do it.',
         )
         write_task(
             families_dir / 'f' / 'tasks' / 'b',
-            name='f/b',
             source='public',
         )
 
@@ -699,8 +715,8 @@ class TestLoadCases:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
-        write_task(data_dir / 'cases' / 'f' / 'b', name='f/b', source='held-out')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
+        write_task(data_dir / 'cases' / 'f' / 'b', source='held-out')
 
         cases = load_cases(load_family('f'))
 
@@ -713,8 +729,8 @@ class TestLoadCases:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
-        write_task(data_dir / 'cases' / 'f' / 'a', name='f/a', source='held-out')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
+        write_task(data_dir / 'cases' / 'f' / 'a', source='held-out')
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
@@ -848,7 +864,7 @@ class TestLoadCases:
 
     def test_ignores_a_file_under_tasks(self, families_dir: Path) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
         (families_dir / 'f' / 'tasks' / 'notes.md').write_text('Notes.')
 
         cases = load_cases(load_family('f'))
@@ -863,8 +879,8 @@ class TestCaseTask:
         write_task_family(families_dir)
         committed = families_dir / 'f' / 'tasks' / 'a'
         local = data_dir / 'cases' / 'f' / 'b'
-        write_task(committed, name='f/a')
-        write_task(local, name='f/b', source='held-out')
+        write_task(committed)
+        write_task(local, source='held-out')
         family = load_family('f')
 
         found = (case_task(family, 'a'), case_task(family, 'b'))
