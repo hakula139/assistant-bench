@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Category } from '@/lib/categories';
 import {
   formatCost,
   formatCount,
@@ -38,7 +39,6 @@ import {
   formatTau,
   MISSING,
 } from '@/lib/format';
-import type { Category } from '@/lib/categories';
 import {
   agreementTerm,
   categoryTerm,
