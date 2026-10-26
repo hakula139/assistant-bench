@@ -436,7 +436,7 @@ describe('VotesBoard', () => {
       )
       .find((labels) => labels.includes('All categories'));
     const categoryTable = [...document.querySelectorAll('table')][1];
-    const headers = [...(categoryTable?.querySelectorAll('thead th') ?? [])].map((cell) =>
+    const headers = [...categoryTable.querySelectorAll('thead th')].map((cell) =>
       text(cell.innerHTML).trim(),
     );
     const captions = [...document.querySelectorAll('figcaption')].map((caption) =>
