@@ -1,6 +1,6 @@
 import textwrap
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 import tomli_w
@@ -20,20 +20,13 @@ from assistant_bench_arena import models
 from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
 
 
-class TaskFields(TypedDict, total=False):
+class TaskOptions(TypedDict, total=False):
+    name: str
     category: str | None
     source: str | None
     instruction: str | None
     task_name: bool
     task_toml: bool
-
-
-class TaskOptions(TaskFields, total=False):
-    name: str
-
-
-class TaskArguments(TaskFields):
-    name: str
 
 
 def write_family(
@@ -49,23 +42,37 @@ def write_family(
 
 
 def case_entry(
-    case_id: str, source: str = 'synthetic', category: str = 'message'
+    case_id: str,
+    source: str = 'synthetic',
+    category: str = 'message',
+    instruction: str = 'Hi.',
+    checklist: list[str] | None = None,
 ) -> str:
-    case = {'id': case_id, 'category': category, 'source': source, 'instruction': 'Hi.'}
+    case: dict[str, Any] = {
+        'id': case_id,
+        'category': category,
+        'source': source,
+        'instruction': instruction,
+    }
+    if checklist is not None:
+        case['checklist'] = checklist
     return '[[cases]]\n' + tomli_w.dumps(case)
 
 
 def write_task(
     directory: Path,
     *,
-    name: str,
+    name: str | None = None,
     category: str | None = 'smoke',
     source: str | None = 'synthetic',
     instruction: str | None = 'Hi.',
     task_name: bool = True,
     task_toml: bool = True,
 ) -> None:
-    """Write a task directory whose fields the caller may leave out."""
+    """Write a task directory whose fields the caller may leave out.
+
+    The task name defaults to the test family `f` and the directory name.
+    """
     directory.mkdir(parents=True)
     metadata = {
         key: value
@@ -74,7 +81,7 @@ def write_task(
     }
     task = {'version': '1.0.0'}
     if task_name:
-        task['name'] = name
+        task['name'] = f'f/{directory.name}' if name is None else name
     if task_toml:
         (directory / 'task.toml').write_text(
             tomli_w.dumps({'schema_version': '1.4', 'task': task, 'metadata': metadata})
@@ -396,7 +403,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
                 id='repeated-voted-systems',
             ),
             pytest.param(
@@ -410,7 +417,7 @@ class TestLoadFamily:
                 """,
                 False,
                 True,
-                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
                 id='repeated-tested-systems',
             ),
             pytest.param(
@@ -425,7 +432,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: `family.toml`: `defects` repeats `tone`.',
+                'Family `f`: `family.toml`: `defects`: repeats `tone`.',
                 id='repeated-defects',
             ),
             pytest.param(
@@ -603,55 +610,23 @@ class TestLoadFamily:
 
 
 class TestLoadCases:
-    def test_preserves_case_fields_and_document_order(self, families_dir: Path) -> None:
+    def test_keeps_document_order_verbatim_text_and_the_checklist_default(
+        self, families_dir: Path
+    ) -> None:
         path = write_case_family(families_dir, ['large'])
+        instruction = '\n  Keep these edges.  \n'
+        checklist = ['  Keep this edge.  ']
         path.write_text(
-            textwrap.dedent(
-                r"""
-                [[cases]]
-                id = "z-last"
-                category = "message"
-                source = "public"
-                instruction = '''
-
-                保留  「格式」。
-                  Keep C:\drafts\notes and the literal \n.
-                '''
-                checklist = ["Keep C:\\drafts\\notes.", "保留  「格式」  "]
-
-                [[cases]]
-                id = "a-first"
-                category = "message"
-                source = "synthetic"
-                instruction = "Next\nline."
-                """
-            ),
-            encoding='utf-8',
+            case_entry('z-last', instruction=instruction, checklist=checklist)
+            + case_entry('a-first')
         )
 
         cases = load_cases(load_family('f'))
 
-        assert [case.model_dump() for case in cases] == [
-            {
-                'id': 'z-last',
-                'category': 'message',
-                'source': 'public',
-                'instruction': textwrap.dedent(
-                    r"""
-                    保留  「格式」。
-                      Keep C:\drafts\notes and the literal \n.
-                    """
-                ),
-                'checklist': [r'Keep C:\drafts\notes.', '保留  「格式」  '],
-            },
-            {
-                'id': 'a-first',
-                'category': 'message',
-                'source': 'synthetic',
-                'instruction': 'Next\nline.',
-                'checklist': [],
-            },
-        ]
+        assert [case.id for case in cases] == ['z-last', 'a-first']
+        assert cases[0].instruction == instruction
+        assert cases[0].checklist == checklist
+        assert cases[1].checklist == []
 
     @pytest.mark.parametrize(
         ('text', 'field', 'message'),
@@ -735,8 +710,8 @@ class TestLoadCases:
 
         assert str(error.value) == (
             'Family `smoke-text`: case `en-greeting` appears at '
-            f'`{committed}:cases[0]` '
-            f'and `{local}:cases[1]`.'
+            f'`{committed}:cases.0` '
+            f'and `{local}:cases.1`.'
         )
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
@@ -747,7 +722,7 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `a` appears at `{path}:cases[0]` and `{path}:cases[1]`.'
+            f'Family `f`: case `a` appears at `{path}:cases.0` and `{path}:cases.1`.'
         )
 
     def test_names_the_entry_and_field_of_an_invalid_case(
@@ -774,7 +749,7 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `b` at `{path}:cases[1]` has category `private-topic`, '
+            f'Family `f`: case `b` at `{path}:cases.1` has category `private-topic`, '
             'missing from `categories` in `family.toml`.'
         )
 
@@ -784,12 +759,10 @@ class TestLoadCases:
         write_task_family(families_dir)
         write_task(
             families_dir / 'f' / 'tasks' / 'a',
-            name='f/a',
             instruction='Do it.',
         )
         write_task(
             families_dir / 'f' / 'tasks' / 'b',
-            name='f/b',
             source='public',
         )
 
@@ -807,8 +780,8 @@ class TestLoadCases:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
-        write_task(data_dir / 'cases' / 'f' / 'b', name='f/b', source='held-out')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
+        write_task(data_dir / 'cases' / 'f' / 'b', source='held-out')
 
         cases = load_cases(load_family('f'))
 
@@ -821,8 +794,8 @@ class TestLoadCases:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
-        write_task(data_dir / 'cases' / 'f' / 'a', name='f/a', source='held-out')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
+        write_task(data_dir / 'cases' / 'f' / 'a', source='held-out')
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
@@ -901,11 +874,7 @@ class TestLoadCases:
         message: str,
     ) -> None:
         write_task_family(families_dir)
-        arguments: TaskArguments = {'name': f'f/{directory}', **options}
-        write_task(
-            families_dir / 'f' / 'tasks' / directory,
-            **arguments,
-        )
+        write_task(families_dir / 'f' / 'tasks' / directory, **options)
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
@@ -960,7 +929,7 @@ class TestLoadCases:
 
     def test_ignores_a_file_under_tasks(self, families_dir: Path) -> None:
         write_task_family(families_dir)
-        write_task(families_dir / 'f' / 'tasks' / 'a', name='f/a')
+        write_task(families_dir / 'f' / 'tasks' / 'a')
         (families_dir / 'f' / 'tasks' / 'notes.md').write_text('Notes.')
 
         cases = load_cases(load_family('f'))
@@ -975,8 +944,8 @@ class TestCaseTask:
         write_task_family(families_dir)
         committed = families_dir / 'f' / 'tasks' / 'a'
         local = data_dir / 'cases' / 'f' / 'b'
-        write_task(committed, name='f/a')
-        write_task(local, name='f/b', source='held-out')
+        write_task(committed)
+        write_task(local, source='held-out')
         family = load_family('f')
 
         found = (case_task(family, 'a'), case_task(family, 'b'))

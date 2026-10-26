@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -51,6 +52,17 @@ type Defect = Literal[
 # ── Settings ──
 
 
+def _unique[T: str](values: list[T]) -> list[T]:
+    """Reject a list with a repeated value."""
+    repeated = sorted({value for value in values if values.count(value) > 1})
+    if repeated:
+        raise ValueError(f'repeats {code(repeated)}')
+    return values
+
+
+type Unique[T] = Annotated[list[T], AfterValidator(_unique)]
+
+
 class _Settings(BaseModel):
     """Settings every family shares."""
 
@@ -62,7 +74,7 @@ class _Settings(BaseModel):
     display_name: str = Field(min_length=1)
     """Short name within the aspect, or the whole name without one."""
 
-    systems: list[str] = []
+    systems: Unique[str] = []
     samples: int = Field(ge=1)
 
     harness: str | None = None
@@ -73,13 +85,6 @@ class _Settings(BaseModel):
 
     public: bool = False
     """Whether the public site lists the family."""
-
-    @model_validator(mode='after')
-    def _check_systems(self) -> Self:
-        repeated = sorted({s for s in self.systems if self.systems.count(s) > 1})
-        if repeated:
-            raise ValueError(f'`systems` repeats {code(repeated)}')
-        return self
 
 
 type Language = Literal['en', 'zh']
@@ -145,20 +150,13 @@ class VotesSettings(_Settings):
     gates: Gates = Gates()
     """Text eligibility checks. Task families set neither `language` nor `gates`."""
 
-    defects: list[Defect] = []
+    defects: Unique[Defect] = []
     """Available output tags, in presentation order."""
 
     @model_validator(mode='after')
     def _check_reference(self) -> Self:
         if self.reference not in self.systems:
             raise ValueError(f'reference `{self.reference}` is not in `systems`')
-        return self
-
-    @model_validator(mode='after')
-    def _check_defects(self) -> Self:
-        repeated = sorted({d for d in self.defects if self.defects.count(d) > 1})
-        if repeated:
-            raise ValueError(f'`defects` repeats {code(repeated)}')
         return self
 
 
@@ -403,7 +401,7 @@ def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
             raise ValueError(error_lines(error, prefix)) from error
 
         for index, case in enumerate(manifest.cases):
-            yield f'{path}:cases[{index}]', case
+            yield f'{path}:cases.{index}', case
 
 
 def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
