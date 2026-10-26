@@ -10,11 +10,11 @@ A board lives at `/<aspect>/<slug>/`, where the slug is the family ID after its 
 
 Each board uses the shared scorer and render registries for its steps, labels, and methodology link. Step captions explain the family's exact configuration. A coding board uses Run → Tests → Blind pairs → Scores and the tests-then-votes methodology. Legends show only the marks a figure draws. Badges, column headers, and summary figures expose their definitions by tap, click, or Enter. A fallback anchor's definition names the reference it stands in for.
 
-A votes board shows one round, with its category filter kept in the URL:
+A votes board shows one round, with its category filter kept in the URL. The category filter shows each category's label while the URL keeps its ID:
 
 - **Summary:** vote and session counts, excluded votes, repeat consistency and split-half diagnostics. The uncertainty note states that inference for new cases and voters remains unavailable until calibrated. Round settings show the recorded method and rules.
 - **Leaderboard:** a sortable table with point scores on one shared axis. Preliminary systems use hollow dots, derived from that round's decisive counts and threshold. The axis begins at most 600 points below the top score and represents clipped points with arrowheads. A category selection uses its refit and labels family-wide columns. Unranked systems follow by name.
-- **Categories:** point plots share an axis starting at the lowest of their own cuts. Rows follow the family board's order, followed by systems ranked only in that category.
+- **Categories:** point plots share an axis starting at the lowest of their own cuts, and follow the family's declared category order. Rows follow the family board's order, followed by systems ranked only in that category.
 - **Cost and latency:** point scores against mean cost per output and p50 latency, with a labelled Pareto frontier. Each metric uses a log axis when every value is positive and a linear axis when it includes zero. A chart without priced or timed systems is omitted.
 
 Each system's page uses its latest appearance for the heading, point score, rank, votes, head-to-head results, categories, output distributions and tagged issues. Each history row retains its own label, fingerprint, reference, anchor, method and rules. Compare scores within one family's round because the anchor can change. Tests-scored families show descriptive pass-rate tables with their report's frozen labels.
@@ -25,7 +25,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 `/vote/` is emitted in every build. The page fetches pairs and verification context from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 ledger, and staging has a separate D1 ledger for validation. Verification runs inline when required, retaining the comparison and draft while the provider checks the browser. Static previews without the API show an unavailable state.
 
-The prompt and the checklist are separate because the model never saw the checklist. Outputs scroll independently and render as text, diffs, or sandboxed HTML from the render origin. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze HTML viewports and diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
+The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text, diffs, or sandboxed HTML from the render origin. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze HTML viewports and diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 
 Nothing is preselected. Each new pair clears the previous control's focus so the next key acts as a shortcut. The page reveals no system identity, timing, or server error details beyond the API's message.
 

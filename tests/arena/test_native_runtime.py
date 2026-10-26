@@ -418,6 +418,7 @@ class TestNativeRuntime:
                 session = body(started)
                 pair = session['pair']
                 assert isinstance(pair, dict)
+                assert pair['category'] == 'reply'
                 assert isinstance(pair['a'], dict) and isinstance(pair['b'], dict)
                 documents: list[str] = []
                 for side in ('a', 'b'):

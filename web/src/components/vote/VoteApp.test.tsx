@@ -13,6 +13,7 @@ import {
   type FamilyView,
   type SessionView,
 } from '@/lib/arena';
+import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
 import { defectTerms } from '@/lib/glossary';
 import { VoteFlow } from '@/lib/vote-flow';
@@ -39,6 +40,7 @@ interface StubOptions {
   brief?: { instruction: string; checklist: string[] };
   render?: 'text' | 'html' | 'diff';
   defects?: Defect[];
+  category?: Category | null;
 }
 
 function stubApi({
@@ -47,6 +49,7 @@ function stubApi({
   brief,
   render = 'text',
   defects = FAMILY.defects,
+  category = 'message',
 }: StubOptions = {}) {
   const family = { ...FAMILY, defects };
   const starts: { family: string }[] = [];
@@ -65,6 +68,7 @@ function stubApi({
     capability: `capability:${id}`,
     instruction: `Instruction ${id}`,
     checklist: [],
+    category,
     ...brief,
     ...(render === 'html'
       ? {
@@ -838,6 +842,18 @@ describe('VoteApp', () => {
     const point = within(checklist).getByRole('listitem');
     expect(point.textContent).toBe('Names make test and both facts');
     expect(point.querySelector('code')?.textContent).toBe('make test');
+  });
+
+  test.each([
+    ['message', 'Message'],
+    [null, null],
+  ] as const)('shows the pair category %j as the label %j', async (category, label) => {
+    stubApi({ category });
+
+    await startSession();
+
+    expect(screen.queryByRole('button', { name: 'Message' }) !== null).toBe(label !== null);
+    expect(screen.queryByText('message')).toBeNull();
   });
 
   test('opens the next pair at the top of the page in fresh output panes', async () => {

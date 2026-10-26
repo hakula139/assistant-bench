@@ -118,6 +118,7 @@ def make_release(
     case_rows = tuple(
         Case(
             key=case_key(index),
+            category='reply',
             source='synthetic',
             instruction_digest=digest(case_document(index).instruction),
             metadata=CaseMetadata(
@@ -167,7 +168,7 @@ def make_release(
             name=family,
             reference=systems[0],
             systems=systems,
-            categories=(),
+            categories=('reply',),
             defects=('tone',),
         ),
         policy=policy,

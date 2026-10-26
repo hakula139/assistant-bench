@@ -14,6 +14,8 @@ Every system that [`family.toml`](../../../families/coding-repo/family.toml) lis
 | `feature`  | Adding durable behavior across application and persistence boundaries                    |     2 |
 | `refactor` | Preserving public behavior while changing publication or persisted data                  |     2 |
 
+The site labels these categories Bug fix, Feature, and Refactor from its glossary.
+
 ## Task Sourcing
 
 Every task is a synthetic Python 3.14 application using the standard library and `unittest`, so no task carries a lockfile. Its instruction and candidate-visible API documentation define every behavior the hidden tests require. The starter implements a usable baseline with a causal state defect or missing integration. The reference provides a complete application and focused regression tests.

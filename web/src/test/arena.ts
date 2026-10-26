@@ -28,6 +28,7 @@ export function makeSession(overrides: Partial<SessionView> = {}): SessionView {
       capability: 'private-pair-capability',
       instruction: 'Compare the two outputs.',
       checklist: ['Use the requested tone.'],
+      category: 'message',
       a: { render: 'text', text: 'Output A' },
       b: { render: 'text', text: 'Output B' },
     },

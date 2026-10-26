@@ -37,6 +37,19 @@ type FamilyName = Annotated[
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
 
+type Category = Literal[
+    'bug-fix',
+    'docs',
+    'essay',
+    'feature',
+    'fiction',
+    'message',
+    'refactor',
+    'reply',
+    'review',
+    'smoke',
+]
+
 type Defect = Literal[
     'facts',
     'mechanics',

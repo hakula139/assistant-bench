@@ -31,6 +31,7 @@ import {
 import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
 import { formatCountOf } from '@/lib/format';
+import { categoryTerm } from '@/lib/glossary';
 import { VoteFlow } from '@/lib/vote-flow';
 
 const FAMILY_PARAM = 'family';
@@ -209,6 +210,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               Prompt
             </Button>
           </CollapsibleTrigger>
+          {pair.category !== null && <Hint term={categoryTerm(pair.category)} />}
           {status}
         </div>
         <CollapsibleContent asChild>

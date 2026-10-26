@@ -7,6 +7,7 @@ const config = (overrides: Partial<Omit<VotesConfig, 'aspect' | 'public'>> = {})
   scorer: 'votes',
   display_name: 'Arena Writing',
   systems: ['acme-large'],
+  categories: [],
   reference: 'acme-large',
   render: 'text',
   gates: {},

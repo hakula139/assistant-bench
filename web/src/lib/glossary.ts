@@ -1,3 +1,4 @@
+import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
 import { formatPercent, formatScore } from '@/lib/format';
 import type { VotesMethod, VotesRules } from '@/lib/report';
@@ -141,6 +142,56 @@ export const defectTerms: Record<Defect, Term> = {
     definition: 'Unclear wording, structure, or flow.',
   },
 };
+
+/** The case categories, as the boards and the vote page name them. */
+export const categoryTerms: Record<Category, Term> = {
+  'bug-fix': {
+    term: 'Bug fix',
+    definition:
+      'Fixing the bugs behind a user report or a failing suite, sometimes with regression tests.',
+  },
+  'docs': {
+    term: 'Docs',
+    definition:
+      'Documentation, code comments where a maintainer needs them, or a concept explained.',
+  },
+  'essay': {
+    term: 'Essay',
+    definition:
+      'A personal or critical essay, blog post, project write-up, or tutorial for a general reader.',
+  },
+  'feature': {
+    term: 'Feature',
+    definition: 'Adding durable behavior across application and persistence boundaries.',
+  },
+  'fiction': { term: 'Fiction', definition: 'A scene, dialogue, continuation, or letter.' },
+  'message': {
+    term: 'Message',
+    definition:
+      'A commit message, PR description, issue or review reply, handoff, or announcement.',
+  },
+  'refactor': {
+    term: 'Refactor',
+    definition: 'Preserving public behavior while changing publication or persisted data.',
+  },
+  'reply': {
+    term: 'Reply',
+    definition: "An assistant's final reply after a task, or an answer to a teammate's question.",
+  },
+  'review': {
+    term: 'Review',
+    definition: 'A review or close reading of a work from a supplied synopsis.',
+  },
+  'smoke': {
+    term: 'Smoke',
+    definition: "A minimal case that checks the bench's own generation and collection.",
+  },
+};
+
+/** Returns the term a category ID names. A family declares only IDs the glossary holds. */
+export function categoryTerm(category: string): Term {
+  return categoryTerms[category as Category];
+}
 
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */
 export function anchorTerm(method: VotesMethod): Term {

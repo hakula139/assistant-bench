@@ -25,7 +25,7 @@ Shared fields:
 | `public`       | no              | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                   |
 | `systems`      | no              | The `systems.toml` tables to run. Defaults to empty                                                                                                                |
 | `samples`      | yes             | Harbor attempts per task and system, at least 1                                                                                                                    |
-| `categories`   | no              | The allowed case categories, which reports publish                                                                                                                 |
+| `categories`   | no              | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary               |
 
 Vote-only fields:
 
@@ -37,6 +37,8 @@ Vote-only fields:
 | `defects`       | no            | Unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. See [Voting](voting.md#casting-a-vote) for shortcuts |
 | `language`      | no            | `zh` or `en` for a case family's language gate                                                                                         |
 | `[gates]`       | no            | A case family's `min_chars`, `max_chars`, and `script = "hans"` settings, defined in [Writing](../design/families/writing.md#gates)    |
+
+A category ID comes from the `Category` literal, and the site labels it in its glossary, so a new ID updates that literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes.
 
 Case families use `votes`. Public preparation supports rendered case families. Authored task families retain collection and tests-only regrading. [TypeScript](../conventions/typescript.md#reports) covers adding defect IDs or languages.
 
@@ -62,7 +64,7 @@ checklist = ["One sentence"]
 ```
 
 - `id` is a slug of the scenario alone, such as `starship-bump`, unique across the committed and local cases of the family and using lowercase letters, digits, and hyphens. It omits the language, which the family fixes, and the category, since moving a case to another category would then change its ID, which gives Harbor a new task name and reruns the case on every system the family lists. A case keeps its ID when its instruction is edited and reruns on the next run. [Running](running.md#running-a-family) describes what happens to its earlier outputs.
-- `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. A family's page under [`design/families/`](../design/families/) describes its categories.
+- `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. The site shows its label from the glossary. A family's page under [`design/families/`](../design/families/) describes its categories.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](running.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 

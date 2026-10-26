@@ -26,7 +26,7 @@ import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
-import { inferenceNote, preliminaryTerm } from '@/lib/glossary';
+import { categoryTerm, inferenceNote, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
 import { isPreliminary } from '@/lib/ranking';
 import type { Distribution, Standing } from '@/lib/report';
@@ -76,7 +76,7 @@ const headToHead = results.head_to_head
 const categoryRows = results.categories.flatMap(
   ({ category, standings: refits }): ForestPlotRow[] => {
     const refit = refits.find((item) => item.system === system);
-    return refit ? [{ label: category, refit }] : [];
+    return refit ? [{ label: categoryTerm(category).term, refit }] : [];
   },
 );
 const categoryDomain = sharedDomain(results.categories.map((board) => board.standings));

@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import Field, NonNegativeInt
 
 from assistant_bench_arena.models import (
+    Category,
     Choice,
     Defects,
     FamilyName,
@@ -50,6 +51,9 @@ class PairView(Record):
     capability: Capability
     instruction: str
     checklist: list[str]
+    category: Category | None
+    """The case's category ID, whose label the site's glossary supplies."""
+
     a: Pane
     b: Pane
 

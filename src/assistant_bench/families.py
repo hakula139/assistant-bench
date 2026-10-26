@@ -35,6 +35,19 @@ type FamilyName = Annotated[
 
 type Choice = Literal['a', 'b', 'tie', 'both_bad']
 
+type Category = Literal[
+    'bug-fix',
+    'docs',
+    'essay',
+    'feature',
+    'fiction',
+    'message',
+    'refactor',
+    'reply',
+    'review',
+    'smoke',
+]
+
 type Defect = Literal[
     'facts',
     'mechanics',
@@ -80,8 +93,8 @@ class _Settings(BaseModel):
     harness: str | None = None
     """Agent for every listed task-family system. Cases always use `generate`."""
 
-    categories: list[str] = []
-    """Allowed case categories, published in reports."""
+    categories: Unique[Category] = []
+    """Allowed case category IDs, in board order. The site labels them."""
 
     public: bool = False
     """Whether the public site lists the family."""
@@ -195,7 +208,7 @@ class Case(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     id: str = Field(pattern=r'^[a-z0-9][a-z0-9-]*$')
-    category: str
+    category: Category
     source: CaseSource
     instruction: str
     checklist: list[str] = []
@@ -214,7 +227,7 @@ class _TaskMetadata(BaseModel):
 
     model_config = ConfigDict(extra='ignore', frozen=True)
 
-    category: str
+    category: Category
     source: CaseSource
 
 
