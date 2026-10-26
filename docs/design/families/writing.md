@@ -23,7 +23,7 @@ The site labels these categories Reply, Message, Docs, Fiction, Essay, and Revie
 
 The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
 
-Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content.
+Most instructions supply the material a reply must use, such as a list of facts, a thread, a log, or code, and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 

@@ -283,67 +283,77 @@ checklist = [
 ]
 
 [[cases]]
-id = "nushell-release-watch"
+id = "timeout-defaults"
 category = "docs"
 source = "synthetic"
 instruction = """
-Add comments to the Nushell script below only where a future maintainer needs them. Return the complete script inside a single fenced code block and nothing else.
+Write the \"Timeouts\" section of the README for `httpkit`, a Python HTTP client library. You have two sources: last year's design doc and the current code. The design doc predates the code, so where the two disagree, document what the code does. After the section, add a line containing only `---`, then a short list for the reviewer naming each disagreement you resolved.
 
-Context:
-- `--max-time 20sec` is required because the API host sometimes accepts a connection and never responds.
-- The releases API returns entries in no particular order, so the script must sort them itself.
-- Tags that do not start with `v` are nightly builds and should not trigger notifications.
-- The state file stores the latest announced tag and is updated only after printing, so a crash between printing and saving will re-announce that release on the next run.
+Design doc excerpt:
 
-```nu
-def main [repo: string, state_file: string] {
-  let releases = (http get --max-time 20sec $\"https://api.example.com/repos/($repo)/releases\")
-  let latest = ($releases | where tag_name starts-with \"v\" | sort-by published_at | last)
-  let seen = (if ($state_file | path exists) { open $state_file | str trim } else { \"\" })
-  if $latest.tag_name == $seen { return }
-  print $\"($repo) ($latest.tag_name): ($latest.html_url)\"
-  $latest.tag_name | save --force $state_file
-}
-```"""
+> Every request has a 5-second connect timeout and a 30-second read timeout. There is no overall deadline, so a slow but steady download never times out. Timeouts count as transient errors and are retried like connection resets. Operators can raise the connect timeout with the `HTTPKIT_CONNECT_TIMEOUT` environment variable.
+
+Current code:
+
+```python
+@dataclass(frozen=True)
+class Timeouts:
+    connect: float = 3.0
+    read: float = 30.0
+    total: float | None = 60.0
+    retry_on_timeout: bool = False
+
+    def scaled(self, factor: float) -> Timeouts:
+        return replace(
+            self,
+            connect=self.connect * factor,
+            read=self.read * factor,
+            total=None if self.total is None else self.total * factor,
+        )
+
+
+def default_timeouts() -> Timeouts:
+    factor = float(os.environ.get(\"HTTPKIT_TIMEOUT_SCALE\", \"1\"))
+    return Timeouts().scaled(factor)
+```
+
+Every request uses `default_timeouts()` unless the caller passes its own `Timeouts`. `total` is a deadline for the whole request, including reading the body."""
 checklist = [
-  "Output is a single fenced code block with no surrounding text",
-  "Executable code is unchanged from the prompt",
-  "Comments appear only where needed and cover the API timeout, unsorted API response, nightly tag filtering, and state-file crash behavior",
-  "No comments merely restate what the syntax already makes obvious",
+  "Documents the code's defaults: a 3 s connect timeout, a 30 s read timeout, and a 60 s deadline for the whole request",
+  "States that timeouts are not retried by default (`retry_on_timeout = False`)",
+  "Documents `HTTPKIT_TIMEOUT_SCALE` as a multiplier of the default timeouts that leaves a caller's own `Timeouts` untouched, and does not document `HTTPKIT_CONNECT_TIMEOUT`",
+  "After the `---` line, lists the four disagreements: the connect timeout, the overall deadline, retries, and the environment variable",
 ]
 
 [[cases]]
-id = "python-pagination"
+id = "queue-adr"
 category = "docs"
 source = "synthetic"
 instruction = """
-Add comments to the Python function below only where a future maintainer needs them. Return the complete function in a single fenced code block and nothing else.
+Write an architecture decision record (ADR) of at most 400 words with the sections Context, Decision, Consequences, and Alternatives considered. Base it only on the team thread below, and record the conclusions the discussion finally reached.
 
-Context:
-- The API silently treats any `per_page` value above 100 as 30.
-- A 403 status with `X-RateLimit-Remaining: 0` means the rate limit was hit, and `X-RateLimit-Reset` gives the reset time as a Unix timestamp in seconds.
-- The extra second of sleep accounts for clock skew between client and server.
-- The API provides the next page's URL in the HTTP `Link` header rather than the response body.
+Thread in #platform, 3 to 7 October:
 
-```python
-def list_issues(session, repo, per_page=100):
-    url = f\"https://api.example.com/repos/{repo}/issues?per_page={min(per_page, 100)}\"
-    issues = []
-    while url:
-        resp = session.get(url)
-        if resp.status_code == 403 and resp.headers.get(\"X-RateLimit-Remaining\") == \"0\":
-            time.sleep(max(0, int(resp.headers[\"X-RateLimit-Reset\"]) - time.time()) + 1)
-            continue
-        resp.raise_for_status()
-        issues.extend(resp.json())
-        url = resp.links.get(\"next\", {}).get(\"url\")
-    return issues
-```"""
+Priya: We need a job queue for order emails. Proposal: Redis lists, since we already run Redis for caching.
+Marco: +1 to Redis. Simple, and it can handle far more than our 300 jobs/s peak.
+Lena: One problem. The email job must be enqueued only if the order transaction commits. With Redis we'd enqueue after the commit and lose jobs whenever the process dies in between, which happened twice last quarter with the webhook sender.
+Sam: What about SQS? Managed, no ops.
+Priya: SQS has the same commit problem, and we can't run it in local dev without an emulator.
+Lena: Postgres with a jobs table and `SELECT ... FOR UPDATE SKIP LOCKED` solves it, because the job row is inserted in the same transaction as the order.
+Marco: Postgres can do something like 50,000 jobs/s, so throughput is a non-issue.
+Lena: Careful. I benchmarked it on the staging database yesterday: about 4,000 jobs/s with 8 workers. Still 13x our peak.
+Marco: Fair, I was quoting a blog post. 4,000 it is.
+Sam: So we drop Redis entirely?
+Priya: No, Redis stays for caching. It just won't carry jobs.
+Priya: Decision: Postgres jobs table with SKIP LOCKED. Lena owns the migration.
+Sam: How long do we keep completed jobs?
+Priya: Undecided. Let's revisit after a month of data."""
 checklist = [
-  "Output is a single fenced code block with no surrounding text",
-  "Executable code is unchanged from the prompt",
-  "Comments appear only where needed and cover the per_page cap, rate-limit headers, clock-skew buffer, and Link-header pagination",
-  "No comments merely restate obvious Python syntax",
+  "Records the Postgres jobs table with `FOR UPDATE SKIP LOCKED` as the decision, explaining the same-transaction enqueue requirement that ruled out Redis and SQS",
+  "Uses the corrected benchmark (about 4,000 jobs/s on staging with 8 workers against a 300 jobs/s peak) and does not repeat the 50,000 jobs/s figure",
+  "States that Redis remains in use for caching",
+  "Leaves the retention of completed jobs as an open question without inventing a period",
+  "Uses the four requested sections within 400 words and adds no facts beyond the thread",
 ]
 
 [[cases]]
@@ -353,10 +363,13 @@ source = "synthetic"
 instruction = """
 Add comments to the Rust code below only where a future maintainer needs them. Return the complete code in a single fenced code block and nothing else.
 
+Leave the code unchanged. The listing is the type's complete implementation except `push`, which lives in another file and is correct. The context comes from the design doc, and some of it may be wrong. Where the doc disagrees with the code, comment on what the code actually does without repeating the doc's claim. If you spot a defect, describe it in a `// TODO:` comment without fixing it.
+
 Context:
+- `with_capacity(n)` creates a buffer that holds exactly `n` items.
 - The buffer leaves one slot empty so `head == tail` always means empty and never full.
-- Capacity is rounded up to a power of two so indices can wrap using a bitmask.
-- `Ordering::Acquire` on the load pairs with the producer's `Release` store, ensuring the consumer sees the slot's written data once it sees the updated tail.
+- The slot count is a power of two so indices can wrap with a bitmask.
+- `Ordering::Acquire` on the tail load pairs with the producer's `Release` store, so the consumer sees a slot's data once it sees the updated tail.
 
 ```rust
 pub struct Ring<T> {
@@ -385,10 +398,10 @@ impl<T> Ring<T> {
 }
 ```"""
 checklist = [
-  "Output is a single fenced code block with no surrounding text",
-  "Executable code is unchanged from the prompt",
-  "Comments explain the extra slot invariant, power-of-two bitmasking, and Acquire/Release synchronization",
-  "No comments merely restate Rust syntax",
+  "Output is a single fenced code block with no surrounding text, and the code is unchanged",
+  "The capacity comment says the ring holds `size - 1` items, at least `capacity` and often more, and does not repeat the doc's \"exactly n\"",
+  "A `// TODO:` notes that the type has no `Drop` impl, so items still in the ring when it is dropped are leaked, since `MaybeUninit` never drops its contents",
+  "Comments cover the empty-slot invariant, the bitmask wrap, and the Acquire / Release pairing without restating Rust syntax",
 ]
 
 [[cases]]
@@ -398,11 +411,14 @@ source = "synthetic"
 instruction = """
 Add comments to the Bash script below only where a future maintainer needs them. Return the complete script in a single fenced code block and nothing else.
 
+The script runs in production, so leave every command unchanged. The context comes from the original author's notes, and some of them may be wrong. Where a note disagrees with what the script does, comment on what the script actually does without repeating the note. If you spot a defect, describe it in a `# TODO:` comment without fixing it.
+
 Context:
-- `flock -n` causes a second invocation to exit immediately if an earlier backup is still running (which happens when the upload is slow).
-- When the lock is held, the script must exit with status 0 because the scheduler alerts on any non-zero exit code.
-- `--one-file-system` prevents `tar` from descending into network mounts under `/home`.
-- The archive is written to a temporary filename and renamed so the sync job never uploads a partial file.
+- `set -o pipefail` is there so that a `zstd` failure stops the script.
+- `flock -n` makes a second invocation wait until the earlier backup finishes, which happens when the upload is slow.
+- When the lock is busy, the script must exit with status 0 because the scheduler alerts on any non-zero exit code.
+- `--one-file-system` keeps `tar` from descending into network mounts under `/home`.
+- The archive is written under a temporary name and renamed so the sync job, which uploads every `home-*.tar.zst` file, never uploads a partial archive.
 
 ```bash
 #!/usr/bin/env bash
@@ -417,40 +433,38 @@ mv \"$dest.tmp\" \"$dest\"
 find /var/backups -name 'home-*.tar.zst' -mtime +14 -delete
 ```"""
 checklist = [
-  "Output is a single fenced code block with no surrounding text",
-  "Executable code is unchanged from the prompt",
-  "Comments appear only where needed and cover the non-blocking lock, the exit 0 requirement for the scheduler, skipping network mounts, and the temporary-name rename that keeps the sync job from uploading a partial file",
-  "No comments merely restate obvious Bash commands",
+  "Output is a single fenced code block with no surrounding text, and every command is unchanged",
+  "Comments say that `flock -n` makes a second run give up at once without waiting, and that `|| exit 0` keeps the scheduler from alerting",
+  "Comments do not repeat the `pipefail` note: without it, a `zstd` failure already fails the pipeline, and `pipefail` is what catches a `tar` failure",
+  "A `# TODO:` notes that a failed run leaves a `.tmp` file that the cleanup pattern never matches",
+  "Comments cover `--one-file-system` and the temporary-name rename without restating obvious Bash commands",
 ]
 
 [[cases]]
-id = "ts-debounce"
+id = "cache-rollout-results"
 category = "docs"
 source = "synthetic"
 instruction = """
-Add comments to the TypeScript React hook below only where a future maintainer needs them. Return the complete code in a single fenced code block and nothing else.
+Write the \"Results\" section of a design doc that proposes a read-through cache in front of the pricing service. Its readers are the staff engineers who will approve or reject the rollout. Keep it under 200 words, and use a table if it helps. Base it only on the benchmark data and notes below.
 
-Context:
-- The 300 ms default delay matches the search API's guidance for typing.
-- The callback is stored in a ref so a parent re-rendering with a fresh inline callback does not reset the debounce timer.
-- The effect cleanup clears the pending timer on unmount so the callback does not fire and update state on an unmounted component.
+Benchmark: five 10-minute runs per configuration on the same staging host, replaying the same recorded production traffic.
 
-```ts
-export function useDebounced<T>(value: T, onSettle: (value: T) => void, delay = 300) {
-  const callback = useRef(onSettle);
-  callback.current = onSettle;
+| Metric | Without cache (median of 5) | With cache (median of 5) |
+| --- | --- | --- |
+| p50 latency | 42 ms | 29 ms |
+| p99 latency | 180 ms | 240 ms |
+| Throughput | 1,850 req/s | 1,910 req/s |
+| Cache hit rate | n/a | 71% |
 
-  useEffect(() => {
-    const timer = setTimeout(() => callback.current(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-}
-```"""
+Notes from the engineer who ran the benchmark:
+- Throughput varied by up to ±80 req/s between runs of the same configuration.
+- Cache misses now make an extra network hop to the cache before reaching the pricing service, which is the likely reason p99 got worse. No experiment has confirmed this.
+- Draft summary line: \"The cache makes the pricing service about 30% faster across the board.\""""
 checklist = [
-  "Output is a single fenced code block with no surrounding text",
-  "Executable code is unchanged from the prompt",
-  "Comments appear only where needed and cover the 300 ms API guidance, the callback ref preventing timer resets, and the unmount cleanup",
-  "No comments merely restate standard React or TypeScript syntax",
+  "Reports the p50 improvement (42 to 29 ms) and the p99 regression (180 to 240 ms) with equal prominence",
+  "Treats the throughput difference (1,850 vs 1,910 req/s) as within the ±80 req/s run-to-run variation and claims no throughput gain",
+  "Does not adopt the draft's \"30% faster across the board\" claim, and presents the extra-hop explanation for p99 as unconfirmed",
+  "Stays under 200 words and adds no data beyond the benchmark and notes",
 ]
 
 [[cases]]
@@ -493,40 +507,52 @@ checklist = [
 ]
 
 [[cases]]
-id = "lockfile"
+id = "write-durability"
 category = "docs"
 source = "synthetic"
-instruction = "A teammate who knows npm well but is new to Nix asks what `flake.lock` does and whether it should be committed to version control. Explain in one or two paragraphs, comparing `flake.lock` to `package-lock.json` where the analogy holds and pointing out where it breaks down."
+instruction = "A backend developer asks in chat: \"Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?\" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs."
 checklist = [
-  "Explains how `flake.lock` differs from `package-lock.json` (e.g., locking flake inputs and revisions, where `package-lock.json` locks a flat dependency tree of packages)",
-  "Clearly states whether `flake.lock` should be committed",
+  "Corrects the premise: a successful `write()` means the kernel holds the data in its page cache, which a power cut can still lose",
+  "Explains that durability needs `fsync()` or `fdatasync()`, or a synchronous open flag such as `O_DSYNC`, plus an `fsync()` of the parent directory when the log file is newly created",
+  "Does not claim that `O_DIRECT` alone makes records durable, since the drive's volatile write cache can still lose them",
+  "Notes the latency or throughput cost of syncing and a mitigation such as syncing once per batch of records",
+  "Stays within three short paragraphs",
 ]
 
 [[cases]]
-id = "string-length"
+id = "zero-major-semver"
 category = "docs"
 source = "synthetic"
-instruction = "In at most three paragraphs, explain for a developer building web forms why the string `\"é\"` can have a length of 1 or 2, and why a family emoji can have a length of 7 or more, depending on the programming language and how the string was constructed. Cover bytes, Unicode code points, UTF-16 code units, and grapheme clusters, and state which unit a text field's character limit should count."
+instruction = "A teammate writes: \"Our Rust crate `tomlfmt` is at 0.9.3, and my PR renames the public function `format_str` to `format_document`. Since we're pre-1.0, SemVer says breaking changes are fine, so I'll ship it as 0.9.4. Any objection?\" Most downstream crates depend on it with Cargo's default requirement syntax, such as `tomlfmt = \"0.9.3\"`. Reply in at most two short paragraphs."
 checklist = [
-  "Distinguishes between precomposed and decomposed forms of `\"é\"`",
-  "Covers bytes, code points, UTF-16 code units, and grapheme clusters",
-  "Recommends counting grapheme clusters for user-facing character limits",
+  "Agrees that SemVer allows breaking changes in 0.y.z releases while explaining why the version number still matters",
+  "Explains that Cargo reads `\"0.9.3\"` as `^0.9.3`, which accepts 0.9.4 automatically, so a breaking 0.9.4 would break downstream builds on their next update",
+  "Recommends releasing the rename as 0.10.0",
+  "Stays within two short paragraphs",
 ]
 
 [[cases]]
-id = "cli-output-path-commit"
+id = "changelog-from-prs"
 category = "message"
 source = "synthetic"
 instruction = """
-Write a Git commit message with an imperative subject line of at most 72 characters and a short body covering this change:
+Write the user-facing release notes for version 3.8 of `pkgsync`, a Python command-line tool that syncs package mirrors, for the project's GitHub release page. Use the sections \"New\", \"Fixed\", and \"Breaking changes\", omitting any that would be empty, and keep the notes under 250 words. Base them only on the pull requests merged since 3.7, listed below oldest first, and leave out changes users cannot observe.
 
-- Previously, the CLI's `--output` flag accepted a directory path and failed later deep inside the export with \"Is a directory\".
-- It now validates the path upfront and exits with code 2 and the message \"--output must be a file path, got a directory: <path>\".
-- Added a test covering both a directory path and a missing parent directory."""
+- #401 ci: cache pip downloads between workflow runs
+- #404 feat: add `--exclude <glob>` to skip matching paths during a sync
+- #407 fix: retry once on HTTP 502 from the upstream instead of aborting the sync
+- #409 refactor(config): simplify the config loader. Body: \"Merges the two loader code paths. As a side effect, `~/.pkgsyncrc` is no longer read; only `~/.config/pkgsync/config.toml` is.\"
+- #412 feat: add `--parallel <n>` to download up to n files at once
+- #415 chore: raise the minimum supported Python version from 3.9 to 3.11
+- #418 docs: fix typos in the README
+- #420 fix: `pkgsync verify` now exits with code 1 when checksums mismatch. It previously printed the mismatch and exited with 0.
+- #422 test: add integration tests for `--exclude`
+- #425 revert: \"feat: add `--parallel <n>`\" (#412). Body: \"Parallel downloads trip the upstream's per-client connection limit. Reverting until we add a limit.\""""
 checklist = [
-  "Subject line uses the imperative mood and is at most 72 characters",
-  "Body explains why the change was made",
-  "Includes all provided facts without adding new ones",
+  "Omits `--parallel`, which #425 reverted, and leaves out the CI, test, README typo, and refactoring-only changes",
+  "Lists as breaking both the minimum Python version rising to 3.11 and `~/.pkgsyncrc` no longer being read, which only #409's body reveals",
+  "Covers `--exclude`, the HTTP 502 retry, and the `verify` exit-code change",
+  "Stays under 250 words and adds no changes or details beyond the pull requests",
 ]
 
 [[cases]]
@@ -565,21 +591,34 @@ checklist = [
 ]
 
 [[cases]]
-id = "release-post"
+id = "outage-timeline"
 category = "message"
 source = "synthetic"
 instruction = """
-Write a short forum announcement for version 2.4 of `tidy`, a Markdown formatter. Use only these facts:
+Write the incident summary you will post in the engineering channel after yesterday's checkout outage. Give a timeline in UTC, then a short paragraph on what is known and what is not. Base it only on the three exports below. Their clocks are accurate, but they use different time zones. Where the sources disagree, point out the disagreement.
 
-- New: tables are now aligned by display width, so columns line up properly with Chinese and Japanese text.
-- New: `tidy --check` exits with code 1 when any file would be modified, intended for CI workflows.
-- Fixed: nested lists inside block quotes no longer lose their indentation.
-- Breaking: the `wrap` setting now defaults to `preserve` instead of `80`, as most users disabled wrapping.
-- Thanks to the four first-time contributors in this release."""
+PagerDuty export (UTC):
+- 2026-10-14 16:44 Alert triggered: checkout error rate above 5%
+- 2026-10-14 16:46 Acknowledged by Dana
+- 2026-10-14 17:20 Alert resolved
+
+Deploy log (UTC):
+- 2026-10-14 16:38 Deploy of checkout v412 completed
+- 2026-10-14 17:03 Rollback to v411 started
+- 2026-10-14 17:12 Rollback to v411 completed
+
+Slack export (America/Los_Angeles, which was on UTC-7 that day):
+- 09:47 Dana: looking at checkout errors, started right after the 9:38 deploy
+- 09:58 Dana: suspect the new payment-config flag in v412, not confirmed
+- 10:03 Dana: rolling back to v411
+- 10:05 Dana: rollback done, errors dropping
+- 10:18 Dana: error rate back to baseline
+- 10:31 Dana: will dig into the flag tomorrow"""
 checklist = [
-  "Highlights the breaking change so it is easy to spot",
-  "Uses a straightforward tone without marketing superlatives",
-  "Includes all provided facts without adding new ones",
+  "Converts every Slack time to UTC correctly by adding 7 hours (09:38 becomes 16:38, 10:18 becomes 17:18) and merges the three sources into one ordered timeline",
+  "Flags the disagreement between Slack's \"rollback done\" at 17:05 UTC and the deploy log's rollback completion at 17:12 UTC",
+  "Presents the payment-config flag in v412 as an unconfirmed suspicion and names no confirmed root cause",
+  "Adds no events, causes, or impact figures beyond the exports",
 ]
 
 [[cases]]
@@ -639,18 +678,19 @@ source = "synthetic"
 instruction = """
 Read the following opening paragraph and write an original continuation of 450 to 600 words. Output only the continuation. Do not repeat the opening paragraph.
 
-Opening: \"The house on Alder Street was empty by the time I arrived, except for the blue bowl on the counter. My brother had promised to wait. Through the kitchen window I could see his car still in the driveway, doors open, engine off. The keys were in the bowl. I had spent eleven years learning not to ask certain questions, and I could feel every one of them now, lined up behind my teeth.\"
+Opening: \"The house on Alder Street was empty by the time I arrived, except for the blue bowl on the counter. My brother had promised to wait. Through the kitchen window I could see his car still in the driveway, doors open, engine off. The keys were in the bowl, on top of a folded receipt from Halvorsen's Hardware dated that morning. I had come straight from the bus station, because the cast on my left wrist had three more weeks to go and I was not allowed to drive. My phone had died somewhere on the second bridge, about when the rain started, and the rain had not let up since. Juniper, his old dog, was asleep under the table and did not get up for me, which was new. The kitchen clock said ten past four, the way it had said ten past four for most of my childhood, because nobody in this family ever replaced a battery. I had spent eleven years learning not to ask certain questions, and I could feel every one of them now, lined up behind my teeth.\"
 
 Follow these requirements in your continuation:
 1. Maintain the first-person point of view and past tense established in the opening.
-2. Reference or interact with the blue bowl or the keys at least once more.
-3. End the passage with the narrator making a concrete decision.
+2. Reference or interact with the blue bowl, the keys, or the receipt at least once more.
+3. Keep every detail the opening establishes consistent. If the continuation changes one, such as charging the phone, show how on the page.
+4. End the passage with the narrator making a concrete decision.
 
-Do not introduce any new named characters."""
+Do not introduce any new named characters. Juniper and the brother may appear."""
 checklist = [
   "Maintains first-person point of view and past tense, without repeating the opening paragraph",
-  "Introduces no new named characters",
-  "References or interacts with the blue bowl or the keys at least once",
+  "Stays consistent with the opening: the narrator does not drive or use the dead phone unless the text shows how, the left wrist stays in its cast, and the rain and the stopped kitchen clock are not contradicted",
+  "Introduces no new named characters, and references the blue bowl, the keys, or the receipt at least once more",
   "Ends with the narrator making a concrete decision",
 ]
 
@@ -714,22 +754,27 @@ checklist = [
 ]
 
 [[cases]]
-id = "unfinished-year"
+id = "bike-lane-rebuttal"
 category = "essay"
 source = "synthetic"
 instruction = """
-Write a reflective first-person blog post of 500 to 700 words in the voice of a fictional narrator looking back on the past year.
+Write a first-person critical essay of 600 to 800 words in the voice of a fictional resident replying, in the same local paper, to the op-ed below. Argue against its conclusion.
 
-1. Ground the reflection in three distinct, concrete moments from the year, each with a specific scene or action.
-2. Discuss one issue, question, or situation from the year that remains unresolved.
+1. Use only the numbers that appear in the op-ed. Any figure you derive must follow from them.
+2. Identify the specific flaw in how the op-ed reads its own numbers.
+3. Concede one point on which the councillor is right.
 
-Do not use the phrases \"this year taught me\" or \"new year, new me\". Do not conclude the post with a New Year's resolution, a vow, or a plan for the future."""
+Do not invent statistics, studies, quotations, or named experts, and do not use the phrases \"the data speaks for itself\" or \"at the end of the day\".
+
+Op-ed by councillor R. Hale, \"The Mill Road bike lane has failed\":
+
+\"When the Mill Road bike lane opened two years ago, we were promised safer streets. The city's own transport report says otherwise. In the year before the lane opened, Mill Road saw 4 collisions involving cyclists. In the year after, it saw 6. That is a 50% increase in crashes. The same report counts about 1,200 cyclists a day on Mill Road before the lane and about 3,600 a day after, which tells you how many more people we are putting in harm's way. Meanwhile, delivery drivers tell me they now double-park because the lane took their loading space, and I have watched vans block the lane myself. A lane that makes crashes more common and blocks deliveries is not a success. It is time to restore the parking and let Mill Road go back to how it worked.\""""
 checklist = [
-  "Written in the first person",
-  "Narrates three distinct, specific moments from the past year",
-  "Identifies one problem, question, or situation from the year that is still unresolved",
-  "Does not contain the phrases \"this year taught me\" or \"new year, new me\"",
-  "Ends without making a resolution, vow, or plan for the coming year",
+  "Identifies the denominator flaw: daily cyclists tripled while collisions rose from 4 to 6, so collisions per cyclist roughly halved",
+  "Does not claim that the op-ed miscalculated the 50% increase in the collision count",
+  "Concedes a point on which the councillor is right, such as the lost loading space or vans blocking the lane",
+  "Uses no numbers beyond the op-ed's and figures derived from them, and invents no statistics, studies, quotations, or experts",
+  "Is 600 to 800 words in the first person and avoids \"the data speaks for itself\" and \"at the end of the day\"",
 ]
 
 [[cases]]
