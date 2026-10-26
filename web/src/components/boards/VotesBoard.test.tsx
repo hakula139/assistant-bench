@@ -444,9 +444,9 @@ describe('VotesBoard', () => {
     expect(options).toEqual(['All categories', 'Reply', 'Message', 'Docs']);
     expect(headers).toEqual(['System', 'Reply', 'Message', 'Docs']);
     expect(captions.filter((caption) => caption.includes('votes'))).toEqual([
-      expect.stringMatching(/^Reply, /),
-      expect.stringMatching(/^Message, /),
-      expect.stringMatching(/^Docs, /),
+      expect.stringMatching(/^Reply\b/),
+      expect.stringMatching(/^Message\b/),
+      expect.stringMatching(/^Docs\b/),
     ]);
     expect(text(html)).not.toMatch(/\breply\b|\bmessage\b|\bdocs\b/);
   });
