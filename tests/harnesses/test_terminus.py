@@ -135,9 +135,12 @@ class NativeProbe(Terminus):
         assert isinstance(self._llm, NativeClient)
         return self._llm
 
+    async def call(self, prompt: str) -> LLMResponse:
+        return await self.client.call(prompt, **self._llm_call_kwargs)
+
     async def request(self, prompt: str) -> LLMResponse:
         try:
-            return await self.client.call(prompt, **self._llm_call_kwargs)
+            return await self.call(prompt)
         finally:
             await self.close()
 
@@ -1236,13 +1239,43 @@ class TestTerminus:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
+            assert context.metadata['responses'] == []
+            assert [
+                call['response_status']
+                for call in context.metadata['response_attempts']
+            ] == ['request_failed'] * 3
+
+        def test_counts_usage_from_completed_requests_after_a_retry(
+            self,
+            endpoint: StubEndpoint,
+            responses_agent: NativeProbe,
+            terminal_session: TmuxSession,
+        ) -> None:
+            endpoint.statuses = [503]
+            endpoint.response = response(
+                json.dumps(
+                    {'analysis': '', 'plan': '', 'commands': [], 'task_complete': True}
+                )
+            )
+            context = AgentContext()
+
+            asyncio.run(responses_agent.execute(terminal_session, context))
+
+            assert len(endpoint.requests) == 3
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+                context.cost_usd,
+            ) == (240, 200, 80, None)
+            assert context.metadata is not None
             assert [
                 call['response_status'] for call in context.metadata['responses']
-            ] == [
-                'request_failed',
-                'request_failed',
-                'request_failed',
-            ]
+            ] == ['completed', 'completed']
+            assert [
+                call['response_status']
+                for call in context.metadata['response_attempts']
+            ] == ['request_failed', 'completed', 'completed']
 
         def test_maps_the_provider_context_error_to_native_context_management(
             self, endpoint: StubEndpoint, responses_agent: NativeProbe
@@ -1260,6 +1293,37 @@ class TestTerminus:
                 asyncio.run(responses_agent.request('Greet me.'))
 
             assert len(endpoint.requests) == 1
+
+        def test_records_a_recovered_context_error_as_a_failed_attempt(
+            self, endpoint: StubEndpoint, responses_agent: NativeProbe
+        ) -> None:
+            endpoint.status = 400
+            endpoint.response = {
+                'error': {
+                    'code': 'context_length_exceeded',
+                    'message': 'The input context is full.',
+                    'type': 'invalid_request_error',
+                }
+            }
+
+            with pytest.raises(ContextLengthExceededError):
+                asyncio.run(responses_agent.call('Greet me.'))
+
+            endpoint.status = 200
+            endpoint.response = response('Hello there.')
+
+            reply = asyncio.run(responses_agent.call('Greet me again.'))
+
+            assert reply.usage is not None
+            llm = responses_agent.client
+            assert isinstance(llm, ResponsesLLM)
+            assert [attempt['response_status'] for attempt in llm.attempts] == [
+                'request_failed',
+                'completed',
+            ]
+            assert [result['response_status'] for result in llm.results] == [
+                'completed'
+            ]
 
         def test_native_budget_reissue_preserves_partial_items_and_all_reported_usage(
             self,
@@ -1796,10 +1860,13 @@ class TestTerminus:
                 asyncio.run(agent.run('Go.', MagicMock(spec=BaseEnvironment), context))
 
             assert is_closed()
-            assert context.metadata == {
+            expected: dict[str, Any] = {
                 'n_episodes': 1,
                 'nixos_config_rev': export.rev,
                 'harbor_version': metadata.version('harbor'),
                 'responses': [],
                 'cache_write_unpriced': False,
             }
+            if api == 'openai-responses':
+                expected['response_attempts'] = []
+            assert context.metadata == expected

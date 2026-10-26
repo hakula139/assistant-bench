@@ -537,6 +537,7 @@ class StubEndpoint:
     ca_file: Path | None = None
     requests: list[Request] = field(default_factory=list)
     status: int = 200
+    statuses: list[int] = field(default_factory=list)
     response_headers: dict[str, str] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=completion)
     responses: list[dict[str, Any]] = field(default_factory=list)
@@ -597,7 +598,7 @@ def serve_stub(
             payload = (
                 b''.join(stream) if stream is not None else json.dumps(reply).encode()
             )
-            self.send_response(stub.status)
+            self.send_response(stub.statuses.pop(0) if stub.statuses else stub.status)
             self.send_header(
                 'Content-Type',
                 'text/event-stream' if stream is not None else 'application/json',

@@ -199,6 +199,7 @@ class ResponsesLLM(BaseLLM):
         self.temperature = temperature
         self.logs_dir = logs_dir
         self.results: list[dict[str, Any]] = []
+        self.attempts: list[dict[str, Any]] = []
 
     @override
     def get_model_context_limit(self) -> int:
@@ -217,6 +218,8 @@ class ResponsesLLM(BaseLLM):
         **kwargs: Any,
     ) -> LLMResponse:
         started = time.monotonic()
+        attempt: dict[str, Any] = {'response_status': 'request_failed'}
+        self.attempts.append(attempt)
         try:
             raw = await self.client.responses.with_raw_response.create(
                 model=self.model_name,
@@ -234,12 +237,6 @@ class ResponsesLLM(BaseLLM):
                 ),
             )
         except APIError as error:
-            self.results.append(
-                {
-                    'response_status': 'request_failed',
-                    'latency_sec': round(time.monotonic() - started, 3),
-                }
-            )
             if (
                 isinstance(error, BadRequestError)
                 and error.code == 'context_length_exceeded'
@@ -248,13 +245,16 @@ class ResponsesLLM(BaseLLM):
                     'The Responses API exhausted its input context.'
                 ) from error
             raise
+        finally:
+            attempt['latency_sec'] = round(time.monotonic() - started, 3)
 
         result = ResponseResult(raw.parse(), raw.headers.get('x-request-id'))
-        details = result.details | {'latency_sec': round(time.monotonic() - started, 3)}
+        details = result.details | {'latency_sec': attempt['latency_sec']}
         usage = result.usage
         if usage is not None:
             details |= usage.details
         self.results.append(details)
+        attempt.update(details)
         artifact = self.logs_dir / f'response-{len(self.results)}.json'
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text(result.response.model_dump_json(indent=2))
