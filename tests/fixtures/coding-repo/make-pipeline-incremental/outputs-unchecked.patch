@@ -1,0 +1,9 @@
+--- a/pipeline/state.py
++++ b/pipeline/state.py
+@@ -69,5 +69,5 @@
+         for output in spec.outputs:
+             path = self.root / output
+-            if not path.is_file() or outputs.get(output) != digest(path):
++            if output not in outputs:
+                 return False
+         return True

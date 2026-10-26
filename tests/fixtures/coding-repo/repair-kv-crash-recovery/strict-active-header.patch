@@ -1,0 +1,11 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -50,8 +50,6 @@
+     data = path.read_bytes()
+     header = HEADER.pack(MAGIC, sequence)
+     if len(data) < HEADER.size:
+-        if active and header.startswith(data):
+-            return Segment(sequence, [], 0)
+         raise CorruptSegment(path, 0, 'incomplete header')
+
+     magic, found = HEADER.unpack_from(data)

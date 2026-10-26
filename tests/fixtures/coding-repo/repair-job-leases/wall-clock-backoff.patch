@@ -1,0 +1,9 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -192,5 +192,5 @@
+                     WHERE id = ?
+                     """,
+-                    (error, now + self.backoff(lease.attempt), lease.job_id),
++                    (error, time.time() + self.backoff(lease.attempt), lease.job_id),
+                 )
+         return self.get(lease.job_id)

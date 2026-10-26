@@ -10,13 +10,13 @@ Every system that [`family.toml`](../../../families/coding-repo/family.toml) lis
 
 | Category   | The instruction asks for                                                                 | Tasks |
 | ---------- | ---------------------------------------------------------------------------------------- | ----: |
-| `bug-fix`  | Fixing the bugs behind a user report or a failing suite, sometimes with regression tests |     2 |
-| `feature`  | Adding durable behavior across application and persistence boundaries                    |     2 |
-| `refactor` | Preserving public behavior while changing publication or persisted data                  |     2 |
+| `bug-fix`  | Fixing the bugs behind a user report or a failing suite, sometimes with regression tests |     4 |
+| `feature`  | Adding behavior across application, protocol and persistence boundaries                  |     3 |
+| `refactor` | Preserving public behavior while changing publication, persisted data or execution       |     3 |
 
 ## Task Sourcing
 
-Every task is a synthetic Python 3.14 application using the standard library and `unittest`, so no task carries a lockfile. Its instruction and candidate-visible API documentation define every behavior the hidden tests require. The starter implements a usable baseline with a causal state defect or missing integration. The reference provides a complete application and focused regression tests.
+Every task is a synthetic Python 3.14 application using the standard library and `unittest`, so no task carries a lockfile. Its instruction, its candidate-visible documentation and any standard the instruction names define every behavior the hidden tests require. Harder tasks report symptoms or state a contract, and leave its consequences, such as crash points, lease races and protocol corner cases, for the candidate to work out. The starter implements a usable baseline with a causal state defect or missing integration. The reference provides a complete application and focused regression tests.
 
 | Task                           | Behavior                                                                                      |
 | ------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -26,6 +26,10 @@ Every task is a synthetic Python 3.14 application using the standard library and
 | `deliver-transactional-outbox` | Commit orders and notifications together, then retry delivery with stable payloads and keys   |
 | `publish-asset-graph`          | Rewrite and hash an asset graph before atomically publishing a complete release               |
 | `migrate-customer-store`       | Migrate persisted names atomically while preserving API responses, reports and relationships  |
+| `repair-kv-crash-recovery`     | Recover a segmented write-ahead log and its snapshot after a crash at any write               |
+| `add-byte-range-requests`      | Serve RFC 9110 byte ranges consistently with validators, compression and keep-alive           |
+| `repair-job-leases`            | Lease SQLite queue jobs atomically across processes, with fencing, expiry and backoff         |
+| `make-pipeline-incremental`    | Skip exactly the build steps whose content, declaration and code fingerprints still match     |
 
 A task's `[metadata] author` preserves the public label of the system whose model wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
 

@@ -1,0 +1,11 @@
+--- a/filehost/ranges.py
++++ b/filehost/ranges.py
+@@ -87,7 +87,7 @@
+
+     field = field.strip()
+     if field.startswith(('"', 'W/')):
+-        return field == etag
++        return field.removeprefix('W/') == etag
+
+     date = parse_http_date(field)
+     return date is not None and date == modified

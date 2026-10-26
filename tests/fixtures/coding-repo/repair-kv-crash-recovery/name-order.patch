@@ -1,0 +1,17 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -32,12 +32,12 @@
+ def list_segments(directory: Path) -> list[tuple[int, Path]]:
+     """Return the sequence number and path of every segment, in sequence order."""
+     found: list[tuple[int, Path]] = []
+-    for path in directory.glob('wal-*.log'):
++    for path in sorted(directory.glob('wal-*.log')):
+         match = _NAME.fullmatch(path.name)
+         if match is not None:
+             found.append((int(match[1]), path))
+
+-    return sorted(found)
++    return found
+
+
+ def read_segment(path: Path, sequence: int, *, active: bool) -> Segment:

@@ -1,0 +1,11 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -87,7 +87,7 @@
+                 row = db.execute(
+                     """
+                     SELECT id FROM jobs
+-                    WHERE dedupe_key = ? AND status IN ('queued', 'running')
++                    WHERE dedupe_key = ?
+                     """,
+                     (dedupe_key,),
+                 ).fetchone()

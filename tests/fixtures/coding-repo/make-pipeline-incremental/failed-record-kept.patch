@@ -1,0 +1,19 @@
+--- a/pipeline/build.py
++++ b/pipeline/build.py
+@@ -39,7 +39,6 @@
+             log(f'up to date {name}')
+             continue
+
+-        state.forget(name)
+         run_step(pipeline.root, spec, function, inputs)
+         state.record(spec, current)
+         report.ran.append(name)
+--- a/pipeline/state.py
++++ b/pipeline/state.py
+@@ -69,5 +69,5 @@
+         for output in spec.outputs:
+             path = self.root / output
+-            if not path.is_file() or outputs.get(output) != digest(path):
++            if not path.is_file():
+                 return False
+         return True

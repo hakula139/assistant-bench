@@ -1,0 +1,19 @@
+--- a/tinykv/snapshot.py
++++ b/tinykv/snapshot.py
+@@ -62,8 +62,7 @@
+     The new snapshot replaces the old one by a rename, so a crash leaves one of
+     them intact, at worst beside an abandoned temporary file.
+     """
+-    temporary = path.with_name(f'{path.name}.tmp')
+-    with temporary.open('wb') as file:
++    with path.open('wb') as file:
+         header = HEADER.pack(MAGIC, covered, len(items))
+         file.write(header)
+         checksum = zlib.crc32(header)
+@@ -76,6 +75,5 @@
+         if sync:
+             sync_file(file)
+
+-    temporary.replace(path)
+     if sync:
+         sync_directory(path.parent)

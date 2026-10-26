@@ -1,0 +1,11 @@
+--- a/filehost/ranges.py
++++ b/filehost/ranges.py
+@@ -29,7 +29,7 @@
+ def parse_range(field: str) -> list[RangeSpec] | None:
+     """Parse a `Range` field, or return `None` when it must be ignored."""
+     unit, equals, specs = field.partition('=')
+-    if not equals or unit.lower() != 'bytes':
++    if not equals or unit != 'bytes':
+         return None
+
+     parsed: list[RangeSpec] = []

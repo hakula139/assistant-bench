@@ -1,0 +1,14 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -238,9 +238,9 @@
+         row = db.execute(
+             """
+             SELECT 1 FROM jobs
+-            WHERE id = ? AND status = 'running' AND lease_token = ? AND lease_until > ?
++            WHERE id = ? AND status = 'running' AND lease_until > ?
+             """,
+-            (lease.job_id, lease.token, now),
++            (lease.job_id, now),
+         ).fetchone()
+         if row is None:
+             raise LeaseLost(lease.job_id)

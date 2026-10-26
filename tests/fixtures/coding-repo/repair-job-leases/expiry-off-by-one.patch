@@ -1,0 +1,13 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -225,8 +225,8 @@
+         db.execute(
+             """
+             UPDATE jobs
+-            SET status = CASE WHEN attempts >= ? THEN 'dead' ELSE 'queued' END,
+-                finished_at = CASE WHEN attempts >= ? THEN ? END,
++            SET status = CASE WHEN attempts > ? THEN 'dead' ELSE 'queued' END,
++                finished_at = CASE WHEN attempts > ? THEN ? END,
+                 last_error = ?,
+                 lease_owner = NULL, lease_token = NULL, lease_until = NULL
+             WHERE status = 'running' AND lease_until <= ?

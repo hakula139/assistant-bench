@@ -1,0 +1,12 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -67,7 +67,6 @@
+             records.append(frame.record)
+             end = frame.end
+-    except FrameError as error:
+-        if not active:
+-            raise CorruptSegment(path, error.offset, error.reason) from error
++    except FrameError:
++        pass
+
+     return Segment(sequence, records, end)
