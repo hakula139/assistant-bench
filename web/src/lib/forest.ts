@@ -110,9 +110,15 @@ export interface Clipped {
   offScale: boolean;
 }
 
-/** Whether `value` falls on the axis, as a reference rule must to be drawn. */
-export const onAxis = ([start, stop]: [number, number], value: number) =>
-  start <= value && value <= stop;
+/** Whether a reference rule at `value`, when set, lies within the axis domain and can be drawn. */
+export const onAxis = ([start, stop]: [number, number], value?: number): value is number =>
+  value !== undefined && start <= value && value <= stop;
+
+/**
+ * The size of the arrowhead for a score below the axis start, in CSS pixels. Every forest draws it
+ * pointing left with its tip on the start gridline.
+ */
+export const ARROWHEAD = { width: 10, height: 12 };
 
 /** Clips an estimate to an axis from `forestDomain`, which never cuts the top end. */
 export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
@@ -178,15 +184,15 @@ export type LegendMark = 'score' | 'preliminary' | 'cut' | 'anchor';
 const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'anchor'];
 
 /**
- * Returns the marks a forest plot of `rows` on `domain` draws, in legend order, where
- * `anchorLine` says whether the plot rules the anchor score.
+ * Returns the marks a forest plot of `rows` on `domain` draws, in legend order. The plot rules
+ * `anchorScore` only where it lies on the axis.
  */
 export function legendMarks(
   rows: ForestRow[],
   domain: [number, number],
-  anchorLine: boolean,
+  anchorScore?: number,
 ): LegendMark[] {
-  const drawn = new Set<LegendMark>(anchorLine ? ['anchor'] : []);
+  const drawn = new Set<LegendMark>(onAxis(domain, anchorScore) ? ['anchor'] : []);
 
   for (const row of rows) {
     if ('estimate' in row) {

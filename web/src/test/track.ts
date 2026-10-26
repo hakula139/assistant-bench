@@ -3,9 +3,10 @@ export interface TrackDrawing {
   dot: 'filled' | 'hollow' | 'none';
   /** The sides of the axis where an arrowhead marks a score the axis cuts off. */
   arrows: ('start' | 'end')[];
-  /** The dot's and the anchor rule's positions on the axis, as their `left` styles. */
+  /** The dot's, the anchor rule's, and each gridline's positions on the axis, as `left` styles. */
   dotAt: string | null;
   ruleAt: string | null;
+  gridAt: string[];
 }
 
 export function trackDrawing(row: Element): TrackDrawing {
@@ -31,5 +32,8 @@ export function trackDrawing(row: Element): TrackDrawing {
     arrows,
     dotAt: dot?.style.left ?? null,
     ruleAt: track.querySelector<HTMLElement>('.bg-chart-reference')?.style.left ?? null,
+    gridAt: [...track.querySelectorAll<HTMLElement>('.bg-chart-grid')].map(
+      (line) => line.style.left,
+    ),
   };
 }

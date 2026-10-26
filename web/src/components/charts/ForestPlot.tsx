@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { grid, LABEL_GAP, labelMargin, referenceRule, tip } from '@/components/charts/chart-marks';
 import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { clip, forestTicks, labelledTicks } from '@/lib/forest';
+import { clip, forestTicks, labelledTicks, onAxis } from '@/lib/forest';
 import { formatCountOf, formatScore } from '@/lib/format';
 import { isPreliminary } from '@/lib/ranking';
 import type { CategoryStanding, VotesRules } from '@/lib/report';
@@ -27,7 +27,7 @@ interface ForestPlotProps {
 }
 
 const ROW_HEIGHT = 30;
-/** Room between the plot's left edge and the axis start, where an arrowhead points. */
+/** Room between the plot's left edge and the axis start, where a dot at the start overhangs. */
 const ARROW_INSET = 8;
 
 /** Height in CSS pixels. */
@@ -64,7 +64,7 @@ export function forestPlotOptions(
     color: { type: 'identity' },
     marks: [
       grid('x', ticks),
-      referenceRule(anchorScore),
+      onAxis(domain, anchorScore) ? referenceRule(anchorScore) : null,
       forestMarks(data, domain),
       offScaleLabels(data),
       tip(

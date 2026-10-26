@@ -1,6 +1,6 @@
 import * as Plot from '@observablehq/plot';
 
-import type { Clipped } from '@/lib/forest';
+import { ARROWHEAD, type Clipped } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
 /** One score point, clipped to the plot's domain. */
@@ -16,12 +16,23 @@ export interface ForestDatum {
 const SERIES = 'var(--chart-series)';
 const SURFACE = 'var(--background)';
 
+/** `ARROWHEAD` as a d3 symbol, with its tip at the dot's position. */
+const arrowhead = {
+  draw(context: Pick<CanvasPath, 'moveTo' | 'lineTo' | 'closePath'>) {
+    const { width, height } = ARROWHEAD;
+    context.moveTo(0, 0);
+    context.lineTo(width, -height / 2);
+    context.lineTo(width, height / 2);
+    context.closePath();
+  },
+};
+
 /** Hollow points mark preliminary coverage. A clipped point keeps an arrowhead. */
 export function forestMarks(data: ForestDatum[], [start]: [number, number]): Plot.Markish[] {
   return [
     Plot.dot(
       data.filter((datum) => datum.clipped.offScale),
-      { x: start, y: 'y', symbol: 'triangle', rotate: -90, r: 5, fill: SERIES },
+      { x: start, y: 'y', symbol: arrowhead, fill: SERIES },
     ),
     Plot.dot(
       data.filter((datum) => !datum.clipped.offScale),

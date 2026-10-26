@@ -199,25 +199,26 @@ describe('legendMarks', () => {
     preliminary,
   });
 
-  test.each<[string, ForestRow, boolean, LegendMark[]]>([
-    ['a settled score and the anchor rule', row(1004), true, ['score', 'anchor']],
-    ['a preliminary score apart from a settled one', row(700, true), false, ['preliminary']],
-    ['a point inside the axis without a cut', row(500), false, ['score']],
-    ['the cut when a score runs past the axis start', row(350), false, ['cut']],
+  test.each<[string, ForestRow, number | undefined, LegendMark[]]>([
+    ['a settled score and the anchor rule', row(1004), 1000, ['score', 'anchor']],
+    ['a preliminary score apart from a settled one', row(700, true), undefined, ['preliminary']],
+    ['a point inside the axis without a cut', row(500), undefined, ['score']],
+    ['the cut when a score runs past the axis start', row(350), undefined, ['cut']],
+    ['no anchor rule for an anchor below the axis start', row(1004), 300, ['score']],
     [
       'the anchor rule without a measured dot',
       { system: 'acme-large', name: 'Acme Large', unplaced: 'anchor' },
-      true,
+      1000,
       ['anchor'],
     ],
     [
       'no measured mark for an unranked system',
       { system: 'acme-edge', name: 'Acme Edge', unplaced: 'unranked' },
-      false,
+      undefined,
       [],
     ],
-  ])('names %s', (_, drawn, anchorLine, marks) => {
-    expect(legendMarks([drawn], domain, anchorLine)).toEqual(marks);
+  ])('names %s', (_, drawn, anchorScore, marks) => {
+    expect(legendMarks([drawn], domain, anchorScore)).toEqual(marks);
   });
 });
 

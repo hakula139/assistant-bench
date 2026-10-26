@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { legendMarks, onAxis, type ForestRow, type LegendMark } from '@/lib/forest';
+import { ARROWHEAD, legendMarks, type ForestRow, type LegendMark } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
@@ -30,7 +30,7 @@ interface ForestProps {
 }
 
 const unplacedText = {
-  'anchor': 'unmeasured',
+  'anchor': 'no votes',
   'unranked': 'unranked',
   'no-votes': 'no votes',
 };
@@ -56,7 +56,17 @@ function details(row: ForestRow): Term {
 const legendKey: Record<LegendMark, { label: string; mark: ReactNode; width?: string }> = {
   score: { label: 'Point score', mark: <ScoreDot preliminary={false} left="50%" /> },
   preliminary: { label: 'Preliminary', mark: <ScoreDot preliminary left="50%" /> },
-  cut: { label: 'Score below the axis', mark: <CutArrow /> },
+  cut: {
+    label: 'Score below the axis',
+    mark: (
+      <span
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2"
+        style={{ width: ARROWHEAD.width }}
+      >
+        <CutArrow />
+      </span>
+    ),
+  },
   anchor: { label: 'Anchor', mark: <AnchorRule left="0" />, width: 'w-px' },
 };
 
@@ -65,7 +75,7 @@ export function drawnMarks(
   domain: [number, number],
   anchorScore?: number,
 ): LegendMark[] {
-  return legendMarks(rows, domain, anchorScore !== undefined && onAxis(domain, anchorScore));
+  return legendMarks(rows, domain, anchorScore);
 }
 
 export function ForestLegend({
@@ -110,12 +120,12 @@ export function Forest({ rows, domain, caption, anchorScore, large = false }: Fo
       <colgroup>
         <col className="w-2/5 sm:w-48" />
         <col />
-        <col className="w-22 sm:w-24" />
+        <col className="w-17 sm:w-24" />
       </colgroup>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="sr-only">System</TableHead>
-          <TableHead className="h-6 p-0 font-normal">
+          <TableHead className="h-6 p-0">
             <span className="sr-only">Point score axis</span>
             <TrackAxis domain={domain} anchorScore={anchorScore} />
           </TableHead>

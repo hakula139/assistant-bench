@@ -1,18 +1,18 @@
 import { cn } from 'cn';
 
-import { clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
+import { ARROWHEAD, clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
 /** A placed system's point score, drawn hollow while its coverage is preliminary. */
-export interface TrackScore {
+interface TrackScore {
   score: number;
   preliminary: boolean;
 }
 
 const middle = 'absolute top-1/2 -translate-y-1/2';
 
-/** The track's extent within its cell, inset so a mark at either axis end stays whole. */
-const extent = 'absolute inset-x-3 inset-y-0';
+/** The track's extent within its cell, inset by a dot's radius so a dot at either end stays whole. */
+const extent = 'absolute inset-x-2 inset-y-0';
 
 const rule = 'absolute inset-y-0 w-px';
 
@@ -46,11 +46,18 @@ export function ScoreDot({ preliminary, left }: { preliminary: boolean; left: st
   );
 }
 
-/** The arrowhead at the axis start for a score the axis cuts off. */
+/** The arrowhead for a score the axis cuts off, with its tip at the left of a positioned parent. */
 export function CutArrow() {
+  const { width, height } = ARROWHEAD;
+
   return (
-    <svg viewBox="0 0 10 12" className={cn(middle, 'left-0 h-3 w-2.5 fill-chart-series')}>
-      <path d="M10 0 0 6l10 6z" />
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      className={cn(middle, 'left-0 fill-chart-series')}
+    >
+      <path d={`M${width} 0 0 ${height / 2}l${width} ${height / 2}z`} />
     </svg>
   );
 }
@@ -82,7 +89,7 @@ export function TrackAxis({
           <span
             key={tick}
             className={cn(
-              'absolute bottom-1 -translate-x-1/2 text-xs text-faint tabular-nums',
+              'absolute bottom-1 -translate-x-1/2 text-xs font-normal text-faint tabular-nums',
               !sparse.has(tick) && axisFits[ticks.length - 1],
             )}
             style={{ left: at(tick) }}
@@ -117,9 +124,7 @@ export function ScoreTrack({
       {forestTicks(domain).map((tick) => (
         <span key={tick} className={cn(rule, 'bg-chart-grid')} style={{ left: at(tick) }} />
       ))}
-      {anchorScore !== undefined && onAxis(domain, anchorScore) && (
-        <AnchorRule left={at(anchorScore)} />
-      )}
+      {onAxis(domain, anchorScore) && <AnchorRule left={at(anchorScore)} />}
       {clipped &&
         (clipped.offScale ? (
           <CutArrow />

@@ -71,6 +71,37 @@ describe('forestPlotOptions', () => {
 
     expect(labels).toEqual(['233']);
   });
+
+  test("puts the arrowhead's tip on the start gridline", () => {
+    const svg = draw(
+      [
+        { label: 'top', refit: refit('top', 1000) },
+        { label: 'far', refit: refit('far', 233) },
+      ],
+      [400, 1100],
+    );
+
+    const arrow = svg.querySelector('g[aria-label="dot"] path');
+    const start = svg.querySelector('g[aria-label="x-grid"] line');
+
+    expect(arrow?.getAttribute('d')).toBe('M0,0L10,-6L10,6Z');
+    expect(arrow?.getAttribute('transform')).toMatch(
+      new RegExp(`^translate\\(${start?.getAttribute('x1') ?? 'missing'},`),
+    );
+  });
+
+  test.each<[string, [number, number], number]>([
+    ['on the axis', [600, 1100], 1],
+    ['below the axis start', [1200, 1800], 0],
+  ])('rules an anchor %s only where the axis holds it', (_, domain, ruled) => {
+    const svg = draw([{ label: 'top', refit: refit('top', domain[1]) }], domain);
+
+    const references = [...svg.querySelectorAll('g[aria-label="rule"]')].filter(
+      (rule) => rule.getAttribute('stroke') === 'var(--chart-reference)',
+    );
+
+    expect(references).toHaveLength(ruled);
+  });
 });
 
 describe('CategoryForests', () => {

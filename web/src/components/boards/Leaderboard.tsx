@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { forestDomain, legendMarks, onAxis, type LegendMark } from '@/lib/forest';
+import { forestDomain, legendMarks, type LegendMark } from '@/lib/forest';
 import { formatCount, formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
 import type { Standing } from '@/lib/report';
@@ -121,9 +121,6 @@ const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
 
 /** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
 export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): LegendMark[] {
-  const domain = forestDomain(rows);
-  const anchor = anchorScore(rows, anchorSystem);
-
   return legendMarks(
     rows.map((row) => ({
       system: row.system,
@@ -131,8 +128,8 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
       estimate: row,
       preliminary: row.preliminary,
     })),
-    domain,
-    anchor !== undefined && onAxis(domain, anchor),
+    forestDomain(rows),
+    anchorScore(rows, anchorSystem),
   );
 }
 

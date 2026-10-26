@@ -264,13 +264,13 @@ describe('family page', () => {
     expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
-  test('lists systems as unmeasured before the first round closes', async () => {
+  test('lists every system with no votes before the first round closes', async () => {
     const empty: Family = { ...(await family()), rounds: [] };
 
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(text(html)).toContain('No round has closed yet.');
-    expect(text(html)).toContain('Acme Large unmeasured');
+    expect(text(html)).toContain('Acme Large no votes');
     expect(text(html)).toContain('Acme Pro no votes');
     expect(text(html)).not.toMatch(/\bLeader\b/);
   });
@@ -282,7 +282,7 @@ describe('family page', () => {
 
     expect(new JSDOM(html).window.document.querySelector('ul[aria-label="Legend"]')).toBeNull();
     expect(html).not.toContain('Score, 95% interval');
-    expect(islandHints(html, 'Forest')).toEqual(['unmeasured', 'no votes', 'no votes', 'no votes']);
+    expect(islandHints(html, 'Forest')).toEqual(['no votes', 'no votes', 'no votes', 'no votes']);
   });
 
   test.each([
