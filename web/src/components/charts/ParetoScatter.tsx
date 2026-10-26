@@ -2,7 +2,7 @@ import * as Plot from '@observablehq/plot';
 import { ticks } from 'd3-array';
 import { useCallback } from 'react';
 
-import { grid, labelMargin, tip } from '@/components/charts/chart-marks';
+import { grid, LABEL_GAP, labelMargin, tip } from '@/components/charts/chart-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { logTicks } from '@/components/charts/ticks';
 import { formatScore } from '@/lib/format';
@@ -48,6 +48,7 @@ const MARGIN = { top: 24, right: 16, bottom: 40 };
 const INSET = { x: 16, y: 8 };
 /** The score ticks the plot's height fits, at Plot's own default density. */
 const SCORE_TICKS = Math.round((HEIGHT - MARGIN.top - MARGIN.bottom) / 35);
+const TICK_SIZE = 6;
 const LABEL_HEIGHT = 14;
 const DOT_RADIUS = 5;
 
@@ -207,6 +208,8 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
           domain: y.domain,
           ticks: scoreTicks,
           tickFormat: formatScore,
+          tickSize: TICK_SIZE,
+          tickPadding: LABEL_GAP - TICK_SIZE,
           label: 'Score',
           inset: INSET.y,
         },

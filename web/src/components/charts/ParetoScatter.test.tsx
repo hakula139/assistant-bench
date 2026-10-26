@@ -121,7 +121,7 @@ describe('ParetoScatter', () => {
 
     expect(lefts).not.toEqual([]);
     expect(Math.min(...lefts)).toBeGreaterThanOrEqual(0);
-    expect(Math.min(...lefts)).toBeLessThan(5);
+    expect(Math.min(...lefts)).toBeLessThan(1);
   });
 
   test('labels the frontier and its tips by display name', async () => {

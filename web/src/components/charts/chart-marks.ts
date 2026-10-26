@@ -8,8 +8,8 @@ export function labelMargin(labels: string[], measure: (text: string) => number)
   return Math.max(...labels.map(measure)) + LABEL_GAP;
 }
 
-/** Gridlines across one axis, at the scale's own ticks or at `ticks`, a count or the values. */
-export function grid(axis: 'x' | 'y', ticks?: number | number[]): Plot.Markish {
+/** Gridlines across one axis at `ticks`, a count or the values. */
+export function grid(axis: 'x' | 'y', ticks: number | number[]): Plot.Markish {
   const options = { ticks, stroke: 'var(--chart-grid)', strokeOpacity: 1 };
   return axis === 'x' ? Plot.gridX(options) : Plot.gridY(options);
 }

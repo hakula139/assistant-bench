@@ -85,7 +85,7 @@ describe('chart marks', () => {
       });
 
       const grids = [...svg.querySelectorAll('g[aria-label$="-grid"]')];
-      const rules = [...svg.querySelectorAll('g[aria-label="rule"]')].filter(
+      const referenceRules = [...svg.querySelectorAll('g[aria-label="rule"]')].filter(
         (rule) => rule.getAttribute('stroke') === 'var(--chart-reference)',
       );
       const tips = [...svg.querySelectorAll('g[aria-label="tip"]')];
@@ -94,7 +94,7 @@ describe('chart marks', () => {
       expect(
         grids.map((grid) => [grid.getAttribute('stroke'), grid.getAttribute('stroke-opacity')]),
       ).toEqual(grids.map(() => ['var(--chart-grid)', null]));
-      expect(rules).toHaveLength(references);
+      expect(referenceRules).toHaveLength(references);
       expect(tips).not.toEqual([]);
       expect(tips.map((tip) => tip.getAttribute('font-family'))).toEqual(tips.map(() => 'inherit'));
     },
