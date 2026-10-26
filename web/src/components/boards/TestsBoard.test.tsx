@@ -41,7 +41,7 @@ describe('TestsBoard', () => {
   test("lists the round's systems by pass rate, best first", () => {
     const html = renderToString(<TestsBoard round={round} />);
 
-    expect(text(html)).toMatch(/Round 2026-10-21 .* Acme Pro 75% 4 0 – – Acme Small 25% 4 0 – – $/);
+    expect(text(html)).toMatch(/^ System .* Acme Pro 75% 4 0 – – Acme Small 25% 4 0 – – $/);
   });
 
   test.each([

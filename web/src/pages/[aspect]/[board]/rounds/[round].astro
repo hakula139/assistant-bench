@@ -1,0 +1,22 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import BoardPage from '@/components/site/BoardPage.astro';
+import type { Report } from '@/lib/report';
+import { getFamilies, roundPaths, type BoardLink, type Family } from '@/lib/reports';
+
+export const getStaticPaths = (async () =>
+  roundPaths(await getFamilies())) satisfies GetStaticPaths;
+
+interface Props {
+  family: Family;
+  /** The boards of the family's aspect, itself included. */
+  boards: BoardLink[];
+  /** The closed round the page shows. */
+  round: Report;
+}
+
+const { family, boards, round } = Astro.props;
+---
+
+<BoardPage family={family} boards={boards} named={round} />

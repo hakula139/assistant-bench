@@ -1,0 +1,65 @@
+---
+import { BookOpen, FileText } from 'lucide-react';
+
+import { scorerViews } from '@/components/scorers';
+import { BoardSwitcher } from '@/components/site/BoardSwitcher';
+import { MethodStrip } from '@/components/site/Method';
+import { note, PageHeader } from '@/components/site/PageParts';
+import { RoundSwitcher } from '@/components/site/RoundSwitcher';
+import Base from '@/layouts/Base.astro';
+import { boardGuide } from '@/lib/method';
+import type { Report } from '@/lib/report';
+import { boardPath, latest, roundLinks, type BoardLink, type Family } from '@/lib/reports';
+import { REPOSITORY } from '@/lib/site';
+
+interface Props {
+  family: Family;
+  /** The boards of the family's aspect, itself included. */
+  boards: BoardLink[];
+  /** The closed round the page's path names, or nothing on the board's path, showing the latest. */
+  named?: Report;
+}
+
+const { family, boards, named } = Astro.props;
+const { config, title } = family;
+const { Board } = scorerViews[config.scorer];
+const guide = boardGuide(config);
+const newest = latest(family);
+const round = named ?? newest;
+---
+
+<Base
+  title={named === undefined ? title : `${title}, round ${named.round}`}
+  description={`${title}: ${guide.summary}.`}
+  section="leaderboards"
+>
+  <PageHeader title={title}>
+    <BoardSwitcher aspect={family.aspect} boards={boards} />
+    <MethodStrip client:load scorer={config.scorer} config={config} />
+    <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      <a href={`/methodology/#${guide.section}`} class="inline-flex items-center gap-2">
+        <BookOpen className="size-4" aria-hidden="true" />
+        How to read this board
+      </a>
+      <a
+        href={`${REPOSITORY}/tree/main/families/${family.name}`}
+        class="inline-flex items-center gap-2"
+      >
+        <FileText className="size-4" aria-hidden="true" />
+        {guide.inputs}
+      </a>
+    </div>
+    {round && (
+      <RoundSwitcher client:load rounds={roundLinks(family, named?.round)} shown={round.round} />
+    )}
+    {newest && round !== newest && (
+      <p class={note}>
+        This is an earlier round.{' '}
+        <span class="text-nowrap">
+          The latest is <a href={boardPath(family)}>{newest.round}</a>.
+        </span>
+      </p>
+    )}
+  </PageHeader>
+  <Board family={family} round={round} />
+</Base>

@@ -59,8 +59,8 @@ import { useSearchParam } from '@/lib/use-search-param';
 interface VotesBoardProps {
   /** The board's path, which each system's page extends. */
   base: string;
-  /** Closed rounds, oldest first. */
-  rounds: VotesRound[];
+  /** The closed round the board shows. */
+  round: VotesRound;
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
@@ -168,16 +168,10 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
-  const latest = rounds[rounds.length - 1];
-  const [roundName, setRound] = useSearchParam('round', latest.round);
+export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const [category, setCategory] = useSearchParam('category', null);
 
-  const {
-    round: activeRound,
-    systems,
-    results,
-  } = rounds.find((item) => item.round === roundName) ?? latest;
+  const { systems, results } = round;
   const names = useMemo(() => reportNames(systems), [systems]);
   const categories = results.categories.map((board) => board.category);
   const activeCategory = category !== null && categories.includes(category) ? category : null;
@@ -229,35 +223,23 @@ export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
 
   return (
     <div className={stack}>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      {categories.length > 0 && (
         <Filter
-          label="Round"
-          value={activeRound}
-          onChange={setRound}
-          options={rounds.toReversed().map((item, i) => ({
-            value: item.round,
-            label: i === 0 ? `${item.round} (latest)` : item.round,
-          }))}
+          label="Category"
+          value={activeCategory === null ? ALL : categoryOption(activeCategory)}
+          onChange={(value) => {
+            setCategory(value === ALL ? null : value.slice('category:'.length));
+          }}
+          options={[
+            { value: ALL, label: 'All categories' },
+            ...categories.map((name) => ({ value: categoryOption(name), label: name })),
+          ]}
         />
-        {categories.length > 0 && (
-          <Filter
-            label="Category"
-            value={activeCategory === null ? ALL : categoryOption(activeCategory)}
-            onChange={(value) => {
-              setCategory(value === ALL ? null : value.slice('category:'.length));
-            }}
-            options={[
-              { value: ALL, label: 'All categories' },
-              ...categories.map((name) => ({ value: categoryOption(name), label: name })),
-            ]}
-          />
-        )}
-      </div>
+      )}
 
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
       {results.provenance?.status === 'ledger' && (
         <SnapshotStatus
-          key={results.provenance.export_id}
           exportId={results.provenance.export_id}
           capturedAt={results.provenance.captured_at}
         />

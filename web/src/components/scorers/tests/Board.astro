@@ -2,14 +2,17 @@
 import { TestsBoard } from '@/components/boards/TestsBoard';
 import Systems from '@/components/scorers/tests/Systems.astro';
 import { note } from '@/components/site/PageParts';
-import { testsRounds, type Family } from '@/lib/reports';
+import type { Report } from '@/lib/report';
+import { testsRound, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
+  /** The closed round to show, or nothing before the first round closes. */
+  round: Report | undefined;
 }
 
-const { family } = Astro.props;
-const round = testsRounds(family).at(-1);
+const { family, round: report } = Astro.props;
+const round = report && testsRound(report);
 ---
 
 {round ? (

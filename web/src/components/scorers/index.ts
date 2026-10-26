@@ -18,7 +18,10 @@ import { votesRounds, type Family } from '@/lib/reports';
 
 /** How the site renders the families of one scorer. */
 interface ScorerView {
-  /** The family page's board, given `family`, with its own state before the first round. */
+  /**
+   * The family page's board, given `family` and the closed `round` to show, with its own state
+   * before the first round.
+   */
   Board: AstroComponentFactory;
   /** The home page's compact board, given `family`. */
   Panel: AstroComponentFactory;

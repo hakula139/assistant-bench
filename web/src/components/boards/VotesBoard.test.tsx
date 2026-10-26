@@ -55,7 +55,7 @@ function render(round: VotesRound, names?: Record<string, string>, labels = CASE
       )
     : round.systems;
   return renderToString(
-    <VotesBoard base={BOARD} rounds={[{ ...round, systems, results: reversed }]} labels={labels} />,
+    <VotesBoard base={BOARD} round={{ ...round, systems, results: reversed }} labels={labels} />,
   );
 }
 
@@ -87,7 +87,6 @@ const legend = (html: string) =>
 describe('VotesBoard', () => {
   afterEach(() => {
     search.delete('category');
-    search.delete('round');
     cleanup();
   });
 
@@ -110,51 +109,18 @@ describe('VotesBoard', () => {
     expect(text(html)).not.toMatch(/refresh deadline|confidence interval/i);
   });
 
-  test('clears the previous capture status while checking a different round', async () => {
-    const earlier = await load('report-ledger');
-    const later = structuredClone(earlier);
-    later.round = '2026-10-24';
-    if (later.results.provenance?.status !== 'ledger') {
-      throw new Error('Expected ledger provenance');
-    }
-    later.results.provenance.export_id = 'next-capture';
-    const pending = Promise.withResolvers<Response>();
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(Response.json({ status: 'current' }))
-      .mockReturnValueOnce(pending.promise);
-    vi.stubGlobal('fetch', fetch);
-    stubPlotFrame();
-    search.set('round', earlier.round);
-    const board = () => <VotesBoard base={BOARD} rounds={[earlier, later]} labels={CASES} />;
-    const { rerender } = renderInDom(board());
-    await screen.findByText(/The ranking uses the current voting evidence/);
-
-    search.set('round', later.round);
-    rerender(board());
-
-    expect(screen.getByRole('status').textContent).toMatch(/^Captured [^.]+ UTC\.$/);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls.map(([, options]) => options?.body)).toEqual([
-      JSON.stringify({ export_id: 'before' }),
-      JSON.stringify({ export_id: 'next-capture' }),
-    ]);
-    pending.resolve(Response.json({ status: 'stale' }));
-    await screen.findByText(/Votes, moderation or evaluation settings have changed/);
-  });
-
   test('does not query live freshness for a historical unit report', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     stubPlotFrame();
 
-    renderInDom(<VotesBoard base={BOARD} rounds={[await load()]} labels={CASES} />);
+    renderInDom(<VotesBoard base={BOARD} round={await load()} labels={CASES} />);
 
     expect(screen.queryByRole('status')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test('switches historical labels, coverage marks, and copy with the selected round', async () => {
+  test('draws the labels, coverage marks, and copy of the round it shows', async () => {
     const earlier = await load('report-early');
     const current = await load();
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
@@ -177,11 +143,10 @@ describe('VotesBoard', () => {
       }
       pro.decisive_votes = 13;
     }
-    const draw = () =>
-      renderToString(<VotesBoard base={BOARD} rounds={[earlier, current]} labels={CASES} />);
-    search.set('round', earlier.round);
+    const draw = (round: VotesRound) =>
+      renderToString(<VotesBoard base={BOARD} round={round} labels={CASES} />);
 
-    const historical = draw();
+    const historical = draw(earlier);
 
     const historicalRow = [...parse(historical).querySelectorAll('tbody tr')].find((row) =>
       row.querySelector(`a[href="${BOARD}acme-pro/"]`),
@@ -193,8 +158,7 @@ describe('VotesBoard', () => {
     expect(text(historical)).toContain('12 raw decisive votes');
     expect(text(historical)).toContain('floor is 0.5');
 
-    search.set('round', current.round);
-    const latest = draw();
+    const latest = draw(current);
 
     const currentRow = [...parse(latest).querySelectorAll('tbody tr')].find((row) =>
       row.querySelector(`a[href="${BOARD}acme-pro/"]`),
@@ -210,7 +174,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
     const user = userEvent.setup();
 
-    const { container } = renderInDom(<VotesBoard base={BOARD} rounds={[round]} labels={CASES} />);
+    const { container } = renderInDom(<VotesBoard base={BOARD} round={round} labels={CASES} />);
     const table = container.querySelector('table');
     const systems = () =>
       [...(table?.querySelectorAll('tbody a') ?? [])].map((link) =>
@@ -345,7 +309,7 @@ describe('VotesBoard', () => {
     systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
     renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
@@ -444,11 +408,7 @@ describe('VotesBoard', () => {
       stubPlotFrame();
       const user = userEvent.setup();
       renderInDom(
-        <VotesBoard
-          base={BOARD}
-          rounds={[{ round, results, systems, closed_at }]}
-          labels={CASES}
-        />,
+        <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
       );
       const select = screen.getByLabelText<HTMLSelectElement>('Category');
       const option = screen.getByRole<HTMLOptionElement>('option', { name: category });
@@ -521,7 +481,7 @@ describe('VotesBoard', () => {
       renderInDom(
         <VotesBoard
           base={BOARD}
-          rounds={[{ round, results, systems, closed_at }]}
+          round={{ round, results, systems, closed_at }}
           labels={boardLabels({ render })}
         />,
       );
@@ -541,7 +501,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>
@@ -575,7 +535,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
 
     const { container } = renderInDom(
-      <VotesBoard base={BOARD} rounds={[{ round, results, systems, closed_at }]} labels={CASES} />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
     const rows = await vi.waitFor(() => {
       const drawn = [...container.querySelectorAll('tbody tr')].filter((row) =>

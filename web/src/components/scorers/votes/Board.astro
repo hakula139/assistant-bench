@@ -4,20 +4,23 @@ import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
 import { note } from '@/components/site/PageParts';
 import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
-import { boardPath, configOf, votesRounds, type Family } from '@/lib/reports';
+import type { Report } from '@/lib/report';
+import { boardPath, configOf, votesRound, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
+  /** The closed round to show, or nothing before the first round closes. */
+  round: Report | undefined;
 }
 
-const { family } = Astro.props;
+const { family, round: report } = Astro.props;
 const config = configOf(family, 'votes');
-const rounds = votesRounds(family);
+const round = report && votesRound(report);
 const rows =
-  rounds.length === 0 ? unmeasuredRows(config.systems, config.reference, family.systemNames) : [];
+  round === undefined ? unmeasuredRows(config.systems, config.reference, family.systemNames) : [];
 ---
 
-{rounds.length === 0 ? (
+{round === undefined ? (
   <div class="flex flex-col gap-4">
     <p class={note}>No round has closed yet.</p>
     <Forest
@@ -30,5 +33,5 @@ const rows =
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard client:load base={boardPath(family)} rounds={rounds} labels={boardLabels(config)} />
+  <VotesBoard client:load base={boardPath(family)} round={round} labels={boardLabels(config)} />
 )}
