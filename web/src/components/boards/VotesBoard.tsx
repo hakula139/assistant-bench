@@ -63,7 +63,6 @@ interface VotesBoardProps {
   rounds: VotesRound[];
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
-  liveOrigin?: string;
 }
 
 const ALL = 'aggregate';
@@ -169,7 +168,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, rounds, labels, liveOrigin }: VotesBoardProps) {
+export function VotesBoard({ base, rounds, labels }: VotesBoardProps) {
   const latest = rounds[rounds.length - 1];
   const [roundName, setRound] = useSearchParam('round', latest.round);
   const [category, setCategory] = useSearchParam('category', null);
@@ -261,7 +260,6 @@ export function VotesBoard({ base, rounds, labels, liveOrigin }: VotesBoardProps
           key={results.provenance.export_id}
           exportId={results.provenance.export_id}
           capturedAt={results.provenance.captured_at}
-          liveOrigin={liveOrigin}
         />
       )}
       {results.method.human_weights.name === 'actor-proportional-cap' && (

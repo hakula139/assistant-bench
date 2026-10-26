@@ -1,57 +1,90 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
-import { queryFreshness, type Freshness } from '@/lib/freshness';
-
-vi.mock('@/lib/freshness', () => ({ queryFreshness: vi.fn() }));
 
 const capturedAt = '2026-01-02T12:00:00Z';
+const captured = 'Captured Jan 2, 2026, 12:00 PM UTC.';
+const unknown = 'Captured Jan 2, 2026, 12:00 PM UTC. Current voting evidence could not be checked.';
+
+function stubFetch(response: Promise<Response>) {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
 
 describe('SnapshotStatus', () => {
   afterEach(() => {
     cleanup();
-    vi.resetAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  test('renders only the capture time before hydration', () => {
+    const html = renderToString(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+
+    expect(html).toContain(`<time dateTime="${capturedAt}">`);
+    expect(html.replace(/<[^>]+>/g, '')).toBe(captured);
   });
 
   test.each([
     ['current', 'The ranking uses the current voting evidence.'],
     ['stale', 'Votes, moderation or evaluation settings have changed since this capture.'],
     ['unknown', 'Current voting evidence could not be checked.'],
-  ] as const)('shows the captured time and %s evidence status', async (status, message) => {
-    const pending = Promise.withResolvers<Freshness>();
-    vi.mocked(queryFreshness).mockReturnValue(pending.promise);
-    render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} liveOrigin={undefined} />);
-    const notice = screen.getByRole('status');
-    expect(notice.textContent).toContain('Current voting evidence could not be checked.');
+  ] as const)(
+    'checks the serving origin and then shows the %s verdict',
+    async (status, message) => {
+      const pending = Promise.withResolvers<Response>();
+      const fetch = stubFetch(pending.promise);
 
-    pending.resolve(status);
+      render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+      const notice = screen.getByRole('status');
+      expect(notice.textContent).toBe(captured);
 
-    await screen.findByText(message, { exact: false });
-    expect(notice.querySelector('time')?.dateTime).toBe(capturedAt);
-    expect(notice.textContent).toContain('UTC');
-    expect(notice.textContent).not.toMatch(/refresh|deadline/i);
-    expect(queryFreshness).toHaveBeenCalledExactlyOnceWith(
-      'capture',
-      undefined,
-      expect.any(AbortSignal),
-    );
+      pending.resolve(Response.json({ status }));
+
+      await screen.findByText(message, { exact: false });
+      expect(notice.textContent).toBe(`${captured} ${message}`);
+      expect(notice.querySelector('time')?.dateTime).toBe(capturedAt);
+      expect(fetch).toHaveBeenCalledOnce();
+      const [path, { signal, ...init } = {}] = fetch.mock.calls[0];
+      expect(path).toBe('/api/freshness');
+      expect(init).toEqual({
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ export_id: 'capture' }),
+      });
+      expect(signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+
+  test.each([
+    ['an unsupported status', () => Promise.resolve(Response.json({ status: 'pending' }))],
+    ['extra private fields', () => Promise.resolve(Response.json({ status: 'current', a: 1 }))],
+    ['invalid JSON', () => Promise.resolve(new Response('not JSON'))],
+    ['a static host without the API', () => Promise.resolve(new Response('', { status: 404 }))],
+    ['a network failure', () => Promise.reject(new TypeError('Network unavailable'))],
+  ])('reports that %s could not be checked', async (_, response) => {
+    stubFetch(response());
+
+    render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+
+    expect((await screen.findByText(/could not be checked/)).textContent).toBe(unknown);
   });
 
-  test('cancels its query when the captured round is removed', () => {
-    const pending = Promise.withResolvers<Freshness>();
-    vi.mocked(queryFreshness).mockReturnValue(pending.promise);
-    const { unmount } = render(
-      <SnapshotStatus exportId="capture" capturedAt={capturedAt} liveOrigin={undefined} />,
-    );
-    const [, , signal] = vi.mocked(queryFreshness).mock.calls[0];
-    expect(signal.aborted).toBe(false);
+  test('cancels its check when the captured round is removed', () => {
+    const pending = Promise.withResolvers<Response>();
+    const fetch = stubFetch(pending.promise);
+    const { unmount } = render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+    const signal = fetch.mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
 
     unmount();
 
-    expect(signal.aborted).toBe(true);
+    expect(signal?.aborted).toBe(true);
     expect(screen.queryByRole('status')).toBeNull();
-    pending.resolve('current');
+    pending.resolve(Response.json({ status: 'current' }));
   });
 });
