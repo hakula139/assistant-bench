@@ -6,7 +6,12 @@ import pytest
 from assistant_bench import task_assets
 
 
-SHARED_FILES = ('environment/Dockerfile', 'tests/test.sh', 'tests/verify_lib.py')
+SHARED_FILES = (
+    'environment/Dockerfile',
+    'solution/solve.sh',
+    'tests/test.sh',
+    'tests/verify.py',
+)
 
 
 def shared_tree(root: Path) -> tuple[Path, list[Path]]:

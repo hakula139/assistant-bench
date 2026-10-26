@@ -29,7 +29,7 @@ The hook runs the fast subset of the [verification](../../AGENTS.md#verification
 
 Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-The authored task applications, reference solutions, hidden tests and deliberately wrong variants follow the same formatting, spelling and strict typing policy as the host code. Behavioral defects remain executable and well typed.
+The authored task applications, reference solutions and hidden tests follow the same formatting, spelling and strict typing policy as the host code. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
 
 The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because its sandbox has neither, while [CI](ci.md#checks) runs those tools.
 

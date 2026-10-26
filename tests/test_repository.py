@@ -122,7 +122,6 @@ def test_coding_tasks_hold_no_symlinks() -> None:
 def test_coding_references_ship_their_changes_and_the_packages_they_change(
     task: Path,
 ) -> None:
-    """A changed package ships whole, as basedpyright reads a package from one path."""
     starter = task / 'environment' / 'app'
     solution = task / 'solution' / 'app'
     shipped = {
@@ -149,6 +148,12 @@ def test_coding_references_ship_their_changes_and_the_packages_they_change(
     assert shipped == changed | typed
 
 
+def test_coding_fixture_directories_match_tasks() -> None:
+    assert {path.name for path in CODING_FIXTURES.iterdir()} <= {
+        task.name for task in CODING_TASKS
+    }
+
+
 @pytest.mark.parametrize(
     ('task', 'candidate'),
     [
@@ -157,7 +162,10 @@ def test_coding_references_ship_their_changes_and_the_packages_they_change(
         for candidate in (
             'starter',
             'reference',
-            *(path.stem for path in sorted((CODING_FIXTURES / task.name).glob('*'))),
+            *(
+                path.stem
+                for path in sorted((CODING_FIXTURES / task.name).glob('*.patch'))
+            ),
         )
     ],
 )
@@ -167,7 +175,18 @@ def test_coding_verifiers_reward_only_the_reference(
     workspace = tmp_path / 'app'
     shutil.copytree(task / 'environment' / 'app', workspace)
     if candidate != 'starter':
-        shutil.copytree(task / 'solution' / 'app', workspace, dirs_exist_ok=True)
+        solve = (task / 'solution' / 'solve.sh').read_text()
+        solve = solve.replace(
+            '"${BASH_SOURCE[0]}"', quote(str(task / 'solution' / 'solve.sh'))
+        ).replace(' /app\n', f' {quote(str(workspace))}\n')
+        subprocess.run(
+            ['bash', '-s'],
+            input=solve,
+            cwd=workspace,
+            text=True,
+            check=True,
+            timeout=60,
+        )
     if candidate not in {'starter', 'reference'}:
         patch = CODING_FIXTURES / task.name / f'{candidate}.patch'
         subprocess.run(['git', 'init', '--quiet'], cwd=workspace, check=True)
@@ -209,6 +228,11 @@ def test_coding_verifiers_reward_only_the_reference(
     assert (logs / 'reward.txt').read_text() == f'{int(accepted)}\n', output
     verdict = 'PASS' if accepted else 'FAIL'
     assert f'{verdict} the hidden behavior tests pass' in output, output
+    if not accepted:
+        assert '\nFAIL: ' in output, output
+        assert not re.search(
+            r'\b(ImportError|ModuleNotFoundError|NameError|SyntaxError)\b', output
+        ), output
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:

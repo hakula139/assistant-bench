@@ -49,7 +49,7 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
 - **Style:** starters, references, hidden tests and verifier scripts share the root formatting, spelling and strict Python 3.14 typing policy. Each task adds a `[tool.basedpyright] executionEnvironments` entry whose `extraPaths` names its `solution/app`, so its hidden tests resolve the reference package.
 
-Application modules still run inside the hidden tests' process and can patch the runner or the checks they share it with, so a passing reward still needs review.
+Application modules run inside the hidden tests' process and can patch the runner or the checks they share it with, so a passing reward needs review.
 
 ## Scoring
 

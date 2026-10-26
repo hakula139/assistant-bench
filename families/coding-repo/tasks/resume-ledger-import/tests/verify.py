@@ -1,5 +1,7 @@
 """Run the workspace tests and the hidden behavior tests in separate scratch copies."""
 
+import importlib.machinery
+import inspect
 import os
 import pathlib
 import shutil
@@ -25,7 +27,12 @@ def check(ok: bool, label: str, detail: str) -> None:
 def copy_workspace() -> pathlib.Path:
     """Copy the workspace to a scratch directory without its caches and history."""
     dst = pathlib.Path(tempfile.mkdtemp()) / 'ws'
-    shutil.copytree(APP, dst, ignore=shutil.ignore_patterns('__pycache__', '.git'))
+    shutil.copytree(
+        APP,
+        dst,
+        symlinks=True,
+        ignore=shutil.ignore_patterns('__pycache__', '.git'),
+    )
     return dst
 
 
@@ -45,7 +52,17 @@ def copy_hidden() -> pathlib.Path:
 def run_unittest(ws: pathlib.Path) -> tuple[bool, str]:
     """Run unittest discovery under `ws/tests`, failing when no test ran."""
     proc = subprocess.run(
-        [sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.'],
+        [
+            sys.executable,
+            '-P',
+            '-m',
+            'unittest',
+            'discover',
+            '-s',
+            'tests',
+            '-t',
+            '.',
+        ],
         cwd=ws,
         capture_output=True,
         text=True,
@@ -64,12 +81,20 @@ def check_shadowing() -> None:
     without `__init__.py`, such as a virtual environment's `venv/`, is only a
     namespace portion, which loses to the standard library.
     """
-    shadowing = sorted(
-        path.name
-        for path in APP.iterdir()
-        if (path.suffix == '.py' or (path / '__init__.py').is_file())
-        and path.stem in sys.stdlib_module_names
-    )
+    modules: list[str] = []
+    for path in APP.iterdir():
+        if path.is_dir():
+            initialized = any(
+                (path / f'__init__{suffix}').is_file()
+                for suffix in importlib.machinery.all_suffixes()
+            )
+            module = path.name if initialized else None
+        else:
+            module = inspect.getmodulename(str(path))
+        if module in sys.stdlib_module_names:
+            modules.append(path.name)
+
+    shadowing = sorted(modules)
     check(
         not shadowing,
         'no top-level module shadows the standard library',
