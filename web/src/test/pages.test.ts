@@ -184,6 +184,7 @@ function testsFamily(): Family {
       aspect: 'writing',
       display_name: 'Smoke Tasks',
       systems: ['acme-pro', 'acme-small'],
+      categories: [],
       public: true,
     },
     [report],

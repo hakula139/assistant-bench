@@ -113,6 +113,7 @@ describe('methodSteps', () => {
       scorer: 'tests',
       display_name: 'Tasks',
       systems: [],
+      categories: [],
       public: true,
     };
 

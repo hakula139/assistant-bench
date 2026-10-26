@@ -1041,6 +1041,7 @@ describe('VoteApp', () => {
         capability: 'private-pair-capability',
         instruction: 'Compare these private answers.',
         checklist: [],
+        category: 'message',
         a: { render: 'text', text: 'Private answer A' },
         b: { render: 'text', text: 'Private answer B' },
       },
