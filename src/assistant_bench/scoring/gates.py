@@ -29,23 +29,41 @@ _LATIN_WORD = re.compile(r"[A-Za-z]+(?:['-][A-Za-z]+)*")
 
 
 class _HTMLText(HTMLParser):
+    """Collect visible prose, dropping the content of each element that closes.
+
+    An element left open at the end of the fragment drops nothing, so a stray raw
+    tag cannot hide the prose after it.
+    """
+
     def __init__(self) -> None:
         super().__init__()
-        self.text: list[str] = []
-        self._excluded: list[str] = []
+        self._open: list[tuple[int, str]] = []
+        self._closed: set[int] = set()
+        self._data: list[tuple[str, tuple[int, ...]]] = []
+        self._next_id = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {'script', 'style', 'code', 'pre'}:
-            self._excluded.append(tag)
+            self._open.append((self._next_id, tag))
+            self._next_id += 1
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self._excluded:
-            while self._excluded.pop() != tag:
-                pass
+        if tag not in {name for _, name in self._open}:
+            return
+        while self._open:
+            index, name = self._open.pop()
+            self._closed.add(index)
+            if name == tag:
+                return
 
     def handle_data(self, data: str) -> None:
-        if not self._excluded:
-            self.text.append(data)
+        self._data.append((data, tuple(index for index, _ in self._open)))
+
+    def visible(self) -> list[str]:
+        """Return the data that no closed element encloses."""
+        return [
+            data for data, indices in self._data if self._closed.isdisjoint(indices)
+        ]
 
 
 def failed_gates(
@@ -90,13 +108,15 @@ def detect_language(text: str) -> Language | None:
     """Return `zh` or `en`, whichever dominates the text's natural language.
 
     The text is parsed as CommonMark. Natural language includes inline text and
-    visible HTML prose, excluding inline code, HTML code/pre and script/style
-    content, attributes, markup comments, and URLs. Each fence tagged `markdown`,
-    `md`, `text`, or `txt` is parsed the same way. Other code blocks contribute only
-    their comments: those opened by `#` and whitespace or by `//` at a line's start
-    or after whitespace, `/* */` blocks, and triple-quoted strings, so code-only
-    outputs are judged by their comments. Han characters count against Latin
-    words, and a tie, including text with neither, returns `None`.
+    visible HTML prose, excluding inline code, closed HTML code/pre and
+    script/style elements, attributes, markup comments, and URLs. An element left
+    open contributes its content, so a stray raw tag hides no later prose. Each
+    fence tagged `markdown`, `md`, `text`, or `txt` is parsed the same way. Other
+    code blocks contribute only their comments: those opened by `#` and whitespace
+    or by `//` at a line's start or after whitespace, `/* */` blocks, and
+    triple-quoted strings, so code-only outputs are judged by their comments. Han
+    characters count against Latin words, and a tie, including text with neither,
+    returns `None`.
     """
     natural = _URL.sub('', '\n'.join(_natural_language(text)))
 
@@ -131,7 +151,7 @@ def _natural_language(markdown: str) -> Iterator[str]:
                 parser.handle_data(''.join(match.groups('')))
 
     parser.close()
-    yield from parser.text
+    yield from parser.visible()
 
 
 def traditional_characters(text: str, source: str) -> list[str]:

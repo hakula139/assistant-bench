@@ -294,13 +294,29 @@ class TestDetectLanguage:
     def test_reads_visible_html_prose(self, text: str, language: str) -> None:
         assert detect_language(text) == language
 
+    @pytest.mark.parametrize(
+        'markup',
+        [
+            'Use the <code>x flag.',
+            'Note <pre> here.',
+            'Avoid a <script> tag in replies.',
+            'Avoid a <style> tag in replies.',
+            '<pre>\nEnglish identifiers\n',
+        ],
+        ids=['code', 'pre', 'script', 'style', 'block'],
+    )
+    def test_reads_prose_after_an_unclosed_excluded_element(self, markup: str) -> None:
+        zh = '构建已经通过，部署前还需要检查服务状态和配置文件。'
+
+        assert detect_language(f'{markup}\n\n{zh}') == 'zh'
+
     def test_does_not_reuse_html_state_across_outputs(self) -> None:
-        hidden = '<code>English words inside an unclosed code element'
-        visible = 'English words in a separate output'
+        opened = '<code>English words inside an element left open'
+        closing = 'English words in a separate output</code>'
 
-        languages = [detect_language(hidden), detect_language(visible)]
+        languages = [detect_language(opened), detect_language(closing)]
 
-        assert languages == [None, 'en']
+        assert languages == ['en', 'en']
 
     def test_reads_english_prose_quoting_chinese(self) -> None:
         text = 'The error message 文件不存在 means the file does not exist yet.'
