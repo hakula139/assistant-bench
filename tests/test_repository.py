@@ -13,7 +13,7 @@ import pytest
 import tomli_w
 from typer.testing import CliRunner
 
-from assistant_bench import jobs
+from assistant_bench import jobs, task_assets
 from assistant_bench.cli import app
 from assistant_bench.families import Case, case_task, load_cases, load_family
 from assistant_bench.paths import REPO_ROOT
@@ -99,19 +99,22 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     jobs.check_tasks(family, tasks)
 
 
-@pytest.mark.parametrize(
-    'shared', ['environment/Dockerfile', 'tests/test.sh', 'tests/verify_lib.py']
-)
-def test_coding_tasks_share_their_common_files(shared: str) -> None:
+@pytest.mark.parametrize('shared', task_assets.SHARED_FILES)
+def test_coding_tasks_copy_their_shared_files(shared: str) -> None:
     family = REPO_ROOT / 'families' / 'coding-repo'
     canonical = (family / 'shared' / shared).read_bytes()
     tasks = sorted((family / 'tasks').glob('*/task.toml'))
 
     for metadata in tasks:
-        artifact = metadata.parent / shared
+        copy = metadata.parent / shared
 
-        assert not artifact.is_symlink(), f'`{artifact}` must be a regular copy'
-        assert artifact.read_bytes() == canonical, f'`{artifact}` needs regeneration'
+        assert copy.read_bytes() == canonical, f'`{copy}` needs regeneration'
+
+
+def test_coding_tasks_hold_no_symlinks() -> None:
+    tasks = REPO_ROOT / 'families' / 'coding-repo' / 'tasks'
+
+    assert [path for path in tasks.rglob('*') if path.is_symlink()] == []
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:

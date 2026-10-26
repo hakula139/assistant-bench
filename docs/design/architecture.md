@@ -8,6 +8,7 @@ assistant-bench limits its code to the parts Harbor lacks: resolving systems, re
 src/assistant_bench/
 ├── cli.py                                  # The Typer `bench` command
 ├── ci.py                                   # Coding task selection and checks for Harbor Smoke
+├── task_assets.py                          # Regeneration of each coding task's shared files
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
 ├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
 ├── report.py                               # The report schema, one results variant per scorer, and closing a round
@@ -89,7 +90,7 @@ src/assistant_bench_arena/
 
 Imports point downward through these layers, so a module never imports one above it:
 
-1. `cli`
+1. `cli`, `ci`, and `task_assets`
 2. `arena.commands`, `revisions`, and `report`
 3. `arena.preparation` and `jobs`
 4. The remaining offline `arena` modules
@@ -102,7 +103,7 @@ Imports point downward through these layers, so a module never imports one above
 
 ## Families and Scorers
 
-A family directory holds only data: `family.toml` and either `cases.toml` or `tasks/`, with `load_family` inferring the source from whichever exists. The source decides how trials run and what grades them:
+A family directory holds `family.toml` and either `cases.toml` or `tasks/`, with `load_family` inferring the source from whichever exists. The coding family also holds `shared/`, the authoring source for the files that `task_assets` copies into every task. The source decides how trials run and what grades them:
 
 | Source          | Agent                  | Verifier | Each output holds                                           |
 | --------------- | ---------------------- | -------- | ----------------------------------------------------------- |
