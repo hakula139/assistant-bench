@@ -3,6 +3,7 @@
 import re
 from collections.abc import Iterator
 from html.parser import HTMLParser
+from itertools import count
 
 from markdown_it import MarkdownIt
 from zhon import hanzi
@@ -26,29 +27,32 @@ _LINE_COMMENT = re.compile(r'(?:^|\s)(?:#(?=\s)|//)(.*)$', re.MULTILINE)
 _BLOCK_COMMENT = re.compile(r'/\*(.*?)\*/|"""(.*?)"""|\'\'\'(.*?)\'\'\'', re.DOTALL)
 _HAN = re.compile(f'[{hanzi.characters}]')
 _LATIN_WORD = re.compile(r"[A-Za-z]+(?:['-][A-Za-z]+)*")
+# CommonMark's first HTML block starts with one of these tags, and ends at any of
+# their closing tags or, without one, at the end of the document.
+_RAW_BLOCK = re.compile(
+    r' {0,3}<(?:pre|script|style|textarea)(?=[\s>]|$)', re.IGNORECASE
+)
+_RAW_BLOCK_END = re.compile(r'</(?:pre|script|style|textarea)>', re.IGNORECASE)
 
 
-class _HTMLText(HTMLParser):
-    """Collect visible prose, dropping the content of each element that closes.
-
-    An element left open at the end of the fragment drops nothing, so a stray raw
-    tag cannot hide the prose after it.
-    """
-
+class _Prose:
     def __init__(self) -> None:
-        super().__init__()
         self._open: list[tuple[int, str]] = []
+        self._ids = count()
         self._closed: set[int] = set()
-        self._data: list[tuple[str, tuple[int, ...]]] = []
-        self._next_id = 0
+        self._data: list[tuple[str, int | None]] = []
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+    def feed(self, markup: str) -> None:
+        parser = _Fragment(self)
+        parser.feed(markup)
+        parser.close()
+
+    def start(self, tag: str) -> None:
         if tag in {'script', 'style', 'code', 'pre'}:
-            self._open.append((self._next_id, tag))
-            self._next_id += 1
+            self._open.append((next(self._ids), tag))
 
-    def handle_endtag(self, tag: str) -> None:
-        if tag not in {name for _, name in self._open}:
+    def end(self, tag: str) -> None:
+        if not any(name == tag for _, name in self._open):
             return
         while self._open:
             index, name = self._open.pop()
@@ -56,14 +60,26 @@ class _HTMLText(HTMLParser):
             if name == tag:
                 return
 
-    def handle_data(self, data: str) -> None:
-        self._data.append((data, tuple(index for index, _ in self._open)))
+    def data(self, text: str) -> None:
+        self._data.append((text, self._open[-1][0] if self._open else None))
 
     def visible(self) -> list[str]:
-        """Return the data that no closed element encloses."""
-        return [
-            data for data, indices in self._data if self._closed.isdisjoint(indices)
-        ]
+        return [text for text, index in self._data if index not in self._closed]
+
+
+class _Fragment(HTMLParser):
+    def __init__(self, prose: _Prose) -> None:
+        super().__init__()
+        self._prose = prose
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._prose.start(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        self._prose.end(tag)
+
+    def handle_data(self, data: str) -> None:
+        self._prose.data(data)
 
 
 def failed_gates(
@@ -128,30 +144,39 @@ def detect_language(text: str) -> Language | None:
 
 
 def _natural_language(markdown: str) -> Iterator[str]:
-    parser = _HTMLText()
+    prose = _Prose()
+    _collect(prose, markdown)
+    yield from prose.visible()
+
+
+def _collect(prose: _Prose, markdown: str) -> None:
     for token in _MARKDOWN.parse(markdown):
         if token.type == 'inline':
             for child in token.children or []:
                 if child.type == 'html_inline':
-                    parser.feed(child.content)
+                    prose.feed(child.content)
                 elif child.type == 'text':
-                    parser.handle_data(child.content)
+                    prose.data(child.content)
         elif token.type == 'html_block':
-            parser.feed(token.content)
+            if _RAW_BLOCK.match(token.content) and not _RAW_BLOCK_END.search(
+                token.content
+            ):
+                line, _, rest = token.content.partition('\n')
+                prose.feed(line)
+                _collect(prose, rest)
+            else:
+                prose.feed(token.content)
         elif (
             token.type == 'fence'
             and (token.info.split() or [''])[0].lower() in _PROSE_FENCES
         ):
             for text in _natural_language(token.content):
-                parser.handle_data(text)
+                prose.data(text)
         elif token.type in ('fence', 'code_block'):
             for match in _LINE_COMMENT.finditer(token.content):
-                parser.handle_data(match.group(1))
+                prose.data(match.group(1))
             for match in _BLOCK_COMMENT.finditer(token.content):
-                parser.handle_data(''.join(match.groups('')))
-
-    parser.close()
-    yield from parser.visible()
+                prose.data(''.join(match.groups('')))
 
 
 def traditional_characters(text: str, source: str) -> list[str]:
