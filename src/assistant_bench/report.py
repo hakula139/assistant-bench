@@ -1,4 +1,4 @@
-"""The report schema, with one results variant per scorer, and the writer of rounds.
+"""The report schema and inputs, the fixed votes method, and the writer of rounds.
 
 A report holds aggregates under public system names and nothing else: no case,
 instruction, output text, route, or request ID.
@@ -164,7 +164,7 @@ class UnrecordedProvenance(_Model):
     status: Literal['unrecorded']
 
 
-class SnapshotProvenance(_Model):
+class LedgerProvenance(_Model):
     schema_version: Literal[1]
     export_id: Annotated[str, Field(min_length=1)]
     export_digest: Annotated[str, Field(min_length=1)]
@@ -178,9 +178,6 @@ class SnapshotProvenance(_Model):
     publication_id: Annotated[str, Field(min_length=1)]
     policy_id: Annotated[str, Field(min_length=1)]
     sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
-
-
-class LedgerProvenance(SnapshotProvenance):
     status: Literal['ledger']
     weighted_evidence_digest: Annotated[str, Field(min_length=1)]
     fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
@@ -745,9 +742,9 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     if not comparisons:
         raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
 
-    board = ranking.rate_components(comparisons, analysis.systems, analysis.reference)[
-        0
-    ]
+    board, *_ = ranking.rate_components(
+        comparisons, analysis.systems, analysis.reference
+    )
     ratings = board.ratings
     ranked = set(ratings.systems)
     connected = [row for row in votes if set(row.systems) <= ranked]

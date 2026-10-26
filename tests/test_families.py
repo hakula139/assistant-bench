@@ -4,7 +4,7 @@ from typing import TypedDict
 
 import pytest
 import tomli_w
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from assistant_bench import families
 from assistant_bench.families import (
@@ -83,6 +83,14 @@ def write_task(
         (directory / 'instruction.md').write_text(instruction)
 
 
+def accepts(adapter: TypeAdapter[str], value: str) -> bool:
+    try:
+        adapter.validate_python(value)
+    except ValidationError:
+        return False
+    return True
+
+
 class TestVoteTypes:
     @pytest.mark.parametrize(
         ('offline', 'contract'),
@@ -100,6 +108,41 @@ class TestVoteTypes:
         contract_schema = contract.json_schema()
 
         assert offline_schema == contract_schema
+
+    @pytest.mark.parametrize(
+        ('name', 'valid'),
+        [
+            ('a', True),
+            ('9x', True),
+            ('a-', True),
+            ('a' * 256, True),
+            ('-a', False),
+            ('A', False),
+            ('a\n', False),
+            ('a' * 257, False),
+        ],
+        ids=[
+            'letter',
+            'leading-digit',
+            'trailing-hyphen',
+            'longest',
+            'leading-hyphen',
+            'uppercase',
+            'final-newline',
+            'too-long',
+        ],
+    )
+    def test_family_names_validate_like_the_voting_contract(
+        self, name: str, valid: bool
+    ) -> None:
+        adapters = {
+            'offline': TypeAdapter(families.FamilyName),
+            'contract': TypeAdapter(models.FamilyName),
+        }
+
+        accepted = {side: accepts(adapter, name) for side, adapter in adapters.items()}
+
+        assert accepted == {'offline': valid, 'contract': valid}
 
 
 class TestLoadFamily:
