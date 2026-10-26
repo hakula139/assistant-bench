@@ -653,7 +653,7 @@ class TestRun:
         assert (result.exit_code, result.stdout, result.stderr) == (
             1,
             '',
-            'Family `f`: `family.toml`: `systems` repeats `opus-5.5-high`.\n',
+            'Family `f`: `family.toml`: `systems`: repeats `opus-5.5-high`.\n',
         )
         assert submitted == []
 

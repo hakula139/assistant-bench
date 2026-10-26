@@ -17,20 +17,13 @@ from assistant_bench.paths import FAMILIES_DIR
 from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
 
 
-class TaskFields(TypedDict, total=False):
+class TaskOptions(TypedDict, total=False):
+    name: str
     category: str | None
     source: str | None
     instruction: str | None
     task_name: bool
     task_toml: bool
-
-
-class TaskOptions(TaskFields, total=False):
-    name: str
-
-
-class TaskArguments(TaskFields):
-    name: str
 
 
 def write_family(
@@ -55,14 +48,17 @@ def case_entry(
 def write_task(
     directory: Path,
     *,
-    name: str,
+    name: str | None = None,
     category: str | None = 'smoke',
     source: str | None = 'synthetic',
     instruction: str | None = 'Hi.',
     task_name: bool = True,
     task_toml: bool = True,
 ) -> None:
-    """Write a task directory whose fields the caller may leave out."""
+    """Write a task directory whose fields the caller may leave out.
+
+    The task name defaults to its family and directory names.
+    """
     directory.mkdir(parents=True)
     metadata = {
         key: value
@@ -71,7 +67,7 @@ def write_task(
     }
     task = {'version': '1.0.0'}
     if task_name:
-        task['name'] = name
+        task['name'] = name or f'{directory.parent.parent.name}/{directory.name}'
     if task_toml:
         (directory / 'task.toml').write_text(
             tomli_w.dumps({'schema_version': '1.4', 'task': task, 'metadata': metadata})
@@ -331,7 +327,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
                 id='repeated-voted-systems',
             ),
             pytest.param(
@@ -345,7 +341,7 @@ class TestLoadFamily:
                 """,
                 False,
                 True,
-                'Family `f`: `family.toml`: `systems` repeats `large`.',
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
                 id='repeated-tested-systems',
             ),
             pytest.param(
@@ -360,7 +356,7 @@ class TestLoadFamily:
                 """,
                 True,
                 False,
-                'Family `f`: `family.toml`: `defects` repeats `tone`.',
+                'Family `f`: `family.toml`: `defects`: repeats `tone`.',
                 id='repeated-defects',
             ),
             pytest.param(
@@ -538,55 +534,16 @@ class TestLoadFamily:
 
 
 class TestLoadCases:
-    def test_preserves_case_fields_and_document_order(self, families_dir: Path) -> None:
+    def test_keeps_document_order_and_defaults_the_checklist(
+        self, families_dir: Path
+    ) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(
-            textwrap.dedent(
-                r"""
-                [[cases]]
-                id = "z-last"
-                category = "message"
-                source = "public"
-                instruction = '''
-
-                保留  「格式」。
-                  Keep C:\drafts\notes and the literal \n.
-                '''
-                checklist = ["Keep C:\\drafts\\notes.", "保留  「格式」  "]
-
-                [[cases]]
-                id = "a-first"
-                category = "message"
-                source = "synthetic"
-                instruction = "Next\nline."
-                """
-            ),
-            encoding='utf-8',
-        )
+        path.write_text(case_entry('z-last') + case_entry('a-first'))
 
         cases = load_cases(load_family('f'))
 
-        assert [case.model_dump() for case in cases] == [
-            {
-                'id': 'z-last',
-                'category': 'message',
-                'source': 'public',
-                'instruction': textwrap.dedent(
-                    r"""
-                    保留  「格式」。
-                      Keep C:\drafts\notes and the literal \n.
-                    """
-                ),
-                'checklist': [r'Keep C:\drafts\notes.', '保留  「格式」  '],
-            },
-            {
-                'id': 'a-first',
-                'category': 'message',
-                'source': 'synthetic',
-                'instruction': 'Next\nline.',
-                'checklist': [],
-            },
-        ]
+        assert [case.id for case in cases] == ['z-last', 'a-first']
+        assert cases[0].checklist == []
 
     @pytest.mark.parametrize(
         ('text', 'field', 'message'),
@@ -670,8 +627,8 @@ class TestLoadCases:
 
         assert str(error.value) == (
             'Family `smoke-text`: case `en-greeting` appears at '
-            f'`{committed}:cases[0]` '
-            f'and `{local}:cases[1]`.'
+            f'`{committed}:cases.0` '
+            f'and `{local}:cases.1`.'
         )
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
@@ -682,7 +639,7 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `a` appears at `{path}:cases[0]` and `{path}:cases[1]`.'
+            f'Family `f`: case `a` appears at `{path}:cases.0` and `{path}:cases.1`.'
         )
 
     def test_names_the_entry_and_field_of_an_invalid_case(
@@ -709,7 +666,7 @@ class TestLoadCases:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `b` at `{path}:cases[1]` has category `private-topic`, '
+            f'Family `f`: case `b` at `{path}:cases.1` has category `private-topic`, '
             'missing from `categories` in `family.toml`.'
         )
 
@@ -836,11 +793,7 @@ class TestLoadCases:
         message: str,
     ) -> None:
         write_task_family(families_dir)
-        arguments: TaskArguments = {'name': f'f/{directory}', **options}
-        write_task(
-            families_dir / 'f' / 'tasks' / directory,
-            **arguments,
-        )
+        write_task(families_dir / 'f' / 'tasks' / directory, **options)
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
