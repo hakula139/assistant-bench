@@ -302,13 +302,13 @@ id = "timeout-defaults"
 category = "docs"
 source = "synthetic"
 instruction = '''
-Write the "Timeouts" section of the README for `httpkit`, a Python HTTP client library. You have two sources: last year's design doc and the current code. The design doc predates the code, so where the two disagree, document what the code does. After the section, add a line containing only `---`, then a short list for the reviewer naming each disagreement you resolved.
+Draft the "Timeouts" section of the README for `httpkit`, a Python HTTP client library. Base it on the two sources below: an excerpt from last year's design document and the current implementation. Because the design document was written before the code, treat the code as authoritative wherever the two conflict. After the README section, include a line containing only `---` and then a brief list for the reviewer identifying each conflict you resolved.
 
-Design doc excerpt:
+Excerpt from last year's design document:
 
-> Every request has a 5-second connect timeout and a 30-second read timeout. There is no overall deadline, so a slow but steady download never times out. Timeouts count as transient errors and are retried like connection resets. Operators can raise the connect timeout with the `HTTPKIT_CONNECT_TIMEOUT` environment variable.
+> By default, requests apply a 5-second connect timeout and a 30-second read timeout, with no overall deadline; a download that makes steady progress never times out, even if it is slow. We treat timeouts as transient failures and retry them the same way we retry connection resets. Operators can increase the connect timeout by setting the `HTTPKIT_CONNECT_TIMEOUT` environment variable.
 
-Current code:
+Current implementation:
 
 ```python
 @dataclass(frozen=True)
@@ -332,7 +332,7 @@ def default_timeouts() -> Timeouts:
     return Timeouts().scaled(factor)
 ```
 
-Every request uses `default_timeouts()` unless the caller passes its own `Timeouts`. `total` is a deadline for the whole request, including reading the body.
+Unless a caller supplies its own `Timeouts` instance, each request gets its configuration from `default_timeouts()`. The `total` field sets a deadline for the entire request, including reading the body.
 '''
 checklist = [
   "Documents the code's defaults: a 3 s connect timeout, a 30 s read timeout, and a 60 s deadline for the whole request",
@@ -346,25 +346,23 @@ id = "queue-adr"
 category = "docs"
 source = "synthetic"
 instruction = '''
-Write an architecture decision record (ADR) of at most 400 words with the sections Context, Decision, Consequences, and Alternatives considered. Base it only on the team thread below, and record the conclusions the discussion finally reached.
-
-Thread in #platform, 3 to 7 October:
+Draft an architecture decision record (ADR) based strictly on the `#platform` discussion below from 3 to 7 October. Keep the ADR to at most 400 words and organize it into four sections: Context, Decision, Consequences, and Alternatives considered.
 
 ```text
-Priya: We need a job queue for order emails. Proposal: Redis lists, since we already run Redis for caching.
-Marco: +1 to Redis. Simple, and it can handle far more than our 300 jobs/s peak.
-Lena: One problem. The email job must be enqueued only if the order transaction commits. With Redis we'd enqueue after the commit and lose jobs whenever the process dies in between, which happened twice last quarter with the webhook sender.
-Sam: What about SQS? Managed, no ops.
-Priya: SQS has the same commit problem, and we can't run it in local dev without an emulator.
-Lena: Postgres with a jobs table and `SELECT ... FOR UPDATE SKIP LOCKED` solves it, because the job row is inserted in the same transaction as the order.
-Marco: Postgres can do something like 50,000 jobs/s, so throughput is a non-issue.
-Lena: Careful. I benchmarked it on the staging database yesterday: about 4,000 jobs/s with 8 workers. Still 13x our peak.
-Marco: Fair, I was quoting a blog post. 4,000 it is.
-Sam: So we drop Redis entirely?
-Priya: No, Redis stays for caching. It just won't carry jobs.
+Priya: We need a queue to handle outgoing order emails. I propose using Redis lists since we already run Redis for caching.
+Marco: +1 for Redis. It's straightforward and easily clears our 300 jobs/s peak.
+Lena: Hold on. We only want to enqueue an email job when the order transaction actually commits. If we push to Redis after the commit and the process dies between those steps, we lose jobs. We hit that exact failure twice last quarter with the webhook sender.
+Sam: Could we use SQS instead? It's managed, so no ops overhead.
+Priya: SQS has the same commit problem, plus running it in local dev requires an emulator.
+Lena: A Postgres jobs table using `SELECT ... FOR UPDATE SKIP LOCKED` solves this because the job row is inserted inside the same transaction as the order.
+Marco: And Postgres can handle something like 50,000 jobs/s, so throughput won't be an issue.
+Lena: Careful with that number. I benchmarked it on the staging database yesterday and got about 4,000 jobs/s with 8 workers. Still 13x our peak.
+Marco: Fair point, I was repeating a number from a blog post. We'll go with 4,000.
+Sam: Does this mean we're dropping Redis altogether?
+Priya: No, Redis stays for caching. We just won't use it to carry jobs.
 Priya: Decision: Postgres jobs table with SKIP LOCKED. Lena owns the migration.
-Sam: How long do we keep completed jobs?
-Priya: Undecided. Let's revisit after a month of data.
+Sam: How long are we keeping completed jobs?
+Priya: Undecided. Let's revisit that once we have a month of data.
 ```
 '''
 checklist = [
@@ -380,16 +378,18 @@ id = "rust-ring-buffer"
 category = "docs"
 source = "synthetic"
 instruction = '''
-Add comments to the Rust code below only where a future maintainer needs them. Return the complete code in a single fenced code block and nothing else.
+Document the Rust implementation below for future maintainers, adding comments only where they are needed. Do not modify the code itself, and return nothing but the complete listing inside a single fenced code block.
 
-Leave the code unchanged. The listing is the type's complete implementation except `push` and the `unsafe impl Send` and `unsafe impl Sync` blocks, which live in another file and are correct. The context comes from the design doc, and some of it may be wrong. Where the doc disagrees with the code, comment on what the code actually does without repeating the doc's claim. If you spot a defect, describe it in a `// TODO:` comment without fixing it.
+Apart from `push` and the `unsafe impl Send` and `unsafe impl Sync` blocks, which are implemented correctly in another file, this listing is the complete implementation of `Ring<T>`. If you find a bug in the implementation, note it in a `// TODO:` comment instead of changing the code.
 
-Context:
+The notes below are taken from the design doc and may contain errors. Where the design doc conflicts with the code, document what the code actually does without mentioning the doc's claim.
 
-- `with_capacity(n)` creates a buffer that holds exactly `n` items.
-- The buffer leaves one slot empty so `head == tail` always means empty and never full.
-- The slot count is a power of two so indices can wrap with a bitmask.
-- `Ordering::Acquire` on the tail load pairs with the producer's `Release` store, so the consumer sees a slot's data once it sees the updated tail.
+Design doc notes:
+
+- `with_capacity(n)` constructs a ring buffer that holds exactly `n` items.
+- One slot is always kept empty so that `head == tail` indicates an empty buffer and never a full one.
+- Because the slot count is a power of two, index wrapping uses a bitmask.
+- Loading `tail` with `Ordering::Acquire` pairs with the producer's `Release` store, ensuring the consumer sees the data in a slot once it observes the updated `tail`.
 
 ```rust
 pub struct Ring<T> {
@@ -430,17 +430,17 @@ id = "bash-backup"
 category = "docs"
 source = "synthetic"
 instruction = '''
-Add comments to the Bash script below only where a future maintainer needs them. Return the complete script in a single fenced code block and nothing else.
+Document the production Bash script below by adding comments only where a future maintainer needs them. Because this script is live in production, leave every command untouched and record any defects you find as `# TODO:` comments rather than changing the code. Output only the complete script in a single fenced code block, with no surrounding text.
 
-The script runs in production, so leave every command unchanged. The context comes from the original author's notes, and some of them may be wrong. Where a note disagrees with what the script does, comment on what the script actually does without repeating the note. If you spot a defect, describe it in a `# TODO:` comment without fixing it.
+The handoff notes below come from the script's original author and may contain mistakes. Wherever a note conflicts with the code, document what the script actually does without repeating the mistaken claim.
 
-Context:
+Author's notes:
 
-- `set -o pipefail` is there so that a `zstd` failure stops the script.
-- `flock -n` makes a second invocation wait until the earlier backup finishes, which happens when the upload is slow.
-- When the lock is busy, the script must exit with status 0 because the scheduler alerts on any non-zero exit code.
-- `--one-file-system` keeps `tar` from descending into network mounts under `/home`.
-- The archive is written under a temporary name and renamed so the sync job, which uploads every `home-*.tar.zst` file, never uploads a partial archive.
+- Enabling `set -o pipefail` ensures the script aborts if `zstd` fails during compression.
+- If an earlier backup is still running because of a slow upload, `flock -n` makes the new invocation wait until the previous run finishes.
+- Because the scheduler triggers an alert on any non-zero exit status, the script must exit with `0` when the lock is held.
+- Passing `--one-file-system` prevents `tar` from crossing into network filesystems mounted under `/home`.
+- Writing the archive to a temporary filename first and renaming it afterward keeps the sync job, which uploads any file matching `home-*.tar.zst`, from transferring an incomplete backup.
 
 ```bash
 #!/usr/bin/env bash
@@ -468,9 +468,9 @@ id = "cache-rollout-results"
 category = "docs"
 source = "synthetic"
 instruction = '''
-Write the "Results" section of a design doc that proposes a read-through cache in front of the pricing service. Its readers are the staff engineers who will approve or reject the rollout. Keep it under 200 words, and use a table if it helps. Base it only on the benchmark data and notes below.
+A design doc proposes placing a read-through cache in front of the pricing service, and staff engineers will review it to approve or reject the rollout. Using only the benchmark data and engineer's notes below, write the doc's "Results" section in under 200 words (you may include a table if helpful).
 
-Benchmark: five 10-minute runs per configuration on the same staging host, replaying the same recorded production traffic.
+The benchmark replayed the same recorded production traffic on a single staging host, running five 10-minute runs for each configuration.
 
 | Metric | Without cache (median of 5) | With cache (median of 5) |
 | --- | --- | --- |
@@ -479,11 +479,11 @@ Benchmark: five 10-minute runs per configuration on the same staging host, repla
 | Throughput | 1,850 req/s | 1,910 req/s |
 | Cache hit rate | n/a | 71% |
 
-Notes from the engineer who ran the benchmark:
+Benchmarking engineer's notes:
 
-- Throughput varied by up to ±80 req/s between runs of the same configuration.
-- Cache misses now make an extra network hop to the cache before reaching the pricing service, which is the likely reason p99 got worse. No experiment has confirmed this.
-- Draft summary line: "The cache makes the pricing service about 30% faster across the board."
+- Within a single configuration, run-to-run throughput varied by as much as ±80 req/s.
+- Because a cache miss still routes through the cache before hitting the pricing service, that extra network hop is the probable cause of the p99 increase, though this has not been experimentally confirmed.
+- Draft takeaway: "The cache makes the pricing service about 30% faster across the board."
 '''
 checklist = [
   "Reports the p50 improvement (42 to 29 ms) and the p99 regression (180 to 240 ms) with equal prominence",
@@ -541,7 +541,7 @@ id = "write-durability"
 category = "docs"
 source = "synthetic"
 instruction = '''
-A backend developer asks in chat: "Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs.
+In a team chat, a backend engineer who is comfortable with system calls but unfamiliar with storage internals asks: "Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?" Write a response of up to three short paragraphs that clears up any flawed assumptions in their question, explains what the log needs to do on Linux to keep records safe across a power loss, and covers the cost of doing so.
 '''
 checklist = [
   "Corrects the premise: a successful `write()` means the kernel holds the data in its page cache, which a power cut can still lose",
@@ -556,9 +556,9 @@ id = "zero-major-semver"
 category = "docs"
 source = "synthetic"
 instruction = '''
-A pull request for `tomlfmt`, a Rust crate at version 0.9.3, renames the public function `format_str` to `format_document`. Its author plans to release it as 0.9.4, reasoning that "SemVer allows breaking changes before 1.0". The project has never written down how it numbers pre-1.0 releases, so before anyone decides, write the "Versioning" section of the crate's `CONTRIBUTING.md` that settles it, using this pull request as the worked example. Keep the section under 200 words.
+`tomlfmt` is a Rust crate currently at version 0.9.3, and most downstream crates depend on it using Cargo's default requirement syntax, such as `tomlfmt = "0.9.3"`. Until now, the project has never documented how it numbers pre-1.0 releases.
 
-Most downstream crates depend on `tomlfmt` with Cargo's default requirement syntax, such as `tomlfmt = "0.9.3"`.
+An open pull request renames the public function `format_str` to `format_document`, and its author wants to publish the change as 0.9.4 on the grounds that "SemVer allows breaking changes before 1.0". Write the "Versioning" section for `CONTRIBUTING.md` to settle the project's policy, using this pull request as the worked example, in under 200 words.
 '''
 checklist = [
   "Agrees that SemVer itself sets no compatibility rules for 0.y.z releases, and explains why the crate's version numbers still matter to Cargo",
@@ -573,7 +573,7 @@ id = "changelog-from-prs"
 category = "message"
 source = "synthetic"
 instruction = '''
-Write the user-facing release notes for version 3.8 of `pkgsync`, a Python command-line tool that syncs package mirrors, for the project's GitHub release page. Use the sections "New", "Fixed", and "Breaking changes", omitting any that would be empty, and keep the notes under 250 words. Base them only on the pull requests merged since 3.7, listed below oldest first, and leave out changes users cannot observe.
+`pkgsync` is a Python CLI tool for synchronizing package mirrors, and version 3.8 is ready to ship. Draft the user-facing release notes for its GitHub release page under the sections "New", "Fixed", and "Breaking changes", dropping any section that has no entries. Stay under 250 words, rely solely on the pull requests merged since 3.7 (listed below from oldest to newest), and omit changes that are not visible to users.
 
 - #401 ci: cache pip downloads between workflow runs
 - #404 feat: add `--exclude <glob>` to skip matching paths during a sync
@@ -635,28 +635,34 @@ id = "outage-timeline"
 category = "message"
 source = "synthetic"
 instruction = '''
-Write the incident summary you will post in the engineering channel after yesterday's checkout outage. Give a timeline in UTC, then a short paragraph on what is known and what is not. Base it only on the three exports below. Their clocks are accurate, but they use different time zones. Where the sources disagree, point out the disagreement.
+Draft an incident summary for the engineering channel covering yesterday's checkout outage. Provide a timeline in UTC followed by a short paragraph summarizing what is known and what is not. Rely only on the three exports below; every system's clock is accurate, though the exports are recorded in different time zones. Call out any points where the sources conflict.
 
 PagerDuty export (UTC):
 
-- 2026-10-14 16:44 Alert triggered: checkout error rate above 5%
-- 2026-10-14 16:46 Acknowledged by Dana
-- 2026-10-14 17:20 Alert resolved
+```text
+2026-10-14 16:44 Alert triggered: checkout error rate above 5%
+2026-10-14 16:46 Acknowledged by Dana
+2026-10-14 17:20 Alert resolved
+```
 
 Deploy log (UTC):
 
-- 2026-10-14 16:38 Deploy of checkout v412 completed
-- 2026-10-14 17:03 Rollback to v411 started
-- 2026-10-14 17:12 Rollback to v411 completed
+```text
+2026-10-14 16:38 Deploy of checkout v412 completed
+2026-10-14 17:03 Rollback to v411 started
+2026-10-14 17:12 Rollback to v411 completed
+```
 
-Slack export (`America/Los_Angeles`, which was on UTC-7 that day):
+Slack export (`America/Los_Angeles`, UTC-7 on that date):
 
-- 09:47 Dana: looking at checkout errors, started right after the 9:38 deploy
-- 09:58 Dana: suspect the new payment-config flag in v412, not confirmed
-- 10:03 Dana: rolling back to v411
-- 10:05 Dana: rollback done, errors dropping
-- 10:18 Dana: error rate back to baseline
-- 10:31 Dana: will dig into the flag tomorrow
+```text
+09:47 Dana: looking at checkout errors, started right after the 9:38 deploy
+09:58 Dana: suspect the new payment-config flag in v412, not confirmed
+10:03 Dana: rolling back to v411
+10:05 Dana: rollback done, errors dropping
+10:18 Dana: error rate back to baseline
+10:31 Dana: will dig into the flag tomorrow
+```
 '''
 checklist = [
   "Converts every Slack time to UTC correctly by adding 7 hours (09:38 becomes 16:38, 10:18 becomes 17:18) and merges the three sources into one ordered timeline",
@@ -725,18 +731,17 @@ id = "alder-street-continuation"
 category = "fiction"
 source = "synthetic"
 instruction = '''
-Read the following opening paragraph and write an original continuation of 450 to 600 words. Output only the continuation. Do not repeat the opening paragraph.
+Write an original 450-to-600-word continuation of the opening paragraph below. Provide only your continuation, without repeating the opening text.
 
-Opening: "The house on Alder Street was empty by the time I arrived, except for the blue bowl on the counter. My brother had promised to wait. Through the kitchen window I could see his car still in the driveway, doors open, engine off. The keys were in the bowl, on top of a folded receipt from Halvorsen's Hardware dated that morning. I had come straight from the bus station, because the cast on my left wrist had three more weeks to go and I was not allowed to drive. My phone had died somewhere on the second bridge, about when the rain started, and the rain had not let up since. Juniper, his old dog, was asleep under the table and did not get up for me, which was new. The kitchen clock said ten past four, the way it had said ten past four for most of my childhood, because nobody in this family ever replaced a battery. I had spent eleven years learning not to ask certain questions, and I could feel every one of them now, lined up behind my teeth."
+> By the time I reached the house on Alder Street, nobody was inside, and only the blue bowl sat waiting on the kitchen counter. My brother had given his word that he would stay until I got there. Outside the kitchen window, his car was still parked in the driveway with the engine off and its doors standing open. Inside the bowl, the keys lay on top of a folded receipt from Halvorsen's Hardware dated that morning. I had come straight from the bus station; the cast on my left wrist still had three more weeks on it, and I was not allowed to drive. My phone had died halfway across the second bridge, right when the rain started coming down, and the rain had not let up since. Under the table, his old dog, Juniper, stayed curled in sleep and never rose to greet me, which had never happened before. Up on the wall, the kitchen clock still read ten past four, the same ten past four it had shown for most of my childhood, since no one in our family ever bothered to change a battery. For eleven years I had trained myself to swallow certain questions, yet I could feel every last one of them crowding behind my teeth now.
 
-Follow these requirements in your continuation:
+Your continuation must meet the following conditions:
 
-1. Maintain the first-person point of view and past tense established in the opening.
-2. Reference or interact with the blue bowl, the keys, or the receipt at least once more.
-3. Keep every detail the opening establishes consistent. If the continuation changes one, such as charging the phone, show how on the page.
-4. End the passage with the narrator making a concrete decision.
-
-Do not introduce any new named characters. Juniper and the brother may appear.
+1. Stay in the first-person point of view and past tense established in the opening.
+2. Mention or interact with the blue bowl, the keys, or the receipt at least one more time.
+3. Remain consistent with every fact established in the opening paragraph; if any circumstance changes, such as charging the phone, depict how that happens on the page.
+4. Do not introduce any new named characters, though the brother and Juniper may appear.
+5. Conclude the scene with the narrator making a concrete decision.
 '''
 checklist = [
   "Maintains first-person point of view and past tense, without repeating the opening paragraph",
@@ -813,17 +818,17 @@ id = "bike-lane-rebuttal"
 category = "essay"
 source = "synthetic"
 instruction = '''
-Write a first-person critical essay of 600 to 800 words in the voice of a fictional resident replying, in the same local paper, to the op-ed below. Argue against its conclusion.
+Your local newspaper recently ran the following op-ed by Councillor R. Hale under the headline "The Mill Road bike lane has failed":
 
-1. Use only the numbers that appear in the op-ed. Any figure you derive must follow from them.
-2. Identify the specific flaw in how the op-ed reads its own numbers.
-3. Concede one point on which the councillor is right.
+> Two years ago, when the city installed the Mill Road bike lane, residents were promised safer streets. The city's own transport report tells a very different story. During the year before the lane opened, Mill Road recorded 4 collisions involving cyclists; in the year after it opened, that count rose to 6, a 50% increase in crashes. That same report notes that daily cycling on Mill Road went from about 1,200 cyclists a day beforehand to about 3,600 a day afterward, meaning we have simply put far more riders in harm's way. On top of that, delivery drivers tell me they are forced to double-park now that the bike lane has replaced their loading space, and I have personally seen vans blocking the lane. A project that drives up crashes while choking off deliveries is not working. It is time to restore the parking and return Mill Road to the way it worked before.
 
-Do not invent statistics, studies, quotations, or named experts, and do not use the phrases "the data speaks for itself" or "at the end of the day".
+Write a 600-to-800-word critical essay in the first person, written from the perspective of a fictional local resident responding to Councillor Hale in the same paper and arguing against the op-ed's conclusion.
 
-Op-ed by councillor R. Hale, "The Mill Road bike lane has failed":
+Your essay must follow these rules:
 
-"When the Mill Road bike lane opened two years ago, we were promised safer streets. The city's own transport report says otherwise. In the year before the lane opened, Mill Road saw 4 collisions involving cyclists. In the year after, it saw 6. That is a 50% increase in crashes. The same report counts about 1,200 cyclists a day on Mill Road before the lane and about 3,600 a day after, which tells you how many more people we are putting in harm's way. Meanwhile, delivery drivers tell me they now double-park because the lane took their loading space, and I have watched vans block the lane myself. A lane that makes crashes more common and blocks deliveries is not a success. It is time to restore the parking and let Mill Road go back to how it worked."
+1. Expose the specific flaw in how the op-ed interprets the numbers it cites, while conceding one point on which the councillor is right.
+2. Rely solely on the numbers given in the op-ed and figures you calculate directly from them, without inventing outside statistics, studies, quotations, or named experts.
+3. Do not use the phrases "the data speaks for itself" or "at the end of the day".
 '''
 checklist = [
   "Identifies the denominator flaw: daily cyclists tripled while collisions rose from 4 to 6, so collisions per cyclist roughly halved",
