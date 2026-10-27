@@ -6,9 +6,20 @@ import { z } from 'astro/zod';
 
 import { familyConfigSchema } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
-import { catalogModelSchema, systemConfigSchema } from '@/lib/systems';
 
 const EXPORT_VAR = 'BENCH_NIXOS_CONFIG';
+
+/**
+ * The fields of a `systems.toml` table the site reads. The bench's catalog validates the whole
+ * file, including that every resolved display name is unique.
+ */
+const systemConfigSchema = z.object({
+  model: z.string().optional(),
+  display_name: z.string().optional(),
+});
+
+/** The field of a nixos-config catalog model the site reads. */
+const catalogModelSchema = z.object({ name: z.string() });
 
 const families = defineCollection({
   loader: glob({

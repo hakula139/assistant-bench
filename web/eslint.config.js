@@ -24,6 +24,9 @@ const sharedRules = {
   'perfectionist/sort-named-imports': ['error', { groups: ['value-import', 'type-import'] }],
 };
 
+const classicZod =
+  "Build classic Zod schemas only at build time. Constructing one runs Zod's eval probe, which the pages' script policy reports as a violation.";
+
 export default defineConfig([
   {
     plugins: { perfectionist },
@@ -45,6 +48,33 @@ export default defineConfig([
       ],
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
+    },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      'src/content.config.ts',
+      'src/lib/arena.ts',
+      'src/lib/family.ts',
+      'src/lib/report.ts',
+      'src/lib/vote-flow.ts',
+      'src/**/*.test.{ts,tsx}',
+      'src/test/**',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...['astro/zod', 'zod'].map((name) => ({ name, message: classicZod })),
+            ...['@/lib/family', '@/lib/report'].map((name) => ({
+              name,
+              allowTypeImports: true,
+              message: classicZod,
+            })),
+          ],
+        },
+      ],
     },
   },
   {
