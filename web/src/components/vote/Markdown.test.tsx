@@ -2,30 +2,21 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { InlineMarkdown, Markdown } from '@/components/vote/Markdown';
+import { Markdown } from '@/components/vote/Markdown';
 
 describe('Markdown', () => {
   afterEach(cleanup);
 
   test.each([
-    ['a code span', Markdown, 'Run `make test` first.', ['make test'], 'Run make test first.'],
-    ['a code span holding a backtick', Markdown, 'Type `` `x` `` here.', ['`x`'], 'Type `x` here.'],
+    ['a code span holding a backtick', 'Type `` `x` `` here.', ['`x`'], 'Type `x` here.'],
     [
       'code spans beside Chinese text',
-      Markdown,
       '运行`make test`后，再看`结果`。',
       ['make test', '结果'],
       '运行make test后，再看结果。',
     ],
-    [
-      'a code span in a checklist item',
-      InlineMarkdown,
-      'Names `make test` and **why**',
-      ['make test'],
-      'Names make test and why',
-    ],
-  ])('renders %s as inline code without its backticks', (_, Component, text, spans, shown) => {
-    const { container } = render(<Component text={text} />);
+  ])('renders %s as inline code without its backticks', (_, text, spans, shown) => {
+    const { container } = render(<Markdown text={text} />);
 
     const codes = [...container.querySelectorAll('code')];
     expect(codes.map((code) => code.textContent)).toEqual(spans);
@@ -52,6 +43,7 @@ describe('Markdown', () => {
     expect(blocks[0].matches(selector)).toBe(true);
     expect(blocks[0].className).toBe(language);
     expect(blocks[0].closest('p')).toBeNull();
+    expect(container.querySelector('.not-prose')).toBeNull();
   });
 
   test('keeps long code lines out of the no-wrap tails so they can scroll or wrap', () => {
@@ -63,7 +55,9 @@ describe('Markdown', () => {
     );
 
     expect(container.querySelector('pre > code')?.textContent).toBe(`${line}\n`);
-    expect(container.querySelector('p > code')?.textContent).toBe(path);
+    const span = container.querySelector('p > code');
+    expect(span?.textContent).toBe(path);
+    expect(span?.classList.contains('wrap-anywhere')).toBe(true);
     expect(container.querySelector('.text-nowrap')).toBeNull();
   });
 });

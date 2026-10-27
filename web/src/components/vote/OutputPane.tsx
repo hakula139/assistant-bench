@@ -101,10 +101,10 @@ function classifyDiff(text: string): { line: string; kind: DiffLine; start: bool
     });
 }
 
-/** Uses `break-all` to avoid early hyphen breaks. Ligatures are disabled so operators read literally. */
+/** Uses `break-all` to avoid early hyphen breaks. */
 function Diff({ text }: { text: string }) {
   return (
-    <div className="font-mono text-sm leading-relaxed break-all whitespace-pre-wrap [font-variant-ligatures:none]">
+    <div className="font-mono text-sm leading-relaxed break-all whitespace-pre-wrap">
       {classifyDiff(text).map(({ line, kind, start }, index) => (
         <div
           key={index}
