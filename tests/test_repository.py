@@ -16,7 +16,7 @@ import pytest
 import tomli_w
 from typer.testing import CliRunner
 
-from assistant_bench import jobs, revisions, task_assets
+from assistant_bench import jobs, manifest, task_assets
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Case, case_task, load_cases, load_family
@@ -262,14 +262,14 @@ def test_committed_families_name_only_tabled_systems() -> None:
 def test_the_fingerprint_manifest_matches_the_runnable_systems(
     stale_fixture: Callable[[Path, str], None],
 ) -> None:
-    manifest = REPO_ROOT / revisions.MANIFEST_FILE
+    path = REPO_ROOT / manifest.MANIFEST_FILE
 
-    current = revisions.render_manifest(
-        revisions.current_fingerprints(load_systems(load_export()))
+    current = manifest.render_manifest(
+        manifest.current_fingerprints(load_systems(load_export()))
     )
 
-    if not manifest.is_file() or manifest.read_text() != current:
-        stale_fixture(manifest, current)
+    if not path.is_file() or path.read_text() != current:
+        stale_fixture(path, current)
 
 
 @pytest.mark.parametrize(

@@ -135,9 +135,9 @@ Changing a system's generation settings changes its [fingerprint](../design/syst
 
 When a change moves fingerprints, whether through a model snapshot, effort, capacities, the generation protocol, or the fingerprint code:
 
-1. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints <base>` to list the changed systems and fail on those a closed report names.
-2. Give each system a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
+1. Run `uv run bench fingerprints`, which fails on each changed system whose closed reports froze its earlier fingerprint.
+2. Give each changed system that a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
 3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
 4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
-5. Run `uv run bench fingerprints <base>` again to confirm that it passes.
-6. Before the next paid run, delete the stale trials of each other changed system under `jobs/<family>/` in the data directory, so it reruns under its name.
+5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.
+6. Before the next paid run, delete the stale trials of each changed system that no closed report names under `jobs/<family>/` in the data directory, so it reruns under its name.

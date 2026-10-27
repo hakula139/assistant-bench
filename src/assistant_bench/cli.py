@@ -3,6 +3,7 @@
 import os
 import subprocess
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
@@ -12,7 +13,7 @@ import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 
-from assistant_bench import jobs, report, revisions
+from assistant_bench import jobs, manifest, report
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.exports import read_export
 from assistant_bench.arena.snapshots import analyze_export
@@ -31,6 +32,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
+from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import code
 from assistant_bench.outputs import Output
@@ -249,50 +251,19 @@ def close(
 
 
 @app.command()
-def fingerprints(
-    base: Annotated[
-        str, typer.Argument(metavar='BASE', help='A Git revision, such as main.')
-    ],
-) -> None:
-    """Fail when a closed report's system changed its fingerprint since BASE.
-
-    Compare BASE's committed fingerprint manifest with the fingerprints each
-    family's runnable systems resolve to now. A changed system that no closed
-    report of its family names is listed, since it reruns under its name.
-    """
+def fingerprints() -> None:
+    """Fail when a system left the fingerprint its family's closed reports froze."""
     try:
-        head = revisions.current_fingerprints(_load_systems())
-        recorded = revisions.manifest_at(base)
-        changed = {
-            key: revisions.reported(key)
-            for key in revisions.changed_fingerprints(recorded or {}, head)
-        }
-    except subprocess.CalledProcessError as error:
-        raise typer.Exit(error.returncode) from error
+        moved = [
+            _moved_line(family, *change)
+            for family, members in manifest.runnable_systems(_load_systems()).items()
+            for change in _moved(report.reported_fingerprints(family), members)
+        ]
     except ValueError as error:
         _fail(str(error))
-    if recorded is None:
-        typer.echo(
-            f'Revision `{base}` has no `{revisions.MANIFEST_FILE}`, so no '
-            'fingerprints compare.'
-        )
-        return
-    for key, reported in changed.items():
-        family, name = key.split('/')
-        message = (
-            f'System `{name}` changed its fingerprint since `{base}` in `{family}`'
-        )
-        if reported:
-            typer.echo(
-                f'{message}, whose closed reports name it. {SYSTEM_RENAME_GUIDE}',
-                err=True,
-            )
-        else:
-            typer.echo(f'{message}. No closed report names it, so it reruns.')
-    if any(changed.values()):
-        raise typer.Exit(1)
-    if not changed:
-        typer.echo(f'Every system keeps its fingerprint since `{base}`.')
+    if moved:
+        _fail('\n'.join([*moved, SYSTEM_RENAME_GUIDE]))
+    typer.echo('Every system keeps the fingerprint its closed reports froze.')
 
 
 # ── Helpers ──
@@ -489,16 +460,19 @@ def _run_targets(
 def _refuse_drift(family: Family, systems: list[System]) -> None:
     try:
         drifted = jobs.drifted_systems(family, systems)
-        reported = report.reported_systems(family.name)
+        frozen = report.reported_fingerprints(family.name)
     except ValueError as error:
         _fail(str(error))
-    if not drifted:
+    moved = _moved(frozen, systems)
+    if not drifted and not moved:
         return
-    names = sorted({name for name, _, _ in drifted})
-    renamed = [name for name in names if name in reported]
-    rerun = [name for name in names if name not in reported]
+    renamed = {name for name, _, _ in moved} | {
+        name for name, _, _ in drifted if name in frozen and frozen[name] is None
+    }
+    rerun = sorted({name for name, _, _ in drifted} - renamed)
     lines = [
         f'Family `{family.name}` has systems that changed their fingerprints:',
+        *(_moved_line(family.name, *change) for change in moved),
         *(
             f'System `{name}` ran under fingerprint `{recorded}` but now resolves '
             f'to `{current}`.'
@@ -506,13 +480,35 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         ),
     ]
     if renamed:
-        lines.append(f'Closed reports name {code(renamed)}. {SYSTEM_RENAME_GUIDE}')
+        lines.append(
+            f'Closed reports name {code(sorted(renamed))}. {SYSTEM_RENAME_GUIDE}'
+        )
     if rerun:
         lines.append(
-            f'No closed report names {code(rerun)}, so delete the stale trials '
-            f'under `jobs/{family.name}/` in the data directory and rerun.'
+            f'Delete the stale trials of {code(rerun)} under `jobs/{family.name}/` '
+            'in the data directory before the next run.'
         )
     _fail('\n'.join(lines))
+
+
+def _moved(
+    frozen: Mapping[str, str | None], systems: list[System]
+) -> list[tuple[str, str, str]]:
+    """Return each system whose fingerprint differs from a frozen one, with both."""
+    moved: list[tuple[str, str, str]] = []
+    for system in systems:
+        recorded = frozen.get(system.name)
+        current = fingerprint(system)
+        if recorded is not None and recorded != current:
+            moved.append((system.name, recorded, current))
+    return moved
+
+
+def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
+    return (
+        f'Closed reports of `{family}` froze `{name}` under fingerprint '
+        f'`{recorded}`, but it now resolves to `{current}`.'
+    )
 
 
 def _collect(family: Family) -> None:

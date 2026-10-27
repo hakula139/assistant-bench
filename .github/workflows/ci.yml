@@ -123,8 +123,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # The fingerprint check reads the base revision's fingerprints.json.
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Nix
@@ -171,10 +169,7 @@ jobs:
         run: nix develop .#python -c uv run pytest
 
       - name: Check fingerprints
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        run: nix develop .#python -c uv run bench fingerprints "$BASE_SHA"
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: nix develop .#python -c uv run bench fingerprints
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v7
