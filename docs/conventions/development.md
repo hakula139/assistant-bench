@@ -63,7 +63,7 @@ Job configs are generated per run and never committed. Harbor copies each one in
 
 - The flake pins the stable Nixpkgs channel for Node.js and the hooks, and takes uv from Nixpkgs master to meet the Python Worker tooling's minimum version. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
 - On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
-- Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. The [fingerprint check](ci.md#checks) fails such a PR when the bump changes a system's fingerprint.
+- Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. When such a bump moves a fingerprint, the stale `fingerprints.json` fails its test, so the PR waits until someone rewrites the manifest and applies the rule in [Systems](../design/systems.md#fingerprints).
 - `uv.lock` pins the Python dependencies, including Ruff, mypy and basedpyright, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 
 ## The nixos-config Input
@@ -75,7 +75,7 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, which [Systems](../design/systems.md#fingerprints) covers, and [Authoring](../guide/authoring.md#systems) gives the recipe for keeping the old name on its old resolution.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and [Systems](../design/systems.md#fingerprints) states whether the system keeps its name.
 
 ## Nix Style
 

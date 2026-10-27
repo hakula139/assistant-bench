@@ -10,7 +10,7 @@ src/assistant_bench/
 ├── ci.py                                   # Coding task selection and checks for Harbor Smoke
 ├── task_assets.py                          # Regeneration of each coding task's shared files
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
-├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
+├── manifest.py                             # The committed manifest of every runnable system's fingerprint
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
 │   ├── commands.py                         # Publication, evidence and private administration commands
@@ -91,7 +91,7 @@ src/assistant_bench_arena/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`, `ci`, and `task_assets`
-2. `arena.commands` and `revisions`
+2. `arena.commands` and `manifest`
 3. `arena.preparation` and `jobs`
 4. The remaining offline `arena` modules
 5. `report`

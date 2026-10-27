@@ -794,3 +794,65 @@ class TestReadReports:
 
         with pytest.raises(ValueError):
             report.read_reports(closed.family, closed.closed_at + timedelta(days=1))
+
+
+class TestReportedFingerprints:
+    @staticmethod
+    def write_rounds(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        early: str | None,
+        late: str | None,
+    ) -> Report:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        for fixture, value in ((EARLY_REPORT_FIXTURE, early), (REPORT_FIXTURE, late)):
+            written = Report.model_validate_json(fixture.read_text())
+            systems = written.systems | {
+                'acme-large': written.systems['acme-large'].model_copy(
+                    update={'fingerprint': value}
+                )
+            }
+            write_report(written.model_copy(update={'systems': systems}))
+        return closed
+
+    @pytest.mark.parametrize(
+        ('early', 'late', 'expected'),
+        [
+            pytest.param('fp-a', 'fp-a', 'fp-a', id='kept'),
+            pytest.param(None, 'fp-a', 'fp-a', id='recorded-later'),
+            pytest.param('fp-a', None, 'fp-a', id='unrecorded-later'),
+            pytest.param(None, None, None, id='never-recorded'),
+        ],
+    )
+    def test_freezes_the_one_fingerprint_closed_reports_recorded(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        early: str | None,
+        late: str | None,
+        expected: str | None,
+    ) -> None:
+        closed = self.write_rounds(monkeypatch, tmp_path, early, late)
+
+        frozen = report.reported_fingerprints(closed.family)
+
+        assert frozen == {
+            system: metadata.fingerprint for system, metadata in closed.systems.items()
+        } | {'acme-large': expected}
+
+    def test_rejects_reports_that_froze_two_fingerprints_under_one_system(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        closed = self.write_rounds(monkeypatch, tmp_path, 'fp-a', 'fp-b')
+
+        with pytest.raises(ValueError, match='`acme-large` reuses an identifier'):
+            report.reported_fingerprints(closed.family)
+
+    def test_rejects_an_invalid_family_before_reading_any_report(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'missing')
+
+        with pytest.raises(ValidationError):
+            report.reported_fingerprints('../outside')

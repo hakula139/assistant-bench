@@ -579,31 +579,21 @@ def _public_systems(
     closed_at: datetime,
 ) -> dict[str, PublicSystem]:
     history: dict[str, PublicSystem] = {}
-    known_fingerprints: dict[str, str] = {}
-    for previous in sorted(previous_reports, key=lambda report: report.closed_at):
+    ordered = sorted(previous_reports, key=lambda report: report.closed_at)
+    for previous in ordered:
         if previous.family != family or previous.closed_at >= closed_at:
             raise ValueError(
                 'Prior reports must belong to this family and close earlier.'
             )
-        for system, metadata in previous.systems.items():
-            if metadata.fingerprint is not None:
-                known = known_fingerprints.get(system)
-                if known is not None and known != metadata.fingerprint:
-                    raise ValueError(
-                        f'System `{system}` reuses an identifier across fingerprints.'
-                    )
-                known_fingerprints[system] = metadata.fingerprint
-            history[system] = metadata
+        history.update(previous.systems)
+    frozen = _frozen_fingerprints(ordered)
 
     public: dict[str, PublicSystem] = {}
     for system in sorted(referenced):
         fingerprint = fingerprints.get(system)
         prior = history.get(system)
-        if (
-            system in known_fingerprints
-            and fingerprint is not None
-            and known_fingerprints[system] != fingerprint
-        ):
+        known = frozen.get(system)
+        if known is not None and fingerprint is not None and known != fingerprint:
             raise ValueError(f'System `{system}` changed its published fingerprint.')
         if system in names:
             public[system] = PublicSystem(
@@ -636,6 +626,41 @@ def write_report(report: Report) -> Path:
 def read_reports(family: str, before: datetime) -> list[Report]:
     family = TypeAdapter(FamilyName).validate_python(family)
     before = TypeAdapter(AwareDatetime).validate_python(before)
+    reports = [report for report in _closed(family) if report.closed_at < before]
+    return sorted(reports, key=lambda report: report.closed_at)
+
+
+def reported_fingerprints(family: str) -> dict[str, str | None]:
+    """Map each system a closed report of the family names to the fingerprint it froze.
+
+    A system maps to null when no report recorded its fingerprint.
+
+    Raises
+    ------
+    ValueError
+        Two closed reports froze different fingerprints under one system.
+    """
+    family = TypeAdapter(FamilyName).validate_python(family)
+    return _frozen_fingerprints(_closed(family))
+
+
+def _frozen_fingerprints(reports: Iterable[Report]) -> dict[str, str | None]:
+    frozen: dict[str, str | None] = {}
+    for report in reports:
+        for system, metadata in report.systems.items():
+            known = frozen.get(system)
+            if metadata.fingerprint is None:
+                frozen.setdefault(system, None)
+            elif known is not None and known != metadata.fingerprint:
+                raise ValueError(
+                    f'System `{system}` reuses an identifier across fingerprints.'
+                )
+            else:
+                frozen[system] = metadata.fingerprint
+    return frozen
+
+
+def _closed(family: str) -> list[Report]:
     reports: list[Report] = []
     for path in sorted((REPORTS_DIR / family).glob('*.json')):
         report = Report.model_validate_json(path.read_text())
@@ -643,10 +668,8 @@ def read_reports(family: str, before: datetime) -> list[Report]:
             raise ValueError(
                 f'Report `{path.name}` does not match its family and round path.'
             )
-        if report.closed_at < before:
-            reports.append(report)
-
-    return sorted(reports, key=lambda report: report.closed_at)
+        reports.append(report)
+    return reports
 
 
 def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:

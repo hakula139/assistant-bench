@@ -17,7 +17,7 @@ from harbor.models.trial.config import AgentConfig
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
-from assistant_bench import catalog, cli, jobs, report, revisions
+from assistant_bench import catalog, cli, jobs, manifest, report
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -31,6 +31,7 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.outputs import Output
 from support import (
+    REPORT_FIXTURE,
     finish_job,
     make_output,
     make_system,
@@ -42,6 +43,24 @@ from support import (
 
 
 runner = CliRunner()
+
+RENAME_GUIDE = (
+    'Give a changed system a new name and keep the old name only in closed '
+    'reports, as `docs/guide/authoring.md#systems` describes.'
+)
+DRIFTED = (
+    'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves to '
+    '`{current}`.'
+)
+MOVED = (
+    'Closed reports of `f` froze `opus-5.5-high` under fingerprint `fp-old`, but it '
+    'now resolves to `{current}`.'
+)
+RENAME = f'Closed reports name `opus-5.5-high`. {RENAME_GUIDE}'
+STALE_TRIALS = (
+    'Delete the stale trials of `opus-5.5-high` under `jobs/f/` in the data '
+    'directory before the next run.'
+)
 
 
 def invoke(*args: str) -> Result:
@@ -63,6 +82,27 @@ def write_job(job_dir: Path) -> None:
     job_dir.mkdir(parents=True)
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+def write_closed_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    family: str,
+    frozen: str | None,
+) -> None:
+    """Close a round of the family that froze `opus-5.5-high` under a fingerprint."""
+    monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+    closed = report.Report.model_validate_json(
+        REPORT_FIXTURE.read_text().replace('acme-large', 'opus-5.5-high')
+    )
+    systems = closed.systems | {
+        'opus-5.5-high': closed.systems['opus-5.5-high'].model_copy(
+            update={'fingerprint': frozen}
+        )
+    }
+    report.write_report(
+        closed.model_copy(update={'family': family, 'systems': systems})
+    )
 
 
 @pytest.fixture
@@ -934,30 +974,84 @@ class TestRun:
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
-    def test_rejects_a_system_whose_recorded_fingerprint_changed(
-        self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
+    @pytest.mark.parametrize(
+        ('reported', 'frozen', 'trial', 'expected'),
+        [
+            pytest.param(
+                False,
+                None,
+                True,
+                [DRIFTED, STALE_TRIALS],
+                id='unreported',
+            ),
+            pytest.param(
+                True,
+                'fp-old',
+                True,
+                [MOVED, DRIFTED, RENAME],
+                id='moved',
+            ),
+            pytest.param(
+                True,
+                'fp-old',
+                False,
+                [MOVED, RENAME],
+                id='moved-without-trials',
+            ),
+            pytest.param(
+                True,
+                '{current}',
+                True,
+                [DRIFTED, STALE_TRIALS],
+                id='restored',
+            ),
+            pytest.param(
+                True,
+                None,
+                True,
+                [DRIFTED, RENAME],
+                id='unrecorded',
+            ),
+        ],
+    )
+    def test_rejects_a_system_whose_fingerprint_changed(
+        self,
+        tmp_path: Path,
+        families_dir: Path,
+        data_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+        reported: bool,
+        frozen: str | None,
+        trial: bool,
+        expected: list[str],
     ) -> None:
         write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        write_trial(
-            data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
-            'c1__1',
-            AgentConfig(
-                import_path='x:Y',
-                kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
-            ),
-            task='f/c1',
-        )
         current = fingerprint(load_systems(load_export())['opus-5.5-high'])
+        if reported:
+            write_closed_report(
+                tmp_path,
+                monkeypatch,
+                'f',
+                None if frozen is None else frozen.format(current=current),
+            )
+        if trial:
+            write_trial(
+                data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
+                'c1__1',
+                AgentConfig(
+                    import_path='x:Y',
+                    kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
+                ),
+                task='f/c1',
+            )
 
         result = invoke('run', 'f')
 
         assert (result.exit_code, result.output) == (
             1,
             'Family `f` has systems that changed their fingerprints:\n'
-            'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves '
-            f'to `{current}`.\nGive a changed system a new name and keep the old '
-            'name only in closed reports, as `docs/guide/authoring.md#systems` '
-            'describes.\n',
+            + ''.join(f'{line.format(current=current)}\n' for line in expected),
         )
         assert submitted == []
 
@@ -1379,7 +1473,7 @@ class TestFingerprints:
     ) -> None:
         write_case_family(families_dir, ['missing'])
 
-        result = invoke('fingerprints', 'origin/main')
+        result = invoke('fingerprints')
 
         assert result.exit_code == 1
         assert result.exception is not None
@@ -1387,78 +1481,75 @@ class TestFingerprints:
         assert 'Family `f` lists `missing`' in result.output
         assert '`systems.toml` does not define' in result.output
 
-    def test_passes_when_every_system_keeps_its_fingerprint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        base = revisions.current_systems(load_systems(load_export()))
-
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            assert selected == set(base)
-            return base
-
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
-
-        result = invoke('fingerprints', 'origin/main')
-
-        assert (result.exit_code, result.output) == (
-            0,
-            'Every system keeps its fingerprint since `origin/main`.\n',
-        )
-
     @pytest.mark.parametrize(
-        'change',
+        ('family', 'frozen', 'failure'),
         [
-            {'route': 'acme/moved'},
-            {'prompt': 'Be brief.'},
+            pytest.param(None, None, None, id='no-reports'),
+            pytest.param('writing-en', 'writing-en/opus-5.5-high', None, id='restored'),
+            pytest.param('writing-en', None, None, id='unrecorded'),
+            pytest.param(
+                'writing-en', 'fp-old', 'writing-en', id='moved-after-a-close'
+            ),
+            pytest.param(
+                'coding-repo',
+                'writing-en/opus-5.5-high',
+                'coding-repo',
+                id='frozen-under-another-harness',
+            ),
         ],
-        ids=['route', 'prompt'],
     )
-    def test_names_the_family_of_a_changed_system_and_requires_a_new_name(
-        self, monkeypatch: pytest.MonkeyPatch, change: dict[str, Any]
+    def test_fails_for_a_system_that_left_its_frozen_fingerprint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        family: str | None,
+        frozen: str | None,
+        failure: str | None,
     ) -> None:
-        head = revisions.current_systems(load_systems(load_export()))
-        key = 'writing-en/opus-5.5-high'
-        old = head[key].model_copy(update=change)
+        head = manifest.current_fingerprints(load_systems(load_export()))
+        recorded = None if frozen is None else head.get(frozen, frozen)
+        if family is None:
+            monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        else:
+            write_closed_report(tmp_path, monkeypatch, family, recorded)
 
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            return head | {key: old}
+        result = invoke('fingerprints')
 
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+        if failure is None:
+            assert (result.exit_code, result.stdout, result.stderr) == (
+                0,
+                'Every system keeps the fingerprint its closed reports froze.\n',
+                '',
+            )
+        else:
+            current = head[f'{failure}/opus-5.5-high']
+            assert (result.exit_code, result.stdout, result.stderr) == (
+                1,
+                '',
+                f'Closed reports of `{failure}` froze `opus-5.5-high` under '
+                f'fingerprint `{recorded}`, but it now resolves to `{current}`.\n'
+                f'{RENAME_GUIDE}\n',
+            )
 
-        result = invoke('fingerprints', 'origin/main')
-
-        assert result.exit_code == 1
-        assert result.stdout == ''
-        assert result.stderr == (
-            'System `opus-5.5-high` changed its fingerprint since `origin/main` in '
-            '`writing-en`. Give a changed system a new name and keep the old '
-            'name only in closed reports, as `docs/guide/authoring.md#systems` '
-            'describes.\n'
+    def test_names_conflicting_closed_reports_without_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_closed_report(tmp_path, monkeypatch, 'writing-en', 'fp-old')
+        later = report.Report.model_validate_json(
+            (tmp_path / 'reports' / 'writing-en' / '2026-10-21.json').read_text()
+        )
+        systems = later.systems | {
+            'opus-5.5-high': later.systems['opus-5.5-high'].model_copy(
+                update={'fingerprint': 'fp-new'}
+            )
+        }
+        report.write_report(
+            later.model_copy(update={'round': '2026-10-22', 'systems': systems})
         )
 
-    def test_names_missing_generation_metadata_without_a_traceback(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            raise ValueError('No declared generation protocol. Give systems new names.')
-
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
-
-        result = invoke('fingerprints', 'origin/main')
+        result = invoke('fingerprints')
 
         assert (result.exit_code, result.output) == (
             1,
-            'No declared generation protocol. Give systems new names.\n',
+            'System `opus-5.5-high` reuses an identifier across fingerprints.\n',
         )
-
-    def test_exits_with_the_code_of_a_failed_revision_lookup(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def systems_at(revision: str, selected: set[str]) -> dict[str, Any]:
-            raise subprocess.CalledProcessError(128, 'git')
-
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
-
-        result = invoke('fingerprints', 'nope')
-
-        assert result.exit_code == 128
