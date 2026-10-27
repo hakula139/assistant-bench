@@ -11,6 +11,8 @@ import { JSDOM } from 'jsdom';
 import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+import { makeSession, VOTE_FAMILY } from '@/test/arena';
+
 const root = fileURLToPath(new URL('../../', import.meta.url));
 let directory: string;
 
@@ -19,7 +21,7 @@ beforeAll(async () => {
   await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
     cwd: root,
   });
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
@@ -135,6 +137,12 @@ describe('built vote document', () => {
 
 describe('built pages', () => {
   const origin = 'http://site.example';
+  const vote = '/vote/index.html';
+  const api = new Map<string, unknown>([
+    ['GET /api/status', { status: 'ready' }],
+    ['GET /api/families', [VOTE_FAMILY]],
+    ['POST /api/sessions', makeSession()],
+  ]);
   let pages: string[];
   let browser: Browser;
 
@@ -151,44 +159,70 @@ describe('built pages', () => {
   });
 
   test.each(['light', 'dark'] as const)(
-    'pass every axe rule in the %s theme once their islands hydrate',
+    "pass axe-core's default rules and target-size in the %s theme, without errors, once their islands hydrate",
     async (theme) => {
       const context = await browser.newContext({ colorScheme: theme });
+      await context.route('**', (route) => route.abort());
       await context.route(`${origin}/**`, async (route) => {
-        const file = join(directory, new URL(route.request().url()).pathname);
+        const request = route.request();
+        const { pathname } = new URL(request.url());
+        const reply = api.get(`${request.method()} ${pathname}`);
+        if (reply !== undefined) {
+          await route.fulfill({ json: reply });
+          return;
+        }
+
+        const file = join(directory, pathname);
         const found = await stat(file).then(
           (stats) => stats.isFile(),
           () => false,
         );
         await route.fulfill(found ? { path: file } : { status: 404 });
       });
-      const violations: Record<string, string[]> = {};
+      const problems: Record<string, string[]> = {};
 
       for (const path of pages) {
         const page = await context.newPage();
-        await page.goto(`${origin}${path}`);
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+        page.on('console', (message) => {
+          if (message.type() === 'error') {
+            errors.push(`console: ${message.text()}`);
+          }
+        });
+
+        await page.goto(`${origin}${path}${path === vote ? `?family=${VOTE_FAMILY.name}` : ''}`);
         // Charts hydrate only once visible, so the viewport takes the whole page.
         await page.setViewportSize({
           width: 1280,
           height: await page.evaluate(() => document.documentElement.scrollHeight),
         });
         await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
+        if (path === vote) {
+          await page.getByRole('button', { name: 'Issues' }).first().click();
+          await page.getByRole('dialog', { name: 'Issues in output A' }).waitFor();
+        }
         await page.waitForLoadState('networkidle');
 
         expect(await page.evaluate(() => document.documentElement.dataset.theme), path).toBe(theme);
-        const results = await new AxeBuilder({ page }).analyze();
-        const found = results.violations.flatMap(({ id, nodes }) =>
-          nodes.map(({ target }) => `${id}: ${target.join(' ')}`),
-        );
+        const results = await new AxeBuilder({ page })
+          .options({ rules: { 'target-size': { enabled: true } } })
+          .analyze();
+        const found = [
+          ...errors,
+          ...results.violations.flatMap(({ id, nodes }) =>
+            nodes.map(({ target }) => `${id}: ${target.join(' ')}`),
+          ),
+        ];
         if (found.length > 0) {
-          violations[path] = found;
+          problems[path] = found;
         }
         await page.close();
       }
       await context.close();
 
-      expect(pages).toContain('/index.html');
-      expect(violations).toEqual({});
+      expect(pages).toEqual(expect.arrayContaining(['/index.html', vote]));
+      expect(problems).toEqual({});
     },
     120_000,
   );
