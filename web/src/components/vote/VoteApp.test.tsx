@@ -854,6 +854,17 @@ describe('VoteApp', () => {
 
     expect(screen.queryByRole('button', { name: 'Message' }) !== null).toBe(label !== null);
     expect(screen.queryByText('message')).toBeNull();
+
+    const trigger = screen.queryByRole('button', { name: 'Message' });
+    if (label === null) {
+      expect(trigger).toBeNull();
+    } else {
+      const band = screen.getByRole('button', { name: 'Prompt' }).parentElement;
+      const instruction = screen.getByText('Instruction t1');
+
+      expect(band?.contains(trigger)).toBe(false);
+      expect(trigger?.nextElementSibling?.contains(instruction)).toBe(true);
+    }
   });
 
   test('opens the next pair at the top of the page in fresh output panes', async () => {

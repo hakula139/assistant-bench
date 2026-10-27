@@ -37,6 +37,7 @@ function Definition({ term }: { term: Term }) {
   return (
     <PopoverContent
       side="top"
+      align="start"
       collisionPadding={16}
       aria-labelledby={title}
       aria-describedby={description}

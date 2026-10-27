@@ -168,7 +168,7 @@ export const categoryTerms: Record<Category, Term> = {
   'message': {
     term: 'Message',
     definition:
-      'A commit message, PR description, issue or review reply, handoff, or announcement.',
+      'A commit message, PR description, reply on an issue or review, handoff, or announcement.',
   },
   'refactor': {
     term: 'Refactor',

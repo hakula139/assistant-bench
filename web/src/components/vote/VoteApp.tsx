@@ -210,7 +210,6 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               Prompt
             </Button>
           </CollapsibleTrigger>
-          {pair.category !== null && <Hint term={categoryTerm(pair.category)} />}
           {status}
         </div>
         <CollapsibleContent asChild>
@@ -221,6 +220,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
+            {pair.category !== null && <Hint term={categoryTerm(pair.category)} />}
             <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
               <section
