@@ -51,8 +51,22 @@ function keepTails(state: StateCore) {
   }
 }
 
+export const INLINE_CODE_CLASS =
+  'not-prose rounded-sm bg-foreground/8 px-1 py-0.5 text-[0.875em] box-decoration-clone wrap-anywhere';
+
+function markInlineCode(state: StateCore) {
+  for (const token of state.tokens) {
+    for (const child of token.children ?? []) {
+      if (child.type === 'code_inline') {
+        child.attrJoin('class', INLINE_CODE_CLASS);
+      }
+    }
+  }
+}
+
 /** Raw HTML is escaped and remote images are disabled. */
 export const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image');
 markdown.core.ruler.push('keep_tails', keepTails);
+markdown.core.ruler.push('mark_inline_code', markInlineCode);
 markdown.renderer.rules.tail_open = () => `<span class="${TAIL_CLASS}">`;
 markdown.renderer.rules.tail_close = () => '</span>';

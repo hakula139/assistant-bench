@@ -3,8 +3,7 @@ import { Fragment } from 'react';
 import { KeptTail } from '@/components/site/Term';
 import { markdown } from '@/lib/markdown';
 
-export const prose =
-  'prose max-w-none text-foreground dark:prose-invert prose-code:before:content-none prose-code:after:content-none';
+export const prose = 'prose max-w-none text-foreground dark:prose-invert';
 
 /** Case or output text rendered as Markdown, which escapes raw HTML and loads no image. */
 export function Markdown({ text }: { text: string }) {
