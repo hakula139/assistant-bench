@@ -1,9 +1,20 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { ApiError, NetworkError, voteRequest } from '@/lib/arena';
+import { ApiError, NetworkError, sessionView, voteRequest } from '@/lib/arena';
 import { sessionKey, VoteFlow } from '@/lib/vote-flow';
 import { requestBody as body, makeSession, VOTE_FAMILY } from '@/test/arena';
+
+const evaluated = vi.hoisted(() => {
+  const calls: unknown[][] = [];
+  globalThis.Function = new Proxy(Function, {
+    construct(target, args) {
+      calls.push(args);
+      return Reflect.construct(target, args) as object;
+    },
+  });
+  return calls;
+});
 
 type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
 const defects = { a: [], b: [] };
@@ -24,6 +35,18 @@ describe('VoteFlow', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+  });
+
+  test("loads and parses without the eval probe the vote page's policy reports", () => {
+    const { flow, session } = opened();
+    flow.choose(session, 'b', defects);
+
+    const restored = new VoteFlow();
+    const parsed = sessionView.parse(makeSession());
+
+    expect(restored.draft).toEqual(flow.draft);
+    expect(parsed).toEqual(makeSession());
+    expect(evaluated).toEqual([]);
   });
 
   test.each(['other\n', '../outside', 'a'.repeat(257)])(

@@ -480,6 +480,22 @@ describe('VoteApp', () => {
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'tie', 'b']);
   });
 
+  test("submits on Enter from the layout's main, which the skip link and margin clicks focus", async () => {
+    const api = stubApi();
+    const user = await startSession(
+      <main tabIndex={-1}>
+        <VoteApp />
+      </main>,
+    );
+    await user.keyboard('a');
+    screen.getByRole('main').focus();
+
+    await user.keyboard('{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+  });
+
   test('takes a shortcut typed in upper case, and undoes from the completed session', async () => {
     const api = stubApi({ cases: 1 });
     const user = await startSession();
@@ -773,19 +789,35 @@ describe('VoteApp', () => {
     expect(localStorage.getItem(`bench-session:${FAMILY.name}`)).toBe('s1');
   });
 
-  test('opens the prompt for each pair, even after the previous one was collapsed', async () => {
-    stubApi();
-    const user = await startSession();
+  test.each([
+    { next: 'a new prompt', brief: undefined, expanded: 'true' },
+    {
+      next: 'the same prompt',
+      brief: { instruction: 'Shared instruction', checklist: [] },
+      expanded: 'false',
+    },
+  ])(
+    'shows $next expanded: $expanded after the prompt is collapsed',
+    async ({ brief, expanded }) => {
+      stubApi({ brief });
+      const user = await startSession();
 
-    await user.click(screen.getByRole('button', { name: 'Prompt' }));
-    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'false');
-    screen.getByRole('group', { name: 'Pair 1' }).focus();
+      await user.click(screen.getByRole('button', { name: 'Prompt' }));
+      expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty(
+        'ariaExpanded',
+        'false',
+      );
+      screen.getByRole('group', { name: 'Pair 1' }).focus();
 
-    await user.keyboard('a{Enter}');
-    await screen.findByText('Output A2');
+      await user.keyboard('a{Enter}');
+      await screen.findByText('Output A2');
 
-    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'true');
-  });
+      expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty(
+        'ariaExpanded',
+        expanded,
+      );
+    },
+  );
 
   test('renders the prompt as Markdown and sets the checklist apart under its own heading', async () => {
     stubApi({

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { z } from 'astro/zod';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { z } from 'zod/mini';
 
 import * as arena from '@/lib/arena';
 import { COMMAND_ID, makeSession, VOTE_FAMILY } from '@/test/arena';

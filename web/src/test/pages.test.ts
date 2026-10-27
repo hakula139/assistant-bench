@@ -6,6 +6,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
+import Base from '@/layouts/Base.astro';
 import { familyTitle } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
@@ -808,6 +809,25 @@ function propsAt<Props>(
   }
   return path.props;
 }
+
+describe('layout', () => {
+  test.each([
+    { layout: 'page', footer: true, column: true },
+    { layout: 'app', footer: false, column: false },
+  ] as const)(
+    'gives the $layout layout a footer: $footer, and the site column: $column',
+    async ({ layout, footer, column }) => {
+      const html = await render(Base, { layout });
+
+      const { document } = new JSDOM(html).window;
+      const main = document.querySelector('main#main');
+      expect(main).not.toBeNull();
+      expect(document.querySelector('footer') !== null).toBe(footer);
+      expect(main?.classList.contains('pt-8')).toBe(column);
+      expect(document.body.classList.contains('md:h-dvh')).toBe(!column);
+    },
+  );
+});
 
 describe('header', () => {
   test.each([0, 3])('keeps the same links with %i families listed', async (count) => {

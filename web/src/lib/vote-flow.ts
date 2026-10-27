@@ -1,4 +1,4 @@
-import { z } from 'astro/zod';
+import { z } from 'zod/mini';
 
 import {
   ApiError,
@@ -27,9 +27,9 @@ const draftSchema = z.strictObject({
   family: familyName,
   session_id: identifier,
   lease_id: identifier,
-  choice: choiceSchema.nullable(),
+  choice: z.nullable(choiceSchema),
   defects: taggedDefects,
-  submitted: receiptQuery.nullable(),
+  submitted: z.nullable(receiptQuery),
   resolved: z.boolean(),
 });
 const operationSchema = z.discriminatedUnion('kind', [
@@ -37,9 +37,9 @@ const operationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('resume'), request: resumeSessionRequest }),
 ]);
 const storedSchema = z.strictObject({
-  draft: draftSchema.nullable(),
-  operation: operationSchema.nullable(),
-  withdrawal: withdrawRequest.nullable(),
+  draft: z.nullable(draftSchema),
+  operation: z.nullable(operationSchema),
+  withdrawal: z.nullable(withdrawRequest),
 });
 type Stored = z.infer<typeof storedSchema>;
 export type Draft = z.infer<typeof draftSchema>;

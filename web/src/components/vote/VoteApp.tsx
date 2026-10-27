@@ -100,7 +100,7 @@ function Notice({ notice }: { notice: string | null }) {
 
 function Screen({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-16">
+    <div className={cn(wideContainer, 'flex flex-col gap-4 pt-8 pb-16')}>
       <h1 className={pageTitle}>{title}</h1>
       {children}
     </div>
@@ -110,10 +110,11 @@ function Screen({ title, children }: { title: string; children: ReactNode }) {
 interface StartScreenProps {
   busy: boolean;
   error: ReactNode;
+  recovery: ReactNode;
   onStart: (family: string) => void;
 }
 
-function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
+function StartScreen({ busy, error: startError, recovery, onStart }: StartScreenProps) {
   const groupsId = useId();
   const [families, setFamilies] = useState<FamilyView[] | null>(null);
   const [error, setError] = useState<ReactNode>(null);
@@ -127,6 +128,7 @@ function StartScreen({ busy, error: startError, onStart }: StartScreenProps) {
   return (
     <Screen title="Start a voting session">
       <ErrorAlert error={error === null ? startError : <>Could not list families: {error}</>} />
+      {recovery}
       {families?.length === 0 && (
         <p className="text-muted-foreground">
           No voting families are available right now. Please check back later.
@@ -183,9 +185,9 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
 
   return (
     <Collapsible
-      open={collapsed !== pair.id}
+      open={collapsed !== pair.instruction}
       onOpenChange={(next) => {
-        setCollapsed(next ? null : pair.id);
+        setCollapsed(next ? null : pair.instruction);
       }}
       asChild
     >
@@ -214,7 +216,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
             className={cn(
               scroll,
               'flex flex-col gap-3 text-base',
-              stacked ? 'max-h-[25dvh]' : 'max-xl:max-h-[25dvh]',
+              stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
             <Markdown text={pair.instruction} />
@@ -474,7 +476,7 @@ export function VoteApp() {
     }
 
     if (event.key === 'Enter') {
-      if (target === pairView.current || target === document.body) {
+      if (target instanceof Node && target.contains(pairView.current)) {
         event.preventDefault();
         submit();
       }
@@ -575,17 +577,15 @@ export function VoteApp() {
     }
 
     return (
-      <>
-        <div className="mx-auto pt-4">{recovery}</div>
-        <StartScreen
-          busy={busy || admission}
-          error={error}
-          onStart={(family) => {
-            history.replaceState(null, '', `?${new URLSearchParams({ family })}`);
-            void run(() => flow.enter(family, accepted));
-          }}
-        />
-      </>
+      <StartScreen
+        busy={busy || admission}
+        error={error}
+        recovery={recovery}
+        onStart={(family) => {
+          history.replaceState(null, '', `?${new URLSearchParams({ family })}`);
+          void run(() => flow.enter(family, accepted));
+        }}
+      />
     );
   }
 
