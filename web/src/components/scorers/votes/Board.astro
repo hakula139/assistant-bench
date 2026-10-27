@@ -33,11 +33,5 @@ const rows =
     <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
-  <VotesBoard
-    client:load
-    base={boardPath(family)}
-    round={round}
-    categories={config.categories}
-    labels={boardLabels(config)}
-  />
+  <VotesBoard client:load base={boardPath(family)} round={round} labels={boardLabels(config)} />
 )}

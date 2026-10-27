@@ -27,7 +27,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { Category } from '@/lib/categories';
 import {
   formatCost,
   formatCount,
@@ -52,7 +51,7 @@ import {
 import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { isPreliminary } from '@/lib/ranking';
-import type { CategoryBoard, CategoryStanding, Standing, VotesResults } from '@/lib/report';
+import type { CategoryStanding, Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
@@ -62,22 +61,12 @@ interface VotesBoardProps {
   base: string;
   /** The closed round the board shows. */
   round: VotesRound;
-  /** The family's category IDs, in the order its boards appear. */
-  categories: Category[];
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
 
 const ALL = 'aggregate';
 const categoryOption = (category: string) => `category:${category}`;
-
-/** The round's category boards in the family's declared order, undeclared ones last. */
-function orderedBoards(boards: CategoryBoard[], declared: Category[]): CategoryBoard[] {
-  const order = new Map<string, number>(declared.map((id, index): [string, number] => [id, index]));
-  const rank = (board: CategoryBoard) => order.get(board.category) ?? declared.length;
-
-  return boards.toSorted((a, b) => rank(a) - rank(b));
-}
 
 function leaderboardRows(
   base: string,
@@ -181,12 +170,12 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
 }
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
-export function VotesBoard({ base, round, categories: declared, labels }: VotesBoardProps) {
+export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const [category, setCategory] = useSearchParam('category', null);
 
   const { systems, results } = round;
   const names = useMemo(() => reportNames(systems), [systems]);
-  const boards = useMemo(() => orderedBoards(results.categories, declared), [results, declared]);
+  const boards = results.categories;
   const activeCategory =
     category !== null && boards.some((board) => board.category === category) ? category : null;
   const unranked =

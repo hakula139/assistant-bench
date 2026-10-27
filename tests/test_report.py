@@ -442,6 +442,16 @@ class TestVotesResults:
             assert results.categories == []
             assert results.votes == 1
 
+    def test_writes_category_boards_in_the_declared_order(self) -> None:
+        rows = (make_evidence(0), make_evidence(1))
+        analysis = make_analysis(
+            rows, categories=(('case-0', 'reply'), ('case-1', 'docs'))
+        )
+
+        results = report.votes_results(analysis)
+
+        assert [board.category for board in results.categories] == ['reply', 'docs']
+
     @pytest.mark.parametrize(
         'change',
         [

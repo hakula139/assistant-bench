@@ -47,14 +47,8 @@ async function load(
 const BOARD = '/writing/arena/';
 
 const CASES = boardLabels({ render: 'text' });
-const CATEGORIES = ['docs', 'message', 'reply'] as const;
 
-function render(
-  round: VotesRound,
-  names?: Record<string, string>,
-  labels = CASES,
-  categories: Category[] = [...CATEGORIES],
-): string {
+function render(round: VotesRound, names?: Record<string, string>, labels = CASES): string {
   const reversed = { ...round.results, standings: round.results.standings.toReversed() };
   const systems = names
     ? Object.fromEntries(
@@ -65,12 +59,7 @@ function render(
       )
     : round.systems;
   return renderToString(
-    <VotesBoard
-      base={BOARD}
-      round={{ ...round, systems, results: reversed }}
-      categories={categories}
-      labels={labels}
-    />,
+    <VotesBoard base={BOARD} round={{ ...round, systems, results: reversed }} labels={labels} />,
   );
 }
 
@@ -131,9 +120,7 @@ describe('VotesBoard', () => {
     vi.stubGlobal('fetch', fetch);
     stubPlotFrame();
 
-    renderInDom(
-      <VotesBoard base={BOARD} round={await load()} categories={[...CATEGORIES]} labels={CASES} />,
-    );
+    renderInDom(<VotesBoard base={BOARD} round={await load()} labels={CASES} />);
 
     expect(screen.queryByRole('status')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
@@ -163,9 +150,7 @@ describe('VotesBoard', () => {
       pro.decisive_votes = 13;
     }
     const draw = (round: VotesRound) =>
-      renderToString(
-        <VotesBoard base={BOARD} round={round} categories={[...CATEGORIES]} labels={CASES} />,
-      );
+      renderToString(<VotesBoard base={BOARD} round={round} labels={CASES} />);
 
     const historical = draw(earlier);
 
@@ -195,9 +180,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
     const user = userEvent.setup();
 
-    const { container } = renderInDom(
-      <VotesBoard base={BOARD} round={round} categories={[...CATEGORIES]} labels={CASES} />,
-    );
+    const { container } = renderInDom(<VotesBoard base={BOARD} round={round} labels={CASES} />);
     const table = container.querySelector('table');
     const systems = () =>
       [...(table?.querySelectorAll('tbody a') ?? [])].map((link) =>
@@ -332,12 +315,7 @@ describe('VotesBoard', () => {
     systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={{ round, results, systems, closed_at }}
-        categories={[...CATEGORIES]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
@@ -443,8 +421,10 @@ describe('VotesBoard', () => {
     expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
-  test('labels each category board, header, and filter option in family order', async () => {
-    const html = render(await load(), undefined, CASES, ['reply', 'message', 'docs']);
+  test('labels each category board, header, and filter option in report order', async () => {
+    const round = await load();
+    round.results.categories.reverse();
+    const html = render(round);
     const document = parse(html);
     const options = [...document.querySelectorAll('select')]
       .map((select) =>
@@ -480,12 +460,7 @@ describe('VotesBoard', () => {
     stubPlotFrame();
     const user = userEvent.setup();
     renderInDom(
-      <VotesBoard
-        base={BOARD}
-        round={{ round, results, systems, closed_at }}
-        categories={[...CATEGORIES]}
-        labels={CASES}
-      />,
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
     );
     const select = screen.getByLabelText<HTMLSelectElement>('Category');
 
@@ -557,7 +532,6 @@ describe('VotesBoard', () => {
         <VotesBoard
           base={BOARD}
           round={{ round, results, systems, closed_at }}
-          categories={[...CATEGORIES]}
           labels={boardLabels({ render })}
         />,
       );

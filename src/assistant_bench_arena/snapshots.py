@@ -8,7 +8,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench_arena.models import Defect, FamilyName, Record
+from assistant_bench_arena.models import Category, Defect, FamilyName, Record
 
 
 class UnitHumanWeights(Record):
@@ -72,7 +72,7 @@ class FamilyDefinition(Record):
     name: FamilyName
     reference: Annotated[str, Field(min_length=1)]
     systems: tuple[str, ...]
-    categories: tuple[str, ...]
+    categories: tuple[Category, ...]
     defects: tuple[Defect, ...]
 
     @model_validator(mode='after')

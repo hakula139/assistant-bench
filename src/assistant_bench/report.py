@@ -741,6 +741,8 @@ class AnalysisInput:
 
     defects: tuple[Defect, ...]
     provenance: LedgerProvenance
+    declared_categories: tuple[Category, ...]
+    """The family's declared category IDs, whose order the boards keep."""
     categories: tuple[tuple[str, Category | None], ...]
     """Every frozen case, with None marking an explicitly uncategorized case."""
 
@@ -812,7 +814,12 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             votes, sorted({system for row in votes for system in row.systems})
         ),
         categories=_categories(
-            dict(analysis.categories), board.anchor, votes, comparisons, outputs
+            dict(analysis.categories),
+            analysis.declared_categories,
+            board.anchor,
+            votes,
+            comparisons,
+            outputs,
         ),
         position=ratings.position if connected else None,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
@@ -921,12 +928,13 @@ def _head_to_head(
 
 def _categories(
     categories: Mapping[str, Category | None],
+    declared: tuple[Category, ...],
     anchor: str,
     votes: list[HumanEvidence],
     comparisons: list[ranking.Comparison],
     outputs: list[OutputMeasurement],
 ) -> list[CategoryBoard]:
-    """Refit each category in the board anchor's component, anchored there too."""
+    """Refit each declared category in the anchor's component, anchored there too."""
     category_votes: defaultdict[Category, list[HumanEvidence]] = defaultdict(list)
     for row in votes:
         if (category := categories[row.comparison.case]) is not None:
@@ -943,8 +951,11 @@ def _categories(
             entrants[category].add(output.system)
 
     boards: list[CategoryBoard] = []
-    for name, category_comparisons in sorted(by_category.items()):
-        matchups = ranking.Matchups.build(category_comparisons)
+    for name in declared:
+        if name not in by_category:
+            continue
+
+        matchups = ranking.Matchups.build(by_category[name])
         if anchor not in matchups.systems:
             continue
 

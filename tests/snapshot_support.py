@@ -49,6 +49,11 @@ def make_analysis(
     categories: tuple[tuple[str, Category | None], ...] | None = None,
 ) -> AnalysisInput:
     comparisons = tuple(row.comparison for row in ordinary) + settlements
+    resolved: tuple[tuple[str, Category | None], ...] = (
+        tuple((row.case, 'docs') for row in comparisons)
+        if categories is None
+        else categories
+    )
     outputs = tuple(
         OutputMeasurement(
             case=row.case,
@@ -85,11 +90,10 @@ def make_analysis(
             weighted_evidence_digest='c' * 64,
             fitted_point_snapshot_id='points-after',
         ),
-        categories=(
-            tuple((row.case, 'docs') for row in comparisons)
-            if categories is None
-            else categories
+        declared_categories=tuple(
+            dict.fromkeys(category for _, category in resolved if category is not None)
         ),
+        categories=resolved,
         ordinary=ordinary,
         repeats=repeats,
         settlements=settlements,

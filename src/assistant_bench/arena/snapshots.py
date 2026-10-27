@@ -274,6 +274,7 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
             weighted_evidence_digest=evidence_digest,
             fitted_point_snapshot_id=fitted_points.id,
         ),
+        declared_categories=family.categories,
         categories=tuple((case.key, case.category) for case in cases),
         ordinary=ordinary,
         repeats=repeats,
