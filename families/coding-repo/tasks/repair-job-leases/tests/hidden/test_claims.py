@@ -12,6 +12,9 @@ from typing import Any
 from jobq import Lease, Queue
 
 
+ROUNDS = 5
+"""Lock-held races per test, each over two fresh jobs."""
+
 CLAIM = """
 import json
 import sys
@@ -21,9 +24,9 @@ from jobq import Queue
 
 queue = Queue(Path(sys.argv[1]))
 print('ready', flush=True)
-sys.stdin.readline()
-lease = queue.claim(sys.argv[2])
-print(json.dumps(None if lease is None else lease.job_id), flush=True)
+for _ in sys.stdin:
+    lease = queue.claim(sys.argv[2])
+    print(json.dumps(None if lease is None else lease.job_id), flush=True)
 """
 
 DRAIN = """
@@ -49,10 +52,11 @@ class ConcurrentClaimTest(unittest.TestCase):
     def setUp(self) -> None:
         self.path = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'jobs.db'
         self.queue = self.enterContext(Queue(self.path))
-        self.jobs = {self.queue.enqueue('task', index) for index in range(2)}
-
         self.blocker = sqlite3.connect(self.path, isolation_level=None, timeout=10)
         self.addCleanup(self.blocker.close)
+
+    def enqueue(self, count: int) -> set[int]:
+        return {self.queue.enqueue('task', index) for index in range(count)}
 
     def hold_write_lock(self) -> None:
         self.blocker.execute('BEGIN IMMEDIATE')
@@ -61,9 +65,11 @@ class ConcurrentClaimTest(unittest.TestCase):
         time.sleep(0.5)
         self.blocker.execute('COMMIT')
 
-    def assert_distinct_leases(self, claimed: list[int | None]) -> None:
+    def assert_distinct_leases(
+        self, claimed: list[int | None], jobs: set[int], attempt: int = 0
+    ) -> None:
         leased = [job_id for job_id in claimed if job_id is not None]
-        self.assertEqual(sorted(leased), sorted(self.jobs), claimed)
+        self.assertEqual(sorted(leased), sorted(jobs), f'round {attempt}: {claimed}')
 
     def test_threads(self) -> None:
         queues = [self.enterContext(Queue(self.path)) for _ in range(6)]
@@ -78,19 +84,22 @@ class ConcurrentClaimTest(unittest.TestCase):
             else:
                 claimed.append(None if lease is None else lease.job_id)
 
-        threads = [
-            threading.Thread(target=claim, args=(queue, f'w{index}'))
-            for index, queue in enumerate(queues)
-        ]
-        self.hold_write_lock()
-        for thread in threads:
-            thread.start()
-        self.release_write_lock()
-        for thread in threads:
-            thread.join(30)
+        for attempt in range(ROUNDS):
+            jobs = self.enqueue(2)
+            claimed.clear()
+            threads = [
+                threading.Thread(target=claim, args=(queue, f'w{index}'))
+                for index, queue in enumerate(queues)
+            ]
+            self.hold_write_lock()
+            for thread in threads:
+                thread.start()
+            self.release_write_lock()
+            for thread in threads:
+                thread.join(30)
 
-        self.assertEqual(errors, [])
-        self.assert_distinct_leases(claimed)
+            self.assertEqual(errors, [], f'round {attempt}')
+            self.assert_distinct_leases(claimed, jobs, attempt)
 
     def start(self, script: str, count: int) -> list[subprocess.Popen[str]]:
         """Start `count` processes running `script` and wait until each is ready."""
@@ -109,34 +118,51 @@ class ConcurrentClaimTest(unittest.TestCase):
             self.assertEqual(worker.stdout.readline(), 'ready\n')
         return workers
 
-    def results(self, workers: list[subprocess.Popen[str]]) -> list[Any]:
+    def release_workers(self, workers: list[subprocess.Popen[str]]) -> list[Any]:
+        """Let each worker run one step behind the write lock and read its result."""
         for worker in workers:
             assert worker.stdin is not None
             worker.stdin.write('go\n')
             worker.stdin.flush()
         self.release_write_lock()
-        results = [json.loads(worker.communicate(timeout=60)[0]) for worker in workers]
-        self.assertEqual([worker.returncode for worker in workers], [0] * len(workers))
+
+        results: list[Any] = []
+        for worker in workers:
+            assert worker.stdout is not None
+            results.append(json.loads(worker.stdout.readline()))
         return results
+
+    def finish(self, workers: list[subprocess.Popen[str]]) -> None:
+        for worker in workers:
+            worker.communicate(timeout=60)
+        self.assertEqual([worker.returncode for worker in workers], [0] * len(workers))
 
     def test_processes(self) -> None:
         workers = self.start(CLAIM, 4)
-        self.hold_write_lock()
 
-        claimed = self.results(workers)
+        for attempt in range(ROUNDS):
+            jobs = self.enqueue(2)
+            self.hold_write_lock()
+            claimed = self.release_workers(workers)
 
-        self.assert_distinct_leases(claimed)
+            self.assert_distinct_leases(claimed, jobs, attempt)
+        self.finish(workers)
 
     def test_processes_draining_the_queue(self) -> None:
-        self.jobs |= {self.queue.enqueue('task', index) for index in range(2, 400)}
-        workers = self.start(DRAIN, 6)
+        jobs = self.enqueue(100)
+        workers = self.start(DRAIN, 4)
         self.hold_write_lock()
 
-        claimed = [job_id for result in self.results(workers) for job_id in result]
+        claimed = [
+            job_id for result in self.release_workers(workers) for job_id in result
+        ]
 
-        self.assert_distinct_leases(claimed)
+        self.finish(workers)
+        self.assert_distinct_leases(claimed, jobs)
 
     def test_tokens_identify_one_lease(self) -> None:
+        self.enqueue(2)
+
         first = self.queue.claim('w1')
         second = self.queue.claim('w2')
 

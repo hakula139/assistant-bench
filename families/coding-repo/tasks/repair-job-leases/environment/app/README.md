@@ -14,7 +14,7 @@ A job is `queued`, `running`, `done` or `dead`. `get(job_id)` returns a `Job`, r
 
 `claim(worker, *, lease_seconds=30.0)` leases the ready job with the earliest `run_at`, then the lowest ID, to `worker` and returns a `Lease`, or `None` when no job is ready. A claim counts one attempt and issues a token that identifies this lease alone. However many processes claim at once, a job has at most one valid lease at any moment.
 
-A lease is valid until `expires_at`. Its holder calls `heartbeat(lease, *, lease_seconds=30.0)` to extend it, which returns the extended lease, and finishes the job with `complete(lease, result=None)` or `fail(lease, error)`. Each of these raises `LeaseLost` and changes nothing once the lease is no longer valid.
+A lease expires at `expires_at`, so it is valid only while the queue's clock reads less than that. Its holder calls `heartbeat(lease, *, lease_seconds=30.0)` to extend it, which returns the extended lease, and finishes the job with `complete(lease, result=None)` or `fail(lease, error)`. Each of these raises `LeaseLost` and changes nothing once the lease is no longer valid.
 
 ## Failures
 
