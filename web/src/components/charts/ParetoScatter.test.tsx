@@ -101,28 +101,36 @@ describe('ParetoScatter', () => {
   test.each([
     ['three-digit', [point('low', 1, 400), point('high', 2, 900)]],
     ['five-digit', [point('low', 1, 9000), point('high', 2, 12000)]],
-  ])('fits %s score labels in the left margin it measures', async (_, points) => {
-    const { container } = render(
-      <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
-    );
-    const svg = await vi.waitFor(() => {
-      const found = container.querySelector('svg');
-      expect(found).not.toBeNull();
-      return found as SVGSVGElement;
-    });
+  ])(
+    'fits %s score labels and the axis label flush in the left margin it measures',
+    async (_, points) => {
+      const { container } = render(
+        <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
+      );
+      const svg = await vi.waitFor(() => {
+        const found = container.querySelector('svg');
+        expect(found).not.toBeNull();
+        return found as SVGSVGElement;
+      });
 
-    const group = svg.querySelector('g[aria-label="y-axis tick label"]');
-    const offset = (element: Element | null) =>
-      Number(/translate\((-?[\d.]+)/.exec(element?.getAttribute('transform') ?? '')?.[1]);
-    // The stubbed frame measures seven pixels per character, and the labels end at their x.
-    const lefts = [...(group?.querySelectorAll('text') ?? [])].map(
-      (label) => offset(group) + offset(label) - label.textContent.length * 7,
-    );
+      const group = svg.querySelector('g[aria-label="y-axis tick label"]');
+      const offset = (element: Element | null) =>
+        Number(/translate\((-?[\d.]+)/.exec(element?.getAttribute('transform') ?? '')?.[1]);
+      // The stubbed frame measures seven pixels per character, and the labels end at their x.
+      const lefts = [...(group?.querySelectorAll('text') ?? [])].map(
+        (label) => offset(group) + offset(label) - label.textContent.length * 7,
+      );
 
-    expect(lefts).not.toEqual([]);
-    expect(Math.min(...lefts)).toBeGreaterThanOrEqual(0);
-    expect(Math.min(...lefts)).toBeLessThan(1);
-  });
+      const axisLabel = svg.querySelector('g[aria-label="y-axis label"]');
+      const axisLabelLeft = offset(axisLabel) + offset(axisLabel?.querySelector('text') ?? null);
+
+      expect(lefts).not.toEqual([]);
+      expect(Math.min(...lefts)).toBeGreaterThanOrEqual(0);
+      expect(Math.min(...lefts)).toBeLessThan(1);
+      expect(axisLabelLeft).toBeGreaterThanOrEqual(0);
+      expect(axisLabelLeft).toBeLessThan(1);
+    },
+  );
 
   test('labels the frontier and its tips by display name', async () => {
     const points = [point('cheap', 1, 900), point('best', 4, 1000), point('dominated', 3, 850)];

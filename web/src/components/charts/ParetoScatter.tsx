@@ -211,6 +211,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
           tickSize: TICK_SIZE,
           tickPadding: LABEL_GAP - TICK_SIZE,
           label: 'Score',
+          labelOffset: marginLeft,
           inset: INSET.y,
         },
         marks: [
