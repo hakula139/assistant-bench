@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { markdown } from '@/lib/markdown';
+import { INLINE_CODE_CLASS, markdown } from '@/lib/markdown';
+
+const code = `<code class="${INLINE_CODE_CLASS}">`;
 
 describe('markdown', () => {
   test('keeps the end of each list item on one line', () => {
@@ -16,7 +18,7 @@ describe('markdown', () => {
     [
       'a code span',
       '在 2.0 里改为 `wrap = "preserve"`。',
-      '在 2.0 里改为 <span class="text-nowrap"><code>wrap = &quot;preserve&quot;</code>。</span>',
+      `在 2.0 里改为 <span class="text-nowrap">${code}wrap = &quot;preserve&quot;</code>。</span>`,
     ],
     [
       'emphasis',
@@ -30,7 +32,7 @@ describe('markdown', () => {
 
   test('keeps the end of an inline line together without a paragraph around it', () => {
     expect(markdown.renderInline('Names `make test` and what it found')).toBe(
-      'Names <code>make test</code> and what <span class="text-nowrap">it found</span>',
+      `Names ${code}make test</code> and what <span class="text-nowrap">it found</span>`,
     );
   });
 });
