@@ -350,6 +350,7 @@ Write an architecture decision record (ADR) of at most 400 words with the sectio
 
 Thread in #platform, 3 to 7 October:
 
+```text
 Priya: We need a job queue for order emails. Proposal: Redis lists, since we already run Redis for caching.
 Marco: +1 to Redis. Simple, and it can handle far more than our 300 jobs/s peak.
 Lena: One problem. The email job must be enqueued only if the order transaction commits. With Redis we'd enqueue after the commit and lose jobs whenever the process dies in between, which happened twice last quarter with the webhook sender.
@@ -364,6 +365,7 @@ Priya: No, Redis stays for caching. It just won't carry jobs.
 Priya: Decision: Postgres jobs table with SKIP LOCKED. Lena owns the migration.
 Sam: How long do we keep completed jobs?
 Priya: Undecided. Let's revisit after a month of data.
+```
 '''
 checklist = [
   "Records the Postgres jobs table with `FOR UPDATE SKIP LOCKED` as the decision, explaining the same-transaction enqueue requirement that ruled out Redis and SQS",
@@ -383,6 +385,7 @@ Add comments to the Rust code below only where a future maintainer needs them. R
 Leave the code unchanged. The listing is the type's complete implementation except `push` and the `unsafe impl Send` and `unsafe impl Sync` blocks, which live in another file and are correct. The context comes from the design doc, and some of it may be wrong. Where the doc disagrees with the code, comment on what the code actually does without repeating the doc's claim. If you spot a defect, describe it in a `// TODO:` comment without fixing it.
 
 Context:
+
 - `with_capacity(n)` creates a buffer that holds exactly `n` items.
 - The buffer leaves one slot empty so `head == tail` always means empty and never full.
 - The slot count is a power of two so indices can wrap with a bitmask.
@@ -432,6 +435,7 @@ Add comments to the Bash script below only where a future maintainer needs them.
 The script runs in production, so leave every command unchanged. The context comes from the original author's notes, and some of them may be wrong. Where a note disagrees with what the script does, comment on what the script actually does without repeating the note. If you spot a defect, describe it in a `# TODO:` comment without fixing it.
 
 Context:
+
 - `set -o pipefail` is there so that a `zstd` failure stops the script.
 - `flock -n` makes a second invocation wait until the earlier backup finishes, which happens when the upload is slow.
 - When the lock is busy, the script must exit with status 0 because the scheduler alerts on any non-zero exit code.
@@ -476,6 +480,7 @@ Benchmark: five 10-minute runs per configuration on the same staging host, repla
 | Cache hit rate | n/a | 71% |
 
 Notes from the engineer who ran the benchmark:
+
 - Throughput varied by up to ±80 req/s between runs of the same configuration.
 - Cache misses now make an extra network hop to the cache before reaching the pricing service, which is the likely reason p99 got worse. No experiment has confirmed this.
 - Draft summary line: "The cache makes the pricing service about 30% faster across the board."
@@ -633,16 +638,19 @@ instruction = '''
 Write the incident summary you will post in the engineering channel after yesterday's checkout outage. Give a timeline in UTC, then a short paragraph on what is known and what is not. Base it only on the three exports below. Their clocks are accurate, but they use different time zones. Where the sources disagree, point out the disagreement.
 
 PagerDuty export (UTC):
+
 - 2026-10-14 16:44 Alert triggered: checkout error rate above 5%
 - 2026-10-14 16:46 Acknowledged by Dana
 - 2026-10-14 17:20 Alert resolved
 
 Deploy log (UTC):
+
 - 2026-10-14 16:38 Deploy of checkout v412 completed
 - 2026-10-14 17:03 Rollback to v411 started
 - 2026-10-14 17:12 Rollback to v411 completed
 
-Slack export (America/Los_Angeles, which was on UTC-7 that day):
+Slack export (`America/Los_Angeles`, which was on UTC-7 that day):
+
 - 09:47 Dana: looking at checkout errors, started right after the 9:38 deploy
 - 09:58 Dana: suspect the new payment-config flag in v412, not confirmed
 - 10:03 Dana: rolling back to v411
@@ -682,6 +690,7 @@ instruction = '''
 Write an original scene of 350 to 500 words set on the last bus of the night. Two strangers on the bus are connected to the same accident from years ago, though neither states this connection directly. Use third-person limited point of view anchored to only one of the passengers, and write in the past tense. Keep the register restrained. Do not name or explicitly describe the accident itself.
 
 Include these three required beats:
+
 1. The bus stops at a location for longer than expected.
 2. A folded note changes hands between the two characters.
 3. The scene concludes on a concrete physical detail.
@@ -700,6 +709,7 @@ instruction = '''
 Write an original scene consisting entirely of dialogue between two adult siblings clearing out a family kitchen. Give each sibling a distinct speaking rhythm and vocabulary. They are arguing about which items to keep and which to throw away, but the underlying emotional reason for their disagreement must never be stated outright. Do not use any dialogue tags (such as "he said"), narrative prose, or stage directions. Output only the spoken lines.
 
 Include these three elements in the conversation:
+
 1. A box of photographs.
 2. A direct question from one sibling that the other leaves unanswered.
 3. A decision to deliberately leave one specific object behind.
@@ -720,6 +730,7 @@ Read the following opening paragraph and write an original continuation of 450 t
 Opening: "The house on Alder Street was empty by the time I arrived, except for the blue bowl on the counter. My brother had promised to wait. Through the kitchen window I could see his car still in the driveway, doors open, engine off. The keys were in the bowl, on top of a folded receipt from Halvorsen's Hardware dated that morning. I had come straight from the bus station, because the cast on my left wrist had three more weeks to go and I was not allowed to drive. My phone had died somewhere on the second bridge, about when the rain started, and the rain had not let up since. Juniper, his old dog, was asleep under the table and did not get up for me, which was new. The kitchen clock said ten past four, the way it had said ten past four for most of my childhood, because nobody in this family ever replaced a battery. I had spent eleven years learning not to ask certain questions, and I could feel every one of them now, lined up behind my teeth."
 
 Follow these requirements in your continuation:
+
 1. Maintain the first-person point of view and past tense established in the opening.
 2. Reference or interact with the blue bowl, the keys, or the receipt at least once more.
 3. Keep every detail the opening establishes consistent. If the continuation changes one, such as charging the phone, show how on the page.
@@ -742,6 +753,7 @@ instruction = '''
 Write an original fictional letter of 300 to 450 words from the perspective of someone writing to a former friend they have not spoken to in six years. Write in the first person from a present-day perspective, using present tense for current reflections and past tense for memories. Do not explain the ultimate reason the friendship ended or why they stopped speaking six years ago. Conclude the letter without asking for a reply or suggesting future contact.
 
 Include these three elements in the letter:
+
 1. One concrete apology for a past action.
 2. One request the writer makes and immediately withdraws, as if it has already been refused.
 3. One shared memory recounted unsentimentally, without nostalgia.
@@ -895,6 +907,7 @@ Write a close reading of 900 to 1,300 words examining one scene from the invente
 Synopsis: Set in a flooded archipelago after a century of retreating coastlines, "The Cartographer's Daughter" follows fourteen-year-old Lin as she travels north by mail boat to finish her late father's hydrographic survey. Across twelve episodes, divided into four three-episode port arcs, she learns that the imperial admiralty has been falsifying depth charts to steer merchant traffic away from silted, impoverished outer islands. Key scenes include "The Sounding Line" in episode 1, where Lin discovers two incompatible lead-line logs in her father's waterproof oilskin satchel; "The Tide-Bell Archive" in episode 3, where she confronts retired harbor master Oren inside a flooded stone bell tower as the incoming tide rises over the floor grates, while the bronze bell overhead tolls with each swell and drowns out half their dialogue; and "The Salt Flats Verdict" in episode 11, where Lin burns her clean fair-copy chart on the admiralty pier.
 
 Scene notes:
+
 - The opening wide shot holds Lin and Oren on opposite sides of the frame, with the bell's hanging rope between them. Water rises through the floor grates throughout the shot.
 - Lin's first question begins in a medium shot facing her. A bell toll covers the middle of the sentence. The camera stays on her face until she finishes, then cuts to Oren, who has not moved.
 - Lin repeats the question more slowly. There is no music. Water dripping from the bell rope remains audible during the pauses between her words.

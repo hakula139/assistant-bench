@@ -166,6 +166,13 @@
             entry = nodeHook "markdownlint" "markdownlint-cli2 --fix";
             files = "\\.md$";
           };
+
+          lint-instructions = {
+            enable = true;
+            package = null;
+            entry = nodeHook "lint-instructions" "node scripts/lint-instructions.mjs";
+            files = "^families/[^/]+/cases\\.toml$";
+          };
         };
 
         uvExe = pkgs.lib.getExe uv;

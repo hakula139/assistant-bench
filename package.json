@@ -3,7 +3,7 @@
   "scripts": {
     "build": "pnpm --filter web build",
     "format": "prettier --check .",
-    "lint": "markdownlint-cli2 \"**/*.md\" && pnpm -r lint",
+    "lint": "markdownlint-cli2 \"**/*.md\" && node scripts/lint-instructions.mjs && pnpm -r lint",
     "spellcheck": "git ls-files | cspell --no-progress --file-list stdin",
     "test": "pnpm --filter web test",
     "typecheck": "pnpm -r typecheck"
@@ -14,6 +14,7 @@
     "prettier": "^3.9.10",
     "prettier-plugin-astro": "^1.1.1",
     "prettier-plugin-tailwindcss": "^0.8.1",
+    "smol-toml": "^1.9.1",
     "wrangler": "^4.152.0"
   }
 }

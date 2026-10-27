@@ -102,6 +102,7 @@ setrlimit
 shadcn
 shfmt
 sigxfsz
+smol
 srcdoc
 SSIM
 starlette
