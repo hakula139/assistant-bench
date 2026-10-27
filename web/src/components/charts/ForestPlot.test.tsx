@@ -56,23 +56,7 @@ describe('forestPlotOptions', () => {
     expect(svg.querySelector('[aria-description="95% interval"]')).toBeNull();
   });
 
-  test('prints the score of a system below the axis start beside its arrowhead', () => {
-    const svg = draw(
-      [
-        { label: 'top', refit: refit('top', 1000) },
-        { label: 'far', refit: refit('far', 233) },
-      ],
-      [400, 1100],
-    );
-
-    const labels = [...svg.querySelectorAll('g[aria-label="text"] text')].map(
-      (node) => node.textContent,
-    );
-
-    expect(labels).toEqual(['233']);
-  });
-
-  test("puts the arrowhead's tip on the start gridline", () => {
+  test('draws a score below the axis start as an arrowhead on the start gridline, with its score past the arrowhead', () => {
     const svg = draw(
       [
         { label: 'top', refit: refit('top', 1000) },
@@ -82,11 +66,17 @@ describe('forestPlotOptions', () => {
     );
 
     const arrow = svg.querySelector('g[aria-label="dot"] path');
-    const start = svg.querySelector('g[aria-label="x-grid"] line');
+    const start = Number(svg.querySelector('g[aria-label="x-grid"] line')?.getAttribute('x1'));
+    const offset = (element: Element | null | undefined) =>
+      Number(/translate\((-?[\d.]+)/.exec(element?.getAttribute('transform') ?? '')?.[1]);
+    const labels = [...svg.querySelectorAll('g[aria-label="text"] text')];
+    const label = labels[0];
 
     expect(arrow?.getAttribute('d')).toBe('M0,0L10,-6L10,6Z');
-    expect(arrow?.getAttribute('transform')).toMatch(
-      new RegExp(`^translate\\(${start?.getAttribute('x1') ?? 'missing'},`),
+    expect(offset(arrow)).toBe(start);
+    expect(labels.map((node) => node.textContent)).toEqual(['233']);
+    expect(offset(label.parentElement) + offset(label)).toBeGreaterThan(
+      offset(arrow?.parentElement) + offset(arrow) + 10,
     );
   });
 

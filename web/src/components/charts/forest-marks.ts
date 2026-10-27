@@ -56,7 +56,7 @@ export function offScaleLabels(data: ForestDatum[]): Plot.Markish {
       x: (datum: ForestDatum) => datum.clipped.score,
       y: 'y',
       text: (datum: ForestDatum) => formatScore(datum.score),
-      dx: 9,
+      dx: ARROWHEAD.width + 4,
       textAnchor: 'start',
       fill: 'var(--muted-foreground)',
     },
