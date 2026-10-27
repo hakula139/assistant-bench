@@ -1,6 +1,6 @@
 --- a/filehost/handlers.py
 +++ b/filehost/handlers.py
-@@ -68,4 +68,2 @@
+@@ -69,4 +69,2 @@
      headers.add('Content-Range', selected.content_range(length))
 -    if encoded is not None:
 -        return Response(206, headers, encoded[selected.start : selected.stop])

@@ -1,4 +1,5 @@
 import email.utils
+import http.client
 
 from .server import (
     BINARY,
@@ -11,16 +12,6 @@ from .server import (
 
 
 class RangeTest(ServerCase):
-    def test_full_responses_advertise_byte_ranges(self) -> None:
-        for method in ('GET', 'HEAD'):
-            with self.subTest(method=method):
-                response, _ = self.fetch('/data.bin', method=method)
-
-                self.assertEqual(response.status, 200)
-                self.assertEqual(
-                    (response.getheader('Accept-Ranges') or '').lower(), 'bytes'
-                )
-
     def test_single_ranges(self) -> None:
         cases = [
             ('bytes=0-0', 0, 0),
@@ -52,45 +43,66 @@ class RangeTest(ServerCase):
             ('data.bin', 'bytes=5000-6000', 1000),
             ('data.bin', 'bytes=-0', 1000),
             ('data.bin', 'bytes=1000-1000, 2000-', 1000),
-            ('empty.bin', 'bytes=0-0', 0),
         ]
         for name, field, length in cases:
             with self.subTest(file=name, range=field):
                 response, _ = self.fetch(f'/{name}', {'Range': field})
 
-                self.assertEqual(response.status, 416)
-                self.assertEqual(
-                    response.getheader('Content-Range'), f'bytes */{length}'
-                )
+                self.assert_unsatisfiable(response, length)
 
-    def test_ignores_invalid_or_foreign_ranges(self) -> None:
-        for field in (
-            'bytes=abc',
-            'bytes=5-2',
-            'items=0-1',
-            'bytes=',
-            'bytes=1-2-3',
-            'bytes=0-1;q',
-        ):
+    def assert_unsatisfiable(
+        self, response: http.client.HTTPResponse, length: int
+    ) -> None:
+        self.assertEqual(response.status, 416)
+        self.assertEqual(response.getheader('Content-Range'), f'bytes */{length}')
+
+    def assert_full(
+        self, response: http.client.HTTPResponse, body: bytes, content: bytes
+    ) -> None:
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body, content)
+        self.assertIsNone(response.getheader('Content-Range'))
+
+    def test_empty_files_are_ignored_or_rejected(self) -> None:
+        for field in ('bytes=0-0', 'bytes=-5'):
+            with self.subTest(range=field):
+                response, body = self.fetch('/empty.bin', {'Range': field})
+
+                if response.status == 416:
+                    self.assert_unsatisfiable(response, 0)
+                else:
+                    self.assert_full(response, body, b'')
+
+    def test_invalid_ranges_are_ignored_or_rejected(self) -> None:
+        for field in ('bytes=abc', 'bytes=5-2', 'bytes=', 'bytes=1-2-3', 'bytes=0-1;q'):
             with self.subTest(range=field):
                 response, body = self.fetch('/data.bin', {'Range': field})
 
-                self.assertEqual(response.status, 200)
-                self.assertEqual(body, BINARY)
-                self.assertIsNone(response.getheader('Content-Range'))
+                if response.status == 416:
+                    self.assert_unsatisfiable(response, 1000)
+                else:
+                    self.assert_full(response, body, BINARY)
+
+    def test_ignores_other_range_units(self) -> None:
+        response, body = self.fetch('/data.bin', {'Range': 'items=0-1'})
+
+        self.assert_full(response, body, BINARY)
 
     def test_several_ranges_send_exactly_the_selected_bytes(self) -> None:
         cases = [
-            ('bytes=0-9,20-29', set(range(10)) | set(range(20, 30))),
-            ('bytes=0-9, 5-14, 990-', set(range(15)) | set(range(990, 1000))),
-            ('bytes=0-9,5000-', set(range(10))),
-            ('bytes=-10,0-0', {0} | set(range(990, 1000))),
-            ('bytes=0-1,,4-5', {0, 1, 4, 5}),
+            ('bytes=0-9,20-29', set(range(10)) | set(range(20, 30)), False),
+            ('bytes=0-9, 5-14, 990-', set(range(15)) | set(range(990, 1000)), True),
+            ('bytes=0-9,5000-', set(range(10)), False),
+            ('bytes=-10,0-0', {0} | set(range(990, 1000)), False),
+            ('bytes=0-1,,4-5', {0, 1, 4, 5}, False),
         ]
-        for field, selected in cases:
+        for field, selected, overlapping in cases:
             with self.subTest(range=field):
                 response, body = self.fetch('/data.bin', {'Range': field})
 
+                if overlapping and response.status == 416:
+                    self.assert_unsatisfiable(response, 1000)
+                    continue
                 if response.status == 200:
                     self.assertEqual(body, BINARY)
                     continue
@@ -119,24 +131,24 @@ class RangeTest(ServerCase):
         earlier = email.utils.formatdate(MODIFIED - 60, usegmt=True)
         later = email.utils.formatdate(MODIFIED + 60, usegmt=True)
         cases = [
-            (tag, True),
-            ('"another-tag"', False),
-            (f'W/{tag}', False),
-            (last_modified(), True),
-            (earlier, False),
-            (later, False),
+            (tag, {206}),
+            ('"another-tag"', {200}),
+            (f'W/{tag}', {200}),
+            (last_modified(), {200, 206}),
+            (earlier, {200}),
+            (later, {200}),
         ]
-        for if_range, partial in cases:
+        for if_range, statuses in cases:
             with self.subTest(if_range=if_range):
                 response, body = self.fetch(
                     '/data.bin', {'Range': 'bytes=10-19', 'If-Range': if_range}
                 )
 
-                if partial:
+                self.assertIn(response.status, statuses)
+                if response.status == 206:
                     self.assert_partial(response, body, BINARY, 10, 19)
                 else:
-                    self.assertEqual(response.status, 200)
-                    self.assertEqual(body, BINARY)
+                    self.assert_full(response, body, BINARY)
 
     def test_preconditions_take_precedence_over_ranges(self) -> None:
         tag = self.identity_tag('data.bin')

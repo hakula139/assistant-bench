@@ -1,6 +1,6 @@
 --- a/filehost/handlers.py
 +++ b/filehost/handlers.py
-@@ -38,7 +38,11 @@
+@@ -39,7 +39,11 @@
      if negotiated:
          headers.add('Vary', 'Accept-Encoding')
 

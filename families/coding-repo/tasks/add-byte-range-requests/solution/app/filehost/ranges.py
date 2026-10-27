@@ -54,33 +54,47 @@ def parse_range(field: str) -> list[RangeSpec] | None:
 def satisfiable(specs: list[RangeSpec], length: int) -> list[ByteRange]:
     """Return the ranges that select bytes of a `length`-byte representation.
 
-    Overlapping and adjacent ranges merge, in ascending order, so a request
-    cannot make the server send the same bytes more than once.
+    Ranges keep their request order, except that overlapping and adjacent ones
+    merge where the first of them stood, so no byte is sent twice.
     """
-    ranges: list[ByteRange] = []
+    merged: list[ByteRange] = []
     for first, last in specs:
         if first is None:
             assert last is not None
-            if last and length:
-                ranges.append(ByteRange(max(length - last, 0), length))
+            if not last:
+                continue
+            selected = ByteRange(max(length - last, 0), length)
         elif first < length:
             stop = length if last is None else min(last + 1, length)
-            ranges.append(ByteRange(first, stop))
+            selected = ByteRange(first, stop)
+        else:
+            continue
 
-    merged: list[ByteRange] = []
-    for byte_range in sorted(ranges, key=lambda candidate: candidate.start):
-        if merged and byte_range.start <= merged[-1].stop:
-            previous = merged.pop()
-            byte_range = ByteRange(previous.start, max(previous.stop, byte_range.stop))
-        merged.append(byte_range)
+        touching = [
+            index
+            for index, kept in enumerate(merged)
+            if selected.start <= kept.stop and kept.start <= selected.stop
+        ]
+        for index in touching:
+            kept = merged[index]
+            selected = ByteRange(
+                min(kept.start, selected.start), max(kept.stop, selected.stop)
+            )
+        for index in reversed(touching[1:]):
+            del merged[index]
+        if touching:
+            merged[touching[0]] = selected
+        else:
+            merged.append(selected)
     return merged
 
 
-def if_range_allows(field: str | None, etag: str, modified: int) -> bool:
+def if_range_allows(field: str | None, etag: str, modified: int, now: float) -> bool:
     """Whether an `If-Range` field lets the request's ranges apply.
 
-    An entity tag must match strongly, so a weak tag never does, and a date must
-    equal the representation's modification time.
+    An entity tag must match strongly, so a weak tag never does. A date must
+    equal the modification time, and counts only once that second has passed,
+    since a file changed twice within it would keep the same date.
     """
     if field is None:
         return True
@@ -90,4 +104,4 @@ def if_range_allows(field: str | None, etag: str, modified: int) -> bool:
         return field == etag
 
     date = parse_http_date(field)
-    return date is not None and date == modified
+    return date is not None and date == modified and modified + 1 <= now

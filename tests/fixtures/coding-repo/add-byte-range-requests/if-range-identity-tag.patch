@@ -1,6 +1,6 @@
 --- a/filehost/handlers.py
 +++ b/filehost/handlers.py
-@@ -50,7 +50,7 @@
+@@ -51,7 +51,7 @@
      encoded = compress(path.read_bytes()) if gzipped else None
      length = info.size if encoded is None else len(encoded)
 
