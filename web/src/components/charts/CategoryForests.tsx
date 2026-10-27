@@ -31,7 +31,7 @@ export function categoryMarks(
       preliminary: isPreliminary(refit, rules),
     })),
   );
-  return legendMarks(rows, domain, domain[0] <= anchorScore && anchorScore <= domain[1]);
+  return legendMarks(rows, domain, anchorScore);
 }
 
 /** One forest plot per category, on an axis every category shares. */

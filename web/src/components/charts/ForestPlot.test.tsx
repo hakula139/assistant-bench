@@ -56,7 +56,7 @@ describe('forestPlotOptions', () => {
     expect(svg.querySelector('[aria-description="95% interval"]')).toBeNull();
   });
 
-  test('prints the score of a system below the axis start beside its arrowhead', () => {
+  test('draws a score below the axis start as an arrowhead on the start gridline, with its score past the arrowhead', () => {
     const svg = draw(
       [
         { label: 'top', refit: refit('top', 1000) },
@@ -65,11 +65,32 @@ describe('forestPlotOptions', () => {
       [400, 1100],
     );
 
-    const labels = [...svg.querySelectorAll('g[aria-label="text"] text')].map(
-      (node) => node.textContent,
+    const arrow = svg.querySelector('g[aria-label="dot"] path');
+    const start = Number(svg.querySelector('g[aria-label="x-grid"] line')?.getAttribute('x1'));
+    const offset = (element: Element | null | undefined) =>
+      Number(/translate\((-?[\d.]+)/.exec(element?.getAttribute('transform') ?? '')?.[1]);
+    const labels = [...svg.querySelectorAll('g[aria-label="text"] text')];
+    const label = labels[0];
+
+    expect(arrow?.getAttribute('d')).toBe('M0,0L10,-6L10,6Z');
+    expect(offset(arrow)).toBe(start);
+    expect(labels.map((node) => node.textContent)).toEqual(['233']);
+    expect(offset(label.parentElement) + offset(label)).toBeGreaterThan(
+      offset(arrow?.parentElement) + offset(arrow) + 10,
+    );
+  });
+
+  test.each<[string, [number, number], number]>([
+    ['on the axis', [600, 1100], 1],
+    ['below the axis start', [1200, 1800], 0],
+  ])('rules an anchor %s only where the axis holds it', (_, domain, ruled) => {
+    const svg = draw([{ label: 'top', refit: refit('top', domain[1]) }], domain);
+
+    const references = [...svg.querySelectorAll('g[aria-label="rule"]')].filter(
+      (rule) => rule.getAttribute('stroke') === 'var(--chart-reference)',
     );
 
-    expect(labels).toEqual(['233']);
+    expect(references).toHaveLength(ruled);
   });
 });
 

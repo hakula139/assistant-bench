@@ -3,72 +3,54 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { Forest } from '@/components/site/Forest';
-import { forestDomain, roundRows } from '@/lib/forest';
+import { Forest, ForestLegend } from '@/components/site/Forest';
+import { forestDomain, forestTicks, roundRows } from '@/lib/forest';
+import { formatScore } from '@/lib/format';
 import { reportSchema } from '@/lib/report';
 import { reportNames } from '@/lib/systems';
 import { readFixture } from '@/test/fixture';
+import { trackDrawing } from '@/test/track';
 
 const estimate = (score: number) => ({ score });
-
-function look(element: Element | null, looks: Record<string, string>): string {
-  return Object.entries(looks).find(([style]) => element?.classList.contains(style))?.[1] ?? 'none';
-}
-
-function drawings() {
-  const { container } = render(
-    <Forest
-      caption="Example"
-      domain={[400, 1100]}
-      rows={[
-        {
-          system: 'settled',
-          name: 'settled',
-          estimate: estimate(1000),
-          preliminary: false,
-        },
-        {
-          system: 'preliminary',
-          name: 'preliminary',
-          estimate: estimate(900),
-          preliminary: true,
-        },
-        { system: 'cut', name: 'cut', estimate: estimate(233), preliminary: false },
-      ]}
-    />,
-  );
-  return Object.fromEntries(
-    [...container.querySelectorAll('tbody tr')].map((row) => [
-      row.querySelector('th')?.textContent ?? '',
-      {
-        dot: look(row.querySelector('.rounded-full'), {
-          'bg-background': 'hollow',
-          'bg-chart-series': 'filled',
-        }),
-        arrows: [...row.querySelectorAll('svg')].map((svg) =>
-          look(svg, { 'left-0': 'start', 'right-0': 'end' }),
-        ),
-      },
-    ]),
-  );
-}
 
 describe('Forest', () => {
   afterEach(cleanup);
 
-  test('draws preliminary coverage as a hollow dot', () => {
-    const { settled, preliminary } = drawings();
+  test('draws settled and preliminary dots, an arrowhead below the axis, the anchor rule, and a gridline under each axis label', () => {
+    const domain: [number, number] = [400, 1100];
+    const grid = ['0%', '14.29%', '28.57%', '42.86%', '57.14%', '71.43%', '85.71%', '100%'];
 
-    expect([settled, preliminary]).toEqual([
-      { dot: 'filled', arrows: [] },
-      { dot: 'hollow', arrows: [] },
+    const { container } = render(
+      <Forest
+        caption="Example"
+        domain={domain}
+        anchorScore={1000}
+        rows={[
+          { system: 'settled', name: 'settled', estimate: estimate(1000), preliminary: false },
+          {
+            system: 'preliminary',
+            name: 'preliminary',
+            estimate: estimate(900),
+            preliminary: true,
+          },
+          { system: 'cut', name: 'cut', estimate: estimate(233), preliminary: false },
+          { system: 'new', name: 'new', unplaced: 'no-votes' },
+        ]}
+      />,
+    );
+
+    const drawings = [...container.querySelectorAll('tbody tr')].map(trackDrawing);
+    const labels = [...container.querySelectorAll<HTMLElement>('thead [aria-hidden] span')];
+
+    expect(drawings).toEqual([
+      { dot: 'filled', arrows: [], dotAt: '85.71%', ruleAt: '85.71%', gridAt: grid },
+      { dot: 'hollow', arrows: [], dotAt: '71.43%', ruleAt: '85.71%', gridAt: grid },
+      { dot: 'none', arrows: ['start'], dotAt: null, ruleAt: '85.71%', gridAt: grid },
+      { dot: 'none', arrows: [], dotAt: null, ruleAt: '85.71%', gridAt: grid },
     ]);
-  });
-
-  test('keeps a point below the axis visible as an arrowhead', () => {
-    const { cut } = drawings();
-
-    expect(cut.arrows).toEqual(['start']);
+    expect(labels.map((label) => [label.textContent, label.style.left])).toEqual(
+      forestTicks(domain).map((tick, index) => [formatScore(tick), grid[index]]),
+    );
   });
 
   test('labels the genuine near-tied ledger scores at their displayed precision', async () => {
@@ -117,6 +99,22 @@ describe('Forest', () => {
         (label) => !label.className.includes('@max-') || label.classList.contains(hidden),
       ),
     ).toBe(true);
+  });
+
+  test('centers every legend mark in a key of one width', () => {
+    const { container } = render(
+      <ForestLegend marks={['score', 'preliminary', 'cut', 'anchor']} anchorScore={1000} />,
+    );
+
+    const keys = [...container.querySelectorAll('li > [aria-hidden]')];
+    const marks = keys.map((key) => key.firstElementChild as HTMLElement);
+
+    expect(keys.map((key) => key.className)).toEqual(keys.map(() => 'relative h-4 w-9 shrink-0'));
+    expect(
+      marks.map(
+        (mark) => mark.style.left || [...mark.classList].find((name) => name === 'left-1/2'),
+      ),
+    ).toEqual(['50%', '50%', 'left-1/2', '50%']);
   });
 
   test("opens a row's point score from its score", async () => {
