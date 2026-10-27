@@ -1,4 +1,4 @@
-import * as Plot from '@observablehq/plot';
+import type * as Plot from '@observablehq/plot';
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -13,7 +13,8 @@ import { cn } from 'cn';
 import { ArrowDown, ArrowUp, CircleHelp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 
-import { anchorRule, forestMarks } from '@/components/charts/forest-marks';
+import { grid, referenceRule } from '@/components/charts/chart-marks';
+import { forestMarks } from '@/components/charts/forest-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { Hint, StatusMark } from '@/components/site/Term';
 import { Button } from '@/components/ui/button';
@@ -33,7 +34,7 @@ import {
   legendMarks,
   type LegendMark,
 } from '@/lib/forest';
-import { formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
+import { formatCount, formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
 import type { Standing } from '@/lib/report';
 
@@ -42,6 +43,8 @@ export interface LeaderboardRow {
   system: string;
   /** The system's display name, which the row shows and sorts by. */
   name: string;
+  /** The system's page, which only systems with a family standing have. */
+  href?: string;
   /**
    * The system's standing on the family board, which also holds its family-wide rates, cost, and
    * latency. A category can rank a system that the family board leaves unranked.
@@ -61,8 +64,6 @@ interface LeaderboardProps {
   /** The mark's definition, which names the reference when the anchor stands in for it. */
   anchorTerm: Term;
   preliminaryTerm: Term;
-  /** Links a system name to its page, which only systems with a family standing have. */
-  href: (system: string) => string;
   /** The gate-failure column's label and meaning. */
   gateFailures: Term;
 }
@@ -127,8 +128,8 @@ function ScoreCell({
       y: { axis: null, domain: [0, 1] },
       color: { type: 'identity' },
       marks: [
-        Plot.gridX(forestTicks(domain), { stroke: 'var(--chart-grid)', strokeOpacity: 1 }),
-        anchor === undefined ? null : anchorRule(anchor),
+        grid('x', forestTicks(domain)),
+        anchor === undefined ? null : referenceRule(anchor),
         forestMarks(
           [{ y: 0.5, score: row.score, clipped: clip(row, domain), preliminary: row.preliminary }],
           domain,
@@ -194,7 +195,6 @@ export function Leaderboard({
   anchorSystem,
   anchorTerm,
   preliminaryTerm,
-  href,
   gateFailures,
 }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
@@ -229,11 +229,8 @@ export function Leaderboard({
         sortFn: 'alphanumeric',
         cell: ({ row: { original } }) => (
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {original.standing ? (
-              <a
-                href={href(original.system)}
-                className="font-medium text-balance sm:whitespace-nowrap"
-              >
+            {original.href ? (
+              <a href={original.href} className="font-medium text-balance sm:whitespace-nowrap">
                 {original.name}
               </a>
             ) : (
@@ -266,6 +263,7 @@ export function Leaderboard({
       helper.accessor('votes', {
         header: terms.votes.term,
         sortDescFirst: true,
+        cell: ({ getValue }) => formatCount(getValue()),
         meta: { numeric: true, term: terms.votes, detail: true },
       }),
       helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
@@ -285,7 +283,7 @@ export function Leaderboard({
         meta: { numeric: true, term: gateFailures, detail: true },
       }),
     ]);
-  }, [ranked, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, href, gateFailures]);
+  }, [ranked, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, gateFailures]);
 
   const table = useTable({
     features,

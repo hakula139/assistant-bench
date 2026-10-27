@@ -1,9 +1,6 @@
 import * as Plot from '@observablehq/plot';
 import { useEffect, useRef, useState } from 'react';
 
-/** Room between a row label and the plot, in CSS pixels. */
-export const LABEL_GAP = 12;
-
 export interface PlotFrame {
   /** The container's width, in CSS pixels. */
   width: number;

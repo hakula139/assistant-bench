@@ -1,6 +1,8 @@
 import * as Plot from '@observablehq/plot';
+import { ticks } from 'd3-array';
 import { useCallback } from 'react';
 
+import { grid, LABEL_GAP, labelMargin, tip } from '@/components/charts/chart-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { logTicks } from '@/components/charts/ticks';
 import { formatScore } from '@/lib/format';
@@ -42,8 +44,11 @@ interface ParetoScatterProps {
 }
 
 const HEIGHT = 320;
-const MARGIN = { top: 24, right: 16, bottom: 40, left: 48 };
+const MARGIN = { top: 24, right: 16, bottom: 40 };
 const INSET = { x: 16, y: 8 };
+/** The score ticks the plot's height fits, at Plot's own default density. */
+const SCORE_TICKS = Math.round((HEIGHT - MARGIN.top - MARGIN.bottom) / 35);
+const TICK_SIZE = 6;
 const LABEL_HEIGHT = 14;
 const DOT_RADIUS = 5;
 
@@ -158,13 +163,6 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
         domain: xDomain,
       };
 
-      const x = Plot.scale({
-        x: {
-          ...xOptions,
-          range: [MARGIN.left + INSET.x, width - MARGIN.right - INSET.x],
-        },
-      });
-
       const y = Plot.scale({
         y: {
           domain: [
@@ -175,31 +173,56 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
           range: [HEIGHT - MARGIN.bottom - INSET.y, MARGIN.top + INSET.y],
         },
       });
+      const [low, high] = y.domain as [number, number];
+      const scoreTicks = ticks(low, high, SCORE_TICKS);
+      const marginLeft = labelMargin(scoreTicks.map(formatScore), measure);
+
+      const x = Plot.scale({
+        x: {
+          ...xOptions,
+          range: [marginLeft + INSET.x, width - MARGIN.right - INSET.x],
+        },
+      });
 
       const placements = placeLabels(
         frontier,
         points,
         (value, score) => [x.apply(value) as number, y.apply(score) as number],
         measure,
-        { left: MARGIN.left, right: width, top: 0, bottom: HEIGHT - MARGIN.bottom },
+        { left: marginLeft, right: width, top: 0, bottom: HEIGHT - MARGIN.bottom },
       );
       const tickWidth = Math.max(...xDomain.map((value) => measure(format(value))));
 
-      const ticks = logTicks(
+      const metricTicks = logTicks(
         xDomain,
-        Math.max(2, Math.floor((width - MARGIN.left - MARGIN.right) / (tickWidth + 24))),
+        Math.max(2, Math.floor((width - marginLeft - MARGIN.right) / (tickWidth + 24))),
       );
 
       return {
         marginTop: MARGIN.top,
         marginRight: MARGIN.right,
         marginBottom: MARGIN.bottom,
-        marginLeft: MARGIN.left,
+        marginLeft,
         x: { ...xOptions, inset: INSET.x },
-        y: { domain: y.domain, label: 'Score', grid: true, inset: INSET.y },
+        y: {
+          domain: y.domain,
+          ticks: scoreTicks,
+          tickFormat: formatScore,
+          tickSize: TICK_SIZE,
+          tickPadding: LABEL_GAP - TICK_SIZE,
+          label: 'Score',
+          labelOffset: marginLeft,
+          inset: INSET.y,
+        },
         marks: [
-          Plot.gridX(ticks),
-          Plot.axisX(ticks, { text: format, label, labelAnchor: 'right', labelArrow: 'none' }),
+          grid('x', metricTicks),
+          grid('y', scoreTicks),
+          Plot.axisX(metricTicks, {
+            text: format,
+            label,
+            labelAnchor: 'right',
+            labelArrow: 'none',
+          }),
           Plot.line(frontier, {
             x: 'x',
             y: 'score',
@@ -232,7 +255,7 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
               strokeWidth: 2,
             }),
           ),
-          Plot.tip(
+          tip(
             points,
             Plot.pointer({
               x: 'x',
@@ -243,7 +266,6 @@ export function ParetoScatter({ points, label, format }: ParetoScatterProps) {
                   `Score ${formatScore(point.score)}`,
                   `${label} ${format(point.x)}`,
                 ].join('\n'),
-              fontFamily: 'inherit',
             }),
           ),
         ],

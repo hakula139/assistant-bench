@@ -1,6 +1,4 @@
 ---
-import { cn } from 'cn';
-
 import IntervalMark from '@/components/site/IntervalMark.astro';
 import { container, wideContainer } from '@/components/site/PageParts';
 import ThemeToggle from '@/components/site/ThemeToggle.astro';
@@ -24,10 +22,10 @@ const links: { section: HeaderSection; href: string; label: string }[] = [
 
 <header class="border-b">
   <nav
-    class={cn(
+    class:list={[
       wide ? wideContainer : container,
       'flex flex-wrap items-center gap-x-6 gap-y-2 py-3 lg:h-14 lg:flex-nowrap lg:py-0',
-    )}
+    ]}
     aria-label="Main"
   >
     <a href="/" class="flex items-center gap-2 font-semibold text-foreground hover:text-foreground">

@@ -57,6 +57,7 @@
   --chart-series: #3550d6;
   --chart-emphasis: #c25e0c;
   --chart-grid: #e8ebf1;
+  --chart-reference: #c4c8d3;
 
   --radius: 0.375rem;
 }
@@ -94,6 +95,7 @@
   --chart-series: #7587f3;
   --chart-emphasis: #ce7c22;
   --chart-grid: #2c3446;
+  --chart-reference: #474f60;
 }
 
 @theme inline {
@@ -122,6 +124,7 @@
   --color-chart-series: var(--chart-series);
   --color-chart-emphasis: var(--chart-emphasis);
   --color-chart-grid: var(--chart-grid);
+  --color-chart-reference: var(--chart-reference);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

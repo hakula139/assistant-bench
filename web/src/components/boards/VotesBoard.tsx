@@ -10,7 +10,6 @@ import {
 } from '@/components/boards/Leaderboard';
 import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 import { CategoryForests, categoryMarks } from '@/components/charts/CategoryForests';
-import type { Refit } from '@/components/charts/ForestPlot';
 import {
   paretoFrontier,
   ParetoScatter,
@@ -51,7 +50,7 @@ import {
 import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { isPreliminary } from '@/lib/ranking';
-import type { Standing, VotesResults } from '@/lib/report';
+import type { CategoryStanding, Standing, VotesResults } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
@@ -69,13 +68,15 @@ const ALL = 'aggregate';
 const categoryOption = (category: string) => `category:${category}`;
 
 function leaderboardRows(
+  base: string,
   results: VotesResults,
   category: string | null,
   names: SystemNames,
 ): LeaderboardRow[] {
-  const row = (fit: Refit, standing: Standing | undefined): LeaderboardRow => ({
+  const row = (fit: CategoryStanding, standing: Standing | undefined): LeaderboardRow => ({
     system: fit.system,
     name: systemName(names, fit.system),
+    href: standing ? systemPagePath(base, fit.system) : undefined,
     standing,
     score: fit.score,
     votes: fit.votes,
@@ -181,8 +182,8 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       : (results.categories.find((board) => board.category === activeCategory)?.unranked ?? []);
 
   const rows = useMemo(
-    () => leaderboardRows(results, activeCategory, names),
-    [results, activeCategory, names],
+    () => leaderboardRows(base, results, activeCategory, names),
+    [base, results, activeCategory, names],
   );
   const order = useMemo(() => categorySystems(results), [results]);
 
@@ -211,7 +212,6 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
 
-  const href = (system: string) => systemPagePath(base, system);
   const anchorTerm =
     results.anchor === results.reference
       ? recordedAnchor(results.method)
@@ -262,7 +262,6 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
           anchorSystem={results.anchor}
           anchorTerm={anchorTerm}
           preliminaryTerm={preliminaryTerm(results.rules)}
-          href={href}
           gateFailures={labels.gateFailures}
         />
         {unranked.length > 0 && (

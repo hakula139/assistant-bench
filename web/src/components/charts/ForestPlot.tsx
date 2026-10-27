@@ -1,23 +1,17 @@
 import * as Plot from '@observablehq/plot';
 import { useCallback } from 'react';
 
-import {
-  anchorRule,
-  forestMarks,
-  offScaleLabels,
-  type ForestDatum,
-} from '@/components/charts/forest-marks';
-import { LABEL_GAP, PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { grid, LABEL_GAP, labelMargin, referenceRule, tip } from '@/components/charts/chart-marks';
+import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
+import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { clip, forestTicks, labelledTicks } from '@/lib/forest';
 import { formatCountOf, formatScore } from '@/lib/format';
 import { isPreliminary } from '@/lib/ranking';
-import type { CategoryBoard, VotesRules } from '@/lib/report';
-
-export type Refit = CategoryBoard['standings'][number];
+import type { CategoryStanding, VotesRules } from '@/lib/report';
 
 export interface ForestPlotRow {
   label: string;
-  refit: Refit;
+  refit: CategoryStanding;
 }
 
 interface ForestPlotProps {
@@ -43,7 +37,7 @@ export function forestPlotOptions(
   { rows, labels, domain, anchorScore, rules }: ForestPlotProps,
   { width, measure }: PlotFrame,
 ): Plot.PlotOptions {
-  const data = rows.map(({ label, refit }): ForestDatum & { refit: Refit } => ({
+  const data = rows.map(({ label, refit }): ForestDatum & { refit: CategoryStanding } => ({
     y: label,
     score: refit.score,
     clipped: clip(refit, domain),
@@ -51,7 +45,7 @@ export function forestPlotOptions(
     refit,
   }));
 
-  const marginLeft = Math.max(...labels.map(measure)) + LABEL_GAP;
+  const marginLeft = labelMargin(labels, measure);
   const ticks = forestTicks(domain);
   const labelled = new Set(labelledTicks(domain, width - marginLeft - ARROW_INSET, anchorScore));
 
@@ -65,22 +59,21 @@ export function forestPlotOptions(
       tickFormat: (tick: number) => (labelled.has(tick) ? formatScore(tick) : ''),
       insetLeft: ARROW_INSET,
       label: null,
-      grid: true,
     },
     y: { domain: labels, label: null, tickSize: 0, tickPadding: LABEL_GAP },
     color: { type: 'identity' },
     marks: [
-      anchorRule(anchorScore),
+      grid('x', ticks),
+      referenceRule(anchorScore),
       forestMarks(data, domain),
       offScaleLabels(data),
-      Plot.tip(
+      tip(
         data,
         Plot.pointerY({
           x: (datum: (typeof data)[number]) => datum.clipped.score,
           y: 'y',
           title: ({ y, refit }: (typeof data)[number]) =>
             `${String(y)}\n${formatScore(refit.score)}\n${formatCountOf(refit.votes, 'vote')}${isPreliminary(refit, rules) ? ', preliminary' : ''}`,
-          fontFamily: 'inherit',
         }),
       ),
     ],

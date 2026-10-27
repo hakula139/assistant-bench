@@ -349,6 +349,7 @@ export type UnavailableInference = z.infer<typeof unavailableInference>;
 export type Distribution = z.infer<typeof distribution>;
 export type Standing = z.infer<typeof standing>;
 export type HeadToHead = z.infer<typeof headToHead>;
+export type CategoryStanding = z.infer<typeof categoryStanding>;
 export type CategoryBoard = z.infer<typeof categoryBoard>;
 export type VotesResults = z.infer<typeof votesResults>;
 export type TestsResults = z.infer<typeof testsResults>;

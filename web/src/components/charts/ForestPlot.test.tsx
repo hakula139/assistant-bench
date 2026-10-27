@@ -9,7 +9,7 @@ import {
   forestPlotOptions,
   type ForestPlotRow,
 } from '@/components/charts/ForestPlot';
-import type { CategoryBoard } from '@/lib/report';
+import type { CategoryBoard, CategoryStanding } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
 const rules = {
@@ -81,7 +81,7 @@ describe('CategoryForests', () => {
   afterEach(cleanup);
 
   test('draws every category on the same axis, labelled by display name', async () => {
-    const board = (category: string, standings: CategoryBoard['standings']): CategoryBoard => ({
+    const board = (category: string, standings: CategoryStanding[]): CategoryBoard => ({
       category,
       votes: 40,
       effective_votes: 40,

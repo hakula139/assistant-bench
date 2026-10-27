@@ -61,7 +61,11 @@ const appearances = rounds.flatMap(({ round, systems, results }) => {
     ? [{ round, systems, reference: results.reference, anchor: results.anchor, results, standing }]
     : [];
 });
-const { round, systems, results, standing } = appearances[appearances.length - 1];
+const last = appearances.at(-1);
+if (last === undefined) {
+  throw new Error(`${system} has no standing on ${family.config.display_name}`);
+}
+const { round, systems, results, standing } = last;
 const names = reportNames(systems);
 const name = (item: string) => systemName(names, item);
 const standings = results.standings;

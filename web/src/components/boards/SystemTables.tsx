@@ -69,11 +69,11 @@ export function HeadToHeadTable({
         {headToHead.map((pair) => (
           <TableRow key={pair.opponent}>
             <TableCell>{systemName(names, pair.opponent)}</TableCell>
-            <TableCell numeric>{pair.votes}</TableCell>
-            <TableCell numeric>{pair.wins}</TableCell>
-            <TableCell numeric>{pair.losses}</TableCell>
-            <TableCell numeric>{pair.ties}</TableCell>
-            <TableCell numeric>{pair.both_bad}</TableCell>
+            <TableCell numeric>{formatCount(pair.votes)}</TableCell>
+            <TableCell numeric>{formatCount(pair.wins)}</TableCell>
+            <TableCell numeric>{formatCount(pair.losses)}</TableCell>
+            <TableCell numeric>{formatCount(pair.ties)}</TableCell>
+            <TableCell numeric>{formatCount(pair.both_bad)}</TableCell>
             <TableCell numeric>{formatPercent(pair.win_rate)}</TableCell>
           </TableRow>
         ))}
@@ -104,7 +104,7 @@ export function CategoryTable({
           <TableRow key={label}>
             <TableCell>{label}</TableCell>
             <TableCell numeric>{formatScore(refit.score)}</TableCell>
-            <TableCell numeric>{refit.votes}</TableCell>
+            <TableCell numeric>{formatCount(refit.votes)}</TableCell>
             <TableCell>{isPreliminary(refit, rules) ? 'preliminary' : ''}</TableCell>
           </TableRow>
         ))}
@@ -170,7 +170,7 @@ export function DefectsTable({ standing }: { standing: Standing }) {
             <TableCell>
               <Hint term={defectTerms[defect]} />
             </TableCell>
-            <TableCell numeric>{count}</TableCell>
+            <TableCell numeric>{formatCount(count)}</TableCell>
             <TableCell numeric>
               {formatPercent(standing.votes === 0 ? null : count / standing.votes)}
             </TableCell>
@@ -252,7 +252,7 @@ export function RoundsTable({
                     {formatScore(past.score)}
                   </Hint>
                 </TableCell>
-                <TableCell numeric>{past.votes}</TableCell>
+                <TableCell numeric>{formatCount(past.votes)}</TableCell>
               </TableRow>
             );
           })}

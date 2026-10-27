@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactElement } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { RoundsTable, VotesStat } from '@/components/boards/SystemTables';
+import {
+  CategoryTable,
+  DefectsTable,
+  HeadToHeadTable,
+  RoundsTable,
+  VotesStat,
+} from '@/components/boards/SystemTables';
 import { terms } from '@/lib/glossary';
 import { reportSchema } from '@/lib/report';
+import { reportNames } from '@/lib/systems';
 import { readFixture } from '@/test/fixture';
 
 async function round() {
@@ -81,6 +89,76 @@ describe('RoundsTable', () => {
       '20261021abcdef01, a hash of the route, effort, harness, and prompt the system ran with that round.',
     );
     expect(screen.queryByRole('button', { name: '2026-10-07' })).toBeNull();
+  });
+});
+
+describe('vote counts', () => {
+  afterEach(cleanup);
+
+  test.each<[string, (past: Awaited<ReturnType<typeof round>>) => ReactElement, string[]]>([
+    [
+      'head-to-head table',
+      (past) => (
+        <HeadToHeadTable
+          headToHead={[
+            {
+              ...past.head_to_head[0],
+              votes: 4321,
+              wins: 1234,
+              losses: 1100,
+              ties: 1010,
+              both_bad: 977,
+            },
+          ]}
+          names={reportNames(past.systems)}
+        />
+      ),
+      ['4,321', '1,234', '1,100', '1,010', '977'],
+    ],
+    [
+      'category table',
+      (past) => (
+        <CategoryTable
+          categories={[
+            { label: 'docs', refit: { ...past.categories[0].standings[0], votes: 1234 } },
+          ]}
+          rules={past.rules}
+        />
+      ),
+      ['1,234'],
+    ],
+    [
+      'issues table',
+      (past) => (
+        <DefectsTable standing={{ ...past.standings[0], votes: 5000, defects: { facts: 1234 } }} />
+      ),
+      ['1,234'],
+    ],
+    [
+      'rounds table',
+      (past) => (
+        <RoundsTable
+          appearances={[
+            {
+              round: '2026-10-21',
+              reference: past.reference,
+              anchor: past.anchor,
+              systems: past.systems,
+              method: past.method,
+              rules: past.rules,
+              standing: { ...past.standings[0], votes: 1234 },
+            },
+          ]}
+        />
+      ),
+      ['1,234'],
+    ],
+  ])('groups the digits of every count in the %s', async (_, table, counts) => {
+    const { container } = render(table(await round()));
+
+    const cells = [...container.querySelectorAll('tbody td')].map((cell) => cell.textContent);
+
+    expect(cells).toEqual(expect.arrayContaining(counts));
   });
 });
 
