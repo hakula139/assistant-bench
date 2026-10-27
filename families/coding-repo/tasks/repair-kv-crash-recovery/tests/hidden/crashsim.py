@@ -8,8 +8,8 @@ process exits with status 86 just before that mutation, or with `tear`, after
 writing only the first half of that write's bytes. Without it, the run prints
 `mutation <kind>` for each one.
 
-`recover DIRECTORY SEGMENT_BYTES` opens the store without any fault, prints its
-entries as JSON, puts a probe entry, reopens the store, and prints them again.
+`recover DIRECTORY SEGMENT_BYTES` opens the store without any fault, prints
+`entries <JSON>`, puts a probe entry, reopens the store, and prints them again.
 """
 
 import builtins
@@ -165,11 +165,11 @@ def recover(directory: Path, segment_bytes: int) -> None:
     from tinykv import Store
 
     with Store.open(directory, segment_bytes=segment_bytes) as store:
-        print(json.dumps(entries(store)), flush=True)
+        print(f'entries {json.dumps(entries(store))}', flush=True)
         store.put(*PROBE)
 
     with Store.open(directory, segment_bytes=segment_bytes) as store:
-        print(json.dumps(entries(store)), flush=True)
+        print(f'entries {json.dumps(entries(store))}', flush=True)
 
 
 def main() -> None:

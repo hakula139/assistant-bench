@@ -69,8 +69,12 @@ class CrashRecoveryTest(unittest.TestCase):
     def recover(self, directory: Path, label: str) -> tuple[State, State]:
         result = driver('recover', str(directory), str(SEGMENT_BYTES))
         self.assertEqual(result.returncode, 0, f'{label}: {result.stderr}')
-        first, second = result.stdout.splitlines()
-        return json.loads(first), json.loads(second)
+        first, second = (
+            json.loads(line.removeprefix('entries '))
+            for line in result.stdout.splitlines()
+            if line.startswith('entries ')
+        )
+        return first, second
 
     def check_every_crash(self, setup: Ops, ops: Ops) -> None:
         """Crash before each mutation `ops` makes, and halfway through each write."""

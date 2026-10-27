@@ -34,4 +34,4 @@ With `sync=True`, each operation's frame is flushed and synced to disk before th
 
 The process can crash at any point, including partway through writing a file, and the files keep whatever bytes reached them. After such a crash, `Store.open` succeeds and holds every operation that returned before the crash. The operation that was running is either fully applied or absent, and nothing else changes. `compact` never changes the store's contents.
 
-Damage that no crash can cause is reported, since the data it held cannot be recovered: `Store.open` raises `CorruptSnapshot` for a damaged snapshot and `CorruptSegment` for a damaged sealed segment.
+Damage to the snapshot or a sealed segment, which no crash can cause, is reported, since the data it held cannot be recovered: `Store.open` raises `CorruptSnapshot` for a damaged snapshot and `CorruptSegment` for a damaged sealed segment. A bad frame in the active segment reads as a crash's torn tail, so the store keeps the frames before it and drops the rest.
