@@ -61,14 +61,16 @@ Each `[[cases]]` entry of `cases.toml` is one case. An empty document declares `
 id = "greeting"
 category = "message"
 source = "synthetic"
-instruction = "Write a one-sentence greeting for a new contributor to an open-source project."
+instruction = '''
+Write a one-sentence greeting for a new contributor to an open-source project.
+'''
 checklist = ["One sentence"]
 ```
 
 - `id` is a slug of the scenario alone, such as `starship-bump`, unique across the committed and local cases of the family and using lowercase letters, digits, and hyphens. It omits the language, which the family fixes, and the category, since moving a case to another category would then change its ID, which gives Harbor a new task name and reruns the case on every system the family lists. A case keeps its ID when its instruction is edited and reruns on the next run. [Running](running.md#running-a-family) describes what happens to its earlier outputs.
 - `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. The site shows its label from the glossary. A family's page under [`design/families/`](../design/families/) describes its categories.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](running.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
-- `instruction` is the prompt every system receives. Write an instruction that spans several lines or contains `"` or `\` as a TOML multi-line literal string (`'''`), which needs no escapes, so the source reads as the rendered task shows it.
+- `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 
 ## Tasks

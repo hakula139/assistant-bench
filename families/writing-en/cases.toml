@@ -10,7 +10,8 @@ As a coding assistant, write a final reply to the user after upgrading a web pro
 - The test now generates its expected string via `Intl.NumberFormat`, matching whichever ICU version runs it.
 - The unit test suite and production build pass locally.
 - You did not run the Playwright suite, which needs a browser download you skipped.
-- The changes are on an unpushed local branch.'''
+- The changes are on an unpushed local branch.
+'''
 checklist = [
   "Includes all listed facts and adds no new information",
   "Explicitly notes that the Playwright suite was not run",
@@ -30,7 +31,8 @@ As a coding assistant, write a final reply to the user after investigating a fla
 - You ran the unit suite 50 times in a loop with the system clock set to 23:59:58 UTC, and all 50 runs passed.
 - You did not run the end-to-end suite.
 - Two other tests in the same file also call `Date.now()`, which you left unchanged because they do not compare dates.
-- The changes are staged locally and not committed.'''
+- The changes are staged locally and not committed.
+'''
 checklist = [
   "Explains the root cause before describing the fix",
   "Distinguishes the passing unit test runs from the unverified end-to-end suite",
@@ -48,7 +50,8 @@ A teammate asks in chat: "Should we move the vote store from SQLite to Postgres 
 - It accumulates about 5,000 rows per year, and the heaviest query reads all rows once when a voting round closes.
 - Backups use SQLite's online backup API to write a consistent nightly snapshot to a single file.
 - No one on the team currently runs Postgres, and the deployment target has no database service.
-- Revisit the database choice if the service needs independent writers on multiple hosts or operational features the current SQLite deployment cannot provide.'''
+- Revisit the database choice if the service needs independent writers on multiple hosts or operational features the current SQLite deployment cannot provide.
+'''
 checklist = [
   "Directly answers the question in the first sentence",
   "States the multi-host writer or operational requirements that would justify revisiting the database choice",
@@ -67,7 +70,8 @@ You reviewed a pull request that adds CSV export to an admin dashboard without m
 - Blocking: cells starting with `=`, `+`, `-`, or `@` are written unescaped, allowing spreadsheets to execute them as formulas.
 - Minor: the export filename uses the server's local date rather than the tenant's timezone.
 - Question: should exports include soft-deleted rows? The ticket does not specify.
-- The tests cover both the happy path and an empty result, and they pass locally.'''
+- The tests cover both the happy path and an empty result, and they pass locally.
+'''
 checklist = [
   "Clearly separates blocking issues from minor ones",
   "Presents the open question distinctly from the code findings",
@@ -86,7 +90,8 @@ As a coding assistant who could not finish a task, write a reply to the user. Re
 - The first push failed with `denied: permission_denied: write_package` because the CI token only has read access to packages.
 - Fixing this requires adding `packages: write` to the `permissions` block in both workflows. You did not make this edit because it broadens the CI token's permissions and requires the user's approval.
 - You left your edits in place, so the current branch references images that do not exist yet.
-- Nothing has been pushed to the default branch.'''
+- Nothing has been pushed to the default branch.
+'''
 checklist = [
   "States clearly that the migration is incomplete",
   "Identifies the permission decision the user needs to make next",
@@ -103,7 +108,8 @@ Write a short maintainer section for a package mirror's `README.md` explaining h
 - The job runs rsync over SSH as the `mirror` user. The upstream host key is pinned in `ssh/known_hosts`, so a changed key halts the sync instead of prompting.
 - Because the upstream archive allows only one connection per client, the job syncs the `pool/` and `dists/` trees sequentially.
 - `--delay-updates` holds updated files aside until the end of the transfer, then replaces them in quick succession. Clients can still see a mix of old and new files during those replacements. `--delete-after` schedules stale-file deletion after the transfer phase.
-- Any sync still running after four hours is killed; the next night's run resumes from the existing file state.'''
+- Any sync still running after four hours is killed; the next night's run resumes from the existing file state.
+'''
 checklist = [
   "Written as a 1-2 paragraph maintainer README section describing current behavior",
   "Includes all specified details (`mirror` user, `ssh/known_hosts`, sequential `pool/` and `dists/` sync, `--delay-updates`, `--delete-after`, 4-hour timeout) without adding outside facts",
@@ -121,7 +127,8 @@ Write the "Configuration" section of the README for `tidy`, a CLI tool that form
 - Any setting omitted from all four sources falls back to its built-in default.
 - The project and user config files are merged key by key, so `tidy.toml` only needs to include the keys a project overrides.
 - Running `tidy config show` prints the final merged settings and where each value came from.
-- Unknown keys in either config file raise an error that names both the file and the offending key.'''
+- Unknown keys in either config file raise an error that names both the file and the offending key.
+'''
 checklist = [
   "Mentions how to inspect the merged result with `tidy config show`",
   "Clearly states the four-level precedence order and fallback to built-in defaults",
@@ -139,7 +146,8 @@ Write the "Cutting a release" section of `CONTRIBUTING.md` for an open-source Py
 - The package version is defined in `pyproject.toml` and uses semantic versioning.
 - `CHANGELOG.md` gets a new section for the version, moved from the "Unreleased" heading.
 - Pushing a `v<version>` tag triggers the publish workflow, which builds the wheel and uploads it to PyPI via trusted publishing (no API token required).
-- If the upload fails, delete the tag on GitHub, fix the issue, and re-push the tag. Once a version reaches PyPI, that version number can never be reused.'''
+- If the upload fails, delete the tag on GitHub, fix the issue, and re-push the tag. Once a version reaches PyPI, that version number can never be reused.
+'''
 checklist = [
   "Formatted as chronologically ordered, numbered steps for a maintainer",
   "Explicitly states that a version published to PyPI cannot be reused",
@@ -157,7 +165,8 @@ Write one or two paragraphs for a build tool's "How caching works" documentation
 - Environment variables are ignored unless explicitly listed under the step's `env` configuration.
 - File modification times are ignored, so touching a file without altering its contents preserves the cache.
 - Upgrading the build tool invalidates all cache keys.
-- Running `build --explain <step>` shows which part of the cache key changed since the previous run.'''
+- Running `build --explain <step>` shows which part of the cache key changed since the previous run.
+'''
 checklist = [
   "Written as 1-2 paragraphs explaining cache behavior",
   "Mentions `build --explain <step>` as the way to diagnose a rerun",
@@ -176,7 +185,8 @@ Write the "Your data" section for the help page of a desktop note-taking app, wr
 - The app sends nothing over the network unless the user enables sync.
 - When sync is enabled, notes are encrypted on the device before upload, and the encryption key never leaves the device.
 - Deleting a notebook sends it to the system trash, where it can be restored.
-- Uninstalling the app leaves the notes folder untouched.'''
+- Uninstalling the app leaves the notes folder untouched.
+'''
 checklist = [
   "Written in clear, accessible language for non-technical users",
   "Explicitly states that uninstalling the app leaves the data folder in place",
@@ -196,7 +206,8 @@ Write a GitHub pull request description containing a `## Summary` section and a 
 - Across a seven-day staging run, daily origin requests dropped from 1.2 million to 140,000, and the CDN hit rate increased from 61% to 96%.
 - Browsers that support `immutable` can reuse cached images without revalidation during the response's 24-hour freshness lifetime, including on ordinary reloads. A forced reload can still request revalidation, and stale responses follow the usual cache rules.
 - Verification performed: unit tests confirm the header is present on resized images and absent on error responses; the change ran in staging for seven days; CDN logs were compared before and after the change.
-- Unverified: the production cache hit rate, where the traffic mix differs.'''
+- Unverified: the production cache hit rate, where the traffic mix differs.
+'''
 checklist = [
   "Includes a `## Summary` section and a `## Test plan` checklist",
   "States the `Cache-Control: public, max-age=86400, immutable` header and the staging metrics (1.2M to 140,000 requests/day; 61% to 96% hit rate)",
@@ -215,7 +226,8 @@ Write a pull request description with `## Summary` and `## Test plan` sections. 
 - Previously, failed deliveries retried every 5 seconds indefinitely. During a customer outage last month, this sent 41,000 requests to a single endpoint over two hours.
 - If a delivery still fails after the 20th attempt, it is marked `failed` and displayed in the dashboard along with its final response code.
 - Existing pending deliveries will follow the old schedule until their next attempt, then switch to the new backoff schedule.
-- Verification: new unit tests use a seeded random source to check the delay bounds and the transition to `failed`; the integration suite passes; in staging, deliveries to an endpoint that returned 503 for 30 minutes succeeded on the first attempt after the endpoint recovered.'''
+- Verification: new unit tests use a seeded random source to check the delay bounds and the transition to `failed`; the integration suite passes; in staging, deliveries to an endpoint that returned 503 for 30 minutes succeeded on the first attempt after the endpoint recovered.
+'''
 checklist = [
   "Includes `## Summary` and `## Test plan` sections",
   "Cites last month's outage (41,000 requests in two hours from 5-second retries) as context for the new backoff schedule, without dramatizing it",
@@ -234,7 +246,8 @@ Write a concise pull request description for an open-source Python CLI, structur
 - Because the project now requires Python 3.12, `datetime.fromisoformat` handles every format the CLI accepts, allowing `python-dateutil` to be removed.
 - Removing the dependency reduces the installed size of the CLI and its dependencies from 3.1 MB to 2.4 MB.
 - Behavior change: timestamps without a timezone were previously interpreted as local time, but are now rejected with an error message specifying the expected format. The CLI documentation already stated that a timezone is required.
-- Testing: all existing parser tests pass, and a new test covers the rejected timezone-less format.'''
+- Testing: all existing parser tests pass, and a new test covers the rejected timezone-less format.
+'''
 checklist = [
   "Includes a `## Summary` section and a `## Test plan` checklist",
   "Calls out the behavior change for timestamps missing a timezone and notes that the docs already required one",
@@ -254,7 +267,8 @@ Write a pull request description with `## Summary` and `## Test plan` sections. 
 - Fix: month boundaries are now calculated in the user's timezone and converted to UTC before running the query.
 - Closes issue #482.
 - Testing: added a passing parametrized test covering UTC-8, UTC, and UTC+9 at both the start and end of a month, plus a passing test for the March daylight-saving transition.
-- Unverified: exports for the two users with no timezone set on their profile, which still fall back to UTC.'''
+- Unverified: exports for the two users with no timezone set on their profile, which still fall back to UTC.
+'''
 checklist = [
   "Includes `## Summary` and `## Test plan` sections and references issue #482",
   "Clearly distinguishes the root cause (UTC boundaries vs. local month header) from the fix (computing boundaries in the user's timezone before converting to UTC)",
@@ -274,7 +288,8 @@ Write a pull request description for a refactoring change, using `## Summary` an
 - There are no behavior changes: every public name remains importable from `settings`, and all default values are unchanged.
 - To verify this, the resolved settings for the three example configs were dumped before and after the refactor; the outputs are byte-identical.
 - Both the full test suite and the type checker pass.
-- Because most lines were moved without modification, reviewers can inspect the changes cleanly using `git diff --color-moved`.'''
+- Because most lines were moved without modification, reviewers can inspect the changes cleanly using `git diff --color-moved`.
+'''
 checklist = [
   "Includes `## Summary` and `## Test plan` sections",
   "Explains that the no-behavior-change claim was verified via byte-identical dumps of the three example configs",
@@ -317,7 +332,8 @@ def default_timeouts() -> Timeouts:
     return Timeouts().scaled(factor)
 ```
 
-Every request uses `default_timeouts()` unless the caller passes its own `Timeouts`. `total` is a deadline for the whole request, including reading the body.'''
+Every request uses `default_timeouts()` unless the caller passes its own `Timeouts`. `total` is a deadline for the whole request, including reading the body.
+'''
 checklist = [
   "Documents the code's defaults: a 3 s connect timeout, a 30 s read timeout, and a 60 s deadline for the whole request",
   "States that timeouts are not retried by default (`retry_on_timeout = False`)",
@@ -347,7 +363,8 @@ Sam: So we drop Redis entirely?
 Priya: No, Redis stays for caching. It just won't carry jobs.
 Priya: Decision: Postgres jobs table with SKIP LOCKED. Lena owns the migration.
 Sam: How long do we keep completed jobs?
-Priya: Undecided. Let's revisit after a month of data.'''
+Priya: Undecided. Let's revisit after a month of data.
+'''
 checklist = [
   "Records the Postgres jobs table with `FOR UPDATE SKIP LOCKED` as the decision, explaining the same-transaction enqueue requirement that ruled out Redis and SQS",
   "Uses the corrected benchmark (about 4,000 jobs/s on staging with 8 workers against a 300 jobs/s peak) and does not repeat the 50,000 jobs/s figure",
@@ -396,7 +413,8 @@ impl<T> Ring<T> {
         Some(value)
     }
 }
-```'''
+```
+'''
 checklist = [
   "Output is a single fenced code block with no surrounding text, and the code is unchanged",
   "The capacity comment says the ring holds `size - 1` items, at least `capacity` and often more, and does not repeat the doc's \"exactly n\"",
@@ -431,7 +449,8 @@ dest=/var/backups/home-$(date +%F).tar.zst
 tar --one-file-system -C / -cf - home | zstd -q -o "$dest.tmp"
 mv "$dest.tmp" "$dest"
 find /var/backups -name 'home-*.tar.zst' -mtime +14 -delete
-```'''
+```
+'''
 checklist = [
   "Output is a single fenced code block with no surrounding text, and every command is unchanged",
   "Comments say that `flock -n` makes a second run give up at once without waiting, and that `|| exit 0` keeps the scheduler from alerting",
@@ -459,7 +478,8 @@ Benchmark: five 10-minute runs per configuration on the same staging host, repla
 Notes from the engineer who ran the benchmark:
 - Throughput varied by up to ±80 req/s between runs of the same configuration.
 - Cache misses now make an extra network hop to the cache before reaching the pricing service, which is the likely reason p99 got worse. No experiment has confirmed this.
-- Draft summary line: "The cache makes the pricing service about 30% faster across the board."'''
+- Draft summary line: "The cache makes the pricing service about 30% faster across the board."
+'''
 checklist = [
   "Reports the p50 improvement (42 to 29 ms) and the p99 regression (180 to 240 ms) with equal prominence",
   "Treats the throughput difference (1,850 vs 1,910 req/s) as within the ±80 req/s run-to-run variation and claims no throughput gain",
@@ -471,7 +491,9 @@ checklist = [
 id = "rebase-hashes"
 category = "docs"
 source = "synthetic"
-instruction = '''A new contributor asks: "I rebased my branch onto main and now Git says my branch and origin have diverged, and every commit has a new hash. What happened, and is it safe to force-push?" Write a reply of two or three short paragraphs for someone who uses Git daily but doesn't know how commits are stored under the hood.'''
+instruction = '''
+A new contributor asks: "I rebased my branch onto main and now Git says my branch and origin have diverged, and every commit has a new hash. What happened, and is it safe to force-push?" Write a reply of two or three short paragraphs for someone who uses Git daily but doesn't know how commits are stored under the hood.
+'''
 checklist = [
   "Explains why rebasing changes commit hashes",
   "States when force-pushing is safe (e.g., when no one else is working on the branch)",
@@ -489,7 +511,8 @@ Write an explanation (at most three paragraphs) for a product manager on how a l
 - A Bradley-Terry model assigns each system a score such that the difference between two scores predicts how often one beats the other.
 - Ties and "both bad" votes count as half a win for each side.
 - Confidence intervals are generated by resampling the votes and refitting the model 1,000 times.
-- In the current pilot with five systems and 120 votes, most adjacent systems have overlapping intervals. Precision also depends on which pairs received votes.'''
+- In the current pilot with five systems and 120 votes, most adjacent systems have overlapping intervals. Precision also depends on which pairs received votes.
+'''
 checklist = [
   "Includes all five given facts",
   "Avoids unexplained mathematical notation",
@@ -500,7 +523,9 @@ checklist = [
 id = "iframe-sandbox"
 category = "docs"
 source = "synthetic"
-instruction = '''In under 250 words, explain to a frontend developer how an `<iframe sandbox="allow-scripts">` isolates untrusted HTML. Compare a document served from a separate origin with `srcdoc` using the same sandbox flags. Cover their opaque origins, what a dedicated origin adds when a document is opened directly, and remaining risks such as network requests, deceptive content, or resource exhaustion.'''
+instruction = '''
+In under 250 words, explain to a frontend developer how an `<iframe sandbox="allow-scripts">` isolates untrusted HTML. Compare a document served from a separate origin with `srcdoc` using the same sandbox flags. Cover their opaque origins, what a dedicated origin adds when a document is opened directly, and remaining risks such as network requests, deceptive content, or resource exhaustion.
+'''
 checklist = [
   "Explains that both variants receive opaque origins under the specified flags and distinguishes the protection a dedicated origin adds for direct navigation",
   "Identifies at least one remaining risk, such as network requests, deceptive content, or resource exhaustion",
@@ -510,7 +535,9 @@ checklist = [
 id = "write-durability"
 category = "docs"
 source = "synthetic"
-instruction = '''A backend developer asks in chat: "Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs.'''
+instruction = '''
+A backend developer asks in chat: "Our append-only log calls `write()` and checks that it returned the full length, so every record is on disk by then, right? Then why did one box lose its last couple of seconds of records in a power cut? Would opening the file with `O_DIRECT` fix it?" Answer in at most three short paragraphs for someone who knows system calls but not storage internals. Correct any mistaken assumption in the question, say what the log must do on Linux for a record to survive a power cut, and note what that costs.
+'''
 checklist = [
   "Corrects the premise: a successful `write()` means the kernel holds the data in its page cache, which a power cut can still lose",
   "Explains that durability needs `fsync()` or `fdatasync()`, or a synchronous open flag such as `O_DSYNC`, plus an `fsync()` of the parent directory when the log file is newly created",
@@ -526,7 +553,8 @@ source = "synthetic"
 instruction = '''
 A pull request for `tomlfmt`, a Rust crate at version 0.9.3, renames the public function `format_str` to `format_document`. Its author plans to release it as 0.9.4, reasoning that "SemVer allows breaking changes before 1.0". The project has never written down how it numbers pre-1.0 releases, so before anyone decides, write the "Versioning" section of the crate's `CONTRIBUTING.md` that settles it, using this pull request as the worked example. Keep the section under 200 words.
 
-Most downstream crates depend on `tomlfmt` with Cargo's default requirement syntax, such as `tomlfmt = "0.9.3"`.'''
+Most downstream crates depend on `tomlfmt` with Cargo's default requirement syntax, such as `tomlfmt = "0.9.3"`.
+'''
 checklist = [
   "Agrees that SemVer itself sets no compatibility rules for 0.y.z releases, and explains why the crate's version numbers still matter to Cargo",
   "Explains that Cargo reads `\"0.9.3\"` as `^0.9.3`, which accepts any later 0.9.x, so a breaking 0.9.4 would break downstream builds on their next update",
@@ -551,7 +579,8 @@ Write the user-facing release notes for version 3.8 of `pkgsync`, a Python comma
 - #418 docs: fix typos in the README
 - #420 fix: `pkgsync verify` now exits with code 1 when checksums mismatch. It previously printed the mismatch and exited with 0.
 - #422 test: add integration tests for `--exclude`
-- #425 revert: "feat: add `--parallel <n>`" (#412). Body: "Parallel downloads trip the upstream's per-client connection limit. Reverting until we add a limit."'''
+- #425 revert: "feat: add `--parallel <n>`" (#412). Body: "Parallel downloads trip the upstream's per-client connection limit. Reverting until we add a limit."
+'''
 checklist = [
   "Omits `--parallel`, which #425 reverted, and leaves out the CI, test, README typo, and refactoring-only changes",
   "Lists as breaking both the minimum Python version rising to 3.11 and `~/.pkgsyncrc` no longer being read, which only #409's body reveals",
@@ -569,7 +598,8 @@ You maintain a small open-source static site generator. Write a brief, friendly 
 - The project's scope is strictly converting Markdown into static files, with no server component.
 - Maintaining a built-in comment system and its external service integrations would fall on two volunteers.
 - Existing template hooks already let users embed any comment widget, and the documentation includes an example using an open-source option.
-- You would accept a documentation PR that adds a second example.'''
+- You would accept a documentation PR that adds a second example.
+'''
 checklist = [
   "Clearly declines the feature request and closes the issue in the final sentence",
   "Mentions the existing template hooks, current docs example, and openness to a docs PR",
@@ -587,7 +617,8 @@ Write an on-call handoff message for your team channel to brief the colleague ta
 - The thumbnail service's queue depth is normal, but its p95 latency jumped from 0.8 s to 9 s following the 13:55 deploy.
 - You rolled back the 13:55 deploy at 15:20, but latency has not recovered, suggesting the deploy may not be the root cause.
 - A status page incident is live, and you promised the next update at 16:30 UTC.
-- The open question is whether the storage provider's incident, posted at 14:05, is related.'''
+- The open question is whether the storage provider's incident, posted at 14:05, is related.
+'''
 checklist = [
   "Leads with the current impact and system state",
   "Clearly highlights the 16:30 UTC status page deadline and the open question to investigate",
@@ -617,7 +648,8 @@ Slack export (America/Los_Angeles, which was on UTC-7 that day):
 - 10:03 Dana: rolling back to v411
 - 10:05 Dana: rollback done, errors dropping
 - 10:18 Dana: error rate back to baseline
-- 10:31 Dana: will dig into the flag tomorrow'''
+- 10:31 Dana: will dig into the flag tomorrow
+'''
 checklist = [
   "Converts every Slack time to UTC correctly by adding 7 hours (09:38 becomes 16:38, 10:18 becomes 17:18) and merges the three sources into one ordered timeline",
   "Flags the disagreement between Slack's \"rollback done\" at 17:05 UTC and the deploy log's rollback completion at 17:12 UTC",
@@ -634,7 +666,8 @@ A teammate reviewed your pull request adding retries to your service's HTTP clie
 
 - Read the retry count from config instead of hard-coding 3: agreed and updated; it now reads `http.max_retries` and defaults to 3.
 - Retry only idempotent requests: agreed and updated, including a new test verifying that a failed `PATCH` request is sent only once.
-- Replace the custom retry loop with the shared HTTP library's built-in retry option: you disagree because the shared library retries all HTTP methods by default, and the version pinned by this service lacks a setting to restrict that, which would undo the idempotency fix. You acknowledge that switching would remove about 40 lines of code.'''
+- Replace the custom retry loop with the shared HTTP library's built-in retry option: you disagree because the shared library retries all HTTP methods by default, and the version pinned by this service lacks a setting to restrict that, which would undo the idempotency fix. You acknowledge that switching would remove about 40 lines of code.
+'''
 checklist = [
   "Clearly explains the technical conflict with the shared library while acknowledging the 40-line savings",
   "Maintains a direct, collegial tone without groveling or excessive thanks",
@@ -651,7 +684,8 @@ Write an original scene of 350 to 500 words set on the last bus of the night. Tw
 Include these three required beats:
 1. The bus stops at a location for longer than expected.
 2. A folded note changes hands between the two characters.
-3. The scene concludes on a concrete physical detail.'''
+3. The scene concludes on a concrete physical detail.
+'''
 checklist = [
   "Written in third-person limited point of view and past tense with a restrained register",
   "Includes all three required beats: an unexpectedly long bus stop, a folded note changing hands, and a final concrete physical detail",
@@ -668,7 +702,8 @@ Write an original scene consisting entirely of dialogue between two adult siblin
 Include these three elements in the conversation:
 1. A box of photographs.
 2. A direct question from one sibling that the other leaves unanswered.
-3. A decision to deliberately leave one specific object behind.'''
+3. A decision to deliberately leave one specific object behind.
+'''
 checklist = [
   "Consists purely of spoken lines, with no dialogue tags, stage directions, or narrative prose",
   "Includes a box of photographs, a direct question left unanswered, and a decision to deliberately leave one specific object behind",
@@ -690,7 +725,8 @@ Follow these requirements in your continuation:
 3. Keep every detail the opening establishes consistent. If the continuation changes one, such as charging the phone, show how on the page.
 4. End the passage with the narrator making a concrete decision.
 
-Do not introduce any new named characters. Juniper and the brother may appear.'''
+Do not introduce any new named characters. Juniper and the brother may appear.
+'''
 checklist = [
   "Maintains first-person point of view and past tense, without repeating the opening paragraph",
   "Stays consistent with the opening: the narrator does not drive or use the dead phone unless the text shows how, the left wrist stays in its cast, and the rain and the stopped kitchen clock are not contradicted",
@@ -708,7 +744,8 @@ Write an original fictional letter of 300 to 450 words from the perspective of s
 Include these three elements in the letter:
 1. One concrete apology for a past action.
 2. One request the writer makes and immediately withdraws, as if it has already been refused.
-3. One shared memory recounted unsentimentally, without nostalgia.'''
+3. One shared memory recounted unsentimentally, without nostalgia.
+'''
 checklist = [
   "Written in first-person letter form from a present-day perspective, using present tense for current reflections and past tense for memories",
   "Includes a concrete apology for a past action, a request withdrawn before it can be refused, and an unsentimental shared memory",
@@ -727,7 +764,8 @@ Write a first-person blog post of 500 to 700 words in the voice of a fictional n
 2. Name one bread-making skill or step you still cannot pull off.
 3. Share one genuinely practical tip a reader could use in their own kitchen.
 
-Do not use the word "journey" anywhere in the text, and do not end with a motivational or inspirational takeaway.'''
+Do not use the word "journey" anywhere in the text, and do not end with a motivational or inspirational takeaway.
+'''
 checklist = [
   "Written in the first person as continuous prose without bulleted or numbered lists",
   "Describes one specific failed loaf and explains what went wrong",
@@ -748,7 +786,8 @@ Write a first-person blog post of 500 to 700 words in the voice of a fictional n
 3. Point out one thing about the finished piece or repair that still is not right.
 4. Offer one practical tip a reader could apply to their own project.
 
-Do not use the phrases "game-changer" or "life hack".'''
+Do not use the phrases "game-changer" or "life hack".
+'''
 checklist = [
   "Written in the first person as continuous prose without bulleted or numbered lists, in a non-promotional tone",
   "Explains why the narrator started the project",
@@ -772,7 +811,8 @@ Do not invent statistics, studies, quotations, or named experts, and do not use 
 
 Op-ed by councillor R. Hale, "The Mill Road bike lane has failed":
 
-"When the Mill Road bike lane opened two years ago, we were promised safer streets. The city's own transport report says otherwise. In the year before the lane opened, Mill Road saw 4 collisions involving cyclists. In the year after, it saw 6. That is a 50% increase in crashes. The same report counts about 1,200 cyclists a day on Mill Road before the lane and about 3,600 a day after, which tells you how many more people we are putting in harm's way. Meanwhile, delivery drivers tell me they now double-park because the lane took their loading space, and I have watched vans block the lane myself. A lane that makes crashes more common and blocks deliveries is not a success. It is time to restore the parking and let Mill Road go back to how it worked."'''
+"When the Mill Road bike lane opened two years ago, we were promised safer streets. The city's own transport report says otherwise. In the year before the lane opened, Mill Road saw 4 collisions involving cyclists. In the year after, it saw 6. That is a 50% increase in crashes. The same report counts about 1,200 cyclists a day on Mill Road before the lane and about 3,600 a day after, which tells you how many more people we are putting in harm's way. Meanwhile, delivery drivers tell me they now double-park because the lane took their loading space, and I have watched vans block the lane myself. A lane that makes crashes more common and blocks deliveries is not a success. It is time to restore the parking and let Mill Road go back to how it worked."
+'''
 checklist = [
   "Identifies the denominator flaw: daily cyclists tripled while collisions rose from 4 to 6, so collisions per cyclist roughly halved",
   "Does not claim that the op-ed miscalculated the 50% increase in the collision count",
@@ -793,7 +833,8 @@ Write a first-person argumentative personal essay of 600 to 800 words in the voi
 3. Address one serious counterargument by engaging accurately with Herbert Simon's concept of attention as a scarce resource in an information-rich world, the idea later called the attention economy. Refer to his idea by paraphrase only. Do not quote him directly or put words in his mouth.
 4. Conclude by qualifying or complicating your original thesis. Do not simply restate it.
 
-Do not invent any quotations, statistics, percentages, experiments, or academic studies.'''
+Do not invent any quotations, statistics, percentages, experiments, or academic studies.
+'''
 checklist = [
   "Written in the first person and states the thesis in the opening paragraph: human attention is not a resource",
   "Includes at least one concrete personal example from the narrator's life",
@@ -814,7 +855,8 @@ Write a first-person critical essay of 500 to 700 words defending a disreputable
 3. Include a close observation of one specific passage, shot, or scene from that invented work.
 4. Acknowledge one weakness that actually exists in the work or the genre.
 
-Do not use the phrase "guilty pleasure".'''
+Do not use the phrase "guilty pleasure".
+'''
 checklist = [
   "Written in the first person, defending a low-status genre without using the phrase \"guilty pleasure\"",
   "Uses an entirely invented work as the central example, with no references to real works or creators",
@@ -833,7 +875,8 @@ Write a first-person reflective essay of 500 to 700 words in the voice of a fict
 2. Work in at least one concrete street-level detail (such as a storefront, intersection, transit stop, or pavement feature).
 3. Let the ending rest on an unresolved thought.
 
-Do not use the words or phrases "journey", "chapter of my life", or "closure".'''
+Do not use the words or phrases "journey", "chapter of my life", or "closure".
+'''
 checklist = [
   "Written in the first person",
   "Includes an account of returning to the city two years after moving away",
@@ -862,7 +905,8 @@ Scene notes:
 2. Explain what this scene contributes to the larger 12-episode series and its themes, without writing a standalone plot summary.
 3. You may include a brief evaluative judgment of the series or scene, but do not assign a numerical score.
 
-Ground observations about framing, sound, and performance in the supplied scene notes. Do not invent dialogue, shots, plot events, characters, or episodes beyond the supplied material. Avoid the words and phrases "masterpiece", "must-watch", and "tour de force".'''
+Ground observations about framing, sound, and performance in the supplied scene notes. Do not invent dialogue, shots, plot events, characters, or episodes beyond the supplied material. Avoid the words and phrases "masterpiece", "must-watch", and "tour de force".
+'''
 checklist = [
   "Focuses on a close reading of \"The Tide-Bell Archive\" scene from episode 3 of \"The Cartographer's Daughter\"",
   "Analyzes how direction, framing, sound design, or voice acting produces meaning using the supplied scene notes",
@@ -885,7 +929,8 @@ Synopsis: "Glasshouse No. 7" spans ten winter days inside a quarantined Alpine b
 3. Explicitly state what kind of player should skip this visual novel.
 4. Conclude with either a numerical score out of 10 or an unambiguous buy, skip, or wait recommendation.
 
-Do not invent plot events, characters, or routes beyond what is given in the synopsis.'''
+Do not invent plot events, characters, or routes beyond what is given in the synopsis.
+'''
 checklist = [
   "Reviews the fictional visual novel \"Glasshouse No. 7\", covering both narrative and game systems",
   "Identifies one concrete user-interface or interaction annoyance",
