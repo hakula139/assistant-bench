@@ -174,7 +174,6 @@ def make_generation(protocol: int = 2, harbor: str = '0.24.0') -> Generation:
         harbor=harbor,
         messages_protocol=1,
         anthropic_api_version='2023-06-01',
-        anthropic='2.3.0',
     )
 
 

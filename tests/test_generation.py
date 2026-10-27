@@ -31,8 +31,12 @@ version = "2.3.0"
 [[package]]
 name = "harbor"
 version = "0.24.0"
+
+[[package]]
+name = "openai"
+version = "3.1.0"
 """
-LOCKED = {'harbor': '0.24.0', 'anthropic': '2.3.0'}
+LOCKED = {'harbor': '0.24.0', 'anthropic': '2.3.0', 'openai': '3.1.0'}
 
 
 class TestGeneration:
@@ -51,7 +55,7 @@ class TestGeneration:
 
             assert (
                 versions.version(harness, 'anthropic-messages')
-                == f'{base}+messages.1.2023-06-01.2.3.0'
+                == f'{base}+messages.1.2023-06-01'
             )
             assert versions.version(harness, 'openai-responses') == base
             assert versions.version(harness, 'openai-chat-completions') == base
@@ -76,6 +80,25 @@ class TestParseGeneration:
 
         assert versions == make_generation(protocol=2, harbor='0.24.0')
 
+    @pytest.mark.parametrize(
+        ('package', 'changes'),
+        [
+            pytest.param('harbor', True, id='harbor-supplies-terminus'),
+            pytest.param('anthropic', False, id='anthropic-sdk'),
+            pytest.param('openai', False, id='openai-sdk'),
+        ],
+    )
+    def test_reads_only_the_locked_harbor_version(
+        self, package: str, changes: bool
+    ) -> None:
+        locked = f'name = "{package}"\nversion = "{LOCKED[package]}"'
+        bumped = LOCK.replace(locked, f'name = "{package}"\nversion = "99.0.0"')
+        assert bumped != LOCK
+
+        versions = parse_generation(PROJECT, bumped)
+
+        assert (versions != parse_generation(PROJECT, LOCK)) is changes
+
 
 class TestLoadGeneration:
     @pytest.fixture(autouse=True)
@@ -87,20 +110,17 @@ class TestLoadGeneration:
     def test_reuses_one_resolution_per_process(self) -> None:
         assert load_generation() is load_generation()
 
-    @pytest.mark.parametrize('package', ['harbor', 'anthropic'])
-    def test_requires_the_installed_packages_to_match_the_lock(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str
+    def test_requires_the_installed_harbor_to_match_the_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         (tmp_path / 'pyproject.toml').write_text(PROJECT)
         (tmp_path / 'uv.lock').write_text(LOCK)
         monkeypatch.setattr(generation, 'REPO_ROOT', tmp_path)
 
         def version(name: str) -> str:
-            return '0.25.0' if name == package else LOCKED[name]
+            return '0.25.0' if name == 'harbor' else LOCKED[name]
 
         monkeypatch.setattr(metadata, 'version', version)
 
-        with pytest.raises(
-            ValueError, match=rf'{package.capitalize()} differs from uv.lock.*uv sync'
-        ):
+        with pytest.raises(ValueError, match=r'Harbor differs from uv.lock.*uv sync'):
             load_generation()

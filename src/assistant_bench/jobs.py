@@ -40,7 +40,12 @@ from assistant_bench.families import (
     task_location,
     tasks_dir,
 )
-from assistant_bench.harnesses import HARNESSES, HOST_ENVIRONMENT
+from assistant_bench.harnesses import (
+    HARNESSES,
+    HOST_ENVIRONMENT,
+    agent_kwargs,
+    fingerprint,
+)
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.messages import MessageCompletionError
 from assistant_bench.harnesses.responses import ResponseCompletionError
@@ -220,20 +225,20 @@ def drifted_systems(
     ValueError
         A source job is not a job directory, or a trial record is unreadable.
     """
-    current = {system.name: system.fingerprint for system in systems}
+    current = {system.name: fingerprint(system) for system in systems}
     recorded: defaultdict[str, set[str]] = defaultdict(set)
     for trial in load_source_trials(_sources(family)):
         kwargs = trial.result.config.agent.kwargs
         name = kwargs.get('system')
-        fingerprint = kwargs.get('fingerprint')
-        if name in current and isinstance(fingerprint, str):
-            recorded[name].add(fingerprint)
+        label = kwargs.get('fingerprint')
+        if name in current and isinstance(label, str):
+            recorded[name].add(label)
 
     return sorted(
-        (name, fingerprint, current[name])
-        for name, fingerprints in recorded.items()
-        for fingerprint in fingerprints
-        if fingerprint != current[name]
+        (name, label, current[name])
+        for name, labels in recorded.items()
+        for label in labels
+        if label != current[name]
     )
 
 
@@ -241,10 +246,10 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
-        model_name=f'{harness.model_prefix}{system.route}',
+        model_name=harness.model_name(system.route),
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
-        kwargs=harness.options(system),
+        kwargs=agent_kwargs(system),
     )
 
 
@@ -564,10 +569,8 @@ class _Candidate:
 
     @property
     def fingerprint(self) -> str | None:
-        fingerprint: str | None = self.origin.result.config.agent.kwargs.get(
-            'fingerprint'
-        )
-        return fingerprint
+        label: str | None = self.origin.result.config.agent.kwargs.get('fingerprint')
+        return label
 
     @property
     def job(self) -> str:

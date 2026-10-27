@@ -39,7 +39,7 @@ from assistant_bench.families import (
     load_cases,
     load_family,
 )
-from assistant_bench.harnesses import HOST_ENVIRONMENT, options
+from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.responses import ResponseResult
 from assistant_bench.outputs import Output
@@ -83,12 +83,6 @@ def votes_family(**settings: Any) -> Family:
     return VOTES.model_copy(
         update={'settings': VOTES.settings.model_copy(update=settings)}
     )
-
-
-def request(system: System, max_output_tokens: int | None = None) -> dict[str, Any]:
-    if max_output_tokens is not None:
-        system = system.model_copy(update={'max_output_tokens': max_output_tokens})
-    return options.generate(system)
 
 
 def current_agent(
@@ -371,7 +365,7 @@ class TestFamilySystems:
         (run,) = jobs.family_systems(family, [system])
 
         assert run == system.model_copy(update={'harness': 'terminus-2'})
-        assert run.fingerprint != system.fingerprint
+        assert fingerprint(run) != fingerprint(system)
 
     def test_keeps_the_systems_of_a_case_family(self) -> None:
         systems = [make_system(prompt='Be brief.')]
@@ -389,11 +383,11 @@ class TestDriftedSystems:
         [
             pytest.param(
                 {'system': CURRENT.name, 'fingerprint': 'fp-old'},
-                [(CURRENT.name, 'fp-old', CURRENT.fingerprint)],
+                [(CURRENT.name, 'fp-old', fingerprint(CURRENT))],
                 id='changed-fingerprint',
             ),
             pytest.param(
-                {'system': CURRENT.name, 'fingerprint': CURRENT.fingerprint},
+                {'system': CURRENT.name, 'fingerprint': fingerprint(CURRENT)},
                 [],
                 id='kept-fingerprint',
             ),
@@ -445,8 +439,8 @@ class TestDriftedSystems:
         drifted = jobs.drifted_systems(VOTES, [small, large])
 
         assert drifted == [
-            ('acme-large', 'fp-old', large.fingerprint),
-            ('acme-small', 'fp-old', small.fingerprint),
+            ('acme-large', 'fp-old', fingerprint(large)),
+            ('acme-small', 'fp-old', fingerprint(small)),
         ]
 
 
@@ -503,7 +497,7 @@ class TestJob:
         assert job.agents[0].kwargs == {
             'api': 'openai-chat-completions',
             'system': 'acme-large',
-            'fingerprint': large.fingerprint,
+            'fingerprint': fingerprint(large),
             'effort': 'medium',
             'system_prompt': 'Be brief.',
             'max_output_tokens': 64,
@@ -536,7 +530,7 @@ class TestJob:
         assert agent.kwargs == {
             'use_responses_api': False,
             'system': 'acme-large',
-            'fingerprint': systems[0].fingerprint,
+            'fingerprint': fingerprint(systems[0]),
             'llm_call_kwargs': {'max_completion_tokens': 64},
             'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
             'reasoning_effort': 'medium',
@@ -1192,7 +1186,7 @@ class TestCollect:
             'trial': 'b__1',
             'job': 'job-1',
             'system': 'acme-large',
-            'fingerprint': system.fingerprint,
+            'fingerprint': fingerprint(system),
             'nixos_config_rev': 'rev-a',
             'harness_version': None,
             'text': 'Hi.',
@@ -1436,7 +1430,7 @@ class TestCollect:
 
         assert [
             (output.system, output.fingerprint, output.text) for output in outputs
-        ] == [(system.name, system.fingerprint, 'job-2')]
+        ] == [(system.name, fingerprint(system), 'job-2')]
 
     def test_gates_each_output_against_its_case_instruction(
         self, data_dir: Path
