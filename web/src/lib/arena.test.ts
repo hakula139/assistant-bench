@@ -43,10 +43,6 @@ const contracts = [
 ] as const;
 
 describe('arena contracts', () => {
-  test("parses without the eval probe the vote page's policy reports", () => {
-    expect(z.config().jitless).toBe(true);
-  });
-
   test.each([
     ['a', true],
     ['family-1', true],

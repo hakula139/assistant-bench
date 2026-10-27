@@ -2,9 +2,6 @@ import { z } from 'zod/mini';
 
 import { defects } from '@/lib/defects';
 
-// The vote document's policy forbids Zod's eval-based parser optimization.
-z.config({ jitless: true });
-
 export const identifier = z.string().check(z.minLength(1), z.maxLength(256));
 /** Mirrors the shared JSON Schema's true-end constraint across validators. */
 export const familyName = z

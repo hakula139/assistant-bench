@@ -54,10 +54,8 @@ export default defineConfig([
     files: ['src/**/*.{ts,tsx}'],
     ignores: [
       'src/content.config.ts',
-      'src/lib/arena.ts',
       'src/lib/family.ts',
       'src/lib/report.ts',
-      'src/lib/vote-flow.ts',
       'src/**/*.test.{ts,tsx}',
       'src/test/**',
     ],
@@ -73,6 +71,7 @@ export default defineConfig([
               message: classicZod,
             })),
           ],
+          patterns: [{ group: ['zod/*', '!zod/mini'], message: classicZod }],
         },
       ],
     },
