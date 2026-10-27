@@ -480,6 +480,22 @@ describe('VoteApp', () => {
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'tie', 'b']);
   });
 
+  test("submits on Enter from the layout's main, which the skip link and margin clicks focus", async () => {
+    const api = stubApi();
+    const user = await startSession(
+      <main tabIndex={-1}>
+        <VoteApp />
+      </main>,
+    );
+    await user.keyboard('a');
+    screen.getByRole('main').focus();
+
+    await user.keyboard('{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+  });
+
   test('takes a shortcut typed in upper case, and undoes from the completed session', async () => {
     const api = stubApi({ cases: 1 });
     const user = await startSession();

@@ -476,7 +476,7 @@ export function VoteApp() {
     }
 
     if (event.key === 'Enter') {
-      if (target === pairView.current || target === document.body) {
+      if (target instanceof Node && target.contains(pairView.current)) {
         event.preventDefault();
         submit();
       }
