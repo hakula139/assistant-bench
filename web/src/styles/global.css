@@ -18,7 +18,7 @@
   --font-mono:
     'Maple Mono', ui-monospace, 'JetBrains Mono', 'Source Code Pro', SFMono-Regular, Menlo,
     Consolas, 'Liberation Mono', monospace;
-  --default-mono-font-feature-settings: 'calt';
+  --default-mono-font-feature-settings: 'calt' 0, 'liga' 0;
   --default-transition-timing-function: ease;
   --text-title: 1.75rem;
   --container-measure: 85ch;
