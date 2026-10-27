@@ -26,7 +26,7 @@ export const pairView = z.strictObject({
   capability,
   instruction: z.string(),
   checklist: z.array(z.string()),
-  category: z.enum(categories).nullable(),
+  category: z.nullable(z.enum(categories)),
   a: pane,
   b: pane,
 });
