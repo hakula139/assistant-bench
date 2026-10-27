@@ -185,9 +185,9 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
 
   return (
     <Collapsible
-      open={collapsed !== pair.id}
+      open={collapsed !== pair.instruction}
       onOpenChange={(next) => {
-        setCollapsed(next ? null : pair.id);
+        setCollapsed(next ? null : pair.instruction);
       }}
       asChild
     >

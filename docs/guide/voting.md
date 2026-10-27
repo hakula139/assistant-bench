@@ -12,7 +12,7 @@ If a connection fails, retry checks whether your vote was saved. The tab retains
 
 ## Casting a Vote
 
-Each pair shows the case's prompt above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Under the prompt, What to check lists the points to judge by, which the model never saw. Nothing is selected until you choose:
+Each pair shows the case's prompt above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Under the prompt, What to check lists the points to judge by, which the model never saw. A prompt you collapse stays collapsed for the following pairs from the same case. Nothing is selected until you choose:
 
 | Key        | Action                                                                               |
 | ---------- | ------------------------------------------------------------------------------------ |
