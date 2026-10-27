@@ -19,13 +19,18 @@ web/src/
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture, JSON Schema, and chart stub helpers and the page tests
+├── test/                                   # The fixture, JSON Schema, and chart stub helpers, and the page and built-site tests
 └── vote/vote.astro                         # The vote page, routed by the integration
 ```
 
 ## Comments
 
 - When a module-level declaration or its interface, type, or class member needs a comment, use `/** */` TSDoc so editors show it on hover. Use `//` for other comments, including those inside a function body.
+
+## Checks
+
+- `pnpm lint` enforces import order with perfectionist's `sort-imports` and `sort-named-imports`, which `eslint --fix` applies.
+- `pnpm test` checks every built page with axe-core, as [Testing](testing.md#accessibility) describes.
 
 ## Reports
 

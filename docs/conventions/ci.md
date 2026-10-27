@@ -7,7 +7,7 @@ CI runs on pushes to `main`, pull requests, and manual dispatch:
 | Job             | Checks                                                                                                                                                                            |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                                                                 |
-| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov                                                                |
+| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov                                         |
 | Build Site      | `pnpm build`, the native Python Worker dry-run and lock check, uploading `web/dist` as the `site-dist` artifact                                                                   |
 | Python Check    | `uv sync --locked`, `pnpm install` for native D1 tests, Ruff, mypy, basedpyright, dependency stub validation, pytest with coverage uploaded to Codecov, and the fingerprint check |
 | Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below       |
@@ -24,6 +24,8 @@ Both jobs authenticate the upload with a GitHub OIDC token, so they alone hold `
 Only the deploy jobs below read secrets, and each reads them in its deploy step alone. List each new check job in CI Result's `needs`.
 
 Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke. Revisit the budget when the workload changes so a stalled job releases its runner and concurrency group promptly.
+
+Node Check installs Playwright's Chromium headless shell without `--with-deps`, since the runner image already carries its system libraries and the apt downloads stalled the job past its timeout.
 
 ## Deploy
 

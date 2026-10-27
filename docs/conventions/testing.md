@@ -5,7 +5,7 @@ Where tests live, when they merge or go, how they reach models and Harbor, and w
 ## Placement
 
 - Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
-- The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom.
+- The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. Checks that need the built site go in `site.test.ts` there, which builds it once, because concurrent `astro build` runs of one root race on its cache. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom.
 - `test_repository.py` checks committed data and lockfiles, and `test_harbor_smoke.py` holds the trials that need Docker.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `make_arena`, `write_synthetic_round`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
@@ -29,6 +29,10 @@ Drop a test once another covers everything it checks.
 
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss or the design that moves the estimates fails. The penalty barely moves those estimates, so the test of a system that wins every vote bounds its gap tightly enough that a tenfold change to the penalty in either direction fails.
 - `tests/fixtures/report.json` and `report-early.json` are the reports `write_synthetic_round` closes to after ten sessions and after one, which the site's tests also parse and render, and `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. Their tests fail when a model or ranking change leaves a file stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
+
+## Accessibility
+
+`site.test.ts` serves the built site's files and a vote API session from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Development](development.md#dev-shell) gives the command that installs the browser.
 
 ## Docker Trials
 

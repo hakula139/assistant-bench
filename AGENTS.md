@@ -46,7 +46,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Rules for Every Change
 
-- Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv.
+- Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases. Keep transcript-derived and held-out cases, all outputs, and Harbor jobs in the data directory, as [Data](docs/conventions/data.md) describes.
@@ -74,7 +74,7 @@ pnpm format                                           # Check formatting of the 
 pnpm lint                                             # Lint Markdown and the site
 pnpm spellcheck                                       # Spell check
 pnpm typecheck                                        # Type check the site
-pnpm test                                             # Test the site, with coverage: schema, charts, pages, and the vote page
+pnpm test                                             # Test the site, with coverage: schema, charts, pages, the vote page, and accessibility
 pnpm build                                            # Build the site from reports/
 nix flake check                                       # After a flake change, run the hooks in the Nix sandbox
 ```
