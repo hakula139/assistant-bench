@@ -136,7 +136,8 @@ describe('built vote document', () => {
 });
 
 describe('built pages', () => {
-  const origin = 'http://site.example';
+  // A secure context, which the vote client's `crypto.randomUUID` requires.
+  const origin = 'https://site.example';
   const vote = '/vote/index.html';
   const api = new Map<string, unknown>([
     ['GET /api/status', { status: 'ready' }],
