@@ -199,7 +199,16 @@ describe('built pages', () => {
         });
         await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
         if (path === vote) {
-          await page.getByRole('button', { name: 'Issues' }).first().click();
+          await page
+            .getByRole('button', { name: 'Issues' })
+            .first()
+            .click({ timeout: 10_000 })
+            .catch(async (error: unknown) => {
+              const shown = await page.locator('main').innerText();
+              throw new Error(`The vote page shows no pair: ${shown}\n${errors.join('\n')}`, {
+                cause: error,
+              });
+            });
           await page.getByRole('dialog', { name: 'Issues in output A' }).waitFor();
         }
         await page.waitForLoadState('networkidle');
