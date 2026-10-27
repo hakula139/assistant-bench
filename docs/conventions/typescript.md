@@ -30,7 +30,7 @@ web/src/
 ## Checks
 
 - `pnpm lint` enforces import order with perfectionist's `sort-imports` and `sort-named-imports`, which `eslint --fix` applies.
-- `pnpm test` runs axe-core over every built page in Chromium, in both themes, and fails on any violation, such as a prose link without its underline. [Testing](testing.md#accessibility) describes its coverage.
+- `pnpm test` checks every built page with axe-core, as [Testing](testing.md#accessibility) describes.
 
 ## Reports
 

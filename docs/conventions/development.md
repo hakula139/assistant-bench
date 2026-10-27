@@ -8,7 +8,7 @@ Both Nix shells provide uv, Node.js, and pnpm. The default shell also installs t
 nix develop                                                      # Dev shell with uv, Node.js, and the hooks
 uv sync                                                          # Virtualenv with Harbor and the dev tools
 pnpm install                                                     # Node-based formatters, linters, spell checker, and the site
-pnpm --filter web exec playwright install --only-shell chromium   # Once per host, the browser for the site's accessibility test
+pnpm --filter web exec playwright install --only-shell chromium   # The site test's browser, again after each Playwright update
 nix flake check                                                  # Run the pre-commit hooks that need neither node_modules nor the virtualenv
 ```
 
