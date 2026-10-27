@@ -254,29 +254,45 @@ def fingerprints(
         str, typer.Argument(metavar='BASE', help='A Git revision, such as main.')
     ],
 ) -> None:
-    """Fail when a system kept its name since BASE but resolves to a new fingerprint.
+    """Fail when a closed report's system changed its fingerprint since BASE.
 
-    Compare runnable family identities, including capacity and revision-owned
-    generation versions. Nix builds BASE's own nixos-config export.
+    Compare BASE's committed fingerprint manifest with the fingerprints each
+    family's runnable systems resolve to now. A changed system that no closed
+    report of its family names is listed, since it reruns under its name.
     """
     try:
-        head_systems = revisions.current_systems(_load_systems())
-        base_systems = revisions.systems_at(base, set(head_systems))
+        head = revisions.current_fingerprints(_load_systems())
+        recorded = revisions.manifest_at(base)
+        changed = {
+            key: revisions.reported(key)
+            for key in revisions.changed_fingerprints(recorded or {}, head)
+        }
     except subprocess.CalledProcessError as error:
         raise typer.Exit(error.returncode) from error
     except ValueError as error:
         _fail(str(error))
-    changed = revisions.changed_fingerprints(base_systems, head_systems)
-    for key in changed:
-        name = head_systems[key].name
+    if recorded is None:
         typer.echo(
-            f'System `{name}` changed its fingerprint since `{base}` in '
-            f'`{key.split("/")[0]}`. {SYSTEM_RENAME_GUIDE}',
-            err=True,
+            f'Revision `{base}` has no `{revisions.MANIFEST_FILE}`, so no '
+            'fingerprints compare.'
         )
-    if changed:
+        return
+    for key, reported in changed.items():
+        family, name = key.split('/')
+        message = (
+            f'System `{name}` changed its fingerprint since `{base}` in `{family}`'
+        )
+        if reported:
+            typer.echo(
+                f'{message}, whose closed reports name it. {SYSTEM_RENAME_GUIDE}',
+                err=True,
+            )
+        else:
+            typer.echo(f'{message}. No closed report names it, so it reruns.')
+    if any(changed.values()):
         raise typer.Exit(1)
-    typer.echo(f'Every system keeps its fingerprint since `{base}`.')
+    if not changed:
+        typer.echo(f'Every system keeps its fingerprint since `{base}`.')
 
 
 # ── Helpers ──
@@ -473,26 +489,30 @@ def _run_targets(
 def _refuse_drift(family: Family, systems: list[System]) -> None:
     try:
         drifted = jobs.drifted_systems(family, systems)
+        reported = report.reported_systems(family.name)
     except ValueError as error:
         _fail(str(error))
     if not drifted:
         return
-    detail = '\n'.join(
-        f'System `{name}` ran under fingerprint `{recorded}` but now resolves to '
-        f'`{current}`.'
-        for name, recorded, current in drifted
-    )
-    _fail(
-        dedent(
-            """
-            Family `{family}` has systems that changed their fingerprints:
-            {detail}
-            {guide}
-            """
+    names = sorted({name for name, _, _ in drifted})
+    renamed = [name for name in names if name in reported]
+    rerun = [name for name in names if name not in reported]
+    lines = [
+        f'Family `{family.name}` has systems that changed their fingerprints:',
+        *(
+            f'System `{name}` ran under fingerprint `{recorded}` but now resolves '
+            f'to `{current}`.'
+            for name, recorded, current in drifted
+        ),
+    ]
+    if renamed:
+        lines.append(f'Closed reports name {code(renamed)}. {SYSTEM_RENAME_GUIDE}')
+    if rerun:
+        lines.append(
+            f'No closed report names {code(rerun)}, so delete the stale trials '
+            f'under `jobs/{family.name}/` in the data directory and rerun.'
         )
-        .strip()
-        .format(family=family.name, detail=detail, guide=SYSTEM_RENAME_GUIDE)
-    )
+    _fail('\n'.join(lines))
 
 
 def _collect(family: Family) -> None:

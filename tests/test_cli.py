@@ -934,9 +934,38 @@ class TestRun:
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
+    @pytest.mark.parametrize(
+        ('reported', 'guide'),
+        [
+            pytest.param(
+                set[str](),
+                'No closed report names `opus-5.5-high`, so delete the stale trials '
+                'under `jobs/f/` in the data directory and rerun.',
+                id='unreported',
+            ),
+            pytest.param(
+                {'opus-5.5-high'},
+                'Closed reports name `opus-5.5-high`. Give a changed system a new '
+                'name and keep the old name only in closed reports, as '
+                '`docs/guide/authoring.md#systems` describes.',
+                id='reported',
+            ),
+        ],
+    )
     def test_rejects_a_system_whose_recorded_fingerprint_changed(
-        self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        submitted: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+        reported: set[str],
+        guide: str,
     ) -> None:
+        def reported_systems(family: str) -> set[str]:
+            assert family == 'f'
+            return reported
+
+        monkeypatch.setattr(report, 'reported_systems', reported_systems)
         write_case_family(families_dir, ['opus-5.5-high'], name='f')
         write_trial(
             data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
@@ -955,9 +984,7 @@ class TestRun:
             1,
             'Family `f` has systems that changed their fingerprints:\n'
             'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves '
-            f'to `{current}`.\nGive a changed system a new name and keep the old '
-            'name only in closed reports, as `docs/guide/authoring.md#systems` '
-            'describes.\n',
+            f'to `{current}`.\n{guide}\n',
         )
         assert submitted == []
 
@@ -1387,16 +1414,22 @@ class TestFingerprints:
         assert 'Family `f` lists `missing`' in result.output
         assert '`systems.toml` does not define' in result.output
 
+    @staticmethod
+    def committed(
+        monkeypatch: pytest.MonkeyPatch, manifest: dict[str, str] | None
+    ) -> None:
+        def manifest_at(revision: str) -> dict[str, str] | None:
+            assert revision == 'origin/main'
+            return manifest
+
+        monkeypatch.setattr(revisions, 'manifest_at', manifest_at)
+
     def test_passes_when_every_system_keeps_its_fingerprint(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        base = revisions.current_systems(load_systems(load_export()))
-
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            assert selected == set(base)
-            return base
-
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+        self.committed(
+            monkeypatch, revisions.current_fingerprints(load_systems(load_export()))
+        )
 
         result = invoke('fingerprints', 'origin/main')
 
@@ -1405,59 +1438,89 @@ class TestFingerprints:
             'Every system keeps its fingerprint since `origin/main`.\n',
         )
 
-    @pytest.mark.parametrize(
-        'change',
-        [
-            {'route': 'acme/moved'},
-            {'prompt': 'Be brief.'},
-        ],
-        ids=['route', 'prompt'],
-    )
-    def test_names_the_family_of_a_changed_system_and_requires_a_new_name(
-        self, monkeypatch: pytest.MonkeyPatch, change: dict[str, Any]
+    def test_passes_a_base_without_a_manifest(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        head = revisions.current_systems(load_systems(load_export()))
-        key = 'writing-en/opus-5.5-high'
-        old = head[key].model_copy(update=change)
-
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            return head | {key: old}
-
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+        self.committed(monkeypatch, None)
 
         result = invoke('fingerprints', 'origin/main')
 
-        assert result.exit_code == 1
-        assert result.stdout == ''
-        assert result.stderr == (
-            'System `opus-5.5-high` changed its fingerprint since `origin/main` in '
-            '`writing-en`. Give a changed system a new name and keep the old '
-            'name only in closed reports, as `docs/guide/authoring.md#systems` '
-            'describes.\n'
+        assert (result.exit_code, result.output) == (
+            0,
+            'Revision `origin/main` has no `fingerprints.json`, so no fingerprints '
+            'compare.\n',
         )
 
-    def test_names_missing_generation_metadata_without_a_traceback(
+    @pytest.mark.parametrize(
+        ('reported', 'code', 'stdout', 'stderr'),
+        [
+            pytest.param(
+                False,
+                0,
+                'System `opus-5.5-high` changed its fingerprint since `origin/main` '
+                'in `writing-en`. No closed report names it, so it reruns.\n',
+                '',
+                id='unreported',
+            ),
+            pytest.param(
+                True,
+                1,
+                '',
+                'System `opus-5.5-high` changed its fingerprint since `origin/main` '
+                'in `writing-en`, whose closed reports name it. Give a changed '
+                'system a new name and keep the old name only in closed reports, '
+                'as `docs/guide/authoring.md#systems` describes.\n',
+                id='reported',
+            ),
+        ],
+    )
+    def test_requires_a_new_name_only_for_a_system_a_closed_report_names(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        reported: bool,
+        code: int,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        key = 'writing-en/opus-5.5-high'
+        head = revisions.current_fingerprints(load_systems(load_export()))
+        self.committed(monkeypatch, head | {key: 'fp-old'})
+
+        def closed(name: str) -> bool:
+            return reported and name == key
+
+        monkeypatch.setattr(revisions, 'reported', closed)
+
+        result = invoke('fingerprints', 'origin/main')
+
+        assert (result.exit_code, result.stdout, result.stderr) == (
+            code,
+            stdout,
+            stderr,
+        )
+
+    def test_names_an_invalid_manifest_without_a_traceback(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def systems_at(revision: str, selected: set[str]) -> dict[str, System]:
-            raise ValueError('No declared generation protocol. Give systems new names.')
+        def manifest_at(revision: str) -> dict[str, str]:
+            raise ValueError('The manifest maps `writing-en/x` to a number.')
 
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+        monkeypatch.setattr(revisions, 'manifest_at', manifest_at)
 
         result = invoke('fingerprints', 'origin/main')
 
         assert (result.exit_code, result.output) == (
             1,
-            'No declared generation protocol. Give systems new names.\n',
+            'The manifest maps `writing-en/x` to a number.\n',
         )
 
     def test_exits_with_the_code_of_a_failed_revision_lookup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def systems_at(revision: str, selected: set[str]) -> dict[str, Any]:
+        def manifest_at(revision: str) -> dict[str, str]:
             raise subprocess.CalledProcessError(128, 'git')
 
-        monkeypatch.setattr(revisions, 'systems_at', systems_at)
+        monkeypatch.setattr(revisions, 'manifest_at', manifest_at)
 
         result = invoke('fingerprints', 'nope')
 

@@ -10,7 +10,7 @@ src/assistant_bench/
 ├── ci.py                                   # Coding task selection and checks for Harbor Smoke
 ├── task_assets.py                          # Regeneration of each coding task's shared files
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
-├── revisions.py                            # Systems as committed at another revision, for the fingerprint check
+├── revisions.py                            # The fingerprint manifest and its comparison across revisions
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
 │   ├── commands.py                         # Publication, evidence and private administration commands

@@ -131,12 +131,13 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
-Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints). Give the changed system a new table name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
+Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints), and whether the system keeps its name follows the rule there. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 
-When changing a model snapshot, effort, capacities, or generation protocol:
+When a change moves fingerprints, whether through a model snapshot, effort, capacities, the generation protocol, or the fingerprint code:
 
-1. Run `uv run bench fingerprints <base>` to identify runnable systems whose generation identity changed.
-2. Give each changed configuration a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
+1. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints <base>` to list the changed systems and fail on those a closed report names.
+2. Give each system a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
 3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
 4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
-5. Run `uv run bench fingerprints <base>` again to confirm that no runnable name retains a changed fingerprint.
+5. Run `uv run bench fingerprints <base>` again to confirm that it passes.
+6. Before the next paid run, delete the stale trials of each other changed system under `jobs/<family>/` in the data directory, so it reruns under its name.

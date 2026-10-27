@@ -794,3 +794,25 @@ class TestReadReports:
 
         with pytest.raises(ValueError):
             report.read_reports(closed.family, closed.closed_at + timedelta(days=1))
+
+
+class TestReportedSystems:
+    def test_names_every_system_a_closed_report_of_the_family_holds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        write_report(closed)
+
+        reported = report.reported_systems(closed.family)
+
+        assert reported == set(closed.systems)
+        assert report.reported_systems('other') == set()
+
+    def test_rejects_an_invalid_family_before_reading_any_report(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'missing')
+
+        with pytest.raises(ValidationError):
+            report.reported_systems('../outside')

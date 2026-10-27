@@ -636,6 +636,17 @@ def write_report(report: Report) -> Path:
 def read_reports(family: str, before: datetime) -> list[Report]:
     family = TypeAdapter(FamilyName).validate_python(family)
     before = TypeAdapter(AwareDatetime).validate_python(before)
+    reports = [report for report in _closed(family) if report.closed_at < before]
+    return sorted(reports, key=lambda report: report.closed_at)
+
+
+def reported_systems(family: str) -> set[str]:
+    """Return every system that a closed report of the family names."""
+    family = TypeAdapter(FamilyName).validate_python(family)
+    return {system for report in _closed(family) for system in report.systems}
+
+
+def _closed(family: str) -> list[Report]:
     reports: list[Report] = []
     for path in sorted((REPORTS_DIR / family).glob('*.json')):
         report = Report.model_validate_json(path.read_text())
@@ -643,10 +654,8 @@ def read_reports(family: str, before: datetime) -> list[Report]:
             raise ValueError(
                 f'Report `{path.name}` does not match its family and round path.'
             )
-        if report.closed_at < before:
-            reports.append(report)
-
-    return sorted(reports, key=lambda report: report.closed_at)
+        reports.append(report)
+    return reports
 
 
 def _fingerprints(outputs: list[Output]) -> dict[str, str | None]:

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import textwrap
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from shlex import quote
 from typing import Any
@@ -15,7 +16,8 @@ import pytest
 import tomli_w
 from typer.testing import CliRunner
 
-from assistant_bench import jobs, task_assets
+from assistant_bench import jobs, revisions, task_assets
+from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Case, case_task, load_cases, load_family
 from assistant_bench.paths import REPO_ROOT
@@ -255,6 +257,19 @@ def untabled(root: Path) -> set[tuple[str, str]]:
 
 def test_committed_families_name_only_tabled_systems() -> None:
     assert untabled(REPO_ROOT) == set()
+
+
+def test_the_fingerprint_manifest_matches_the_runnable_systems(
+    stale_fixture: Callable[[Path, str], None],
+) -> None:
+    manifest = REPO_ROOT / revisions.MANIFEST_FILE
+
+    current = revisions.render_manifest(
+        revisions.current_fingerprints(load_systems(load_export()))
+    )
+
+    if not manifest.is_file() or manifest.read_text() != current:
+        stale_fixture(manifest, current)
 
 
 @pytest.mark.parametrize(

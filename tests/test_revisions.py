@@ -1,47 +1,19 @@
-import json
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from assistant_bench import revisions
-from assistant_bench.generation import Generation
+from assistant_bench import report, revisions
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.paths import REPO_ROOT
+from assistant_bench.report import Report, write_report
 from support import (
-    EXPORT_FILE,
-    make_generation,
+    REPORT_FIXTURE,
     make_system,
     write_case_family,
     write_task_family,
 )
-
-
-PROJECT = """\
-[tool.assistant-bench]
-generation-protocol = 1
-messages-protocol = 1
-anthropic-api-version = "2023-06-01"
-"""
-LOCK = """\
-[[package]]
-name = "anthropic"
-version = "2.3.0"
-
-[[package]]
-name = "harbor"
-version = "0.23.0"
-"""
-SYSTEMS = """\
-[large]
-model = "acme-large"
-"""
-FAMILIES = {
-    'families/writing/family.toml': 'systems = ["large"]\n',
-    'families/coding/family.toml': 'systems = ["large"]\nharness = "terminus-2"\n',
-    'families/smoke/family.toml': 'scorer = "tests"\n',
-}
 
 
 class TestCurrentSystems:
@@ -71,19 +43,30 @@ class TestCurrentSystems:
         }
 
 
-class TestSystemsAt:
+class TestCurrentFingerprints:
+    def test_fingerprints_each_system_under_its_family_harness(
+        self, families_dir: Path
+    ) -> None:
+        write_case_family(families_dir, ['large'], name='writing')
+        write_task_family(families_dir, 'echo', name='coding', systems=('large',))
+        system = make_system(name='large')
+
+        current = revisions.current_fingerprints({'large': system})
+
+        assert current == {
+            'coding/large': fingerprint(
+                system.model_copy(update={'harness': 'terminus-2'})
+            ),
+            'writing/large': fingerprint(system),
+        }
+        assert current['coding/large'] != current['writing/large']
+
+
+class TestManifestAt:
     @staticmethod
     def fake_git(
-        monkeypatch: pytest.MonkeyPatch,
-        project: str = PROJECT,
-        systems: str = SYSTEMS,
-        export_path: Path = EXPORT_FILE,
+        monkeypatch: pytest.MonkeyPatch, manifest: str | None
     ) -> list[tuple[str, ...]]:
-        documents = FAMILIES | {
-            'pyproject.toml': project,
-            'uv.lock': LOCK,
-            'systems.toml': systems,
-        }
         calls: list[tuple[str, ...]] = []
 
         def run(
@@ -100,11 +83,11 @@ class TestSystemsAt:
                 case ('git', 'rev-parse'):
                     output = 'abc123'
                 case ('git', 'ls-tree'):
-                    output = '\n'.join(FAMILIES)
+                    output = '' if manifest is None else revisions.MANIFEST_FILE
                 case ('git', 'show'):
-                    output = documents[args[2].removeprefix('abc123:')]
-                case ('nix', 'build'):
-                    output = str(export_path)
+                    assert args[2] == f'abc123:{revisions.MANIFEST_FILE}'
+                    assert manifest is not None
+                    output = manifest
                 case _:
                     pytest.fail(f'Unexpected command {args}')
             return subprocess.CompletedProcess(args, 0, stdout=f'{output}\n')
@@ -112,155 +95,65 @@ class TestSystemsAt:
         monkeypatch.setattr(subprocess, 'run', run)
         return calls
 
-    def test_uses_historical_export_versions_and_family_harnesses(
+    def test_reads_the_manifest_the_revision_committed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = self.fake_git(monkeypatch)
-        historical = make_generation(protocol=1, harbor='0.23.0')
+        fingerprints = {'writing/large': 'a1', 'coding/large': 'b2'}
+        calls = self.fake_git(monkeypatch, revisions.render_manifest(fingerprints))
 
-        systems = revisions.systems_at(
-            'origin/main', {'writing/large', 'coding/large', 'new/large'}
-        )
+        manifest = revisions.manifest_at('origin/main')
 
-        assert {name: fingerprint(system) for name, system in systems.items()} == {
-            'writing/large': 'f5c2d54568475bec',
-            'coding/large': '829e4933566e752c',
-        }
-        assert all(system.generation == historical for system in systems.values())
-        assert ('git', 'show', 'abc123:pyproject.toml') in calls
-        assert ('git', 'show', 'abc123:uv.lock') in calls
-        assert calls[-1] == (
-            'nix',
-            'build',
-            '--no-link',
-            '--print-out-paths',
-            f'git+file:{REPO_ROOT}?rev=abc123#nixos-config',
-        )
+        assert manifest == fingerprints
+        assert calls[0] == ('git', 'rev-parse', '--verify', 'origin/main^{commit}')
 
-    def test_ignores_unselected_retired_tables_and_current_admission_lists(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        document = json.loads(EXPORT_FILE.read_text())
-        for model in document['catalog']['models'].values():
-            model['apis'] = []
-        old_export = tmp_path / 'old-export.json'
-        old_export.write_text(json.dumps(document))
-        self.fake_git(
-            monkeypatch,
-            systems=SYSTEMS + '\n[retired]\nmodel = "missing-model"\n',
-            export_path=old_export,
-        )
-        current = make_system(
-            name='large', generation=make_generation(protocol=1, harbor='0.23.0')
-        )
-
-        old = revisions.systems_at('origin/main', {'writing/large'})
-
-        assert revisions.changed_fingerprints(old, {'writing/large': current}) == []
-        assert fingerprint(old['writing/large']) == 'f5c2d54568475bec'
-
-    def test_requires_no_historical_metadata_after_all_shared_names_are_replaced(
+    def test_reports_a_revision_without_a_manifest(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = self.fake_git(monkeypatch, project='')
+        calls = self.fake_git(monkeypatch, None)
 
-        systems = revisions.systems_at('origin/main', {'writing/large-high'})
+        manifest = revisions.manifest_at('origin/main')
 
-        assert systems == {}
-        assert not any(args[:2] == ('nix', 'build') for args in calls)
-        assert ('git', 'show', 'abc123:pyproject.toml') not in calls
+        assert manifest is None
+        assert not any(args[:2] == ('git', 'show') for args in calls)
 
-    def test_detects_transport_changes_against_the_revision_owned_api(
+    def test_rejects_a_manifest_that_does_not_map_names_to_fingerprints(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self.fake_git(monkeypatch)
-        generation = make_generation(protocol=1, harbor='0.23.0')
-        head = {
-            'writing/large': make_system(
-                name='large', generation=generation, api='openai-responses'
-            ),
-            'coding/large': make_system(
-                name='large',
-                harness='terminus-2',
-                generation=generation,
-                api='openai-responses',
-            ),
-        }
+        self.fake_git(monkeypatch, '{"writing/large": 1}')
 
-        base = revisions.systems_at('origin/main', set(head))
-
-        assert revisions.changed_fingerprints(base, head) == list(head)
-        assert all(system.api == 'openai-chat-completions' for system in base.values())
-
-        self.fake_git(monkeypatch, systems=SYSTEMS + 'api = "openai-responses"\n')
-
-        responses_base = revisions.systems_at('origin/main', set(head))
-
-        assert revisions.changed_fingerprints(responses_base, head) == []
-
-    @pytest.mark.parametrize(
-        ('project', 'missing'),
-        [
-            (
-                '[tool.assistant-bench]\nmessages-protocol = 1\n',
-                'generation-protocol',
-            ),
-            (
-                '[tool.assistant-bench]\ngeneration-protocol = 1\n',
-                'messages-protocol',
-            ),
-        ],
-        ids=['generation-protocol', 'messages-protocol'],
-    )
-    def test_names_the_generation_key_a_shared_cohort_lacks(
-        self, monkeypatch: pytest.MonkeyPatch, project: str, missing: str
-    ) -> None:
-        self.fake_git(monkeypatch, project=project)
-
-        with pytest.raises(ValueError, match=rf'lacks `{missing}`.*new names'):
-            revisions.systems_at('origin/main', {'writing/large'})
-
-    @pytest.mark.parametrize(
-        ('generation', 'expected'),
-        [
-            pytest.param(
-                make_generation(protocol=1, harbor='0.24.0'),
-                ['coding/large'],
-                id='harbor-native-prompts',
-            ),
-            pytest.param(
-                make_generation(protocol=2, harbor='0.23.0'),
-                ['writing/large', 'coding/large'],
-                id='generation-protocol',
-            ),
-        ],
-    )
-    def test_detects_runtime_changes_against_revision_owned_versions(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        generation: Generation,
-        expected: list[str],
-    ) -> None:
-        self.fake_git(monkeypatch)
-        head = {
-            'writing/large': make_system(name='large', generation=generation),
-            'coding/large': make_system(
-                name='large', harness='terminus-2', generation=generation
-            ),
-        }
-
-        base = revisions.systems_at('origin/main', set(head))
-
-        assert revisions.changed_fingerprints(base, head) == expected
+        with pytest.raises(ValueError):
+            revisions.manifest_at('origin/main')
 
 
 class TestChangedFingerprints:
     def test_names_only_systems_that_kept_their_name(self) -> None:
-        base = {'kept': make_system(), 'changed': make_system(), 'gone': make_system()}
-        head = {
-            'kept': make_system(),
-            'changed': make_system(effort='high'),
-            'new': make_system(effort='low'),
-        }
+        base = {'f/kept': 'a', 'f/changed': 'b', 'f/gone': 'c'}
+        head = {'f/kept': 'a', 'f/changed': 'x', 'f/new': 'y'}
 
-        assert revisions.changed_fingerprints(base, head) == ['changed']
+        changed = revisions.changed_fingerprints(base, head)
+
+        assert changed == ['f/changed']
+
+
+class TestReported:
+    @pytest.mark.parametrize(
+        ('key', 'expected'),
+        [
+            pytest.param('arena/acme-large', True, id='reported'),
+            pytest.param('arena/acme-new', False, id='other-system'),
+            pytest.param('writing/acme-large', False, id='other-family'),
+        ],
+    )
+    def test_requires_a_closed_report_of_the_same_family(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        key: str,
+        expected: bool,
+    ) -> None:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        write_report(Report.model_validate_json(REPORT_FIXTURE.read_text()))
+
+        reported = revisions.reported(key)
+
+        assert reported is expected

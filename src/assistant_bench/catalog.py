@@ -170,7 +170,7 @@ _CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems
 
 
 class SystemIdentity(BaseModel):
-    """Immutable generation facts, independent of current capability admission."""
+    """The generation facts a harness builds its agent kwargs from."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -270,7 +270,7 @@ def resolve_system(
         The model, its channel, the effort, or the prompt is unknown or ambiguous.
     """
     entry = _catalog_model(name, config, export)
-    identity = _identity(name, config, entry, export, generation, 'generate')
+    identity = _identity(name, config, entry, export, generation)
     if entry is not None:
         if not entry.apis:
             raise ValueError(
@@ -294,19 +294,6 @@ def resolve_system(
         price=price,
         vendor=vendor,
         display_name=display_name,
-    )
-
-
-def resolve_identity(
-    name: str,
-    config: SystemConfig,
-    export: NixosConfigExport,
-    generation: Generation,
-    harness: str,
-) -> SystemIdentity:
-    """Project generation facts from explicitly supplied revision-owned inputs."""
-    return _identity(
-        name, config, _catalog_model(name, config, export), export, generation, harness
     )
 
 
@@ -343,7 +330,6 @@ def _identity(
     entry: CatalogModel | None,
     export: NixosConfigExport,
     generation: Generation,
-    harness: str,
 ) -> SystemIdentity:
     if entry is None:
         assert config.route is not None
@@ -381,7 +367,7 @@ def _identity(
         effort=effort,
         thinking_mode=thinking_mode,
         prompt=_prompt(name, config.prompt, export),
-        harness=harness,
+        harness='generate',
     )
 
 

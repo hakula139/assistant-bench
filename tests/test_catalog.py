@@ -1,5 +1,4 @@
 import textwrap
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -7,18 +6,16 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench.catalog import (
-    Api,
     NixosConfigExport,
     Price,
     System,
     SystemConfig,
     load_export,
     load_systems,
-    resolve_identity,
     resolve_system,
 )
 from assistant_bench.harnesses import fingerprint
-from support import GENERATION, make_generation, make_system
+from support import GENERATION, make_system
 
 
 class TestPrice:
@@ -260,94 +257,6 @@ class TestLoadSystems:
         ) == ('anthropic-messages', 'anthropic-adaptive', 128000, 1000000)
 
 
-class TestResolveIdentity:
-    def test_requires_native_thinking_metadata_for_a_replayable_identity(
-        self, export: NixosConfigExport
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        document['catalog']['models']['acme-large']['thinking']['mode'] = None
-        missing_mode = NixosConfigExport.model_validate(document)
-        config = SystemConfig(
-            model='acme-large', api='anthropic-messages', effort='high'
-        )
-        versions = make_generation()
-
-        with pytest.raises(ValueError):
-            resolve_identity('native', config, missing_mode, versions, 'generate')
-
-    @pytest.mark.parametrize(
-        ('api', 'effort', 'required', 'expected'),
-        [
-            ('openai-chat-completions', None, True, 'f5c2d54568475bec'),
-            ('openai-responses', 'high', True, '865b3aa1a8d35ca2'),
-            ('openai-chat-completions', None, False, '7c39907f6e270579'),
-            ('openai-responses', 'unlisted', True, 'a00063818adeaeee'),
-        ],
-        ids=[
-            'required-default',
-            'explicit-effort',
-            'optional-default',
-            'identity-without-admission',
-        ],
-    )
-    def test_projects_historical_facts_while_current_execution_stays_strict(
-        self,
-        export: NixosConfigExport,
-        monkeypatch: pytest.MonkeyPatch,
-        api: Api,
-        effort: str | None,
-        required: bool,
-        expected: str,
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        entry = document['catalog']['models']['acme-large']
-        entry['apis'] = []
-        entry['thinking']['requiresEffort'] = required
-        old = NixosConfigExport.model_validate(document)
-        config = SystemConfig(model='acme-large', api=api, effort=effort)
-        versions = make_generation(protocol=1, harbor='0.23.0')
-
-        def unexpected(*args: object, **kwargs: object) -> Any:
-            pytest.fail('Historical identity attempted to read current runtime state')
-
-        monkeypatch.setattr('assistant_bench.catalog.load_generation', unexpected)
-        monkeypatch.setattr('assistant_bench.catalog.load_export', unexpected)
-        monkeypatch.setattr(metadata, 'version', unexpected)
-
-        identity = resolve_identity('large', config, old, versions, 'generate')
-
-        assert fingerprint(identity) == expected
-        with pytest.raises(ValueError, match='declares no supported APIs'):
-            resolve_system('large', config, old, versions)
-
-    @pytest.mark.parametrize(
-        'change', ['price', 'display-name', 'vendor', 'capabilities', 'export-revision']
-    )
-    def test_excludes_non_generation_metadata_from_historical_identity(
-        self, export: NixosConfigExport, change: str
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        entry = document['catalog']['models']['acme-large']
-        config = SystemConfig(model='acme-large')
-        versions = make_generation(protocol=1, harbor='0.23.0')
-        if change == 'price':
-            entry['channelCost'] = {}
-        elif change == 'display-name':
-            config = config.model_copy(update={'display_name': 'Other label'})
-        elif change == 'vendor':
-            entry['vendor'] = 'other'
-        elif change == 'capabilities':
-            entry['apis'] = []
-            entry['thinking']['efforts'] = []
-        else:
-            document['rev'] = 'another-revision'
-        changed = NixosConfigExport.model_validate(document)
-
-        identity = resolve_identity('large', config, changed, versions, 'generate')
-
-        assert fingerprint(identity) == 'f5c2d54568475bec'
-
-
 class TestResolveSystem:
     @pytest.mark.parametrize(
         ('change', 'message'),
@@ -481,6 +390,33 @@ class TestResolveSystem:
 
         assert system.vendor is None
         assert fingerprint(system) == fingerprint(make_system())
+
+    @pytest.mark.parametrize(
+        'change', ['price', 'display-name', 'vendor', 'export-revision']
+    )
+    def test_keeps_the_fingerprint_when_only_public_metadata_changes(
+        self, export: NixosConfigExport, change: str
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        entry = document['catalog']['models']['acme-large']
+        config = SystemConfig(model='acme-large')
+        if change == 'price':
+            entry['channelCost'] = {}
+        elif change == 'display-name':
+            config = config.model_copy(update={'display_name': 'Other label'})
+        elif change == 'vendor':
+            entry['vendor'] = 'other'
+        else:
+            document['rev'] = 'another-revision'
+        changed = NixosConfigExport.model_validate(document)
+
+        system = resolve_system('large', config, changed, GENERATION)
+
+        assert fingerprint(system) == fingerprint(
+            resolve_system(
+                'large', SystemConfig(model='acme-large'), export, GENERATION
+            )
+        )
 
     def test_applies_the_default_effort_a_model_requires(
         self, export: NixosConfigExport
