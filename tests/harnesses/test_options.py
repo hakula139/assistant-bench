@@ -22,8 +22,6 @@ class TestGenerate:
         kwargs = options.generate(system)
 
         assert kwargs == {
-            'system': system.name,
-            'fingerprint': system.fingerprint,
             'api': 'anthropic-messages',
             'thinking_mode': 'anthropic-adaptive',
             'effort': 'high',
@@ -46,7 +44,7 @@ class TestGenerate:
             ),
         ],
     )
-    def test_builds_the_request_settings_with_the_labels(
+    def test_builds_the_request_settings(
         self, fields: dict[str, Any], settings: dict[str, Any]
     ) -> None:
         system = make_system(**fields)
@@ -54,8 +52,6 @@ class TestGenerate:
         kwargs = options.generate(system)
 
         assert kwargs == {
-            'system': 'acme-large',
-            'fingerprint': system.fingerprint,
             'api': 'openai-chat-completions',
             **settings,
             'max_output_tokens': 64,
@@ -74,8 +70,6 @@ class TestTerminus:
         kwargs = options.terminus(system)
 
         assert kwargs == {
-            'system': system.name,
-            'fingerprint': system.fingerprint,
             'api': 'anthropic-messages',
             'thinking_mode': 'anthropic-adaptive',
             'use_responses_api': False,
@@ -90,8 +84,6 @@ class TestTerminus:
         kwargs = options.terminus(system)
 
         assert kwargs == {
-            'system': 'acme-large',
-            'fingerprint': system.fingerprint,
             'use_responses_api': False,
             'llm_call_kwargs': {'max_completion_tokens': 64},
             'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
@@ -118,8 +110,6 @@ class TestTerminus:
         kwargs = options.terminus(system)
 
         assert kwargs == {
-            'system': system.name,
-            'fingerprint': system.fingerprint,
             'use_responses_api': True,
             'model_info': {'max_input_tokens': 98304, 'max_output_tokens': 32768},
             'reasoning_effort': 'max',

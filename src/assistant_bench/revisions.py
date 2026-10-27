@@ -15,6 +15,7 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.families import family_names, load_family
 from assistant_bench.generation import parse_generation
+from assistant_bench.harnesses import fingerprint
 from assistant_bench.jobs import family_systems, listed_systems
 from assistant_bench.messages import code
 from assistant_bench.paths import REPO_ROOT
@@ -105,7 +106,7 @@ def changed_fingerprints(
     return [
         name
         for name, system in head.items()
-        if name in base and base[name].fingerprint != system.fingerprint
+        if name in base and fingerprint(base[name]) != fingerprint(system)
     ]
 
 

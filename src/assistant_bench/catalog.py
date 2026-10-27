@@ -1,8 +1,6 @@
 """Systems under test, resolved against the model catalog exported from nixos-config."""
 
 import difflib
-import hashlib
-import json
 import os
 import tomllib
 from collections.abc import Callable
@@ -182,7 +180,7 @@ class SystemIdentity(BaseModel):
     """Configured completion allowance, including reasoning tokens."""
 
     context_window: int = Field(gt=0)
-    """Configured context capacity for Terminus's native context management."""
+    """Configured context capacity for the agent's native context management."""
 
     effort: str | None
     thinking_mode: ThinkingMode | None = None
@@ -198,31 +196,6 @@ class SystemIdentity(BaseModel):
         if self.api == 'anthropic-messages' and self.thinking_mode is None:
             raise ValueError('Native Messages identity requires its thinking mode.')
         return self
-
-    @property
-    def fingerprint(self) -> str:
-        """Hash of what shapes the outputs. Votes pool only within one fingerprint."""
-        prompt = self.prompt
-        identity = {
-            'version': self.generation.version(self.harness, self.api),
-            'api': self.api,
-            'route': self.route,
-            'effort': self.effort,
-            'harness': self.harness,
-            'max_output_tokens': self.max_output_tokens,
-            'prompt': prompt and hashlib.sha256(prompt.encode()).hexdigest(),
-        }
-        if self.harness == 'terminus-2':
-            identity['context_window'] = self.context_window
-        if self.api == 'anthropic-messages':
-            identity['thinking_mode'] = self.thinking_mode
-
-        encoded = json.dumps(
-            {key: value for key, value in identity.items() if value is not None},
-            sort_keys=True,
-        )
-
-        return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 class System(SystemIdentity):

@@ -27,6 +27,7 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.cli import app
 from assistant_bench.families import Family, Gate, family_names, load_cases, load_family
+from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.outputs import Output
 from support import (
@@ -745,8 +746,8 @@ class TestRun:
         opus = load_systems(load_export())['opus-5.5-high']
         assert agent.import_path == 'assistant_bench.harnesses.terminus:Terminus'
         assert agent.model_name == f'openai/{opus.route}'
-        assert agent.kwargs['fingerprint'] == (
-            opus.model_copy(update={'harness': 'terminus-2'}).fingerprint
+        assert agent.kwargs['fingerprint'] == fingerprint(
+            opus.model_copy(update={'harness': 'terminus-2'})
         )
         assert 'max_turns' not in agent.kwargs
         assert agent.kwargs['api'] == 'anthropic-messages'
@@ -946,7 +947,7 @@ class TestRun:
             ),
             task='f/c1',
         )
-        current = load_systems(load_export())['opus-5.5-high'].fingerprint
+        current = fingerprint(load_systems(load_export())['opus-5.5-high'])
 
         result = invoke('run', 'f')
 
@@ -1368,7 +1369,7 @@ class TestClose:
         assert closed.results.scorer == 'tests'
         assert closed.results.standings[0].pass_rate == 1.0
         assert closed.systems['large'].display_name == 'Public Large'
-        assert closed.systems['large'].fingerprint == resolved.fingerprint
+        assert closed.systems['large'].fingerprint == fingerprint(resolved)
         assert 'Family `f`: 1 outputs, 0 errored.' in result.output
 
 

@@ -14,7 +14,7 @@ The catalog's `maxTokens` is the configured completion allowance, including reas
 
 ## Fingerprints
 
-A system's fingerprint hashes its resolved route, API, completion allowance, effort, harness, generation protocol, and the SHA-256 of its prompt text. `terminus-2` also binds the context window, which sets its input limit, and native Messages binds its thinking mode, native protocol, and API version. SDK versions, the table name, and public labels are excluded, and so is the context window under `generate`, which never sends it. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
+A system's fingerprint hashes its harness, model name, generation version, and every kwarg the harness gives its agent except the trial labels, so a trial's agent config changes only with the system's fingerprint or name. Those kwargs carry the resolved API, effort, and completion allowance, the prompt under `generate`, the context window as the input limit under `terminus-2`, and the thinking mode of native Messages. The generation version adds the declared generation protocol, the locked Harbor version under `terminus-2`, and the native protocol and API version of native Messages. SDK versions, the table name, and public labels are excluded. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
 
 Votes and scores pool only within one fingerprint. Altering a system's generation settings requires a new table name, preserving the old name's frozen results. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 

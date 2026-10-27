@@ -17,7 +17,7 @@ from assistant_bench.catalog import (
     resolve_identity,
     resolve_system,
 )
-from assistant_bench.generation import Generation
+from assistant_bench.harnesses import fingerprint
 from support import GENERATION, make_generation, make_system
 
 
@@ -142,121 +142,6 @@ class TestSystem:
 
         with pytest.raises(ValidationError):
             System.model_validate(fields)
-
-    class TestFingerprint:
-        @pytest.mark.parametrize(
-            'change',
-            [{'messages_protocol': 2}, {'anthropic_api_version': '2026-10-21'}],
-            ids=['messages-protocol', 'api-version'],
-        )
-        @pytest.mark.parametrize('harness', ['generate', 'terminus-2'])
-        def test_native_versions_invalidate_only_messages_outputs(
-            self, change: dict[str, Any], harness: str
-        ) -> None:
-            versions = make_generation()
-            changed = versions.model_copy(update=change)
-            native = make_system(
-                api='anthropic-messages',
-                thinking_mode='anthropic-adaptive',
-                harness=harness,
-                generation=versions,
-            )
-            other = make_system(harness=harness, generation=versions)
-
-            assert (
-                native.model_copy(update={'generation': changed}).fingerprint
-                != native.fingerprint
-            )
-            assert (
-                other.model_copy(update={'generation': changed}).fingerprint
-                == other.fingerprint
-            )
-
-        def test_captured_identity_stays_stable_when_the_runtime_changes(
-            self, monkeypatch: pytest.MonkeyPatch
-        ) -> None:
-            generate = make_system()
-            terminal = make_system(harness='terminus-2')
-            before = (generate.fingerprint, terminal.fingerprint)
-
-            def version(name: str) -> str:
-                return '999.0.0'
-
-            monkeypatch.setattr(metadata, 'version', version)
-
-            after = (generate.fingerprint, terminal.fingerprint)
-
-            assert after == before
-
-        @pytest.mark.parametrize(
-            ('changed', 'expected'),
-            [
-                pytest.param(
-                    make_generation(protocol=2, harbor='0.24.0'),
-                    (True, True),
-                    id='protocol',
-                ),
-                pytest.param(
-                    make_generation(protocol=1, harbor='0.25.0'),
-                    (False, True),
-                    id='harbor',
-                ),
-            ],
-        )
-        def test_versions_invalidate_only_the_outputs_they_shape(
-            self, changed: Generation, expected: tuple[bool, bool]
-        ) -> None:
-            base = make_generation(protocol=1, harbor='0.24.0')
-
-            differences = tuple(
-                make_system(harness=harness, generation=base).fingerprint
-                != make_system(harness=harness, generation=changed).fingerprint
-                for harness in ('generate', 'terminus-2')
-            )
-
-            assert differences == expected
-
-        def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
-            assert make_system().fingerprint == '1f58b40f86f0f14c'
-            assert make_system(name='x').fingerprint == '1f58b40f86f0f14c'
-            assert make_system(display_name='x').fingerprint == '1f58b40f86f0f14c'
-            assert make_system(vendor='other').fingerprint == '1f58b40f86f0f14c'
-
-        @pytest.mark.parametrize(
-            ('base', 'change', 'changes'),
-            [
-                pytest.param({}, {'route': 'acme/large-2'}, True, id='route'),
-                pytest.param({}, {'effort': 'high'}, True, id='effort'),
-                pytest.param({}, {'prompt': 'Be brief.'}, True, id='prompt'),
-                pytest.param({}, {'harness': 'terminus-2'}, True, id='harness'),
-                pytest.param({}, {'max_output_tokens': 128}, True, id='output'),
-                pytest.param({}, {'api': 'openai-responses'}, True, id='api'),
-                pytest.param(
-                    {'harness': 'terminus-2'},
-                    {'context_window': 16384},
-                    True,
-                    id='terminus-context',
-                ),
-                pytest.param({}, {'context_window': 16384}, False, id='context'),
-                pytest.param(
-                    {
-                        'api': 'anthropic-messages',
-                        'thinking_mode': 'anthropic-adaptive',
-                    },
-                    {'context_window': 16384},
-                    False,
-                    id='messages-context',
-                ),
-            ],
-        )
-        def test_changes_only_with_what_shapes_the_requests(
-            self, base: dict[str, str], change: dict[str, str | int], changes: bool
-        ) -> None:
-            before = make_system(**base)
-
-            after = make_system(**(base | change))
-
-            assert (after.fingerprint != before.fingerprint) is changes
 
 
 class TestLoadSystems:
@@ -393,10 +278,10 @@ class TestResolveIdentity:
     @pytest.mark.parametrize(
         ('api', 'effort', 'required', 'expected'),
         [
-            ('openai-chat-completions', None, True, '30d562d847e1e432'),
-            ('openai-responses', 'high', True, '4fa5e51fbc1b97b1'),
-            ('openai-chat-completions', None, False, '26c62ac1c147644e'),
-            ('openai-responses', 'unlisted', True, '7f0d2b4f5e0f682f'),
+            ('openai-chat-completions', None, True, 'f5c2d54568475bec'),
+            ('openai-responses', 'high', True, '865b3aa1a8d35ca2'),
+            ('openai-chat-completions', None, False, '7c39907f6e270579'),
+            ('openai-responses', 'unlisted', True, 'a00063818adeaeee'),
         ],
         ids=[
             'required-default',
@@ -431,7 +316,7 @@ class TestResolveIdentity:
 
         identity = resolve_identity('large', config, old, versions, 'generate')
 
-        assert identity.fingerprint == expected
+        assert fingerprint(identity) == expected
         with pytest.raises(ValueError, match='declares no supported APIs'):
             resolve_system('large', config, old, versions)
 
@@ -460,7 +345,7 @@ class TestResolveIdentity:
 
         identity = resolve_identity('large', config, changed, versions, 'generate')
 
-        assert identity.fingerprint == '30d562d847e1e432'
+        assert fingerprint(identity) == 'f5c2d54568475bec'
 
 
 class TestResolveSystem:
@@ -595,7 +480,7 @@ class TestResolveSystem:
         )
 
         assert system.vendor is None
-        assert system.fingerprint == make_system().fingerprint
+        assert fingerprint(system) == fingerprint(make_system())
 
     def test_applies_the_default_effort_a_model_requires(
         self, export: NixosConfigExport

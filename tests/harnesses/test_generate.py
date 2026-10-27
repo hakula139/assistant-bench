@@ -17,7 +17,7 @@ from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
 from assistant_bench.families import Gate, VotesSettings, load_cases, load_family
 from assistant_bench.generation import load_generation
-from assistant_bench.harnesses import options
+from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from assistant_bench.harnesses.messages import MessageStreamError
@@ -131,7 +131,7 @@ class TestGenerate:
             config = jobs.job(family, jobs.family_systems(family, [system]), [task])
 
             context, output = run_agent(
-                endpoint, tmp_path / 'agent', **options.generate(system)
+                endpoint, tmp_path / 'agent', **agent_kwargs(system)
             )
             write_trial(
                 data_dir / 'jobs' / family.name / 'job-1',
@@ -660,7 +660,7 @@ class TestGenerate:
             )
 
             first, first_output = run_agent(
-                endpoint, tmp_path / 'bounded', **options.generate(bounded)
+                endpoint, tmp_path / 'bounded', **agent_kwargs(bounded)
             )
 
             assert first_output.read_text() == ''
@@ -676,13 +676,13 @@ class TestGenerate:
             endpoint.response = completion(content='A complete answer.')
 
             second, second_output = run_agent(
-                endpoint, tmp_path / 'generous', **options.generate(generous)
+                endpoint, tmp_path / 'generous', **agent_kwargs(generous)
             )
 
             assert [
                 request.body['max_completion_tokens'] for request in endpoint.requests
             ] == [16000, 65536]
-            assert generous.fingerprint != bounded.fingerprint
+            assert fingerprint(generous) != fingerprint(bounded)
             assert second_output.read_text() == 'A complete answer.'
             assert second.metadata is not None
             assert second.metadata['finish_reason'] == 'stop'

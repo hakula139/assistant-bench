@@ -33,7 +33,7 @@ from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import load_family
 from assistant_bench.generation import load_generation
-from assistant_bench.harnesses import options
+from assistant_bench.harnesses import agent_kwargs
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.host import HostEnvironment
 from assistant_bench.harnesses.messages import (
@@ -183,7 +183,7 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
         logs_dir=tmp_path,
         model_name=f'openai/{system.route}',
         extra_env=endpoint.env,
-        **options.terminus(system),
+        **agent_kwargs(system),
     )
     yield agent
     asyncio.run(agent.close())
@@ -205,7 +205,7 @@ def messages_agent(
         logs_dir=tmp_path,
         model_name=f'openai/{system.route}',
         extra_env=endpoint.env,
-        **options.terminus(system),
+        **agent_kwargs(system),
     )
     yield agent
     asyncio.run(agent.close())
@@ -227,7 +227,7 @@ def run_and_collect(
         logs_dir=tmp_path,
         model_name=f'openai/{system.route}',
         extra_env=endpoint.env,
-        **options.terminus(system),
+        **agent_kwargs(system),
     )
     context = AgentContext()
 
@@ -263,7 +263,7 @@ class TestTerminus:
         change: dict[str, Any],
         message: str,
     ) -> None:
-        kwargs = options.terminus(make_system(harness='terminus-2')) | change
+        kwargs = agent_kwargs(make_system(harness='terminus-2')) | change
 
         with pytest.raises(ValueError, match=message):
             NativeProbe(
@@ -291,14 +291,14 @@ class TestTerminus:
             logs_dir=tmp_path / 'first',
             model_name=f'openai/{first.route}',
             extra_env=endpoint.env,
-            **options.terminus(first),
+            **agent_kwargs(first),
         )
 
         second_agent = NativeProbe(
             logs_dir=tmp_path / 'second',
             model_name=f'openai/{second.route}',
             extra_env=endpoint.env,
-            **options.terminus(second),
+            **agent_kwargs(second),
         )
 
         assert first_agent.client.get_model_context_limit() == 8128
@@ -320,7 +320,7 @@ class TestTerminus:
             logs_dir=tmp_path,
             model_name=f'openai/{system.route}',
             extra_env=endpoint.env,
-            **options.terminus(system),
+            **agent_kwargs(system),
         )
 
         assert agent.client.get_model_context_limit() == 98304
@@ -742,7 +742,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
 
             result = asyncio.run(agent.request('Greet me.'))
@@ -968,7 +968,7 @@ class TestTerminus:
                 harness='terminus-2', max_output_tokens=32768, context_window=131072
             )
             api_log = tmp_path / 'api.json'
-            kwargs = options.terminus(system)
+            kwargs = agent_kwargs(system)
             kwargs['llm_call_kwargs']['logging_path'] = api_log
             agent = NativeProbe(
                 logs_dir=tmp_path,
@@ -1038,7 +1038,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
 
             with pytest.raises(ServiceUnavailableError):
@@ -1129,7 +1129,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             context = AgentContext()
 
@@ -1392,7 +1392,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             context = AgentContext()
 
@@ -1455,7 +1455,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             context = AgentContext()
 
@@ -1527,7 +1527,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             context = AgentContext()
 
@@ -1598,7 +1598,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             context = AgentContext()
 
@@ -1639,7 +1639,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
 
             with pytest.raises(OutputLengthExceededError) as error:
@@ -1672,7 +1672,7 @@ class TestTerminus:
                 logs_dir=tmp_path,
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             chat = agent.conversation()
 
@@ -1761,22 +1761,32 @@ class TestTerminus:
                 model_name=f'openai/{system.route}',
                 extra_env=endpoint.env,
                 temperature=0.7,
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
 
             result = asyncio.run(agent.request('Greet me.'))
 
             (request,) = endpoint.requests
-            assert request.body['model'] == system.route
-            assert request.body['temperature'] == 0.7
+            prompt = [{'role': 'user', 'content': 'Greet me.'}]
             if api == 'openai-responses':
                 assert request.path == '/v1/responses'
-                assert request.body['reasoning'] == {'effort': effort}
-                assert request.body['max_output_tokens'] == 32768
+                assert request.body == {
+                    'model': system.route,
+                    'input': prompt,
+                    'reasoning': {'effort': effort},
+                    'max_output_tokens': 32768,
+                    'store': False,
+                    'temperature': 0.7,
+                }
             else:
                 assert request.path == '/v1/chat/completions'
-                assert request.body['reasoning_effort'] == effort
-                assert request.body['max_completion_tokens'] == 32768
+                assert request.body == {
+                    'model': system.route,
+                    'messages': prompt,
+                    'reasoning_effort': effort,
+                    'max_completion_tokens': 32768,
+                    'temperature': 0.7,
+                }
             assert request.headers['authorization'] == 'Bearer test-key'
             assert request.headers['x-trace'] == 'bench'
             assert result.content == 'Hello there.'
@@ -1801,7 +1811,7 @@ class TestTerminus:
                     CA_FILE_VAR: str(tls_endpoint.ca_file),
                     LOCAL_ADDRESS_VAR: '127.0.0.1',
                 },
-                **options.terminus(system),
+                **agent_kwargs(system),
             )
             is_closed = agent.closure_check()
 
@@ -1828,7 +1838,7 @@ class TestTerminus:
             fails: bool,
         ) -> None:
             env, export = agent_export
-            kwargs = options.terminus(make_system(harness='terminus-2', api=api))
+            kwargs = agent_kwargs(make_system(harness='terminus-2', api=api))
             Terminus.preflight(kwargs, endpoint.env | env)
             agent = NativeProbe(
                 logs_dir=tmp_path,

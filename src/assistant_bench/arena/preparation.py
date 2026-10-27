@@ -8,6 +8,7 @@ from assistant_bench.arena.publication import prepare, publication_settings
 from assistant_bench.arena.sources import prove_task
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.families import case_task, load_cases, load_family
+from assistant_bench.harnesses import fingerprint
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir
 from assistant_bench_arena.models import FamilyName, Record
@@ -84,6 +85,6 @@ def prepare_selection(selection: Preparation) -> Release:
         outputs,
         source_digests=sources,
         system_names={system.name: system.display_name for system in systems},
-        system_fingerprints={system.name: system.fingerprint for system in systems},
+        system_fingerprints={system.name: fingerprint(system) for system in systems},
         approval=selection.approval,
     )

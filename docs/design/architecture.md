@@ -25,13 +25,13 @@ src/assistant_bench/
 │   └── sources.py                          # Native task hash and agent-input proof
 ├── outputs.py                              # Output records and outputs/<family>.jsonl
 ├── harnesses/
-│   ├── __init__.py                         # System harnesses: a Harbor agent and its builders
+│   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
 │   ├── endpoint.py                         # Endpoint variables and native SDK transports
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
 │   ├── messages.py                         # Native Messages streaming and conversation content
-│   ├── options.py                          # The kwargs each harness builds from its resolved system
+│   ├── options.py                          # The kwargs each harness builds from a system's generation identity
 │   ├── responses.py                        # Native SDK results and stateless conversation items
 │   ├── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
 │   └── usage.py                            # Validated measured token counters shared by every transport
@@ -41,7 +41,7 @@ src/assistant_bench/
 │   ├── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 │   └── weighting.py                        # Family-wide cumulative actor caps
 ├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
-├── catalog.py                              # Systems, fingerprints, and prices from systems.toml and the nixos-config export
+├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
 ├── diffs.py                                # Git-style diffs of a task's workspace against its repository
