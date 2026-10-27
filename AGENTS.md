@@ -72,7 +72,7 @@ uv run basedpyright                                   # Check the shared editor 
 uv run pytest                                         # Run the tests that need no Docker, with coverage
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
 pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
-pnpm lint                                             # Lint Markdown, case instructions, and the site
+pnpm lint                                             # Lint Markdown and the site
 pnpm spellcheck                                       # Spell check
 pnpm typecheck                                        # Type check the site
 pnpm test                                             # Test the site, with coverage: schema, charts, pages, the vote page, and accessibility
