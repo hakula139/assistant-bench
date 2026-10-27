@@ -53,7 +53,7 @@ function details(row: ForestRow): Term {
   };
 }
 
-const legendKey: Record<LegendMark, { label: string; mark: ReactNode; width?: string }> = {
+const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   score: { label: 'Point score', mark: <ScoreDot preliminary={false} left="50%" /> },
   preliminary: { label: 'Preliminary', mark: <ScoreDot preliminary left="50%" /> },
   cut: {
@@ -67,7 +67,7 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode; width?: st
       </span>
     ),
   },
-  anchor: { label: 'Anchor', mark: <AnchorRule left="0" />, width: 'w-px' },
+  anchor: { label: 'Anchor', mark: <AnchorRule left="50%" /> },
 };
 
 export function drawnMarks(
@@ -98,10 +98,7 @@ export function ForestLegend({
     >
       {marks.map((key) => (
         <li key={key} className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={cn('relative h-4 shrink-0', legendKey[key].width ?? 'w-9')}
-          >
+          <span aria-hidden="true" className="relative h-4 w-9 shrink-0">
             {legendKey[key].mark}
           </span>
           {key === 'anchor' && anchorScore !== undefined

@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { Forest } from '@/components/site/Forest';
+import { Forest, ForestLegend } from '@/components/site/Forest';
 import { forestDomain, forestTicks, roundRows } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 import { reportSchema } from '@/lib/report';
@@ -99,6 +99,22 @@ describe('Forest', () => {
         (label) => !label.className.includes('@max-') || label.classList.contains(hidden),
       ),
     ).toBe(true);
+  });
+
+  test('centers every legend mark in a key of one width', () => {
+    const { container } = render(
+      <ForestLegend marks={['score', 'preliminary', 'cut', 'anchor']} anchorScore={1000} />,
+    );
+
+    const keys = [...container.querySelectorAll('li > [aria-hidden]')];
+    const marks = keys.map((key) => key.firstElementChild as HTMLElement);
+
+    expect(keys.map((key) => key.className)).toEqual(keys.map(() => 'relative h-4 w-9 shrink-0'));
+    expect(
+      marks.map(
+        (mark) => mark.style.left || [...mark.classList].find((name) => name === 'left-1/2'),
+      ),
+    ).toEqual(['50%', '50%', 'left-1/2', '50%']);
   });
 
   test("opens a row's point score from its score", async () => {

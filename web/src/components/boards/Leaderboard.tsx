@@ -86,7 +86,7 @@ function ScoreCell({
 }) {
   const summary = `${row.name}: ${formatScore(row.score)}`;
   return (
-    <div role="img" aria-label={summary} title={summary} className="absolute inset-0">
+    <div role="img" aria-label={summary} title={summary} className="absolute inset-x-4 inset-y-0">
       <ScoreTrack domain={domain} anchorScore={anchor} estimate={row} />
     </div>
   );
@@ -246,7 +246,7 @@ export function Leaderboard({
               const { numeric, forest, term, detail } = header.column.columnDef.meta ?? {};
               if (forest) {
                 return (
-                  <TableHead key={header.id} className="w-[38%] p-0 max-lg:hidden">
+                  <TableHead key={header.id} className="w-[38%] px-4 py-0 max-lg:hidden">
                     <span className="sr-only">Point score</span>
                     <table.FlexRender header={header} />
                   </TableHead>
