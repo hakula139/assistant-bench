@@ -107,6 +107,7 @@ describe('built vote document', () => {
     expect(document.querySelector('a[href="#main"]')?.textContent.trim()).toBe('Skip to content');
     const island = document.querySelector('main#main astro-island[component-export="VoteApp"]');
     expect(island).not.toBeNull();
+    expect(document.querySelector('footer')).toBeNull();
     const styles = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')];
     expect(styles.length).toBeGreaterThan(0);
     for (const style of styles) {

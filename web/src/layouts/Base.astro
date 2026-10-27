@@ -11,13 +11,15 @@ interface Props {
   /** The header link the page sits under. */
   section?: HeaderSection;
   /**
-   * The vote page's layout: the wide header over a footerless `main` that fills the screen from
-   * `md`, where the content sets its own column and scrolling.
+   * `page` sets the content in the site's column above the footer. `app` puts the wide header over a
+   * footerless `main` that fills the screen from `md` and leaves column, spacing, and scrolling to
+   * the content.
    */
-  wide?: boolean;
+  layout?: 'page' | 'app';
 }
 
-const { title, section, description = SITE_DESCRIPTION, wide = false } = Astro.props;
+const { title, section, description = SITE_DESCRIPTION, layout = 'page' } = Astro.props;
+const app = layout === 'app';
 ---
 
 <!doctype html>
@@ -29,25 +31,25 @@ const { title, section, description = SITE_DESCRIPTION, wide = false } = Astro.p
     />
     <slot name="head" />
   </head>
-  <body class:list={['flex min-h-dvh flex-col', wide && 'md:h-dvh']}>
+  <body class:list={['flex min-h-dvh flex-col', app && 'md:h-dvh']}>
     <a
       href="#main"
       class="sr-only rounded-md bg-background px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
     >
       Skip to content
     </a>
-    <Header section={section} wide={wide} />
+    <Header section={section} wide={app} />
     <main
       id="main"
       tabindex="-1"
       class:list={[
         'flex-1 outline-none',
-        wide ? 'flex flex-col md:min-h-0' : [container, 'pt-8 pb-16', stack],
+        app ? 'flex flex-col md:min-h-0' : [container, 'pt-8 pb-16', stack],
       ]}
     >
       <slot />
     </main>
-    {!wide && (
+    {!app && (
       <footer class="border-t">
         <p class:list={[container, 'py-6 text-sm text-muted-foreground']}>
           {SITE_NAME} is a <a href="https://hakula.xyz/">hakula.xyz</a> project, with its code,

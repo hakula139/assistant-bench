@@ -11,7 +11,12 @@ csp.insertScriptResource("'self'");
 csp.insertScriptResource('https://challenges.cloudflare.com');
 ---
 
-<Base title="Vote" description="Blind pairwise voting on assistant outputs." section="vote" wide>
+<Base
+  title="Vote"
+  description="Blind pairwise voting on assistant outputs."
+  section="vote"
+  layout="app"
+>
   <meta slot="head" name="robots" content="noindex" />
   <VoteApp client:only="react" />
 </Base>
