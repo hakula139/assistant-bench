@@ -1,10 +1,11 @@
 """Resolve and call the functions that implement steps."""
 
-import importlib
+import importlib.util
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from .config import StepSpec
@@ -33,21 +34,51 @@ class StepFailed(Exception):
         super().__init__(f'Step {step!r} failed: {reason}')
 
 
-def load_function(root: Path, spec: StepSpec) -> StepFunction:
-    """Import a step's `module:function` with the project root on the path."""
+_sources: dict[str, bytes] = {}
+"""The source each step module last ran from, by module name."""
+
+
+def load_function(root: Path, spec: StepSpec) -> tuple[StepFunction, bytes]:
+    """Import a step's `module:function` with the project root on the path.
+
+    Return the function with the source its module ran from. A module whose file
+    changed since it last ran in this process runs again from the current source,
+    so the function always comes from the source returned with it.
+    """
     module_name, _, function_name = spec.run.partition(':')
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
     try:
-        module = importlib.import_module(module_name)
+        module, source = _run_module(module_name)
     except ImportError as error:
         raise StepFailed(spec.name, f'cannot import {module_name}: {error}') from error
 
     function = getattr(module, function_name, None)
     if not callable(function):
         raise StepFailed(spec.name, f'{spec.run} is not a function.')
-    return function
+    return function, source
+
+
+def _run_module(name: str) -> tuple[ModuleType, bytes]:
+    module_spec = importlib.util.find_spec(name)
+    if module_spec is None or module_spec.origin is None:
+        raise ModuleNotFoundError(f'No module named {name!r}', name=name)
+
+    source = Path(module_spec.origin).read_bytes()
+    module = sys.modules.get(name)
+    if module is not None and _sources.get(name) == source:
+        return module, source
+
+    module = importlib.util.module_from_spec(module_spec)
+    sys.modules[name] = module
+    try:
+        exec(compile(source, module_spec.origin, 'exec'), module.__dict__)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    _sources[name] = source
+    return module, source
 
 
 def resolve_inputs(root: Path, patterns: tuple[str, ...]) -> list[Path]:
@@ -55,12 +86,6 @@ def resolve_inputs(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     for pattern in patterns:
         found.update(path for path in root.glob(pattern) if path.is_file())
     return sorted(found)
-
-
-def module_source(function: StepFunction) -> bytes:
-    """Return the source of the module that defines `function`."""
-    module = sys.modules[function.__module__]
-    return b'' if module.__file__ is None else Path(module.__file__).read_bytes()
 
 
 def run_step(

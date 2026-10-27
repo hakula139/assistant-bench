@@ -26,6 +26,7 @@ def fingerprint(root: Path, spec: StepSpec, inputs: list[Path], source: bytes) -
     """
     document = {
         'run': spec.run,
+        'patterns': spec.inputs,
         'params': spec.params,
         'outputs': spec.outputs,
         'source': hashlib.sha256(source).hexdigest(),

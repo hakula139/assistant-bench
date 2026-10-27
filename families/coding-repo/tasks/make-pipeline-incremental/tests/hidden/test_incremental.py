@@ -1,5 +1,7 @@
 import os
 
+import pipeline
+
 from .project import ProjectCase
 
 
@@ -71,6 +73,23 @@ class IncrementalBuildTest(ProjectCase):
 
         steps.write_text(steps.read_text().replace('rows\\n"', 'rows in total\\n"'))
         self.assertIn('publish', self.build())
+        self.assert_matches_clean_build()
+
+    def test_module_edits_between_builds_in_one_process(self) -> None:
+        """Builds through the Python API, under a module name no other test imports."""
+        steps = self.root / 'edited_steps.py'
+        (self.root / 'steps.py').rename(steps)
+        config = self.root / 'pipeline.toml'
+        config.write_text(config.read_text().replace('"steps:', '"edited_steps:'))
+        project = pipeline.load(self.root)
+        pipeline.build(project, log=lambda _: None)
+        steps.write_text(
+            steps.read_text().replace("SEPARATOR = ','", "SEPARATOR = ' | '")
+        )
+
+        pipeline.build(project, log=lambda _: None)
+
+        self.build()
         self.assert_matches_clean_build()
 
     def test_missing_or_edited_outputs_are_rebuilt(self) -> None:

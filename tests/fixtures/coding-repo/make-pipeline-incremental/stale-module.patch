@@ -1,0 +1,10 @@
+--- a/pipeline/steps.py
++++ b/pipeline/steps.py
+@@ -51,5 +51,6 @@
+
+     try:
+-        module, source = _run_module(module_name)
++        module = importlib.import_module(module_name)
++        source = Path(str(module.__file__)).read_bytes()
+     except ImportError as error:
+         raise StepFailed(spec.name, f'cannot import {module_name}: {error}') from error

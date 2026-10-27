@@ -89,6 +89,14 @@ class IncrementalTest(unittest.TestCase):
         config.write_text(config.read_text().replace('"words"', '"tokens"'))
         self.assertEqual(self.build(), ['count'])
 
+    def test_pattern_changes_rerun(self) -> None:
+        config = self.root / 'pipeline.toml'
+        config.write_text(
+            config.read_text().replace('["src/*.txt"]', '["src/*.txt", "extra/*.txt"]')
+        )
+
+        self.assertEqual(self.build(), ['lower'])
+
     def test_rebuilds_missing_outputs_and_failed_steps(self) -> None:
         (self.root / 'out/count.txt').unlink()
         self.assertEqual(self.build(), ['count'])

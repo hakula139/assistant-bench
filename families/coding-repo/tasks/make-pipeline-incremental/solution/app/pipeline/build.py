@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from .config import Pipeline
 from .graph import order
 from .state import STATE_PATH, State, fingerprint
-from .steps import load_function, module_source, resolve_inputs, run_step
+from .steps import load_function, resolve_inputs, run_step
 
 
 @dataclass
@@ -31,9 +31,9 @@ def build(
     state = State.load(pipeline.root)
     for name in order(pipeline, target):
         spec = pipeline.steps[name]
-        function = load_function(pipeline.root, spec)
+        function, source = load_function(pipeline.root, spec)
         inputs = resolve_inputs(pipeline.root, spec.inputs)
-        current = fingerprint(pipeline.root, spec, inputs, module_source(function))
+        current = fingerprint(pipeline.root, spec, inputs, source)
         if state.fresh(spec, current):
             report.skipped.append(name)
             log(f'up to date {name}')
