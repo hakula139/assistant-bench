@@ -33,7 +33,7 @@ File responses carry `Accept-Ranges: bytes`. A `GET` with a `Range` field in the
 - Several ranges merge where they overlap or touch, and otherwise keep their request order. When more than one remains, an uncompressed representation is sent as `multipart/byteranges` and a gzip one in full with `200 OK`.
 - When no range selects a byte, as with a first position at or past the end or `bytes=-0`, the server answers `416 Range Not Satisfiable` with `Content-Range: bytes */LENGTH`.
 - A field with another unit or invalid syntax, such as a first position after the last, is ignored, and so is any `Range` on an empty file.
-- With `If-Range`, the ranges apply only when it holds the representation's strong entity tag, or exactly its `Last-Modified` date once that second has passed, and the full representation is sent otherwise.
+- With `If-Range`, the ranges apply only when it holds the representation's strong entity tag, and the full representation is sent otherwise. A date never qualifies, since a file can change twice within the second its `Last-Modified` names.
 
 ## Python API
 

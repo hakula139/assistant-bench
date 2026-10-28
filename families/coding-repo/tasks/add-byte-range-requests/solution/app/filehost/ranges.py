@@ -1,12 +1,12 @@
 """Byte range requests as RFC 9110 section 14 defines them."""
 
 import re
+import sys
 from dataclasses import dataclass
-
-from .dates import parse_http_date
 
 
 _RANGE_SPEC = re.compile(r'([0-9]*)-([0-9]*)')
+_MAX_DIGITS = len(str(sys.maxsize)) - 1
 
 type RangeSpec = tuple[int | None, int | None]
 """A range's first and last positions, where a missing first gives a suffix."""
@@ -41,14 +41,24 @@ def parse_range(field: str) -> list[RangeSpec] | None:
         match = _RANGE_SPEC.fullmatch(item)
         if match is None:
             return None
-        first, last = (int(group) if group else None for group in match.groups())
-        if first is None and last is None:
+        first, last = (group.lstrip('0') or group[:1] for group in match.groups())
+        if not first and not last:
             return None
-        if first is not None and last is not None and first > last:
+        if first and last and (len(first), first) > (len(last), last):
             return None
-        parsed.append((first, last))
+        parsed.append((_position(first), _position(last)))
 
     return parsed or None
+
+
+def _position(digits: str) -> int | None:
+    """Read a position, saturating one too long for any file to reach.
+
+    Saturating avoids converting thousands of digits, which Python refuses.
+    """
+    if not digits:
+        return None
+    return int(digits) if len(digits) <= _MAX_DIGITS else sys.maxsize
 
 
 def satisfiable(specs: list[RangeSpec], length: int) -> list[ByteRange]:
@@ -89,19 +99,10 @@ def satisfiable(specs: list[RangeSpec], length: int) -> list[ByteRange]:
     return merged
 
 
-def if_range_allows(field: str | None, etag: str, modified: int, now: float) -> bool:
+def if_range_allows(field: str | None, etag: str) -> bool:
     """Whether an `If-Range` field lets the request's ranges apply.
 
-    An entity tag must match strongly, so a weak tag never does. A date must
-    equal the modification time, and counts only once that second has passed,
-    since a file changed twice within it would keep the same date.
+    Only the representation's strong entity tag does. A date never does, since
+    a file can change twice within the second its `Last-Modified` names.
     """
-    if field is None:
-        return True
-
-    field = field.strip()
-    if field.startswith(('"', 'W/')):
-        return field == etag
-
-    date = parse_http_date(field)
-    return date is not None and date == modified and modified + 1 <= now
+    return field is None or field.strip() == etag

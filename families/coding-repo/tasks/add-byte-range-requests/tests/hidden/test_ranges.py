@@ -1,14 +1,25 @@
 import email.utils
 import http.client
+import itertools
+import re
 
 from .server import (
     BINARY,
     MODIFIED,
     ServerCase,
     gzip_body,
+    is_multipart,
     last_modified,
     multipart_parts,
+    parse_content_range,
 )
+
+
+HUGE = '9' * 5000
+"""A position longer than Python converts to an `int` by default."""
+
+MAX_COALESCED_GAP = 100
+"""The widest gap between ranges a server may send to save a part's headers."""
 
 
 class RangeTest(ServerCase):
@@ -24,10 +35,12 @@ class RangeTest(ServerCase):
             ('bytes=-5000', 0, 999),
             ('Bytes=10-19', 10, 19),
             ('bytes=0-18446744073709551616', 0, 999),
+            (f'bytes=0-{HUGE}', 0, 999),
+            (f'bytes=-{HUGE}', 0, 999),
         ]
         tag = self.identity_tag('data.bin')
         for field, first, last in cases:
-            with self.subTest(range=field):
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch('/data.bin', {'Range': field})
 
                 self.assert_partial(response, body, BINARY, first, last)
@@ -43,9 +56,10 @@ class RangeTest(ServerCase):
             ('data.bin', 'bytes=5000-6000', 1000),
             ('data.bin', 'bytes=-0', 1000),
             ('data.bin', 'bytes=1000-1000, 2000-', 1000),
+            ('data.bin', f'bytes={HUGE}-', 1000),
         ]
         for name, field, length in cases:
-            with self.subTest(file=name, range=field):
+            with self.subTest(file=name, range=shorten(field)):
                 response, _ = self.fetch(f'/{name}', {'Range': field})
 
                 self.assert_unsatisfiable(response, length)
@@ -54,7 +68,9 @@ class RangeTest(ServerCase):
         self, response: http.client.HTTPResponse, length: int
     ) -> None:
         self.assertEqual(response.status, 416)
-        self.assertEqual(response.getheader('Content-Range'), f'bytes */{length}')
+        self.assertEqual(
+            (response.getheader('Content-Range') or '').lower(), f'bytes */{length}'
+        )
 
     def assert_full(
         self, response: http.client.HTTPResponse, body: bytes, content: bytes
@@ -65,7 +81,7 @@ class RangeTest(ServerCase):
 
     def test_empty_files_are_ignored_or_rejected(self) -> None:
         for field in ('bytes=0-0', 'bytes=-5'):
-            with self.subTest(range=field):
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch('/empty.bin', {'Range': field})
 
                 if response.status == 416:
@@ -74,8 +90,16 @@ class RangeTest(ServerCase):
                     self.assert_full(response, body, b'')
 
     def test_invalid_ranges_are_ignored_or_rejected(self) -> None:
-        for field in ('bytes=abc', 'bytes=5-2', 'bytes=', 'bytes=1-2-3', 'bytes=0-1;q'):
-            with self.subTest(range=field):
+        invalid = (
+            'bytes=abc',
+            'bytes=5-2',
+            'bytes=',
+            'bytes=1-2-3',
+            'bytes=0-1;q',
+            f'bytes={HUGE}-0',
+        )
+        for field in invalid:
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch('/data.bin', {'Range': field})
 
                 if response.status == 416:
@@ -88,7 +112,7 @@ class RangeTest(ServerCase):
 
         self.assert_full(response, body, BINARY)
 
-    def test_several_ranges_send_exactly_the_selected_bytes(self) -> None:
+    def test_several_ranges_send_the_selected_bytes(self) -> None:
         cases = [
             ('bytes=0-9,20-29', set(range(10)) | set(range(20, 30)), False),
             ('bytes=0-9, 5-14, 990-', set(range(15)) | set(range(990, 1000)), True),
@@ -97,7 +121,7 @@ class RangeTest(ServerCase):
             ('bytes=0-1,,4-5', {0, 1, 4, 5}, False),
         ]
         for field, selected, overlapping in cases:
-            with self.subTest(range=field):
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch('/data.bin', {'Range': field})
 
                 if overlapping and response.status == 416:
@@ -108,23 +132,21 @@ class RangeTest(ServerCase):
                     continue
                 self.assertEqual(response.status, 206)
                 content_type = response.getheader('Content-Type') or ''
-                if content_type.startswith('multipart/'):
+                if is_multipart(content_type):
                     parts = multipart_parts(content_type, body)
                 else:
                     parts = [(response.getheader('Content-Range') or '', body)]
                 covered: set[int] = set()
                 for content_range, data in parts:
-                    first, last = self.parse_content_range(content_range)
+                    parsed = parse_content_range(content_range)
+                    self.assertIsNotNone(parsed, content_range)
+                    assert parsed is not None
+                    first, last, length = parsed
+                    self.assertEqual(length, len(BINARY), content_range)
                     self.assertEqual(data, BINARY[first : last + 1], content_range)
                     covered.update(range(first, last + 1))
-                self.assertEqual(covered, selected)
-
-    def parse_content_range(self, value: str) -> tuple[int, int]:
-        unit, _, rest = value.partition(' ')
-        span, _, length = rest.partition('/')
-        first, _, last = span.partition('-')
-        self.assertEqual((unit, length), ('bytes', '1000'), value)
-        return int(first), int(last)
+                self.assertLessEqual(selected, covered)
+                self.assertLessEqual(covered - selected, coalescable_gaps(selected))
 
     def test_if_range_gates_the_ranges(self) -> None:
         tag = self.identity_tag('data.bin')
@@ -150,6 +172,17 @@ class RangeTest(ServerCase):
                 else:
                     self.assert_full(response, body, BINARY)
 
+    def test_failed_if_range_ignores_unsatisfiable_ranges(self) -> None:
+        tag = self.identity_tag('data.bin')
+        earlier = email.utils.formatdate(MODIFIED - 60, usegmt=True)
+        for if_range in ('"another-tag"', f'W/{tag}', earlier):
+            with self.subTest(if_range=if_range):
+                response, body = self.fetch(
+                    '/data.bin', {'Range': 'bytes=5000-', 'If-Range': if_range}
+                )
+
+                self.assert_full(response, body, BINARY)
+
     def test_preconditions_take_precedence_over_ranges(self) -> None:
         tag = self.identity_tag('data.bin')
         old = email.utils.formatdate(MODIFIED - 3600, usegmt=True)
@@ -159,11 +192,11 @@ class RangeTest(ServerCase):
             ({'If-Match': '"another-tag"'}, 412),
             ({'If-Unmodified-Since': old}, 412),
         ]
-        for headers, status in cases:
-            with self.subTest(headers=headers):
-                response, body = self.fetch(
-                    '/data.bin', {'Range': 'bytes=0-9', **headers}
-                )
+        for (headers, status), field in itertools.product(
+            cases, ('bytes=0-9', 'bytes=5000-')
+        ):
+            with self.subTest(headers=headers, range=field):
+                response, body = self.fetch('/data.bin', {'Range': field, **headers})
 
                 self.assertEqual(response.status, status)
                 self.assertIsNone(response.getheader('Content-Range'))
@@ -188,7 +221,7 @@ class RangeTest(ServerCase):
         identity = self.identity_tag('notes.txt')
         compressed = f'{identity[:-1]}-gzip"'
         for field, first, last in (('bytes=0-99', 0, 99), ('bytes=-50', None, None)):
-            with self.subTest(range=field):
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch(
                     '/notes.txt', {'Range': field, 'Accept-Encoding': 'gzip'}
                 )
@@ -230,7 +263,7 @@ class RangeTest(ServerCase):
             ('bytes=1048576-2097151', 1048576, 2097151),
             ('bytes=-10', len(content) - 10, len(content) - 1),
         ):
-            with self.subTest(range=field):
+            with self.subTest(range=shorten(field)):
                 response, body = self.fetch('/large.bin', {'Range': field})
 
                 self.assert_partial(response, body, content, first, last)
@@ -252,3 +285,22 @@ class RangeTest(ServerCase):
             self.assertEqual(response.getheader('Connection'), 'keep-alive', headers)
             if expected is not None:
                 self.assertEqual(body, expected, headers)
+
+
+def coalescable_gaps(selected: set[int]) -> set[int]:
+    """Return the positions between selected bytes a server may also send.
+
+    RFC 9110 section 15.3.7.2 lets a server coalesce ranges whose gap is
+    smaller than the overhead of sending them as separate parts.
+    """
+    gaps: set[int] = set()
+    ordered = sorted(selected)
+    for before, after in itertools.pairwise(ordered):
+        if 1 < after - before <= MAX_COALESCED_GAP:
+            gaps.update(range(before + 1, after))
+    return gaps
+
+
+def shorten(field: str) -> str:
+    """Abbreviate long positions, which would crowd the failure output."""
+    return re.sub(r'\d{21,}', lambda match: f'<{len(match[0])} digits>', field)

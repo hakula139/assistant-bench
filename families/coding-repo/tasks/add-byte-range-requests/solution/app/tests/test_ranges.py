@@ -48,6 +48,8 @@ class RangeTest(unittest.TestCase):
             ('bytes=1000-5000', 1000, 1023),
             ('bytes=-24', 1000, 1023),
             ('Bytes=-5000', 0, 1023),
+            ('bytes=0-' + '9' * 5000, 0, 1023),
+            ('bytes=-' + '9' * 5000, 0, 1023),
         ]
         for field, first, last in cases:
             with self.subTest(range=field):
@@ -63,7 +65,9 @@ class RangeTest(unittest.TestCase):
         cases = [
             ('bytes=1024-', 416),
             ('bytes=-0', 416),
+            ('bytes=' + '9' * 5000 + '-', 416),
             ('bytes=9-1', 200),
+            ('bytes=' + '9' * 5000 + '-9', 200),
             ('lines=0-1', 200),
         ]
         for field, status in cases:
@@ -95,8 +99,7 @@ class RangeTest(unittest.TestCase):
         cases = [
             (tag, 206),
             (f'W/{tag}', 200),
-            (formatdate(MODIFIED, usegmt=True), 206),
-            (formatdate(MODIFIED + 1, usegmt=True), 200),
+            (formatdate(MODIFIED, usegmt=True), 200),
         ]
         for if_range, status in cases:
             with self.subTest(if_range=if_range):

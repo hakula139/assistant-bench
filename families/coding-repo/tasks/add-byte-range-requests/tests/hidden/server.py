@@ -72,7 +72,10 @@ class ServerCase(unittest.TestCase):
     ) -> tuple[http.client.HTTPResponse, bytes]:
         connection = self.connect()
         connection.request(method, path, headers=headers or {})
-        response = connection.getresponse()
+        try:
+            response = connection.getresponse()
+        except http.client.RemoteDisconnected:
+            self.fail(f'the server closed the connection without answering {path}')
         return response, response.read()
 
     def identity_tag(self, name: str) -> str:
@@ -91,8 +94,8 @@ class ServerCase(unittest.TestCase):
     ) -> None:
         self.assertEqual(response.status, 206)
         self.assertEqual(
-            response.getheader('Content-Range'),
-            f'bytes {first}-{last}/{len(representation)}',
+            parse_content_range(response.getheader('Content-Range') or ''),
+            (first, last, len(representation)),
         )
         self.assertEqual(body, representation[first : last + 1])
         self.assertEqual(response.getheader('Content-Length'), str(len(body)))
@@ -106,10 +109,28 @@ def gzip_body(content: bytes) -> bytes:
     return gzip.compress(content, compresslevel=6, mtime=0)
 
 
+def parse_content_range(value: str) -> tuple[int, int, int] | None:
+    """Read a `bytes FIRST-LAST/LENGTH` field, whose unit is case-insensitive."""
+    match = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', value.strip(), re.IGNORECASE)
+    if match is None:
+        return None
+    first, last, length = (int(group) for group in match.groups())
+    return first, last, length
+
+
+def is_multipart(content_type: str) -> bool:
+    return content_type.strip().lower().startswith('multipart/')
+
+
 def multipart_parts(content_type: str, body: bytes) -> list[tuple[str, bytes]]:
-    """Split a `multipart/byteranges` body into its parts' ranges and bytes."""
+    """Split a `multipart/byteranges` body into its parts' ranges and bytes.
+
+    The media type and parameter name are case-insensitive, the boundary not.
+    """
     match = re.fullmatch(
-        r'multipart/byteranges;\s*boundary="?([^";]+)"?', content_type.strip()
+        r'multipart/byteranges;\s*boundary="?([^";]+)"?',
+        content_type.strip(),
+        re.IGNORECASE,
     )
     if match is None:
         raise AssertionError(f'unexpected Content-Type {content_type!r}')

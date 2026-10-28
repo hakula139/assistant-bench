@@ -1,0 +1,20 @@
+--- a/filehost/handlers.py
++++ b/filehost/handlers.py
+@@ -84,11 +84,13 @@
+     field = request.headers.get('Range')
+     if request.method != 'GET' or field is None or length == 0:
+         return None
+-    if not if_range_allows(request.headers.get('If-Range'), etag):
+-        return None
+-
+     specs = parse_range(field)
+-    return None if specs is None else satisfiable(specs, length)
++    if specs is None:
++        return None
++    ranges = satisfiable(specs, length)
++    if ranges and not if_range_allows(request.headers.get('If-Range'), etag):
++        return None
++    return ranges
+
+
+ def _multipart(

@@ -1,0 +1,11 @@
+--- a/filehost/ranges.py
++++ b/filehost/ranges.py
+@@ -58,7 +58,7 @@
+     """
+     if not digits:
+         return None
+-    return int(digits) if len(digits) <= _MAX_DIGITS else sys.maxsize
++    return int(digits)
+
+
+ def satisfiable(specs: list[RangeSpec], length: int) -> list[ByteRange]:

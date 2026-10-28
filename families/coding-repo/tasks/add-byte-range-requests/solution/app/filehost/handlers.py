@@ -1,7 +1,6 @@
 """Turn a request for a static file into a response."""
 
 import secrets
-import time
 from pathlib import Path
 
 from .conditional import Validators, evaluate
@@ -51,7 +50,7 @@ def handle(request: Request, config: ServerConfig) -> Response:
     encoded = compress(path.read_bytes()) if gzipped else None
     length = info.size if encoded is None else len(encoded)
 
-    ranges = _requested_ranges(request, etag, info.modified, length)
+    ranges = _requested_ranges(request, etag, length)
     if ranges == []:
         return error(416, Headers([('Content-Range', f'bytes */{length}')]))
     if ranges is not None and len(ranges) > 1 and encoded is None:
@@ -79,14 +78,13 @@ def error(status: int, headers: Headers | None = None) -> Response:
 
 
 def _requested_ranges(
-    request: Request, etag: str, modified: int, length: int
+    request: Request, etag: str, length: int
 ) -> list[ByteRange] | None:
     """Return the ranges to send, an empty list for none, or `None` for all."""
     field = request.headers.get('Range')
     if request.method != 'GET' or field is None or length == 0:
         return None
-    if_range = request.headers.get('If-Range')
-    if not if_range_allows(if_range, etag, modified, time.time()):
+    if not if_range_allows(request.headers.get('If-Range'), etag):
         return None
 
     specs = parse_range(field)
