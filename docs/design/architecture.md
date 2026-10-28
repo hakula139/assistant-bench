@@ -23,7 +23,7 @@ src/assistant_bench/
 │   ├── runtime.py                          # Named native targets and Service-only configuration
 │   ├── snapshots.py                        # Verified evidence cuts as report inputs and sampling points
 │   └── sources.py                          # Native task hash and agent-input proof
-├── outputs.py                              # Output records and outputs/<family>.jsonl
+├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
 │   ├── endpoint.py                         # Endpoint variables and native SDK transports
@@ -38,6 +38,7 @@ src/assistant_bench/
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   ├── length.py                           # Shared output length measurement
+│   ├── pass_rates.py                       # Task-clustered pass-rate intervals and the paired leader test
 │   ├── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
 │   └── weighting.py                        # Family-wide cumulative actor caps
 ├── families.py                             # family.toml, gate, case, and vote models, and the local case merge

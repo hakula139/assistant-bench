@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatPercent } from '@/lib/format';
+import { formatPercent, formatPercentRange } from '@/lib/format';
 import { testsRounds, type Family } from '@/lib/reports';
 import { reportNames, systemName } from '@/lib/systems';
 
@@ -29,15 +29,17 @@ const name = (system: string) => systemName(names, system);
       <TableRow>
         <TableHead>System</TableHead>
         <TableHead numeric>Pass rate</TableHead>
+        <TableHead numeric>95% interval</TableHead>
       </TableRow>
     </TableHeader>
     <TableBody>
       {results.standings
-        .toSorted((a, b) => b.pass_rate - a.pass_rate)
+        .toSorted((a, b) => b.pass_rate.rate - a.pass_rate.rate)
         .map((standing) => (
           <TableRow>
             <TableCell>{name(standing.system)}</TableCell>
-            <TableCell numeric>{formatPercent(standing.pass_rate)}</TableCell>
+            <TableCell numeric>{formatPercent(standing.pass_rate.rate)}</TableCell>
+            <TableCell numeric>{formatPercentRange(standing.pass_rate)}</TableCell>
           </TableRow>
         ))}
     </TableBody>

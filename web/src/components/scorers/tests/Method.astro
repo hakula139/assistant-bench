@@ -1,8 +1,34 @@
 ---
 import { Glossary } from '@/components/site/Glossary';
 import { MethodStrip } from '@/components/site/Method';
-import { terms } from '@/lib/glossary';
+import { passHatKTerm, terms } from '@/lib/glossary';
+
+const columns = [
+  terms.passRate,
+  terms.passInterval,
+  passHatKTerm('k'),
+  terms.tasks,
+  terms.errored,
+  terms.testsCostLatency,
+];
 ---
 
 <MethodStrip scorer="tests" />
-<Glossary heading="Column" entries={[terms.passRate, terms.testsCostLatency]} />
+<p>
+  A round closes once every system has run each task the same number of times, and the task's own
+  tests grade each trial. A trial passes when its tests award the full reward, even after its agent
+  timed out, and a trial whose tests never ran fails.
+</p>
+<p>
+  A pass rate averages each task's share of passing trials, so every task counts once. Its 95%
+  interval is an exact Clopper-Pearson interval that treats each task as one observation, since
+  repeated trials of one task share its difficulty. It keeps its coverage near 100%, where pass
+  rates often fall and approximate intervals come out too narrow for a family's few tasks. With
+  several trials per task, pass^k gives the share of tasks where every trial passed.
+</p>
+<p>
+  The board names the system with the top pass rate and any system that an exact paired sign test at
+  the 5% level cannot separate from it. The test counts the shared tasks each system does better on,
+  so with few tasks the top system has to win nearly every task where the two differ.
+</p>
+<Glossary heading="Column" entries={columns} />

@@ -347,6 +347,28 @@
       "title": "LedgerProvenance",
       "type": "object"
     },
+    "PassRate": {
+      "additionalProperties": false,
+      "description": "A mean of per-task shares with its 95% Clopper-Pearson interval over tasks.",
+      "properties": {
+        "rate": {
+          "$ref": "#/$defs/Share"
+        },
+        "lower": {
+          "$ref": "#/$defs/Share"
+        },
+        "upper": {
+          "$ref": "#/$defs/Share"
+        }
+      },
+      "required": [
+        "rate",
+        "lower",
+        "upper"
+      ],
+      "title": "PassRate",
+      "type": "object"
+    },
     "Provenance": {
       "discriminator": {
         "mapping": {
@@ -465,6 +487,11 @@
       ],
       "title": "SettledWeights",
       "type": "object"
+    },
+    "Share": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
     },
     "Standing": {
       "additionalProperties": false,
@@ -615,49 +642,155 @@
       "title": "Standing",
       "type": "object"
     },
-    "TestsResults": {
+    "TestsCategory": {
       "additionalProperties": false,
-      "description": "Pass rates on Harbor task tests, where an errored trial fails.",
       "properties": {
-        "scorer": {
-          "const": "tests",
-          "title": "Scorer",
+        "category": {
+          "title": "Category",
           "type": "string"
         },
         "standings": {
           "items": {
-            "$ref": "#/$defs/TestsStanding"
+            "$ref": "#/$defs/TestsCategoryStanding"
           },
           "title": "Standings",
           "type": "array"
         }
       },
       "required": [
-        "scorer",
+        "category",
         "standings"
+      ],
+      "title": "TestsCategory",
+      "type": "object"
+    },
+    "TestsCategoryStanding": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "tasks": {
+          "minimum": 1,
+          "title": "Tasks",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "$ref": "#/$defs/PassRate"
+        }
+      },
+      "required": [
+        "system",
+        "tasks",
+        "pass_rate"
+      ],
+      "title": "TestsCategoryStanding",
+      "type": "object"
+    },
+    "TestsDecision": {
+      "additionalProperties": false,
+      "description": "The top pass rate and the systems a paired sign test cannot separate from it.",
+      "properties": {
+        "leader": {
+          "title": "Leader",
+          "type": "string"
+        },
+        "tied": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tied",
+          "type": "array"
+        }
+      },
+      "required": [
+        "leader",
+        "tied"
+      ],
+      "title": "TestsDecision",
+      "type": "object"
+    },
+    "TestsResults": {
+      "additionalProperties": false,
+      "description": "Pass rates on Harbor task tests, where every system ran every task.",
+      "properties": {
+        "scorer": {
+          "const": "tests",
+          "title": "Scorer",
+          "type": "string"
+        },
+        "samples": {
+          "description": "Trials the family runs per task and system, the k of pass^k.",
+          "minimum": 1,
+          "title": "Samples",
+          "type": "integer"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/TestsStanding"
+          },
+          "minItems": 1,
+          "title": "Standings",
+          "type": "array"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/TestsCategory"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "decision": {
+          "$ref": "#/$defs/TestsDecision"
+        }
+      },
+      "required": [
+        "scorer",
+        "samples",
+        "standings",
+        "categories",
+        "decision"
       ],
       "title": "TestsResults",
       "type": "object"
     },
     "TestsStanding": {
       "additionalProperties": false,
-      "description": "One system's pass rate, with cost and latency over its error-free trials.",
+      "description": "One system's pass rates, with cost and latency over its error-free trials.",
       "properties": {
         "system": {
           "title": "System",
           "type": "string"
         },
+        "tasks": {
+          "minimum": 1,
+          "title": "Tasks",
+          "type": "integer"
+        },
         "trials": {
+          "minimum": 1,
           "title": "Trials",
           "type": "integer"
         },
         "errored": {
+          "minimum": 0,
           "title": "Errored",
           "type": "integer"
         },
         "pass_rate": {
-          "title": "Pass Rate",
-          "type": "number"
+          "$ref": "#/$defs/PassRate"
+        },
+        "pass_hat_k": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Share"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Share of tasks whose `samples` trials all passed, null for one sample."
         },
         "mean_cost_usd": {
           "anyOf": [
@@ -684,9 +817,11 @@
       },
       "required": [
         "system",
+        "tasks",
         "trials",
         "errored",
         "pass_rate",
+        "pass_hat_k",
         "mean_cost_usd",
         "p50_latency_sec"
       ],

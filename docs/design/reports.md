@@ -19,11 +19,11 @@ Voted systems get labels and fingerprints from the sealed publication and evalua
 | Variant        | Published values                                                                                                                                                                                                                   |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VotesResults` | Point standings and ranks, frozen method and rules, unavailable population inference, raw and effective human counts, output rates, cost and latency, distributions, defect tags, head-to-head records, categories and diagnostics |
-| `TestsResults` | Trials, errored trials, descriptive pass rates, mean cost and p50 latency                                                                                                                                                          |
+| `TestsResults` | Samples per task, then per system its tasks, trials, errored trials, pass rate with its 95% interval, pass^k, mean cost and p50 latency, per-category pass rates, and the leader decision                                          |
 
-Voted intervals, best and worst ranks, separability and leader decisions are required null fields. Preliminary markers are derived from each round's raw decisive counts and recorded rule. [Ranking](ranking.md) defines the fit and uncertainty target.
+Voted intervals, best and worst ranks, separability and leader decisions are required null fields. Preliminary markers are derived from each round's raw decisive counts and recorded rule. [Ranking](ranking.md) defines the fit and uncertainty target, and its [test pass rates](ranking.md#test-pass-rates) define the tests intervals and leader decision.
 
-Each round's output inventory determines its measurement denominators. Cost and latency cover completed outputs without errors. Gate-failure rates cover outputs with a verdict, including errored task agents whose tests ran. Defect tags count once per choice on the tagged output. Errored trials count as failures in tests-scored pass rates.
+Each round's output inventory determines its measurement denominators. Cost and latency cover completed outputs without errors. Gate-failure rates cover outputs with a verdict, including errored task agents whose tests ran. Defect tags count once per choice on the tagged output. Tests-scored pass rates count every trial, and a trial whose tests never ran fails. A tests round closes only once every system has `samples` trials of every current task.
 
 ## Publication Boundaries
 
@@ -31,4 +31,4 @@ Reports contain no case ID, instruction, output, route, request ID or session. T
 
 ## Synthetic Fixtures
 
-`tests/fixtures/report.json` and `report-early.json` are synthetic rounds shared by Python and site tests. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes regeneration and schema comparison. Prettier leaves generated reports and fixtures as their writer formats them.
+`tests/fixtures/report.json` and `report-early.json` are synthetic votes rounds and `report-tests.json` a synthetic tests round, shared by Python and site tests. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes regeneration and schema comparison. Prettier leaves generated reports and fixtures as their writer formats them.

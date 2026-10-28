@@ -219,6 +219,34 @@ describe('reportSchema', () => {
     },
   );
 
+  test('parses the tests round the pydantic models write', async () => {
+    const payload = await readFixture('report-tests');
+
+    const parsed = reportSchema.parse(payload);
+
+    expect(parsed).toEqual(payload);
+  });
+
+  test.each([
+    ['no standings', ['standings'], []],
+    ['an interval above one', ['standings', 0, 'pass_rate', 'upper'], 1.5],
+    ['pass^k with one sample', ['samples'], 1],
+    ['pass^k missing with several samples', ['standings', 0, 'pass_hat_k'], null],
+    ['a leader outside the standings', ['decision', 'leader'], 'acme-new'],
+    ['a leader tied with itself', ['decision', 'tied'], ['acme-pro']],
+    ['a repeated tie', ['decision', 'tied'], ['acme-mini', 'acme-mini']],
+    ['an unknown category system', ['categories', 0, 'standings', 0, 'system'], 'acme-new'],
+    ['a repeated category', ['categories', 1, 'category'], 'bug-fix'],
+  ] satisfies [string, (string | number)[], unknown][])(
+    'rejects tests results with %s',
+    async (_, path, value) => {
+      const payload = await readFixture('report-tests');
+      replaceField(payload, ['results', ...path], value);
+
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
+
   test.each([
     ['interval', ['standings', 0, 'interval'], { lower: 900, upper: 1100 }],
     ['best rank', ['standings', 0, 'best_rank'], 1],

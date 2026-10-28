@@ -35,7 +35,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import code
-from assistant_bench.outputs import Output
+from assistant_bench.outputs import Output, tests_pass
 
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
@@ -540,7 +540,7 @@ def _collect(family: Family) -> None:
         typer.echo(f'Mean reward {sum(rewards) / len(rewards):.3f}.')
 
     graded = {output.case for output in outputs if output.reward is not None}
-    solved = {output.case for output in outputs if (output.reward or 0) >= 1}
+    solved = {output.case for output in outputs if tests_pass(output.reward)}
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
 
@@ -573,7 +573,7 @@ def _author_rates(
                 if output.system == name
                 and (vendors[output.case] == system.vendor) == own
             ]
-            passed = sum((output.reward or 0) >= 1 for output in trials)
+            passed = sum(tests_pass(output.reward) for output in trials)
             rate = (
                 f'{passed}/{len(trials)} ({passed / len(trials):.1%})'
                 if trials

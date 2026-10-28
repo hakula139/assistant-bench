@@ -120,7 +120,7 @@ describe('methodSteps', () => {
     expect(steps.map(({ title, hint }) => `${title}: ${hint ?? ''}`)).toEqual([
       'Run: Every system attempts each task.',
       "Tests: The task's own tests score each trial.",
-      'Pass rate: The share of trials whose tests pass, counting errored trials as failures.',
+      'Pass rate: The share of trials whose tests pass, averaged over tasks so that each task counts once. A trial whose tests never ran fails.',
     ]);
   });
 

@@ -1461,7 +1461,7 @@ class TestClose:
         (path,) = (tmp_path / 'reports' / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'tests'
-        assert closed.results.standings[0].pass_rate == 1.0
+        assert closed.results.standings[0].pass_rate.rate == 1.0
         assert closed.systems['large'].display_name == 'Public Large'
         assert closed.systems['large'].fingerprint == fingerprint(resolved)
         assert 'Family `f`: 1 outputs, 0 errored.' in result.output

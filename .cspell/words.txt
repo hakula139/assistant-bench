@@ -6,6 +6,8 @@ asyncio
 Atoi
 basedpyright
 BFGS
+Bhatia
+binomtest
 blas
 Cachix
 cafile
@@ -25,6 +27,7 @@ dynlib
 endog
 envrc
 esbuild
+evals
 exog
 expit
 fsize
@@ -49,6 +52,7 @@ litellm
 llms
 Logit
 lucide
+McNemar
 mypy
 NFKC
 nixfmt
@@ -60,6 +64,7 @@ numtide
 nvmrc
 Orchidarium
 pkgs
+pvalue
 pycache
 pydantic
 pydocstyle

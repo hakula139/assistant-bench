@@ -1,12 +1,11 @@
 """Explicitly approved numerical and rendering projections for an arena release."""
 
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
 from pydantic import JsonValue
 
 from assistant_bench.families import Case, Family, VotesSettings
-from assistant_bench.outputs import Output as CollectedOutput
+from assistant_bench.outputs import Output as CollectedOutput, system_fingerprints
 from assistant_bench.report import INFERENCE, METHOD, RULES
 from assistant_bench.scoring.length import text_length
 from assistant_bench_arena.ledger_models import (
@@ -326,26 +325,19 @@ def _systems(
     outputs: Sequence[CollectedOutput],
     configured: Mapping[str, str],
 ) -> list[System]:
-    fingerprints: defaultdict[str, set[str]] = defaultdict(set)
-
-    for output in outputs:
-        if output.fingerprint is None:
+    fingerprints: dict[str, str] = {}
+    for system, fingerprint in system_fingerprints(outputs).items():
+        if fingerprint is None:
             raise ValueError('Published output identity requires a known fingerprint.')
-
-        fingerprints[output.system].add(output.fingerprint)
-
-    for system, values in fingerprints.items():
-        if system in configured:
-            values.add(configured[system])
-
-    if any(len(values) != 1 for values in fingerprints.values()):
-        raise ValueError(
-            'Each published system requires one configuration fingerprint.'
-        )
+        if configured.get(system, fingerprint) != fingerprint:
+            raise ValueError(
+                'Each published system requires one configuration fingerprint.'
+            )
+        fingerprints[system] = fingerprint
 
     names = [system for system in order if system in fingerprints]
     names.extend(sorted(set(fingerprints) - set(names)))
     return [
-        System(id=system, fingerprint=next(iter(fingerprints[system])), order=index)
+        System(id=system, fingerprint=fingerprints[system], order=index)
         for index, system in enumerate(names)
     ]
