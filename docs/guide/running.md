@@ -55,7 +55,7 @@ Removing a system from the family's `systems` stops new trials and current colle
 
 A run refuses a system whose earlier trials or closed reports recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
 
-Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their `[[cases]]` entries in `cases.toml`, then `uv run bench run`.
+Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their `[[cases]]` entries in `cases.toml`, then, once they are [reviewed](authoring.md), `uv run bench run`.
 
 ## Collecting Outputs
 

@@ -2,6 +2,8 @@
 
 Learn how to add a family, write its cases or tasks, and declare a system under test, running `uv run bench check <family>` after each change.
 
+Have new or edited cases and tasks reviewed before any paid run over them, even when the run's budget is already approved.
+
 ## Families
 
 A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are.

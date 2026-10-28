@@ -56,6 +56,8 @@ Production D1 is the sole source of real votes, including votes cast from a MacB
 
 The ledger holds immutable evaluations, approved publications, sampling snapshots, receipt history and guarded control events. Typed private management commands publish and investigate these records. Database bindings belong to the native owner, while the management client has only its authenticated Service capability.
 
+`src/assistant_bench_arena/schema.sql` holds the ledger's whole schema. Until other people vote on the public arena, a schema change rewrites that file and recreates the staging and production databases, dropping their votes. From then on, each schema change ships as the next numbered Wrangler D1 migration, which carries only the schema's SQL, so existing votes survive and no code moves or rewrites them.
+
 ## Vote API
 
 Anonymous browsers qualify through abuse checks and receive bounded session authority. The native owner validates the configured origin, capability scope, command identity and current ledger state before accepting a choice. Browser and network admission quotas limit submissions, while the offline cap limits one browser actor's total ranking influence. Private management has no public HTTP route.
