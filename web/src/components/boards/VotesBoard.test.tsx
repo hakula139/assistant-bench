@@ -437,9 +437,12 @@ describe('VotesBoard', () => {
   test('replaces the gate column with a family-wide pass rate for a tested family', async () => {
     search.set('category', 'message');
 
-    const html = render(await loadTested(), undefined, DIFFS);
+    const header = parse(render(await loadTested(), undefined, DIFFS)).querySelector('thead');
+    for (const axis of header?.querySelectorAll('[aria-hidden="true"]') ?? []) {
+      axis.remove();
+    }
 
-    expect(text(head(html))).toBe(
+    expect(text(header?.innerHTML ?? '')).toBe(
       ' System Point score Score Votes What Votes means Both bad all categories What Both bad means Pass rate all categories What Pass rate means ',
     );
   });
