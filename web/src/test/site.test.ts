@@ -18,13 +18,27 @@ let directory: string;
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'bench-site-'));
+  // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build.
   await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
     cwd: root,
+    env: { ...process.env, NODE_ENV: 'production' },
   });
 }, 180_000);
 
 afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
+});
+
+test("bundles React's production build", async () => {
+  const scripts = (await readdir(directory, { recursive: true })).filter((path) =>
+    path.endsWith('.js'),
+  );
+  const sources = await Promise.all(scripts.map((path) => readFile(join(directory, path), 'utf8')));
+
+  expect(scripts.length).toBeGreaterThan(0);
+  expect(
+    scripts.filter((_, index) => sources[index].includes('Download the React DevTools')),
+  ).toEqual([]);
 });
 
 describe('built vote document', () => {
