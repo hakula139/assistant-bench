@@ -10,14 +10,14 @@ Both families send every case to the systems each [`family.toml`](../../../famil
 
 Every case belongs to one category, which the per-category leaderboards split on:
 
-| Category  | The instruction asks for                                                                    | Cases per family |
-| --------- | ------------------------------------------------------------------------------------------- | ---------------: |
-| `reply`   | An assistant's final reply after a task, or an answer to a teammate's question              |                8 |
-| `message` | A commit message, PR description, issue or review reply, handoff, or announcement           |               14 |
-| `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained          |               21 |
-| `fiction` | A scene, dialogue, continuation, or letter                                                  |                5 |
-| `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader |                8 |
-| `review`  | A review or close reading of an invented work from supplied material                        |                3 |
+| Category  | The instruction asks for                                                                                             | Cases per family |
+| --------- | -------------------------------------------------------------------------------------------------------------------- | ---------------: |
+| `reply`   | An assistant's final reply after a task, or an answer to a teammate's decision or status question                    |                8 |
+| `message` | A commit message, PR description, issue or review reply, handoff, or announcement                                    |               14 |
+| `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained, including in reply to a teammate |               21 |
+| `fiction` | A scene, dialogue, continuation, or letter                                                                           |                5 |
+| `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader                          |                8 |
+| `review`  | A review or close reading of an invented work from supplied material                                                 |                3 |
 
 The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
 
