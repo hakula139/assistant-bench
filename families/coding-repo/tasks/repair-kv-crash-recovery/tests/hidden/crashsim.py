@@ -8,9 +8,6 @@ removing it. With `CRASH_AT`, the process exits with status 86 just before that
 mutation, or with `tear`, after writing only the first half of that write's
 bytes. Without it, the run prints `mutation <kind>` for each one, and `sync
 file` or `sync dir` for each `fsync` or `fdatasync`.
-
-`recover DIRECTORY SEGMENT_BYTES` opens the store without any fault, prints
-`entries <JSON>`, puts a probe entry, reopens the store, and prints them again.
 """
 
 import builtins
@@ -25,7 +22,6 @@ from typing import Any, Self
 
 
 CRASH_STATUS = 86
-PROBE = (b'probe-after-recovery', b'still here')
 
 
 class Injector:
@@ -155,10 +151,6 @@ def track_sync(name: str, injector: Injector) -> None:
     setattr(os, name, tracked)
 
 
-def entries(store: Any) -> dict[str, str]:
-    return {key.hex(): value.hex() for key, value in store.items()}
-
-
 def run(
     directory: Path, segment_bytes: int, ops: list[list[str]], args: list[str]
 ) -> None:
@@ -183,23 +175,10 @@ def run(
     store.close()
 
 
-def recover(directory: Path, segment_bytes: int) -> None:
-    from tinykv import Store
-
-    with Store.open(directory, segment_bytes=segment_bytes) as store:
-        print(f'entries {json.dumps(entries(store))}', flush=True)
-        store.put(*PROBE)
-
-    with Store.open(directory, segment_bytes=segment_bytes) as store:
-        print(f'entries {json.dumps(entries(store))}', flush=True)
-
-
 def main() -> None:
-    command, directory, segment_bytes, *rest = sys.argv[1:]
-    if command == 'run':
-        run(Path(directory), int(segment_bytes), json.loads(rest[0]), rest[1:])
-    else:
-        recover(Path(directory), int(segment_bytes))
+    command, directory, segment_bytes, ops, *rest = sys.argv[1:]
+    assert command == 'run'
+    run(Path(directory), int(segment_bytes), json.loads(ops), rest)
 
 
 if __name__ == '__main__':
