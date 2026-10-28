@@ -157,7 +157,7 @@ describe('built pages', () => {
 
   afterAll(async () => {
     await browser.close();
-  });
+  }, 60_000);
 
   test.each(['light', 'dark'] as const)(
     "pass axe-core's default rules and target-size in the %s theme, without errors, once their islands hydrate",
