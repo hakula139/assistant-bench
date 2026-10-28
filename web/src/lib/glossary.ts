@@ -1,6 +1,6 @@
 import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
-import { formatScore } from '@/lib/format';
+import { formatCount, formatScore } from '@/lib/format';
 import type { VotesMethod, VotesRules } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
@@ -216,14 +216,14 @@ export function anchorTerm(method: VotesMethod): Term {
 export function effectiveVotesTerm(method: VotesMethod): Term {
   return {
     term: 'Effective votes',
-    definition: `Votes after weighting, where a voter with more than ${method.actor_cap} votes shares a weight of ${method.actor_cap} across them. Scores, win rates and both-bad rates use these weights, while vote counts stay raw.`,
+    definition: `Votes after weighting, where a voter with more than ${formatCount(method.actor_cap)} votes shares a weight of ${formatCount(method.actor_cap)} across them. Scores, win rates and both-bad rates use these weights, while vote counts stay raw.`,
   };
 }
 
 export function preliminaryTerm(rules: VotesRules): Term {
   return {
     ...terms.preliminary,
-    definition: `Fewer than ${rules.preliminary_decisive_votes} raw votes with a winner. This marks coverage and does not measure confidence.`,
+    definition: `Fewer than ${formatCount(rules.preliminary_decisive_votes)} raw votes with a winner. This marks coverage and does not measure confidence.`,
   };
 }
 

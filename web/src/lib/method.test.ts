@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
-import { boardGuide, boardLabels, gateRule, methodSteps } from '@/lib/method';
+import { boardGuide, boardLabels, gateRule, methodSteps, roundMethod } from '@/lib/method';
 
 const config = (overrides: Partial<Omit<VotesConfig, 'aspect' | 'public'>> = {}): VotesConfig => ({
   scorer: 'votes',
@@ -18,6 +18,23 @@ const config = (overrides: Partial<Omit<VotesConfig, 'aspect' | 'public'>> = {})
 const joiner = String.fromCodePoint(0x2060);
 
 const rule = (problems: string) => `An output loses its pairs without a vote if it is ${problems}.`;
+
+describe('roundMethod', () => {
+  test('prints the fit settings and voting rules as rounded figures', () => {
+    const method = {
+      l2_penalty: 0.0125,
+      points_per_logit: 400 / Math.log(10),
+      anchor_score: 1000,
+      actor_cap: 1000,
+    };
+
+    const text = roundMethod(method, { preliminary_decisive_votes: 1200 });
+
+    expect(text).toBe(
+      "Bradley-Terry, L2 penalty 0.0125, 174 points per logit, anchor 1,000. Each voter contributes at most 1,000 votes of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Preliminary coverage requires 1,200 raw decisive votes.",
+    );
+  });
+});
 
 describe('gateRule', () => {
   test.each([
