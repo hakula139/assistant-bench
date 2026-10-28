@@ -36,3 +36,7 @@ Nothing is preselected. Each new pair clears the previous control's focus so the
 The site is named HAKULA†BENCH, after the owner's blog HAKULA†CHANNEL, with the dagger as part of the name. The wordmark and favicon retain decorative capped-line artwork. Actual ranking plots show point estimates and state the unavailable uncertainty contract.
 
 The remaining design uses ink text, one ultramarine accent, tabular numbers, and no card grid or hero number. IBM Plex Sans sets text, Sarasa Gothic SC or Source Han Sans SC supplies Chinese where installed, and Maple Mono sets code. Charts use one series hue and one emphasis hue for the hovered or current system.
+
+Lists of aspects and families, such as the board switcher, the home page, the methodology, and the vote page's family list, must hold many more entries than today, so none takes a fixed-size slot such as one header tab per family. Visible copy stays minimal, with details in tooltips or popovers that a tap also opens.
+
+No paragraph ends on a lone word in any browser. The base style sets `text-pretty` and, where a browser lacks `pretty`, `text-balance` on text blocks, while headings, labels, and short notes that still end on one word take `text-balance` or tighter wording. Screenshot review catches orphans, so no test checks for them.
