@@ -754,14 +754,19 @@ class TestTerminus:
             assert 'input_tokens' not in recorded
             assert recorded['usage_invalid'] is True
 
-        def test_native_refusal_keeps_one_measured_attempt_without_quality_retries(
+        def test_native_refusal_records_its_detail_without_quality_retries(
             self,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             terminal_session: TmuxSession,
         ) -> None:
+            details = {
+                'type': 'refusal',
+                'category': 'cyber',
+                'explanation': 'Exploit development.',
+            }
             endpoint.stream = message_stream(
-                message('Cannot answer.', stop_reason='refusal')
+                message('Cannot answer.', stop_reason='refusal', stop_details=details)
             )
             context = AgentContext()
 
@@ -769,12 +774,13 @@ class TestTerminus:
                 asyncio.run(messages_agent.execute(terminal_session, context))
 
             assert len(endpoint.requests) == 1
+            assert context.metadata is not None
+            assert context.metadata['stop_details'] == details
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
                 context.n_output_tokens,
             ) == (130, 100, 40)
-            assert context.metadata is not None
             assert [
                 item['finish_reason'] for item in context.metadata['responses']
             ] == ['refusal']

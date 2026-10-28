@@ -3,11 +3,25 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from assistant_bench.families import Gate
 from assistant_bench.paths import data_dir, write_atomically
+
+
+class StopDetails(BaseModel):
+    """The Messages API's account of a refusal."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    type: Literal['refusal']
+    category: str | None
+    """The policy area, from an open set such as `cyber`, `bio`, and `general_harms`."""
+
+    explanation: str | None
+    """Human-readable text that the API does not keep stable."""
 
 
 class Output(BaseModel):
@@ -26,6 +40,9 @@ class Output(BaseModel):
     """For voted tasks, the diff of the solution the tests graded."""
 
     finish_reason: str | None
+    stop_details: StopDetails | None
+    """Set only when a Messages refusal ended the trial, in a reply or an agent run."""
+
     gate_failures: list[Gate] | None
     """An empty list admits votes, while failures settle pairs automatically.
 
@@ -37,7 +54,7 @@ class Output(BaseModel):
 
     input_tokens: int | None
     cached_tokens: int | None
-    cache_write_tokens: int | None = None
+    cache_write_tokens: int | None
     output_tokens: int | None
     reasoning_tokens: int | None
     cost_usd: float | None
