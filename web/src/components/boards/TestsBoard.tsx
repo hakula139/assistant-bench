@@ -55,17 +55,24 @@ function testsRows(results: TestsResults, category: string | null, names: System
   );
 }
 
-/** Names the top pass rate and the systems the paired sign test cannot separate from it. */
-function decisionNote({ leader, tied }: TestsResults['decision'], names: SystemNames): string {
+const allOf = new Intl.ListFormat('en', { type: 'conjunction' });
+
+/**
+ * Names the top pass rate and the systems the paired sign test cannot separate from it, in board
+ * order.
+ */
+function decisionNote(
+  { leader, tied }: TestsResults['decision'],
+  rows: TestsRow[],
+  names: SystemNames,
+): string {
   const top = systemName(names, leader);
   if (tied.length === 0) {
     return `${top} has the top pass rate, and a paired sign test over shared tasks separates it from every other system.`;
   }
 
-  const others = tied
-    .map((system) => systemName(names, system))
-    .toSorted((a, b) => a.localeCompare(b));
-  return `${top} has the top pass rate, but a paired sign test over shared tasks cannot separate it from ${others.join(', ')}.`;
+  const others = rows.filter((row) => tied.includes(row.system)).map((row) => row.name);
+  return `${top} has the top pass rate, but a paired sign test over shared tasks cannot separate it from ${allOf.format(others)}.`;
 }
 
 /**
@@ -150,7 +157,9 @@ export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
         <TableBody>
           {rows.map(({ system, name, tasks, pass_rate, standing }) => (
             <TableRow key={system}>
-              <TableCell className="font-medium">{name}</TableCell>
+              <TableCell className="font-medium text-balance whitespace-normal sm:whitespace-nowrap">
+                {name}
+              </TableCell>
               <TableCell numeric>{formatPercent(pass_rate.rate)}</TableCell>
               <TableCell numeric>{formatPercentRange(pass_rate)}</TableCell>
               {standing && passHatK && (
@@ -180,7 +189,7 @@ export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
         </TableBody>
       </Table>
       {family && results.standings.length > 1 && (
-        <p className={note}>{decisionNote(results.decision, names)}</p>
+        <p className={note}>{decisionNote(results.decision, rows, names)}</p>
       )}
     </div>
   );

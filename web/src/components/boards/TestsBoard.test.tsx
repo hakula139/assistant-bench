@@ -38,13 +38,22 @@ describe('TestsBoard', () => {
     );
   });
 
-  test('names the systems the paired sign test cannot separate from the leader', async () => {
-    const html = renderToString(<TestsBoard round={await testsRound()} />);
+  test.each([
+    [['acme-mini'], 'Acme Mini.'],
+    [['acme-small', 'acme-mini'], 'Acme Mini and Acme Small.'],
+  ])(
+    'names the systems the paired sign test cannot separate from the leader, in board order: %j',
+    async (tied, names) => {
+      const round = await testsRound();
+      round.results.decision.tied = tied;
 
-    expect(text(html)).toContain(
-      'Acme Pro has the top pass rate, but a paired sign test over shared tasks cannot separate it from Acme Mini.',
-    );
-  });
+      const html = renderToString(<TestsBoard round={round} />);
+
+      expect(text(html)).toContain(
+        `Acme Pro has the top pass rate, but a paired sign test over shared tasks cannot separate it from ${names}`,
+      );
+    },
+  );
 
   test('says when the leader is separated from every other system', async () => {
     const round = await testsRound();
