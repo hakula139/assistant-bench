@@ -53,7 +53,7 @@ describe('RoundsTable', () => {
 
     const historical = await screen.findByRole('dialog', { name: 'Round settings' });
     expect(historical.textContent).toContain('Historical Pro');
-    expect(historical.textContent).toContain('anchor 1234');
+    expect(historical.textContent).toContain('anchor 1,234');
     expect(historical.textContent).toContain('12 raw decisive votes');
     expect(historical.textContent).not.toContain('Current Pro');
   });

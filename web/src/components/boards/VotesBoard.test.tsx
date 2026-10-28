@@ -166,7 +166,7 @@ describe('VotesBoard', () => {
     expect(historicalRow?.textContent).toContain('Historical Pro');
     expect(historicalRow?.textContent).not.toContain('Preliminary');
     expect(text(historical)).not.toContain('Current Pro');
-    expect(text(historical)).toContain('anchor 1234');
+    expect(text(historical)).toContain('anchor 1,234');
     expect(text(historical)).toContain('12 raw decisive votes');
 
     const latest = draw(current);
