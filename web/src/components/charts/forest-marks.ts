@@ -1,5 +1,6 @@
 import * as Plot from '@observablehq/plot';
 
+import { HALO } from '@/components/charts/chart-marks';
 import { ARROWHEAD, type Clipped } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
@@ -59,6 +60,22 @@ export function offScaleLabels(data: ForestDatum[]): Plot.Markish {
       dx: ARROWHEAD.width + 4,
       textAnchor: 'start',
       fill: 'var(--muted-foreground)',
+      ...HALO,
     },
   );
+}
+
+/** Says at the axis start why a row has no point. */
+export function unplacedLabels(
+  rows: { y: string; text: string }[],
+  [start]: [number, number],
+): Plot.Markish {
+  return Plot.text(rows, {
+    x: start,
+    y: 'y',
+    text: 'text',
+    textAnchor: 'start',
+    fill: 'var(--faint)',
+    ...HALO,
+  });
 }

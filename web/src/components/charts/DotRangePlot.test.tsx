@@ -87,4 +87,54 @@ describe('DotRangePlot', () => {
       ).toEqual(lines);
     }
   });
+
+  test.each([
+    {
+      axis: 'a short token span',
+      rows: [
+        { label: 'acme-pro', value: 480, range: { lower: 460, upper: 500 } },
+        { label: 'acme-large', value: 520, range: { lower: 500, upper: 540 } },
+      ],
+      format: 'tokens' as const,
+      domain: undefined,
+      expected: ['460', '540'],
+    },
+    {
+      axis: 'the full pass-rate span',
+      rows: [
+        { label: 'acme-pro', value: 0.3 },
+        { label: 'acme-large', value: 0.8 },
+      ],
+      format: 'percent' as const,
+      domain: [0, 1] as [number, number],
+      expected: ['0%', '50%', '100%'],
+    },
+    {
+      axis: 'a pass-rate span beside long row labels',
+      rows: [
+        { label: 'acme-pro-with-a-very-long-name', value: 0.3 },
+        { label: 'acme-large', value: 0.8 },
+      ],
+      format: 'percent' as const,
+      domain: [0, 1] as [number, number],
+      expected: ['0%', '100%'],
+    },
+  ])('labels $expected on a narrow axis over $axis', async ({ rows, format, domain, expected }) => {
+    stubPlotFrame(288);
+
+    const { container } = render(
+      <DotRangePlot rows={rows} label="Value" format={format} domain={domain} />,
+    );
+    const svg = await vi.waitFor(() => {
+      const drawn = container.querySelector('svg');
+      expect(drawn).not.toBeNull();
+      return drawn as SVGSVGElement;
+    });
+
+    const ticks = [...svg.querySelectorAll('g[aria-label="x-axis tick label"] text')].map(
+      (node) => node.textContent,
+    );
+
+    expect(ticks).toEqual(expected);
+  });
 });

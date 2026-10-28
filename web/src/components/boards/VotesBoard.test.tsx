@@ -294,9 +294,12 @@ describe('VotesBoard', () => {
 
   test('marks only the anchor and the preliminary systems', async () => {
     const html = render(await load());
+    const leaderboard = html.slice(0, html.indexOf('>Categories</h2>'));
 
     const marked = (status: string) =>
-      [...text(html).matchAll(new RegExp(`(Acme [A-Z][a-z]+) ${status} `, 'g'))].map((m) => m[1]);
+      [...text(leaderboard).matchAll(new RegExp(`(Acme [A-Z][a-z]+) ${status} `, 'g'))].map(
+        (m) => m[1],
+      );
 
     expect(marked('Anchor')).toEqual(['Acme Large']);
     expect(marked('Preliminary')).toEqual(['Acme Tiny']);
@@ -532,7 +535,7 @@ describe('VotesBoard', () => {
     expect(new Set(rules), name).toEqual(new Set([hidden]));
   });
 
-  test('shows the category legend where the leaderboard legend hides with the point column', async () => {
+  test('keeps the category legend at every width, while the leaderboard legend hides with the point column', async () => {
     const document = parse(render(await load()));
 
     const legends = [...document.querySelectorAll('ul[aria-label="Legend"]')].map((list) => [
@@ -543,7 +546,7 @@ describe('VotesBoard', () => {
 
     expect(legends).toEqual([
       ['max-lg:hidden', null, legend(render(await load()))],
-      ['lg:hidden', 'Categories', expect.stringContaining('Preliminary')],
+      [undefined, 'Categories', expect.stringContaining('Preliminary')],
     ]);
   });
 
@@ -668,7 +671,9 @@ describe('VotesBoard', () => {
 
     expect(text(html)).toContain('Acme Edge Preliminary 847 31 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
-    expect(text(html)).toContain('Acme Mini 857, 36 votes, preliminary – 934');
-    expect(text(html)).toContain('Acme Edge – 847, 31 votes, preliminary – Score');
+    expect(text(html)).toContain(
+      'Acme Mini Preliminary 857 36 votes no votes Preliminary 934 36 votes',
+    );
+    expect(text(html)).toContain('Acme Edge unranked Preliminary 847 31 votes no votes Score');
   });
 });

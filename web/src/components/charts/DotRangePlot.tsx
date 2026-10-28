@@ -1,8 +1,17 @@
 import * as Plot from '@observablehq/plot';
+import { nice } from 'd3-array';
 import { useCallback } from 'react';
 
-import { grid, LABEL_GAP, labelMargin, referenceRule, tip } from '@/components/charts/chart-marks';
+import {
+  grid,
+  LABEL_GAP,
+  labelMargin,
+  referenceRule,
+  tickCount,
+  tip,
+} from '@/components/charts/chart-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
+import { linearTicks } from '@/components/charts/ticks';
 import { formatCount, formatPercent, formatSeconds } from '@/lib/format';
 
 export interface DotRange {
@@ -29,12 +38,26 @@ interface DotRangePlotProps {
 }
 
 const ROW_HEIGHT = 32;
+const MARGIN_RIGHT = 24;
 
 const formats: Record<ValueFormat, (value: number) => string> = {
   percent: formatPercent,
   tokens: formatCount,
   seconds: formatSeconds,
 };
+
+/** The span of every value, range end and baseline the plot draws. */
+function extent(rows: DotRange[], baseline?: number): [number, number] {
+  const values = rows.flatMap((row) => [
+    row.value,
+    ...(row.range ? [row.range.lower, row.range.upper] : []),
+  ]);
+  if (baseline !== undefined) {
+    values.push(baseline);
+  }
+
+  return [Math.min(...values), Math.max(...values)];
+}
 
 export function DotRangePlot({ rows, label, format, baseline, domain }: DotRangePlotProps) {
   const height = rows.length * ROW_HEIGHT + 48;
@@ -45,16 +68,26 @@ export function DotRangePlot({ rows, label, format, baseline, domain }: DotRange
       const color = (row: DotRange) =>
         row.emphasis ? 'var(--chart-emphasis)' : 'var(--chart-series)';
       const ranged = rows.filter((row) => row.range !== undefined);
-      const ticks = Math.ceil(width / 160);
+      const [low, high] = nice(
+        ...(domain ?? extent(rows, baseline)),
+        // Plot's default count when it rounds a domain.
+        10,
+      );
+      const marginLeft = labelMargin(
+        rows.map((row) => row.label),
+        measure,
+      );
+      const ticks = linearTicks(
+        low,
+        high,
+        tickCount(width - marginLeft - MARGIN_RIGHT, [low, high].map(tick), measure),
+      );
 
       return {
-        marginLeft: labelMargin(
-          rows.map((row) => row.label),
-          measure,
-        ),
-        marginRight: 24,
+        marginLeft,
+        marginRight: MARGIN_RIGHT,
         marginBottom: 40,
-        x: { label, domain, tickFormat: tick, nice: true, ticks },
+        x: { label, domain: [low, high], tickFormat: tick, ticks },
         y: {
           domain: rows.map((row) => row.label),
           label: null,

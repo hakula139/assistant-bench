@@ -66,6 +66,7 @@ export function CategoryForests({
               refit,
             }))}
             labels={labels}
+            unranked={board.unranked.map((system) => systemName(names, system))}
             domain={domain}
             anchorScore={anchorScore}
             rules={rules}

@@ -118,8 +118,9 @@ describe('labelledTicks', () => {
   test.each<[[number, number], number, number[]]>([
     [[600, 1400], 160, [600, 1000, 1400]],
     [[400, 1100], 280, [400, 1100]],
+    [[900, 1900], 400, [900, 1900]],
   ])(
-    'labels every tick of %j from %i px, 40 px an interval, and only the sparse ones below',
+    'labels every tick of %j from %i px, 40 px a narrowest interval, and only the sparse ones below',
     (domain, width, sparse) => {
       const ticks = [labelledTicks(domain, width, 1000), labelledTicks(domain, width - 1, 1000)];
 

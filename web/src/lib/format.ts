@@ -21,8 +21,12 @@ const penalty = new Intl.NumberFormat('en', { maximumSignificantDigits: 21 });
 /** Shown wherever a report holds no value, as for an unpriced route. */
 export const MISSING = '–';
 
-export const formatScore = (value: number) => whole.format(value);
-export const formatTau = (value: number | null) => (value === null ? MISSING : tau.format(value));
+/** Swaps the hyphen `Intl` writes for a negative number with a typographic minus sign. */
+const minus = (text: string) => text.replace('-', '\u2212');
+
+export const formatScore = (value: number) => minus(whole.format(value));
+export const formatTau = (value: number | null) =>
+  value === null ? MISSING : minus(tau.format(value));
 export const formatCount = (value: number) => whole.format(value);
 
 /** Counts a regular English noun, as in "1 vote" and "34 votes". */

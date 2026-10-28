@@ -66,9 +66,18 @@ export function Hint({ term, side, children }: { term: Term; side?: Side; childr
   );
 }
 
-export function StatusMark({ status, term = terms[status] }: { status: Status; term?: Term }) {
+/** `compact` keeps the preliminary mark to its icon, as the anchor's always is, where space is short. */
+export function StatusMark({
+  status,
+  term = terms[status],
+  compact = false,
+}: {
+  status: Status;
+  term?: Term;
+  compact?: boolean;
+}) {
   const Icon = statusIcons[status];
-  const labelled = status === 'preliminary';
+  const labelled = status === 'preliminary' && !compact;
 
   return (
     <Popover>

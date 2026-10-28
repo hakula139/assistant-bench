@@ -1,6 +1,6 @@
 import { cn } from 'cn';
 
-import { ARROWHEAD, clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
+import { ARROWHEAD, axisIntervals, clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
 /** A placed system's point score, drawn hollow while its coverage is preliminary. */
@@ -16,7 +16,10 @@ const extent = 'absolute inset-x-2 inset-y-0';
 
 const rule = 'absolute inset-y-0 w-px';
 
-/** Matches the minimum tick spacing in `labelledTicks`. */
+/**
+ * Hides a label on an axis of `axisIntervals` narrowest intervals where they would crowd, matching
+ * the minimum tick spacing in `labelledTicks`.
+ */
 const axisFits: Record<number, string> = {
   1: '@max-[2.5rem]:hidden',
   2: '@max-[5rem]:hidden',
@@ -25,6 +28,15 @@ const axisFits: Record<number, string> = {
   5: '@max-[12.5rem]:hidden',
   6: '@max-[15rem]:hidden',
   7: '@max-[17.5rem]:hidden',
+  8: '@max-[20rem]:hidden',
+  9: '@max-[22.5rem]:hidden',
+  10: '@max-[25rem]:hidden',
+  11: '@max-[27.5rem]:hidden',
+  12: '@max-[30rem]:hidden',
+  13: '@max-[32.5rem]:hidden',
+  14: '@max-[35rem]:hidden',
+  15: '@max-[37.5rem]:hidden',
+  16: '@max-[40rem]:hidden',
 };
 
 const position =
@@ -80,6 +92,7 @@ export function TrackAxis({
 }) {
   const ticks = forestTicks(domain);
   const sparse = new Set(sparseTicks(domain, anchorScore));
+  const intervals = axisIntervals(domain);
   const at = position(domain);
 
   return (
@@ -90,7 +103,7 @@ export function TrackAxis({
             key={tick}
             className={cn(
               'absolute bottom-1 -translate-x-1/2 text-xs font-normal text-faint tabular-nums',
-              !sparse.has(tick) && axisFits[ticks.length - 1],
+              !sparse.has(tick) && axisFits[intervals],
             )}
             style={{ left: at(tick) }}
           >

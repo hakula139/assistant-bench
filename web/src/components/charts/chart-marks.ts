@@ -8,6 +8,22 @@ export function labelMargin(labels: string[], measure: (text: string) => number)
   return Math.max(...labels.map(measure)) + LABEL_GAP;
 }
 
+/**
+ * How many x ticks fit along `span` CSS pixels when each label is as wide as the widest of `labels`
+ * and keeps 24 pixels from the next, and never fewer than two.
+ */
+export function tickCount(
+  span: number,
+  labels: string[],
+  measure: (text: string) => number,
+): number {
+  const widest = Math.max(...labels.map(measure));
+  return Math.max(2, Math.floor(span / (widest + 24)));
+}
+
+/** Text options that ring a label in the page color, so that lines drawn before it do not cross it. */
+export const HALO = { stroke: 'var(--background)', strokeWidth: 4 };
+
 /** Gridlines across one axis at `ticks`, a count or the values. */
 export function grid(axis: 'x' | 'y', ticks: number | number[]): Plot.Markish {
   const options = { ticks, stroke: 'var(--chart-grid)', strokeOpacity: 1 };

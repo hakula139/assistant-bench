@@ -532,10 +532,11 @@ export function VoteApp() {
     session?.family.name ??
     resumingFamily ??
     flow.family;
-  const recovery =
-    acceptedReceipt !== null || admission || error !== null ? (
+  // A session's views report an accepted vote in their own status, so only views without one do.
+  const recovery = ({ acknowledge }: { acknowledge: boolean }) =>
+    (acknowledge && acceptedReceipt !== null) || admission || error !== null ? (
       <div className="flex flex-col items-start gap-2">
-        {acceptedReceipt !== null && <p role="status">Vote accepted.</p>}
+        {acknowledge && acceptedReceipt !== null && <p role="status">Vote accepted.</p>}
         {admission ? (
           <Verification
             onReady={() => {
@@ -575,14 +576,14 @@ export function VoteApp() {
 
   if (session === null) {
     if (admission) {
-      return <Screen title="Connecting to voting">{recovery}</Screen>;
+      return <Screen title="Connecting to voting">{recovery({ acknowledge: true })}</Screen>;
     }
 
     return (
       <StartScreen
         busy={busy || admission}
         error={error}
-        recovery={recovery}
+        recovery={recovery({ acknowledge: true })}
         onStart={(family) => {
           history.replaceState(null, '', `?${new URLSearchParams({ family })}`);
           void run(() => flow.enter(family, accepted));
@@ -600,7 +601,7 @@ export function VoteApp() {
           </p>
           <Notice notice={notice} />
           <ErrorAlert error={error} />
-          {recovery}
+          {recovery({ acknowledge: false })}
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={votingLocked}
@@ -626,6 +627,7 @@ export function VoteApp() {
     );
   }
 
+  const pairRecovery = recovery({ acknowledge: false });
   const status = (
     <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
       <span role="status" className="flex items-center gap-1 empty:sr-only">
@@ -739,7 +741,7 @@ export function VoteApp() {
           'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
         )}
       >
-        {recovery !== null && <div className="sm:col-span-2">{recovery}</div>}
+        {pairRecovery !== null && <div className="sm:col-span-2">{pairRecovery}</div>}
         <ToggleGroup
           type="single"
           variant="choice"

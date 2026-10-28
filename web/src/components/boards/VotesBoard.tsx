@@ -16,7 +16,7 @@ import {
 import { TableTwin } from '@/components/charts/TableTwin';
 import { ForestLegend } from '@/components/site/Forest';
 import { note, Section, stack, Stat, statList } from '@/components/site/PageParts';
-import { Hint } from '@/components/site/Term';
+import { Hint, StatusMark } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { unplacedText } from '@/lib/forest';
 import {
   formatCost,
   formatCount,
@@ -47,7 +48,13 @@ import {
 import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
 import { isPreliminary } from '@/lib/ranking';
-import type { CategoryStanding, Standing, VotesResults } from '@/lib/report';
+import type {
+  CategoryBoard,
+  CategoryStanding,
+  Standing,
+  VotesResults,
+  VotesRules,
+} from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useSearchParam } from '@/lib/use-search-param';
@@ -112,30 +119,75 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
   const { length } = results;
 
   return (
-    <dl className={statList}>
-      <Stat
-        label={terms.votes.term}
-        detail={
-          <>
-            over {formatCountOf(results.sessions, 'session')}
-            {results.dropped_votes > 0 && (
-              <>
-                , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
-              </>
+    <div className="flex flex-col gap-3">
+      <dl className={statList}>
+        <Stat
+          label={terms.votes.term}
+          detail={
+            <>
+              over {formatCountOf(results.sessions, 'session')}
+              {results.dropped_votes > 0 && (
+                <>
+                  , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
+                </>
+              )}
+            </>
+          }
+        >
+          {formatCount(results.votes)}
+        </Stat>
+        <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
+          {formatScore(results.effective_votes)}
+        </Stat>
+        <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
+        {length !== null && (
+          <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
+        )}
+      </dl>
+      <SnapshotStatus
+        exportId={results.provenance.export_id}
+        capturedAt={results.provenance.captured_at}
+      />
+      <details className={note}>
+        <summary>Round settings</summary>
+        <p>{roundMethod(results.method, results.rules)}</p>
+      </details>
+    </div>
+  );
+}
+
+/** One system's score in a category, with its vote count, or why the category has no score. */
+function CategoryCell({
+  board,
+  system,
+  rules,
+}: {
+  board: CategoryBoard;
+  system: string;
+  rules: VotesRules;
+}) {
+  const refit = board.standings.find((item) => item.system === system);
+
+  return (
+    <TableCell numeric>
+      {refit ? (
+        <span className="flex flex-col items-end leading-tight">
+          <span className="flex items-center gap-1.5">
+            {isPreliminary(refit, rules) && (
+              <StatusMark status="preliminary" term={preliminaryTerm(rules)} compact />
             )}
-          </>
-        }
-      >
-        {formatCount(results.votes)}
-      </Stat>
-      <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
-        {formatScore(results.effective_votes)}
-      </Stat>
-      <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
-      {length !== null && (
-        <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
+            {formatScore(refit.score)}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatCountOf(refit.votes, 'vote')}
+          </span>
+        </span>
+      ) : (
+        <span className="text-xs text-faint">
+          {unplacedText[board.unranked.includes(system) ? 'unranked' : 'no-votes']}
+        </span>
       )}
-    </dl>
+    </TableCell>
   );
 }
 
@@ -213,14 +265,6 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       )}
 
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
-      <SnapshotStatus
-        exportId={results.provenance.export_id}
-        capturedAt={results.provenance.captured_at}
-      />
-      <details className={note}>
-        <summary>Round settings</summary>
-        <p>{roundMethod(results.method, results.rules)}</p>
-      </details>
 
       <div className="flex flex-col gap-4">
         <Leaderboard
@@ -250,7 +294,6 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       {boards.length > 0 && (
         <Section title="Categories">
           <ForestLegend
-            className="lg:hidden"
             marks={categoryMarks(boards, results.method.anchor_score, results.rules)}
             anchorScore={results.method.anchor_score}
           />
@@ -277,16 +320,14 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                 {order.map((system) => (
                   <TableRow key={system}>
                     <TableCell>{systemName(names, system)}</TableCell>
-                    {boards.map((board) => {
-                      const refit = board.standings.find((item) => item.system === system);
-                      return (
-                        <TableCell key={board.category} numeric>
-                          {refit
-                            ? `${formatScore(refit.score)}, ${formatCountOf(refit.votes, 'vote')}${isPreliminary(refit, results.rules) ? ', preliminary' : ''}`
-                            : MISSING}
-                        </TableCell>
-                      );
-                    })}
+                    {boards.map((board) => (
+                      <CategoryCell
+                        key={board.category}
+                        board={board}
+                        system={system}
+                        rules={results.rules}
+                      />
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>

@@ -2,9 +2,14 @@ import * as Plot from '@observablehq/plot';
 import { useCallback } from 'react';
 
 import { grid, LABEL_GAP, labelMargin, referenceRule, tip } from '@/components/charts/chart-marks';
-import { forestMarks, offScaleLabels, type ForestDatum } from '@/components/charts/forest-marks';
+import {
+  forestMarks,
+  offScaleLabels,
+  unplacedLabels,
+  type ForestDatum,
+} from '@/components/charts/forest-marks';
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
-import { clip, forestTicks, labelledTicks, onAxis } from '@/lib/forest';
+import { clip, forestTicks, labelledTicks, onAxis, unplacedText } from '@/lib/forest';
 import { formatCountOf, formatScore } from '@/lib/format';
 import { isPreliminary } from '@/lib/ranking';
 import type { CategoryStanding, VotesRules } from '@/lib/report';
@@ -18,6 +23,8 @@ interface ForestPlotProps {
   rows: ForestPlotRow[];
   /** Every row label from top to bottom, including labels without a row. */
   labels: string[];
+  /** The labels without a row whose systems the board leaves unranked. Other such labels lack votes. */
+  unranked?: string[];
   /** Shared across category plots so their points use the same scale. */
   domain: [number, number];
   anchorScore: number;
@@ -34,7 +41,7 @@ const ARROW_INSET = 8;
 export const forestPlotHeight = (labels: string[]) => labels.length * ROW_HEIGHT + 36;
 
 export function forestPlotOptions(
-  { rows, labels, domain, anchorScore, rules }: ForestPlotProps,
+  { rows, labels, unranked = [], domain, anchorScore, rules }: ForestPlotProps,
   { width, measure }: PlotFrame,
 ): Plot.PlotOptions {
   const data = rows.map(({ label, refit }): ForestDatum & { refit: CategoryStanding } => ({
@@ -44,6 +51,14 @@ export function forestPlotOptions(
     preliminary: isPreliminary(refit, rules),
     refit,
   }));
+
+  const placed = new Set(rows.map((row) => row.label));
+  const empty = labels
+    .filter((label) => !placed.has(label))
+    .map((label) => ({
+      y: label,
+      text: unplacedText[unranked.includes(label) ? 'unranked' : 'no-votes'],
+    }));
 
   const marginLeft = labelMargin(labels, measure);
   const ticks = forestTicks(domain);
@@ -67,6 +82,7 @@ export function forestPlotOptions(
       onAxis(domain, anchorScore) ? referenceRule(anchorScore) : null,
       forestMarks(data, domain),
       offScaleLabels(data),
+      unplacedLabels(empty, domain),
       tip(
         data,
         Plot.pointerY({
@@ -81,10 +97,19 @@ export function forestPlotOptions(
 }
 
 /** One forest plot of category refits, labelled by system or by category. */
-export function ForestPlot({ rows, labels, domain, anchorScore, rules, label }: ForestPlotProps) {
+export function ForestPlot({
+  rows,
+  labels,
+  unranked,
+  domain,
+  anchorScore,
+  rules,
+  label,
+}: ForestPlotProps) {
   const plot = useCallback(
-    (frame: PlotFrame) => forestPlotOptions({ rows, labels, domain, anchorScore, rules }, frame),
-    [rows, labels, domain, anchorScore, rules],
+    (frame: PlotFrame) =>
+      forestPlotOptions({ rows, labels, unranked, domain, anchorScore, rules }, frame),
+    [rows, labels, unranked, domain, anchorScore, rules],
   );
 
   return <PlotFigure plot={plot} height={forestPlotHeight(labels)} label={label} />;
