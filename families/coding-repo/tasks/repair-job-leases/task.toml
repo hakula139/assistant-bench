@@ -1,0 +1,28 @@
+schema_version = "1.4"
+
+[task]
+name = "coding-repo/repair-job-leases"
+description = "Repair claiming, lease expiry and retries in a multi-process SQLite job queue"
+version = "1.0.0"
+
+[metadata]
+category = "bug-fix"
+source = "synthetic"
+author = "opus-5.5"
+author_vendor = "anthropic"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 600.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 2
+memory_mb = 2048
+network_mode = "no-network"
+
+[[artifacts]]
+source = "/app"

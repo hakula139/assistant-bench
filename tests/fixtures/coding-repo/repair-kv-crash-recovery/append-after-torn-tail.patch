@@ -1,0 +1,12 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -103,8 +103,7 @@
+         """Continue the active segment after dropping a crash's incomplete write."""
+         file = path.open('r+b')
+         try:
+-            file.truncate(segment.end)
+-            file.seek(segment.end)
++            file.seek(0, 2)
+             if segment.end == 0:
+                 file.write(HEADER.pack(MAGIC, segment.sequence))
+             if sync:

@@ -1,0 +1,13 @@
+--- a/pipeline/state.py
++++ b/pipeline/state.py
+@@ -14,8 +14,8 @@
+
+
+ def digest(path: Path) -> str:
+-    with path.open('rb') as file:
+-        return hashlib.file_digest(file, 'sha256').hexdigest()
++    status = path.stat()
++    return f'{status.st_size}-{status.st_mtime_ns}'
+
+
+ def fingerprint(root: Path, spec: StepSpec, inputs: list[Path], source: bytes) -> str:

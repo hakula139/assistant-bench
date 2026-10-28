@@ -1,0 +1,11 @@
+--- a/pipeline/build.py
++++ b/pipeline/build.py
+@@ -34,7 +34,7 @@
+         function, source = load_function(pipeline.root, spec)
+         inputs = resolve_inputs(pipeline.root, spec.inputs)
+         current = fingerprint(pipeline.root, spec, inputs, source)
+-        if state.fresh(spec, current):
++        if state.fresh(spec, current) and not report.ran:
+             report.skipped.append(name)
+             log(f'up to date {name}')
+             continue

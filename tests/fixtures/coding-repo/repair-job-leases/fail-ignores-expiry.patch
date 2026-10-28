@@ -1,0 +1,16 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -172,7 +172,12 @@
+         """Record a failed attempt, then retry the job later or dead-letter it."""
+         with transaction(self._db) as db:
+             now = self._clock()
+-            self._check(db, lease, now)
++            held = db.execute(
++                "SELECT 1 FROM jobs WHERE id = ? AND status = 'running' AND lease_token = ?",
++                (lease.job_id, lease.token),
++            ).fetchone()
++            if held is None:
++                raise LeaseLost(lease.job_id)
+             if lease.attempt >= self.max_attempts:
+                 db.execute(
+                     """

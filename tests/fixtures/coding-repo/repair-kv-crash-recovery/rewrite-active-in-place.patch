@@ -1,0 +1,18 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -101,12 +101,10 @@
+     @classmethod
+     def reopen(cls, path: Path, segment: Segment, *, sync: bool) -> Self:
+         """Continue the active segment after dropping a crash's incomplete write."""
+-        file = path.open('r+b')
++        intact = path.read_bytes()[: segment.end]
++        file = path.open('wb')
+         try:
+-            file.truncate(segment.end)
+-            file.seek(segment.end)
+-            if segment.end == 0:
+-                file.write(HEADER.pack(MAGIC, segment.sequence))
++            file.write(intact or HEADER.pack(MAGIC, segment.sequence))
+             if sync:
+                 sync_file(file)
+         except BaseException:

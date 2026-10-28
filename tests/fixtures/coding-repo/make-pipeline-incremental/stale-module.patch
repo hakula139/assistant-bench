@@ -1,0 +1,30 @@
+--- a/pipeline/steps.py
++++ b/pipeline/steps.py
+@@ -1,5 +1,6 @@
+ """Resolve and call the functions that implement steps."""
+
++import importlib
+ import importlib.util
+ import sys
+ from collections.abc import Callable
+@@ -51,14 +52,14 @@
+         sys.path.insert(0, str(root))
+
+     try:
+-        function = _function(spec, module_name, function_name, rerun=False)
+-        defining = getattr(function, '__module__', None) or module_name
+-        if defining != module_name and _changed(root, defining):
+-            _run_module(defining, rerun=True)
+-            function = _function(spec, module_name, function_name, rerun=True)
++        module = importlib.import_module(module_name)
+     except ImportError as error:
+         raise StepFailed(spec.name, f'cannot import {module_name}: {error}') from error
+-    return function, _sources.get(defining, _sources[module_name])
++
++    function = getattr(module, function_name, None)
++    if not callable(function):
++        raise StepFailed(spec.name, f'{spec.run} is not a function.')
++    return function, Path(str(module.__file__)).read_bytes()
+
+
+ def _function(

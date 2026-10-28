@@ -1,0 +1,11 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -114,7 +114,7 @@
+                 """
+                 SELECT * FROM jobs
+                 WHERE status = 'queued' AND run_at <= ?
+-                ORDER BY run_at, id
++                ORDER BY id
+                 LIMIT 1
+                 """,
+                 (now,),

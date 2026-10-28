@@ -1,0 +1,28 @@
+--- a/jobq/queue.py
++++ b/jobq/queue.py
+@@ -3,6 +3,7 @@
+ import json
+ import secrets
+ import sqlite3
++import threading
+ import time
+ from collections.abc import Callable
+ from dataclasses import dataclass, replace
+@@ -15,6 +16,7 @@
+
+ type Clock = Callable[[], float]
+
++_CLAIM_LOCK = threading.Lock()
+ EXPIRED_ERROR = 'lease expired'
+
+
+@@ -107,7 +109,8 @@
+
+     def claim(self, worker: str, *, lease_seconds: float = 30.0) -> Lease | None:
+         """Lease the next ready job to `worker`, or return `None` when none is ready."""
+-        with transaction(self._db) as db:
++        with _CLAIM_LOCK:
++            db = self._db
+             now = self._clock()
+             self._expire(db, now)
+             row = db.execute(

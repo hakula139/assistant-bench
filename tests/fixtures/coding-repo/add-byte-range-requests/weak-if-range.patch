@@ -1,0 +1,8 @@
+--- a/filehost/ranges.py
++++ b/filehost/ranges.py
+@@ -105,4 +105,4 @@
+     Only the representation's strong entity tag does. A date never does, since
+     a file can change twice within the second its `Last-Modified` names.
+     """
+-    return field is None or field.strip() == etag
++    return field is None or field.strip().removeprefix('W/') == etag

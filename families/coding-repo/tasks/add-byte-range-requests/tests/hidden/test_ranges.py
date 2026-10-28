@@ -1,0 +1,306 @@
+import email.utils
+import http.client
+import itertools
+import re
+
+from .server import (
+    BINARY,
+    MODIFIED,
+    ServerCase,
+    gzip_body,
+    is_multipart,
+    last_modified,
+    multipart_parts,
+    parse_content_range,
+)
+
+
+HUGE = '9' * 5000
+"""A position longer than Python converts to an `int` by default."""
+
+MAX_COALESCED_GAP = 100
+"""The widest gap between ranges a server may send to save a part's headers."""
+
+
+class RangeTest(ServerCase):
+    def test_single_ranges(self) -> None:
+        cases = [
+            ('bytes=0-0', 0, 0),
+            ('bytes=0-99', 0, 99),
+            ('bytes=100-', 100, 999),
+            ('bytes=999-999', 999, 999),
+            ('bytes=990-2000', 990, 999),
+            ('bytes=-1', 999, 999),
+            ('bytes=-200', 800, 999),
+            ('bytes=-5000', 0, 999),
+            ('Bytes=10-19', 10, 19),
+            ('bytes=0-18446744073709551616', 0, 999),
+            (f'bytes=0-{HUGE}', 0, 999),
+            (f'bytes=-{HUGE}', 0, 999),
+        ]
+        tag = self.identity_tag('data.bin')
+        for field, first, last in cases:
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch('/data.bin', {'Range': field})
+
+                self.assert_partial(response, body, BINARY, first, last)
+                self.assertEqual(response.getheader('ETag'), tag)
+                self.assertEqual(response.getheader('Last-Modified'), last_modified())
+                self.assertEqual(
+                    response.getheader('Content-Type'), 'application/octet-stream'
+                )
+
+    def test_unsatisfiable_ranges(self) -> None:
+        cases = [
+            ('data.bin', 'bytes=1000-', 1000),
+            ('data.bin', 'bytes=5000-6000', 1000),
+            ('data.bin', 'bytes=-0', 1000),
+            ('data.bin', 'bytes=1000-1000, 2000-', 1000),
+            ('data.bin', f'bytes={HUGE}-', 1000),
+        ]
+        for name, field, length in cases:
+            with self.subTest(file=name, range=shorten(field)):
+                response, _ = self.fetch(f'/{name}', {'Range': field})
+
+                self.assert_unsatisfiable(response, length)
+
+    def assert_unsatisfiable(
+        self, response: http.client.HTTPResponse, length: int
+    ) -> None:
+        self.assertEqual(response.status, 416)
+        self.assertEqual(
+            (response.getheader('Content-Range') or '').lower(), f'bytes */{length}'
+        )
+
+    def assert_full(
+        self, response: http.client.HTTPResponse, body: bytes, content: bytes
+    ) -> None:
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body, content)
+        self.assertIsNone(response.getheader('Content-Range'))
+
+    def test_empty_files_are_ignored_or_rejected(self) -> None:
+        for field in ('bytes=0-0', 'bytes=-5'):
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch('/empty.bin', {'Range': field})
+
+                if response.status == 416:
+                    self.assert_unsatisfiable(response, 0)
+                else:
+                    self.assert_full(response, body, b'')
+
+    def test_invalid_ranges_are_ignored_or_rejected(self) -> None:
+        invalid = (
+            'bytes=abc',
+            'bytes=5-2',
+            'bytes=',
+            'bytes=1-2-3',
+            'bytes=0-1;q',
+            f'bytes={HUGE}-0',
+        )
+        for field in invalid:
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch('/data.bin', {'Range': field})
+
+                if response.status == 416:
+                    self.assert_unsatisfiable(response, 1000)
+                else:
+                    self.assert_full(response, body, BINARY)
+
+    def test_ignores_other_range_units(self) -> None:
+        response, body = self.fetch('/data.bin', {'Range': 'items=0-1'})
+
+        self.assert_full(response, body, BINARY)
+
+    def test_several_ranges_send_the_selected_bytes(self) -> None:
+        cases = [
+            ('bytes=0-9,20-29', set(range(10)) | set(range(20, 30)), False),
+            ('bytes=0-9, 5-14, 990-', set(range(15)) | set(range(990, 1000)), True),
+            ('bytes=0-9,5000-', set(range(10)), False),
+            ('bytes=-10,0-0', {0} | set(range(990, 1000)), False),
+            ('bytes=0-1,,4-5', {0, 1, 4, 5}, False),
+        ]
+        for field, selected, overlapping in cases:
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch('/data.bin', {'Range': field})
+
+                if overlapping and response.status == 416:
+                    self.assert_unsatisfiable(response, 1000)
+                    continue
+                if response.status == 200:
+                    self.assertEqual(body, BINARY)
+                    continue
+                self.assertEqual(response.status, 206)
+                content_type = response.getheader('Content-Type') or ''
+                if is_multipart(content_type):
+                    parts = multipart_parts(content_type, body)
+                else:
+                    parts = [(response.getheader('Content-Range') or '', body)]
+                covered: set[int] = set()
+                for content_range, data in parts:
+                    parsed = parse_content_range(content_range)
+                    self.assertIsNotNone(parsed, content_range)
+                    assert parsed is not None
+                    first, last, length = parsed
+                    self.assertEqual(length, len(BINARY), content_range)
+                    self.assertEqual(data, BINARY[first : last + 1], content_range)
+                    covered.update(range(first, last + 1))
+                self.assertLessEqual(selected, covered)
+                self.assertLessEqual(covered - selected, coalescable_gaps(selected))
+
+    def test_if_range_gates_the_ranges(self) -> None:
+        tag = self.identity_tag('data.bin')
+        earlier = email.utils.formatdate(MODIFIED - 60, usegmt=True)
+        later = email.utils.formatdate(MODIFIED + 60, usegmt=True)
+        cases = [
+            (tag, {206}),
+            ('"another-tag"', {200}),
+            (f'W/{tag}', {200}),
+            (last_modified(), {200, 206}),
+            (earlier, {200}),
+            (later, {200}),
+        ]
+        for if_range, statuses in cases:
+            with self.subTest(if_range=if_range):
+                response, body = self.fetch(
+                    '/data.bin', {'Range': 'bytes=10-19', 'If-Range': if_range}
+                )
+
+                self.assertIn(response.status, statuses)
+                if response.status == 206:
+                    self.assert_partial(response, body, BINARY, 10, 19)
+                else:
+                    self.assert_full(response, body, BINARY)
+
+    def test_failed_if_range_ignores_unsatisfiable_ranges(self) -> None:
+        tag = self.identity_tag('data.bin')
+        earlier = email.utils.formatdate(MODIFIED - 60, usegmt=True)
+        for if_range in ('"another-tag"', f'W/{tag}', earlier):
+            with self.subTest(if_range=if_range):
+                response, body = self.fetch(
+                    '/data.bin', {'Range': 'bytes=5000-', 'If-Range': if_range}
+                )
+
+                self.assert_full(response, body, BINARY)
+
+    def test_preconditions_take_precedence_over_ranges(self) -> None:
+        tag = self.identity_tag('data.bin')
+        old = email.utils.formatdate(MODIFIED - 3600, usegmt=True)
+        cases = [
+            ({'If-None-Match': tag}, 304),
+            ({'If-Modified-Since': last_modified()}, 304),
+            ({'If-Match': '"another-tag"'}, 412),
+            ({'If-Unmodified-Since': old}, 412),
+        ]
+        for (headers, status), field in itertools.product(
+            cases, ('bytes=0-9', 'bytes=5000-')
+        ):
+            with self.subTest(headers=headers, range=field):
+                response, body = self.fetch('/data.bin', {'Range': field, **headers})
+
+                self.assertEqual(response.status, status)
+                self.assertIsNone(response.getheader('Content-Range'))
+                if status == 304:
+                    self.assertEqual(body, b'')
+
+        response, body = self.fetch(
+            '/data.bin', {'Range': 'bytes=0-9', 'If-Match': tag}
+        )
+        self.assert_partial(response, body, BINARY, 0, 9)
+
+    def test_head_ignores_ranges(self) -> None:
+        response, body = self.fetch('/data.bin', {'Range': 'bytes=0-9'}, method='HEAD')
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Content-Length'), '1000')
+        self.assertIsNone(response.getheader('Content-Range'))
+        self.assertEqual(body, b'')
+
+    def test_ranges_of_compressed_responses_stay_consistent(self) -> None:
+        text = self.files['notes.txt']
+        identity = self.identity_tag('notes.txt')
+        compressed = f'{identity[:-1]}-gzip"'
+        for field, first, last in (('bytes=0-99', 0, 99), ('bytes=-50', None, None)):
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch(
+                    '/notes.txt', {'Range': field, 'Accept-Encoding': 'gzip'}
+                )
+
+                gzipped = response.getheader('Content-Encoding') == 'gzip'
+                representation = gzip_body(text) if gzipped else text
+                self.assertEqual(
+                    response.getheader('ETag'), compressed if gzipped else identity
+                )
+                self.assertEqual(response.getheader('Vary'), 'Accept-Encoding')
+                if response.status == 200:
+                    self.assertEqual(body, representation)
+                    continue
+                if first is None or last is None:
+                    first, last = len(representation) - 50, len(representation) - 1
+                self.assert_partial(response, body, representation, first, last)
+
+    def test_if_range_compares_the_selected_representation(self) -> None:
+        text = self.files['notes.txt']
+        identity = self.identity_tag('notes.txt')
+        for tag in (identity, f'{identity[:-1]}-gzip"'):
+            with self.subTest(if_range=tag):
+                response, body = self.fetch(
+                    '/notes.txt',
+                    {'Range': 'bytes=0-99', 'If-Range': tag, 'Accept-Encoding': 'gzip'},
+                )
+
+                gzipped = response.getheader('Content-Encoding') == 'gzip'
+                representation = gzip_body(text) if gzipped else text
+                if response.status == 200:
+                    self.assertEqual(body, representation)
+                    continue
+                self.assertEqual(response.getheader('ETag'), tag)
+                self.assert_partial(response, body, representation, 0, 99)
+
+    def test_large_files_send_only_the_range(self) -> None:
+        content = self.files['large.bin']
+        for field, first, last in (
+            ('bytes=1048576-2097151', 1048576, 2097151),
+            ('bytes=-10', len(content) - 10, len(content) - 1),
+        ):
+            with self.subTest(range=shorten(field)):
+                response, body = self.fetch('/large.bin', {'Range': field})
+
+                self.assert_partial(response, body, content, first, last)
+
+    def test_connections_stay_usable_across_range_responses(self) -> None:
+        connection = self.connect()
+        exchanges: list[tuple[dict[str, str], int, bytes | None]] = [
+            ({'Range': 'bytes=0-9'}, 206, BINARY[:10]),
+            ({'Range': 'bytes=5000-'}, 416, None),
+            ({}, 200, BINARY),
+            ({'Range': 'bytes=-3'}, 206, BINARY[-3:]),
+        ]
+        for headers, status, expected in exchanges:
+            connection.request('GET', '/data.bin', headers=headers)
+            response = connection.getresponse()
+            body = response.read()
+
+            self.assertEqual(response.status, status, headers)
+            self.assertEqual(response.getheader('Connection'), 'keep-alive', headers)
+            if expected is not None:
+                self.assertEqual(body, expected, headers)
+
+
+def coalescable_gaps(selected: set[int]) -> set[int]:
+    """Return the positions between selected bytes a server may also send.
+
+    RFC 9110 section 15.3.7.2 lets a server coalesce ranges whose gap is
+    smaller than the overhead of sending them as separate parts.
+    """
+    gaps: set[int] = set()
+    ordered = sorted(selected)
+    for before, after in itertools.pairwise(ordered):
+        if 1 < after - before <= MAX_COALESCED_GAP:
+            gaps.update(range(before + 1, after))
+    return gaps
+
+
+def shorten(field: str) -> str:
+    """Abbreviate long positions, which would crowd the failure output."""
+    return re.sub(r'\d{21,}', lambda match: f'<{len(match[0])} digits>', field)

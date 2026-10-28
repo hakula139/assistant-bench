@@ -1,0 +1,15 @@
+--- a/filehost/handlers.py
++++ b/filehost/handlers.py
+@@ -39,7 +39,11 @@
+     if negotiated:
+         headers.add('Vary', 'Accept-Encoding')
+
+-    match evaluate(request.method, request.headers, Validators(etag, info.modified)):
++    if 'Range' in request.headers:
++        verdict = None
++    else:
++        verdict = evaluate(request.method, request.headers, Validators(etag, info.modified))
++    match verdict:
+         case 304:
+             return Response(304, headers)
+         case 412:

@@ -131,14 +131,26 @@ reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
 executionEnvironments = [
   { root = "src/assistant_bench_arena/worker", reportMissingModuleSource = false },
+  { root = "families/coding-repo/tasks/add-byte-range-requests", extraPaths = [
+    "families/coding-repo/tasks/add-byte-range-requests/solution/app",
+  ] },
   { root = "families/coding-repo/tasks/deliver-transactional-outbox", extraPaths = [
     "families/coding-repo/tasks/deliver-transactional-outbox/solution/app",
+  ] },
+  { root = "families/coding-repo/tasks/make-pipeline-incremental", extraPaths = [
+    "families/coding-repo/tasks/make-pipeline-incremental/solution/app",
   ] },
   { root = "families/coding-repo/tasks/migrate-customer-store", extraPaths = [
     "families/coding-repo/tasks/migrate-customer-store/solution/app",
   ] },
   { root = "families/coding-repo/tasks/publish-asset-graph", extraPaths = [
     "families/coding-repo/tasks/publish-asset-graph/solution/app",
+  ] },
+  { root = "families/coding-repo/tasks/repair-job-leases", extraPaths = [
+    "families/coding-repo/tasks/repair-job-leases/solution/app",
+  ] },
+  { root = "families/coding-repo/tasks/repair-kv-crash-recovery", extraPaths = [
+    "families/coding-repo/tasks/repair-kv-crash-recovery/solution/app",
   ] },
   { root = "families/coding-repo/tasks/repair-singleflight-cache", extraPaths = [
     "families/coding-repo/tasks/repair-singleflight-cache/solution/app",

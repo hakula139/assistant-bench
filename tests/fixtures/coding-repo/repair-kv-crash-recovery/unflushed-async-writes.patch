@@ -1,0 +1,9 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -120,6 +120,4 @@
+         if self._sync:
+             sync_file(self._file)
+-        else:
+-            self._file.flush()
+
+         self.size += len(data)
