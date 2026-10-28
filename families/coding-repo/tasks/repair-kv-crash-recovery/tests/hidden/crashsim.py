@@ -1,12 +1,13 @@
 """Drive a store in a child process that can crash at any file mutation.
 
-`run DIRECTORY SEGMENT_BYTES OPS [CRASH_AT [tear]]` opens the store, applies
-the JSON operations, and prints `done <index>` after each one returns. Every
-file mutation the operations make is counted: creating or truncating a file,
-writing to it, renaming, truncating or removing it. With `CRASH_AT`, the
-process exits with status 86 just before that mutation, or with `tear`, after
-writing only the first half of that write's bytes. Without it, the run prints
-`mutation <kind>` for each one.
+`run DIRECTORY SEGMENT_BYTES OPS [CRASH_AT [tear]]` opens the store, prints
+`opened`, applies the JSON operations, and prints `done <index>` after each one
+returns. Every file mutation that opening the store and the operations make is
+counted: creating or truncating a file, writing to it, renaming, truncating or
+removing it. With `CRASH_AT`, the process exits with status 86 just before that
+mutation, or with `tear`, after writing only the first half of that write's
+bytes. Without it, the run prints `mutation <kind>` for each one, and `sync
+file` or `sync dir` for each `fsync` or `fdatasync`.
 
 `recover DIRECTORY SEGMENT_BYTES` opens the store without any fault, prints
 `entries <JSON>`, puts a probe entry, reopens the store, and prints them again.
@@ -16,6 +17,7 @@ import builtins
 import io
 import json
 import os
+import stat
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -32,6 +34,11 @@ class Injector:
         self.count = 0
         self.crash_at = crash_at
         self.tear = tear
+
+    def synced(self, descriptor: int) -> None:
+        if self.active and self.crash_at is None:
+            kind = 'dir' if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 'file'
+            print(f'sync {kind}', flush=True)
 
     def mutate(
         self,
@@ -122,6 +129,9 @@ def install(injector: Injector) -> None:
 
     for name in ('replace', 'rename', 'remove', 'unlink', 'truncate', 'ftruncate'):
         wrap(name, injector)
+    for name in ('fsync', 'fdatasync'):
+        if hasattr(os, name):
+            track_sync(name, injector)
 
 
 def wrap(name: str, injector: Injector) -> None:
@@ -130,6 +140,17 @@ def wrap(name: str, injector: Injector) -> None:
     def tracked(*args: Any, **kwargs: Any) -> Any:
         injector.mutate(name)
         return original(*args, **kwargs)
+
+    setattr(os, name, tracked)
+
+
+def track_sync(name: str, injector: Injector) -> None:
+    original = getattr(os, name)
+
+    def tracked(fd: Any) -> None:
+        descriptor = fd if isinstance(fd, int) else fd.fileno()
+        injector.synced(descriptor)
+        original(fd)
 
     setattr(os, name, tracked)
 
@@ -145,8 +166,9 @@ def run(
     install(injector)
     from tinykv import Store
 
-    store = Store.open(directory, segment_bytes=segment_bytes)
     injector.active = True
+    store = Store.open(directory, segment_bytes=segment_bytes)
+    print('opened', flush=True)
     for index, (name, *operands) in enumerate(ops):
         values = [bytes.fromhex(operand) for operand in operands]
         if name == 'put':

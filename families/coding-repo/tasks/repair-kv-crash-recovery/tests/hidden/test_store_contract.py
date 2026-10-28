@@ -2,11 +2,27 @@ import struct
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 import zlib
 from pathlib import Path
 
-from tinykv import CorruptSegment, CorruptSnapshot, Store, StoreClosed
+from tinykv import CorruptSegment, CorruptSnapshot, Store, StoreClosed, StoreError
+
+
+CRASH_AFTER_UNSYNCED_PUT = textwrap.dedent(
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    from tinykv import Store
+
+    store = Store.open(Path(sys.argv[1]), sync=False)
+    store.put(b'key', b'value')
+    os._exit(0)
+    """
+)
 
 
 def frame(op: int, key: bytes, value: bytes = b'') -> bytes:
@@ -130,6 +146,36 @@ class StoreContractTest(unittest.TestCase):
 
         with Store.open(self.directory) as store:
             self.assertEqual(store.items(), [(b'after', b'3'), (b'kept', b'1')])
+
+    def test_bad_frames_in_the_active_segment_are_dropped(self) -> None:
+        with Store.open(self.directory) as store:
+            store.put(b'kept', b'1')
+
+        damaged = bytearray(frame(1, b'bad', b'checksum'))
+        damaged[-1] ^= 0xFF
+        with segments(self.directory)[-1].open('ab') as file:
+            file.write(bytes(damaged) + frame(1, b'after-bad', b'2'))
+
+        try:
+            store = Store.open(self.directory)
+        except StoreError as error:
+            self.fail(f'a bad frame in the active segment stops the store: {error!r}')
+        with store:
+            self.assertEqual(store.items(), [(b'kept', b'1')])
+            store.put(b'after', b'3')
+
+        with Store.open(self.directory) as store:
+            self.assertEqual(store.items(), [(b'after', b'3'), (b'kept', b'1')])
+
+    def test_unsynced_writes_survive_a_process_crash(self) -> None:
+        subprocess.run(
+            [sys.executable, '-c', CRASH_AFTER_UNSYNCED_PUT, str(self.directory)],
+            check=True,
+            timeout=30,
+        )
+
+        with Store.open(self.directory) as store:
+            self.assertEqual(store.items(), [(b'key', b'value')])
 
     def test_cli_keeps_its_behavior(self) -> None:
         def run(*args: str) -> subprocess.CompletedProcess[str]:

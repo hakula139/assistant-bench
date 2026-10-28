@@ -1,0 +1,11 @@
+--- a/tinykv/segments.py
++++ b/tinykv/segments.py
+@@ -67,7 +67,7 @@
+             records.append(frame.record)
+             end = frame.end
+     except FrameError as error:
+-        if not active:
++        if not active or error.reason == 'checksum mismatch':
+             raise CorruptSegment(path, error.offset, error.reason) from error
+
+     return Segment(sequence, records, end)

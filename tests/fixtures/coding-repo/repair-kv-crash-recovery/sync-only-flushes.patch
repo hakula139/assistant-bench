@@ -1,0 +1,10 @@
+--- a/tinykv/fsutil.py
++++ b/tinykv/fsutil.py
+@@ -8,7 +8,6 @@
+ def sync_file(file: BinaryIO) -> None:
+     """Flush Python's buffer and ask the kernel to persist the file's bytes."""
+     file.flush()
+-    os.fsync(file.fileno())
+
+
+ def sync_directory(directory: Path) -> None:

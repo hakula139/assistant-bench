@@ -1,10 +1,12 @@
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -12,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CRASH_STATUS = 86
 PROBE = {b'probe-after-recovery'.hex(): b'still here'.hex()}
 SEGMENT_BYTES = 96
+TORN_FRAME = struct.pack('>II', 0, 9) + b'\x01\x00'
+"""The start of a frame whose write a crash cut short."""
 
 type State = dict[str, str]
 type Ops = list[list[str]]
@@ -76,10 +80,17 @@ class CrashRecoveryTest(unittest.TestCase):
         )
         return first, second
 
-    def check_every_crash(self, setup: Ops, ops: Ops) -> None:
-        """Crash before each mutation `ops` makes, and halfway through each write."""
+    def check_every_crash(
+        self, setup: Ops, ops: Ops, damage: Callable[[Path], None] | None = None
+    ) -> None:
+        """Crash before each mutation opening the store and `ops` make.
+
+        Writes also crash halfway. `damage` alters the store before the crashes.
+        """
         base = self.root / 'base'
         self.run_ops(base, setup)
+        if damage is not None:
+            damage(base)
         expected = states(ops, states(setup)[-1])
 
         counted = self.root / 'counted'
@@ -143,6 +154,34 @@ class CrashRecoveryTest(unittest.TestCase):
         ]
 
         self.check_every_crash(setup, [COMPACT, put('delta', 'four')])
+
+    def test_crashes_while_recovering_a_torn_tail(self) -> None:
+        def tear(directory: Path) -> None:
+            active = max(
+                directory.glob('wal-*.log'), key=lambda path: int(path.stem[4:])
+            )
+            with active.open('ab') as file:
+                file.write(TORN_FRAME)
+
+        setup = [put('alpha', 'one'), put('beta', 'two')]
+
+        self.check_every_crash(setup, [put('gamma', 'three')], tear)
+
+    def test_operations_sync_their_frames(self) -> None:
+        ops = [put('alpha', 'one' * 20), put('beta', 'two' * 20), delete('alpha')]
+
+        lines = self.run_ops(self.root / 'synced', ops)
+
+        events = lines[lines.index('opened') + 1 :]
+        for index in range(len(ops)):
+            end = events.index(f'done {index}')
+            window, events = events[:end], events[end + 1 :]
+            writes = [
+                at for at, event in enumerate(window) if event == 'mutation write'
+            ]
+            with self.subTest(operation=index):
+                self.assertTrue(writes, window)
+                self.assertIn('sync file', window[writes[-1] + 1 :], window)
 
 
 if __name__ == '__main__':
