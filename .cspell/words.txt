@@ -140,6 +140,7 @@ wght
 workerd
 writingf
 writingzh
+xdist
 zhon
 zhuyin
 zstd

@@ -5,7 +5,6 @@ import os
 import queue
 import re
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -35,6 +34,8 @@ from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# The URL `wrangler dev` serves once ready, which names the port that `--port 0` bound.
+_READY = re.compile(r'Ready on (http://\S+)')
 _REJECTION = TypeAdapter[Rejection](Rejection.__value__)
 _GUARD = re.compile(
     r'^Error: D1_ERROR: ([a-z_]+): SQLITE_CONSTRAINT '
@@ -312,10 +313,6 @@ class D1Runtime:
             """)
         )
 
-        with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 0))
-            port = listener.getsockname()[1]
-
         process = subprocess.Popen(
             [
                 str(Path(sys.executable).with_name('pywrangler')),
@@ -326,7 +323,9 @@ class D1Runtime:
                 '--ip',
                 '127.0.0.1',
                 '--port',
-                str(port),
+                '0',
+                '--inspector-port',
+                '0',
                 '--persist-to',
                 str(self.directory / 'state'),
             ],
@@ -360,10 +359,10 @@ class D1Runtime:
                 if line is None:
                     raise RuntimeError((self.directory / 'owner.log').read_text())
 
-                if 'Ready on' in line:
+                if ready := _READY.search(line):
                     break
 
-            response = httpx.get(f'http://127.0.0.1:{port}', timeout=30)
+            response = httpx.get(ready[1], timeout=30)
             assert response.status_code == 200 and response.text == 'ready'
 
             yield self

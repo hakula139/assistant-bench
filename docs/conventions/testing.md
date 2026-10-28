@@ -40,6 +40,10 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 `pyproject.toml` deselects Docker tests by default, and Harbor Smoke selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
 
+## Parallel Runs
+
+`pyproject.toml` runs pytest on one pytest-xdist worker per CPU, and workers steal queued tests from each other so the slow coding verifiers and native Worker tests spread evenly. A test may not depend on another test's order or state. A subprocess that listens binds port 0 and reports the port it bound, since another worker can take a port probed and then released before the subprocess binds it. Pass `-n 0` to run in one process, as when debugging.
+
 ## Coverage
 
 `uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable.

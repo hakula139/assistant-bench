@@ -335,7 +335,8 @@ def run_pytest(
     return subprocess.run(
         [
             *(sys.executable, '-m', 'pytest', '-c', str(REPO_ROOT / 'pyproject.toml')),
-            *('--rootdir', str(directory), '--no-cov', '-p', 'no:cacheprovider'),
+            *('--rootdir', str(directory), '--no-cov', '-n', '0'),
+            *('-p', 'no:cacheprovider'),
             *(*args, str(path)),
         ],
         capture_output=True,
