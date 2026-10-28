@@ -9,6 +9,7 @@ import {
   forestPlotOptions,
   type ForestPlotRow,
 } from '@/components/charts/ForestPlot';
+import type { Category } from '@/lib/categories';
 import type { CategoryBoard, CategoryStanding } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
@@ -102,7 +103,7 @@ describe('CategoryForests', () => {
   afterEach(cleanup);
 
   test('draws every category on the same axis, labelled by display name', async () => {
-    const board = (category: string, standings: CategoryStanding[]): CategoryBoard => ({
+    const board = (category: Category, standings: CategoryStanding[]): CategoryBoard => ({
       category,
       votes: 40,
       effective_votes: 40,
@@ -110,8 +111,8 @@ describe('CategoryForests', () => {
       unranked: [],
     });
     const categories = [
-      board('strong', [refit('a', 1400), refit('b', 1000)]),
-      board('weak', [refit('a', 1000), refit('b', 750)]),
+      board('docs', [refit('a', 1400), refit('b', 1000)]),
+      board('message', [refit('a', 1000), refit('b', 750)]),
     ];
 
     const { container } = render(
@@ -126,6 +127,10 @@ describe('CategoryForests', () => {
     await vi.waitFor(() => {
       expect(container.querySelectorAll('svg')).toHaveLength(2);
     });
+
+    const captions = [...container.querySelectorAll('figcaption')].map((node) => node.textContent);
+
+    expect(captions).toEqual(['Docs, 40 votes', 'Message, 40 votes']);
 
     const ticks = (axis: 'x' | 'y') =>
       [...container.querySelectorAll('svg')].map((svg) =>

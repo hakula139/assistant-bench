@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench_arena.models import Choice, Defects, FamilyName, Record
+from assistant_bench_arena.models import Category, Choice, Defects, FamilyName, Record
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
     CaseMetadata,
@@ -42,7 +42,7 @@ class Statement(Record):
 
 class Case(Record):
     key: Identifier
-    category: str | None = None
+    category: Category | None = None
     source: Literal['public', 'synthetic', 'private']
     instruction_digest: Identifier
     metadata: CaseMetadata

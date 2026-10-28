@@ -682,6 +682,16 @@ class TestVotesResults:
             assert results.categories == []
             assert results.votes == 1
 
+    def test_writes_category_boards_in_the_declared_order(self) -> None:
+        rows = (make_evidence(0), make_evidence(1))
+        analysis = make_analysis(
+            rows, categories=(('case-0', 'reply'), ('case-1', 'docs'))
+        )
+
+        results = report.votes_results(analysis)
+
+        assert [board.category for board in results.categories] == ['reply', 'docs']
+
     @pytest.mark.parametrize(
         'change',
         [
@@ -750,7 +760,7 @@ class TestVotesResults:
             base.ordinary,
             settlements=(bridge,),
             repeats=base.repeats,
-            categories=(*base.categories, ('bridge', 'other')),
+            categories=(*base.categories, ('bridge', 'message')),
         )
         payload = report.votes_results(connected).model_dump(mode='json')
         standing = next(row for row in payload['standings'] if row['system'] == 'x')
@@ -879,12 +889,12 @@ class TestVotesResults:
         assert pair.win_rate != pytest.approx((pair.wins + pair.ties / 2) / pair.votes)
 
         categories = {board.category: board for board in results.categories}
-        assert set(categories) == {'main', 'other'}
-        assert categories['main'].votes == 15
-        assert categories['main'].effective_votes == pytest.approx(9)
+        assert set(categories) == {'docs', 'message'}
+        assert categories['docs'].votes == 15
+        assert categories['docs'].effective_votes == pytest.approx(9)
         assert all(
             row.effective_votes == pytest.approx(9)
-            for row in categories['main'].standings
+            for row in categories['docs'].standings
         )
 
     def test_scales_length_with_inherited_weights_in_the_ranked_component(self) -> None:

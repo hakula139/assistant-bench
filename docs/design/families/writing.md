@@ -19,6 +19,8 @@ Every case belongs to one category, which the per-category leaderboards split on
 | `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader |                8 |
 | `review`  | A review or close reading of a work from a supplied synopsis                                |                3 |
 
+The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
+
 The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
 
 Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content.

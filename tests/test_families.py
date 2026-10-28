@@ -458,6 +458,36 @@ class TestLoadFamily:
                 systems = ["large"]
                 samples = 1
                 reference = "large"
+                categories = ["message", "reply", "message"]
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `categories`: repeats `message`.',
+                id='repeated-categories',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
+                categories = ["punctuation"]
+                """,
+                True,
+                False,
+                'Family `f`: `family.toml`: `categories.0`: Input should be',
+                id='retired-category',
+            ),
+            pytest.param(
+                'f',
+                """\
+                scorer = "votes"
+                display_name = "Family F"
+                systems = ["large"]
+                samples = 1
+                reference = "large"
                 defects = ["typos"]
                 """,
                 True,
@@ -662,6 +692,13 @@ class TestLoadCases:
                 'Input should be a valid list.',
                 id='non-list-checklist',
             ),
+            pytest.param(
+                case_entry('a', category='punctuation'),
+                'cases.0.category',
+                "Input should be 'bug-fix', 'docs', 'essay', 'feature', 'fiction', "
+                "'message', 'refactor', 'reply', 'review' or 'smoke'.",
+                id='retired-category',
+            ),
         ],
     )
     def test_rejects_a_case_document_that_breaks_its_contract(
@@ -818,13 +855,13 @@ class TestLoadCases:
         self, families_dir: Path
     ) -> None:
         path = write_case_family(families_dir, ['large'])
-        path.write_text(case_entry('a') + case_entry('b', category='private-topic'))
+        path.write_text(case_entry('a') + case_entry('b', category='docs'))
 
         with pytest.raises(ValueError) as error:
             load_cases(load_family('f'))
 
         assert str(error.value) == (
-            f'Family `f`: case `b` at `{path}:cases.1` has category `private-topic`, '
+            f'Family `f`: case `b` at `{path}:cases.1` has category `docs`, '
             'missing from `categories` in `family.toml`.'
         )
 
@@ -927,8 +964,8 @@ class TestLoadCases:
             ),
             pytest.param(
                 'a',
-                {'category': 'other'},
-                'Family `f`: case `a` at `tasks/a` has category `other`, '
+                {'category': 'docs'},
+                'Family `f`: case `a` at `tasks/a` has category `docs`, '
                 'missing from `categories` in `family.toml`.',
                 id='unlisted-category',
             ),

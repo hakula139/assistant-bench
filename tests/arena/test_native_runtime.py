@@ -49,7 +49,7 @@ def admission(response: dict[str, JsonValue]) -> str:
 
 
 def html_release() -> Release:
-    release = make_release(cases=1)
+    release = make_release(cases=1, category='reply')
     presentation = release.publication.presentation.model_copy(
         update={'render': 'html'}
     )
@@ -418,6 +418,7 @@ class TestNativeRuntime:
                 session = body(started)
                 pair = session['pair']
                 assert isinstance(pair, dict)
+                assert pair['category'] == 'reply'
                 assert isinstance(pair['a'], dict) and isinstance(pair['b'], dict)
                 documents: list[str] = []
                 for side in ('a', 'b'):

@@ -118,7 +118,7 @@ class Voting:
             sealed = await self._release(
                 session.family, lease.evaluation_id, lease.publication_id
             )
-            pair = await self._pair(lease, sealed.publication, context.now)
+            pair = await self._pair(lease, sealed, context.now)
 
         presentation = sealed.publication.presentation
         return SessionView(
@@ -219,8 +219,11 @@ class Voting:
 
             after = page.after
 
-    async def _pair(self, lease: Lease, publication: Publication, now: int) -> PairView:
-        case = publication.presentation.cases[lease.case_key]
+    async def _pair(self, lease: Lease, sealed: SealedFamily, now: int) -> PairView:
+        case = sealed.publication.presentation.cases[lease.case_key]
+        frozen = next(
+            item for item in sealed.evaluation.cases if item.key == lease.case_key
+        )
         return PairView(
             id=lease.id,
             capability=self.pairs.encode(
@@ -233,6 +236,7 @@ class Voting:
             ),
             instruction=case.instruction,
             checklist=list(case.checklist),
+            category=frozen.category,
             a=await self._pane(lease, 'a', now),
             b=await self._pane(lease, 'b', now),
         )

@@ -6,6 +6,7 @@ const votes = {
   scorer: 'votes',
   aspect: 'coding',
   display_name: 'Repository Tasks',
+  categories: ['bug-fix', 'feature'],
   reference: 'acme-large',
   public: true,
 };
@@ -20,6 +21,12 @@ test.each([
   const result = familyConfigSchema.safeParse(config);
 
   expect(result.error?.issues.map((issue) => issue.path)).toEqual([[key]]);
+});
+
+test('rejects a category the site cannot label', () => {
+  const result = familyConfigSchema.safeParse({ ...votes, categories: ['punctuation'] });
+
+  expect(result.error?.issues.map((issue) => issue.path)).toEqual([['categories', 0]]);
 });
 
 test.each([

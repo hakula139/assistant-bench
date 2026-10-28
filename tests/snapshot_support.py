@@ -3,7 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from assistant_bench.families import Choice
+from assistant_bench.families import Category, Choice
 from assistant_bench.report import (
     AnalysisInput,
     HumanEvidence,
@@ -46,9 +46,14 @@ def make_analysis(
     *,
     settlements: tuple[Comparison, ...] = (),
     repeats: tuple[HumanEvidence, ...] = (),
-    categories: tuple[tuple[str, str | None], ...] | None = None,
+    categories: tuple[tuple[str, Category | None], ...] | None = None,
 ) -> AnalysisInput:
     comparisons = tuple(row.comparison for row in ordinary) + settlements
+    resolved: tuple[tuple[str, Category | None], ...] = (
+        tuple((row.case, 'docs') for row in comparisons)
+        if categories is None
+        else categories
+    )
     outputs = tuple(
         OutputMeasurement(
             case=row.case,
@@ -85,11 +90,10 @@ def make_analysis(
             weighted_evidence_digest='c' * 64,
             fitted_point_snapshot_id='points-after',
         ),
-        categories=(
-            tuple((row.case, 'main') for row in comparisons)
-            if categories is None
-            else categories
+        declared_categories=tuple(
+            dict.fromkeys(category for _, category in resolved if category is not None)
         ),
+        categories=resolved,
         ordinary=ordinary,
         repeats=repeats,
         settlements=settlements,
@@ -126,14 +130,14 @@ def make_capped_analysis() -> AnalysisInput:
         replace(row, comparison=row.comparison._replace(weight=weight))
         for row, weight in zip(ordinary, weights, strict=True)
     )
-    categories = tuple(
+    categories: tuple[tuple[str, Category | None], ...] = tuple(
         (
             row.comparison.case,
-            'remote'
+            'review'
             if index in range(200, 250)
-            else 'main'
+            else 'docs'
             if index < 10 or index in range(250, 255)
-            else 'other',
+            else 'message',
         )
         for index, row in enumerate(weighted)
     )

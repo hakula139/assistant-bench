@@ -10,6 +10,7 @@ const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
   ...(listed && { aspect: 'writing' }),
   display_name: displayName,
   systems: ['acme-large', 'acme-pro'],
+  categories: [],
   reference: 'acme-large',
   render: 'text',
   gates: {},

@@ -40,6 +40,7 @@ import {
 } from '@/lib/format';
 import {
   agreementTerm,
+  categoryTerm,
   fallbackAnchor,
   inferenceNote,
   preliminaryTerm,
@@ -174,12 +175,13 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
   const { systems, results } = round;
   const names = useMemo(() => reportNames(systems), [systems]);
-  const categories = results.categories.map((board) => board.category);
-  const activeCategory = category !== null && categories.includes(category) ? category : null;
+  const boards = results.categories;
+  const activeCategory =
+    category !== null && boards.some((board) => board.category === category) ? category : null;
   const unranked =
     activeCategory === null
       ? results.unranked
-      : (results.categories.find((board) => board.category === activeCategory)?.unranked ?? []);
+      : (boards.find((board) => board.category === activeCategory)?.unranked ?? []);
 
   const rows = useMemo(
     () => leaderboardRows(base, results, activeCategory, names),
@@ -223,7 +225,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
   return (
     <div className={stack}>
-      {categories.length > 0 && (
+      {boards.length > 0 && (
         <Filter
           label="Category"
           value={activeCategory === null ? ALL : categoryOption(activeCategory)}
@@ -232,7 +234,10 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
           }}
           options={[
             { value: ALL, label: 'All categories' },
-            ...categories.map((name) => ({ value: categoryOption(name), label: name })),
+            ...boards.map((board) => ({
+              value: categoryOption(board.category),
+              label: categoryTerm(board.category).term,
+            })),
           ]}
         />
       )}
@@ -280,15 +285,15 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
         />
       </div>
 
-      {categories.length > 0 && (
+      {boards.length > 0 && (
         <Section title="Categories">
           <ForestLegend
             className="lg:hidden"
-            marks={categoryMarks(results.categories, results.method.anchor_score, results.rules)}
+            marks={categoryMarks(boards, results.method.anchor_score, results.rules)}
             anchorScore={results.method.anchor_score}
           />
           <CategoryForests
-            categories={results.categories}
+            categories={boards}
             systems={order}
             names={names}
             anchorScore={results.method.anchor_score}
@@ -299,9 +304,9 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead>System</TableHead>
-                  {categories.map((name) => (
-                    <TableHead key={name} numeric>
-                      {name}
+                  {boards.map((board) => (
+                    <TableHead key={board.category} numeric>
+                      {categoryTerm(board.category).term}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -310,7 +315,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                 {order.map((system) => (
                   <TableRow key={system}>
                     <TableCell>{systemName(names, system)}</TableCell>
-                    {results.categories.map((board) => {
+                    {boards.map((board) => {
                       const refit = board.standings.find((item) => item.system === system);
                       return (
                         <TableCell key={board.category} numeric>

@@ -421,36 +421,62 @@ describe('VotesBoard', () => {
     expect(text(html)).toContain('1 Acme Pro 1,004 114');
   });
 
-  test.each(['all', '', 'category:all', 'a&b + %'])(
-    'selects literal category %j separately from all categories',
-    async (category) => {
-      const report = await load();
-      const categoryBoard = report.results.categories[0];
-      categoryBoard.category = category;
-      categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
-      const { round, results, systems, closed_at } = report;
-      stubPlotFrame();
-      const user = userEvent.setup();
-      renderInDom(
-        <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
-      );
-      const select = screen.getByLabelText<HTMLSelectElement>('Category');
-      const option = screen.getByRole<HTMLOptionElement>('option', { name: category });
+  test('labels each category board, header, and filter option in report order', async () => {
+    const round = await load();
+    round.results.categories.reverse();
+    const html = render(round);
+    const document = parse(html);
+    const options = [...document.querySelectorAll('select')]
+      .map((select) =>
+        [...select.querySelectorAll('option')].map((option) => text(option.innerHTML).trim()),
+      )
+      .find((labels) => labels.includes('All categories'));
+    const categoryTable = [...document.querySelectorAll('table')][1];
+    const headers = [...categoryTable.querySelectorAll('thead th')].map((cell) =>
+      text(cell.innerHTML).trim(),
+    );
+    const captions = [...document.querySelectorAll('figcaption')].map((caption) =>
+      text(caption.innerHTML).trim(),
+    );
 
-      await user.selectOptions(select, option.value);
+    expect(options).toEqual(['All categories', 'Reply', 'Message', 'Docs']);
+    expect(headers).toEqual(['System', 'Reply', 'Message', 'Docs']);
+    expect(captions.filter((caption) => caption.includes('votes'))).toEqual([
+      expect.stringMatching(/^Reply\b/),
+      expect.stringMatching(/^Message\b/),
+      expect.stringMatching(/^Docs\b/),
+    ]);
+    expect(text(html)).not.toMatch(/\breply\b|\bmessage\b|\bdocs\b/);
+  });
 
-      expect(search.get('category')).toBe(category);
-      const selected = render(report);
-      expect(text(head(selected))).toMatch(/^ System /);
-      expect(text(parse(selected).querySelector('tbody')?.innerHTML ?? '')).toContain('1,100');
+  test('keeps the category ID in the search parameter while the option shows the label', async () => {
+    const report = await load();
+    const categoryBoard = report.results.categories.find((board) => board.category === 'message');
+    if (categoryBoard === undefined) {
+      throw new Error('the fixture has a message category');
+    }
+    categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
+    const { round, results, systems, closed_at } = report;
+    stubPlotFrame();
+    const user = userEvent.setup();
+    renderInDom(
+      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
+    );
+    const select = screen.getByLabelText<HTMLSelectElement>('Category');
 
-      const aggregate = screen.getByRole<HTMLOptionElement>('option', { name: 'All categories' });
-      await user.selectOptions(select, aggregate.value);
+    await user.selectOptions(select, 'category:message');
 
-      expect(search.has('category')).toBe(false);
-      expect(text(head(render(report)))).toMatch(/^ Rank What Rank means System /);
-    },
-  );
+    expect(search.get('category')).toBe('message');
+    const selected = render(report);
+    expect(text(head(selected))).toMatch(/^ System /);
+    expect(text(parse(selected).querySelector('tbody')?.innerHTML ?? '')).toContain('1,100');
+
+    const aggregate = screen.getByRole<HTMLOptionElement>('option', { name: 'All categories' });
+    await user.selectOptions(select, aggregate.value);
+
+    expect(search.has('category')).toBe(false);
+    expect(text(head(render(report)))).toMatch(/^ Rank What Rank means System /);
+  });
 
   test.each([
     ['Point score', 'max-lg:hidden'],

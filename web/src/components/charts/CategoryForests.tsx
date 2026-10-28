@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { ForestPlot } from '@/components/charts/ForestPlot';
 import { legendMarks, sharedDomain, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
+import { categoryTerm } from '@/lib/glossary';
 import { isPreliminary } from '@/lib/ranking';
 import type { CategoryBoard, VotesRules } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
@@ -56,7 +57,7 @@ export function CategoryForests({
       {categories.map((board) => (
         <figure key={board.category} className="flex flex-col gap-1">
           <figcaption className="text-sm">
-            <span className="font-medium">{board.category}</span>
+            <span className="font-medium">{categoryTerm(board.category).term}</span>
             <span className="text-muted-foreground">, {formatCountOf(board.votes, 'vote')}</span>
           </figcaption>
           <ForestPlot

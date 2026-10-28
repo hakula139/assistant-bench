@@ -1,5 +1,6 @@
 import { z } from 'zod/mini';
 
+import { categories } from '@/lib/categories';
 import { defects } from '@/lib/defects';
 
 export const identifier = z.string().check(z.minLength(1), z.maxLength(256));
@@ -25,6 +26,7 @@ export const pairView = z.strictObject({
   capability,
   instruction: z.string(),
   checklist: z.array(z.string()),
+  category: z.nullable(z.enum(categories)),
   a: pane,
   b: pane,
 });

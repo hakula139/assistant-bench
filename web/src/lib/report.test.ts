@@ -273,6 +273,7 @@ describe('reportSchema', () => {
     ['category duplicate membership', ['categories', 0, 'unranked'], ['acme-large']],
     ['contradictory repeat floor', ['rater_agreement', 'below_floor'], true],
     ['unknown opponent', ['head_to_head', 0, 'opponent'], 'unknown'],
+    ['unknown category', ['categories', 0, 'category'], 'unknown'],
     ['unknown unranked system', ['unranked'], ['unknown']],
     ['unknown category system', ['categories', 0, 'unranked'], ['unknown']],
     ['empty system id', ['standings', 0, 'system'], ''],

@@ -141,6 +141,21 @@
         "minLength": 1,
         "type": "string"
       },
+      "Category": {
+        "enum": [
+          "bug-fix",
+          "docs",
+          "essay",
+          "feature",
+          "fiction",
+          "message",
+          "refactor",
+          "reply",
+          "review",
+          "smoke"
+        ],
+        "type": "string"
+      },
       "DiffPane": {
         "additionalProperties": false,
         "description": "A solution as a unified diff of the task's repository.",
@@ -241,6 +256,17 @@
         "title": "Checklist",
         "type": "array"
       },
+      "category": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Category"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The case's category ID, whose label the site's glossary supplies."
+      },
       "a": {
         "$ref": "#/$defs/Pane"
       },
@@ -248,7 +274,7 @@
         "$ref": "#/$defs/Pane"
       }
     },
-    "required": ["id", "capability", "instruction", "checklist", "a", "b"],
+    "required": ["id", "capability", "instruction", "checklist", "category", "a", "b"],
     "title": "PairView",
     "type": "object"
   },
@@ -257,6 +283,21 @@
       "Capability": {
         "maxLength": 2048,
         "minLength": 1,
+        "type": "string"
+      },
+      "Category": {
+        "enum": [
+          "bug-fix",
+          "docs",
+          "essay",
+          "feature",
+          "fiction",
+          "message",
+          "refactor",
+          "reply",
+          "review",
+          "smoke"
+        ],
         "type": "string"
       },
       "Defect": {
@@ -378,6 +419,17 @@
             "title": "Checklist",
             "type": "array"
           },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Category"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The case's category ID, whose label the site's glossary supplies."
+          },
           "a": {
             "$ref": "#/$defs/Pane"
           },
@@ -385,7 +437,7 @@
             "$ref": "#/$defs/Pane"
           }
         },
-        "required": ["id", "capability", "instruction", "checklist", "a", "b"],
+        "required": ["id", "capability", "instruction", "checklist", "category", "a", "b"],
         "title": "PairView",
         "type": "object"
       },
