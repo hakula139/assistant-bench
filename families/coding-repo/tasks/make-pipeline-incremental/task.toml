@@ -2,7 +2,7 @@ schema_version = "1.4"
 
 [task]
 name = "coding-repo/make-pipeline-incremental"
-description = "Make a file-based build pipeline skip exactly the steps whose results cannot change"
+description = "Make a file-based build pipeline skip exactly the steps whose inputs, declaration, code and outputs are unchanged"
 version = "2.0.0"
 
 [metadata]
