@@ -31,7 +31,7 @@ describe('roundMethod', () => {
     const text = roundMethod(method, { preliminary_decisive_votes: 1200 });
 
     expect(text).toBe(
-      "Bradley-Terry, L2 penalty 0.013, 174 points per logit, anchor 1,000. Each voter contributes at most 1,000 votes of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Preliminary coverage requires 1,200 raw decisive votes.",
+      "Bradley-Terry, L2 penalty 0.0125, 174 points per logit, anchor 1,000. Each voter contributes at most 1,000 votes of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Preliminary coverage requires 1,200 raw decisive votes.",
     );
   });
 });

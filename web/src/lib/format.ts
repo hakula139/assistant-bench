@@ -16,7 +16,7 @@ const seconds = new Intl.NumberFormat('en', {
 
 const tau = new Intl.NumberFormat('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const bias = new Intl.NumberFormat('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const penalty = new Intl.NumberFormat('en', { maximumSignificantDigits: 2 });
+const penalty = new Intl.NumberFormat('en', { maximumSignificantDigits: 21 });
 
 /** Shown wherever a report holds no value, as for an unpriced route. */
 export const MISSING = '–';
@@ -25,12 +25,12 @@ export const formatScore = (value: number) => whole.format(value);
 export const formatTau = (value: number | null) => (value === null ? MISSING : tau.format(value));
 export const formatCount = (value: number) => whole.format(value);
 
-/** Prints a fit's regularization strength to two significant digits, as in "0.01". */
-export const formatPenalty = (value: number) => penalty.format(value);
-
 /** Counts a regular English noun, as in "1 vote" and "34 votes". */
 export const formatCountOf = (value: number, noun: string) =>
   `${whole.format(value)} ${value === 1 ? noun : `${noun}s`}`;
+
+/** Prints a recorded fit setting exactly in plain decimal notation, as in "0.0125" for 1.25e-2. */
+export const formatPenalty = (value: number) => penalty.format(value);
 
 export const formatPercent = (value: number | null) =>
   value === null ? MISSING : percent.format(value);
