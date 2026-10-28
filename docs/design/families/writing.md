@@ -10,24 +10,24 @@ Both families send every case to the systems each [`family.toml`](../../../famil
 
 Every case belongs to one category, which the per-category leaderboards split on:
 
-| Category  | The instruction asks for                                                                    | Cases per family |
-| --------- | ------------------------------------------------------------------------------------------- | ---------------: |
-| `reply`   | An assistant's final reply after a task, or an answer to a teammate's question              |                8 |
-| `message` | A commit message, PR description, issue or review reply, handoff, or announcement           |               14 |
-| `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained          |               21 |
-| `fiction` | A scene, dialogue, continuation, or letter                                                  |                5 |
-| `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader |                8 |
-| `review`  | A review or close reading of a work from a supplied synopsis                                |                3 |
+| Category  | The instruction asks for                                                                                             | Cases per family |
+| --------- | -------------------------------------------------------------------------------------------------------------------- | ---------------: |
+| `reply`   | An assistant's final reply after a task, or an answer to a teammate's decision or status question                    |                8 |
+| `message` | A commit message, PR description, issue or review reply, handoff, or announcement                                    |               14 |
+| `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained, including in reply to a teammate |               21 |
+| `fiction` | A scene, dialogue, continuation, or letter                                                                           |                5 |
+| `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader                          |                8 |
+| `review`  | A review or close reading of an invented work from supplied material                                                 |                3 |
 
 The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
 
 The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
 
-Most instructions supply a list of facts and ask for those facts alone, so a vote can weigh fidelity, register, and structure on equal content.
+Most instructions supply the material a reply must use, such as a list of facts, a thread, a log, or code, and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 
-A review case supplies a synopsis of its invented work, with scene observations for an animation close reading. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker and inventing quotations.
+A review case supplies the material on its invented work, such as a synopsis, the staging notes a close reading draws on, or a rules summary with playtest notes. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker beyond the concept's own name, and ban inventing quotations.
 
 A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
 

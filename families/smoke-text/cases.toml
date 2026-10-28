@@ -2,12 +2,16 @@
 id = "en-greeting"
 category = "message"
 source = "synthetic"
-instruction = "Write a one-sentence greeting for a new contributor to an open-source project."
+instruction = '''
+Write a one-sentence greeting for a new contributor to an open-source project.
+'''
 checklist = ["One sentence"]
 
 [[cases]]
 id = "zh-greeting"
 category = "message"
 source = "synthetic"
-instruction = "用一句话欢迎一位刚加入开源项目的贡献者。"
+instruction = '''
+用一句话欢迎一位刚加入开源项目的贡献者。
+'''
 checklist = ["一句话", "简体中文"]
