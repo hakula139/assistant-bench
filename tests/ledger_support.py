@@ -5,7 +5,6 @@ import os
 import queue
 import re
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -35,6 +34,8 @@ from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+_READY = re.compile(r'Ready on (http://\S+)')
 _REJECTION = TypeAdapter[Rejection](Rejection.__value__)
 _GUARD = re.compile(
     r'^Error: D1_ERROR: ([a-z_]+): SQLITE_CONSTRAINT '
@@ -210,6 +211,15 @@ async def seed_actor(transport: D1Transport, actor: Actor) -> None:
     )
 
 
+def ready_url(line: str) -> str | None:
+    """Return the URL a `wrangler dev` ready line names, which holds the bound port.
+
+    Wrangler colors the URL when the environment forces color.
+    """
+    ready = _READY.search(_ANSI.sub('', line))
+    return ready[1] if ready else None
+
+
 class D1Runtime:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
@@ -227,6 +237,7 @@ class D1Runtime:
             PATH=os.pathsep.join(
                 [str(Path(sys.executable).parent), self.environment['PATH']]
             ),
+            NO_COLOR='1',
             WRANGLER_SEND_METRICS='false',
             XDG_CONFIG_HOME=str(directory / 'config'),
         )
@@ -312,10 +323,6 @@ class D1Runtime:
             """)
         )
 
-        with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 0))
-            port = listener.getsockname()[1]
-
         process = subprocess.Popen(
             [
                 str(Path(sys.executable).with_name('pywrangler')),
@@ -326,7 +333,9 @@ class D1Runtime:
                 '--ip',
                 '127.0.0.1',
                 '--port',
-                str(port),
+                '0',
+                '--inspector-port',
+                '0',
                 '--persist-to',
                 str(self.directory / 'state'),
             ],
@@ -355,15 +364,21 @@ class D1Runtime:
 
         try:
             while True:
-                line = lines.get(timeout=60)
+                try:
+                    line = lines.get(timeout=60)
+                except queue.Empty:
+                    raise RuntimeError(
+                        'The D1 runtime was not ready within 60 s.\n'
+                        + (self.directory / 'owner.log').read_text()
+                    ) from None
 
                 if line is None:
                     raise RuntimeError((self.directory / 'owner.log').read_text())
 
-                if 'Ready on' in line:
+                if url := ready_url(line):
                     break
 
-            response = httpx.get(f'http://127.0.0.1:{port}', timeout=30)
+            response = httpx.get(url, timeout=30)
             assert response.status_code == 200 and response.text == 'ready'
 
             yield self

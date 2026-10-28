@@ -5,7 +5,6 @@ import os
 import queue
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -733,9 +732,6 @@ class NativeRuntime:
 
     @contextmanager
     def _worker(self, label: str) -> Generator[None]:
-        with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 0))
-            port = listener.getsockname()[1]
         executable = (
             [str(Path(sys.executable).with_name('pywrangler'))]
             if label != 'facade'
@@ -751,7 +747,7 @@ class NativeRuntime:
                 '--ip',
                 '127.0.0.1',
                 '--port',
-                str(port),
+                '0',
                 '--inspector-port',
                 '0',
                 '--env-file',
