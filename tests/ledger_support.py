@@ -34,7 +34,7 @@ from assistant_bench_arena.transport import CommandRejected, Rejection
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# The URL `wrangler dev` serves once ready, which names the port that `--port 0` bound.
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _READY = re.compile(r'Ready on (http://\S+)')
 _REJECTION = TypeAdapter[Rejection](Rejection.__value__)
 _GUARD = re.compile(
@@ -211,6 +211,15 @@ async def seed_actor(transport: D1Transport, actor: Actor) -> None:
     )
 
 
+def ready_url(line: str) -> str | None:
+    """Return the URL a `wrangler dev` ready line names, which holds the bound port.
+
+    Wrangler colors the URL when the environment forces color.
+    """
+    ready = _READY.search(_ANSI.sub('', line))
+    return ready[1] if ready else None
+
+
 class D1Runtime:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
@@ -228,6 +237,7 @@ class D1Runtime:
             PATH=os.pathsep.join(
                 [str(Path(sys.executable).parent), self.environment['PATH']]
             ),
+            NO_COLOR='1',
             WRANGLER_SEND_METRICS='false',
             XDG_CONFIG_HOME=str(directory / 'config'),
         )
@@ -354,15 +364,21 @@ class D1Runtime:
 
         try:
             while True:
-                line = lines.get(timeout=60)
+                try:
+                    line = lines.get(timeout=60)
+                except queue.Empty:
+                    raise RuntimeError(
+                        'The D1 runtime was not ready within 60 s.\n'
+                        + (self.directory / 'owner.log').read_text()
+                    ) from None
 
                 if line is None:
                     raise RuntimeError((self.directory / 'owner.log').read_text())
 
-                if ready := _READY.search(line):
+                if url := ready_url(line):
                     break
 
-            response = httpx.get(ready[1], timeout=30)
+            response = httpx.get(url, timeout=30)
             assert response.status_code == 200 and response.text == 'ready'
 
             yield self

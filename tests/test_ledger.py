@@ -50,6 +50,7 @@ from ledger_support import (
     parse_schema,
     publish_presentation,
     publish_release,
+    ready_url,
     schema_statements,
     seed_actor,
 )
@@ -224,6 +225,30 @@ class TestParseSchema:
                 ]
 
         asyncio.run(scenario())
+
+
+class TestReadyUrl:
+    @pytest.mark.parametrize(
+        ('line', 'url'),
+        [
+            (
+                '[wrangler:info] Ready on http://127.0.0.1:51895\n',
+                'http://127.0.0.1:51895',
+            ),
+            (
+                '[wrangler:info] \x1b[1mReady\x1b[22m on '
+                '\x1b[32mhttp://127.0.0.1:51895\x1b[39m\n',
+                'http://127.0.0.1:51895',
+            ),
+            ('[wrangler:info] Updated and ready on http://127.0.0.1:51895\n', None),
+            ('Starting local server...\n', None),
+        ],
+        ids=['plain', 'colored', 'reload', 'other'],
+    )
+    def test_reads_the_bound_url_from_the_ready_line(
+        self, line: str, url: str | None
+    ) -> None:
+        assert ready_url(line) == url
 
 
 class TestLedger:

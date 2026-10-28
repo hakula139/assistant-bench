@@ -118,7 +118,7 @@ jobs:
   python-check:
     name: Python Check
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
