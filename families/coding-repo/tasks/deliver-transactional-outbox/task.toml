@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/deliver-transactional-outbox"
 description = "Make order notifications transactional and safely retryable"
-version = "2.1.0"
+version = "3.0.0"
 
 [metadata]
 category = "feature"

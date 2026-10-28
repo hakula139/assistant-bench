@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/migrate-customer-store"
 description = "Upgrade a persisted customer store atomically across its callers"
-version = "2.1.0"
+version = "3.0.0"
 
 [metadata]
 category = "refactor"

@@ -29,8 +29,12 @@ class RecordingResult(unittest.TextTestResult):
 
 
 class RecordingRunner(unittest.TextTestRunner):
+    # unittest documents this override, while typeshed rejects a subclass of
+    # `TextTestResult` as `resultclass`.
     def _makeResult(self) -> RecordingResult:
-        return RecordingResult(self.stream, self.descriptions, self.verbosity)
+        return RecordingResult(
+            self.stream, self.descriptions, self.verbosity, durations=self.durations
+        )
 
 
 def namespaces() -> Namespaces:
