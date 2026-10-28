@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/repair-singleflight-cache"
 description = "Repair tenant isolation and cancellation in an asynchronous singleflight cache"
-version = "2.0.0"
+version = "2.1.0"
 
 [metadata]
 category = "bug-fix"

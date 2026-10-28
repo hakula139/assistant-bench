@@ -26,6 +26,7 @@ from assistant_bench.paths import REPO_ROOT
 CODING = REPO_ROOT / 'families' / 'coding-repo'
 CODING_TASKS = sorted(path.parent for path in (CODING / 'tasks').glob('*/task.toml'))
 CODING_FIXTURES = REPO_ROOT / 'tests' / 'fixtures' / 'coding-repo'
+CODING_BYPASSES = sorted(path.stem for path in CODING_FIXTURES.glob('*.py'))
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
@@ -151,7 +152,7 @@ def test_coding_references_ship_their_changes_and_the_packages_they_change(
 
 
 def test_coding_fixture_directories_match_tasks() -> None:
-    assert {path.name for path in CODING_FIXTURES.iterdir()} <= {
+    assert {path.name for path in CODING_FIXTURES.iterdir() if path.is_dir()} <= {
         task.name for task in CODING_TASKS
     }
 
@@ -168,6 +169,7 @@ def test_coding_fixture_directories_match_tasks() -> None:
                 path.stem
                 for path in sorted((CODING_FIXTURES / task.name).glob('*.patch'))
             ),
+            *CODING_BYPASSES,
         )
     ],
 )
@@ -189,7 +191,12 @@ def test_coding_verifiers_reward_only_the_reference(
             check=True,
             timeout=60,
         )
-    if candidate not in {'starter', 'reference'}:
+    if candidate in CODING_BYPASSES:
+        bypass = (CODING_FIXTURES / f'{candidate}.py').read_text()
+        for package in workspace.glob('*/__init__.py'):
+            if package.parent.name != 'tests':
+                package.write_text(package.read_text() + bypass)
+    elif candidate not in {'starter', 'reference'}:
         patch = CODING_FIXTURES / task.name / f'{candidate}.patch'
         subprocess.run(['git', 'init', '--quiet'], cwd=workspace, check=True)
         subprocess.run(['git', 'apply', str(patch)], cwd=workspace, check=True)
@@ -230,7 +237,7 @@ def test_coding_verifiers_reward_only_the_reference(
     assert (logs / 'reward.txt').read_text() == f'{int(accepted)}\n', output
     verdict = 'PASS' if accepted else 'FAIL'
     assert f'{verdict} the hidden behavior tests pass' in output, output
-    if not accepted:
+    if not accepted and candidate not in CODING_BYPASSES:
         assert '\nFAIL: ' in output, output
         assert not re.search(
             r'\b(ImportError|ModuleNotFoundError|NameError|SyntaxError)\b', output

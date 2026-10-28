@@ -41,6 +41,7 @@ fstat
 fsutil
 ftruncate
 getattr
+geteuid
 hakula
 Halvorsen
 hanzi

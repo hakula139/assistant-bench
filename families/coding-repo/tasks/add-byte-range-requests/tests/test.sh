@@ -9,3 +9,6 @@ if python3 /tests/verify.py; then
 else
   echo 0 >/logs/verifier/reward.txt
 fi
+# Harbor reads reward.json before reward.txt, and the tested code may have
+# planted one.
+rm -f /logs/verifier/reward.json

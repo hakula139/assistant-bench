@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/resume-ledger-import"
 description = "Implement atomic resumable CSV imports with exact ledger accounting"
-version = "2.0.0"
+version = "2.1.0"
 
 [metadata]
 category = "feature"
