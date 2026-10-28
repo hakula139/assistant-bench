@@ -17,7 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ARROWHEAD, legendMarks, type ForestRow, type LegendMark } from '@/lib/forest';
+import {
+  ARROWHEAD,
+  legendMarks,
+  unplacedText,
+  type ForestRow,
+  type LegendMark,
+} from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
@@ -28,12 +34,6 @@ interface ForestProps {
   anchorScore?: number;
   large?: boolean;
 }
-
-const unplacedText = {
-  'anchor': 'no votes',
-  'unranked': 'unranked',
-  'no-votes': 'no votes',
-};
 
 function scoreText(row: ForestRow): string {
   return 'estimate' in row

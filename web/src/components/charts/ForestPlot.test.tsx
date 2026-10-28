@@ -25,10 +25,14 @@ const refit = (system: string, score: number, decisive = 40) => ({
 
 const frame = { width: 600, measure: (text: string) => text.length * 7 };
 
-function draw(rows: ForestPlotRow[], domain: [number, number]): Element {
-  const labels = rows.map((row) => row.label);
+function draw(
+  rows: ForestPlotRow[],
+  domain: [number, number],
+  labels = rows.map((row) => row.label),
+  unranked: string[] = [],
+): Element {
   return Plot.plot({
-    ...forestPlotOptions({ rows, labels, domain, rules, anchorScore: 1000 }, frame),
+    ...forestPlotOptions({ rows, labels, unranked, domain, rules, anchorScore: 1000 }, frame),
     width: frame.width,
     height: forestPlotHeight(labels),
   });
@@ -75,6 +79,49 @@ describe('forestPlotOptions', () => {
     expect(offset(label.parentElement) + offset(label)).toBeGreaterThan(
       offset(arrow?.parentElement) + offset(arrow) + 10,
     );
+  });
+
+  test('prints a negative score below the axis with a minus sign, haloed against crossing rules', () => {
+    const svg = draw(
+      [
+        { label: 'top', refit: refit('top', 1000) },
+        { label: 'far', refit: refit('far', -161) },
+      ],
+      [400, 1100],
+    );
+
+    const label = svg.querySelector('g[aria-label="text"]');
+
+    expect(label?.textContent).toBe('\u2212161');
+    expect(label?.getAttribute('stroke')).toBe('var(--background)');
+    expect(label?.getAttribute('paint-order')).toBe('stroke');
+  });
+
+  test('names why a row without a point is empty', () => {
+    const svg = draw(
+      [{ label: 'top', refit: refit('top', 1000) }],
+      [600, 1100],
+      ['top', 'silent', 'loose'],
+      ['loose'],
+    );
+
+    const y = (element: Element | null | undefined) =>
+      /translate\([^,]+,(-?[\d.]+)/.exec(element?.getAttribute('transform') ?? '')?.[1];
+    const rows = Object.fromEntries(
+      [...svg.querySelectorAll('g[aria-label="y-axis tick label"] text')].map((tick) => [
+        tick.textContent,
+        y(tick),
+      ]),
+    );
+    const notes = [...svg.querySelectorAll('g[aria-label="text"] text')].map((note) => [
+      note.textContent,
+      y(note),
+    ]);
+
+    expect(notes).toEqual([
+      ['no votes', rows.silent],
+      ['unranked', rows.loose],
+    ]);
   });
 
   test.each<[string, [number, number], number]>([

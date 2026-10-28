@@ -87,10 +87,21 @@ export function sparseTicks(domain: [number, number], anchorScore?: number): num
 }
 
 /**
- * The axis width each interval between ticks needs, in CSS pixels, for every tick to keep its label
- * apart from its neighbors'. The `axisFits` variants in `ScoreTrack.tsx` match it.
+ * The axis width the narrowest interval between ticks needs, in CSS pixels, for every tick to keep
+ * its label apart from its neighbors'. The `axisFits` variants in `ScoreTrack.tsx` match it.
  */
 const INTERVAL_WIDTH = 40;
+
+/**
+ * Returns how many of the narrowest tick intervals span the axis, rounded up, so that labelling
+ * every tick needs `INTERVAL_WIDTH` pixels for each. The end intervals can be as short as half
+ * the others.
+ */
+export function axisIntervals(domain: [number, number]): number {
+  const all = forestTicks(domain);
+  const gap = Math.min(...all.slice(1).map((tick, i) => tick - all[i]));
+  return Math.ceil((domain[1] - domain[0]) / gap);
+}
 
 /** Returns the ticks a forest plot labels on an axis `width` CSS pixels wide. */
 export function labelledTicks(
@@ -98,8 +109,9 @@ export function labelledTicks(
   width: number,
   anchorScore?: number,
 ): number[] {
-  const all = forestTicks(domain);
-  return width >= (all.length - 1) * INTERVAL_WIDTH ? all : sparseTicks(domain, anchorScore);
+  return width >= axisIntervals(domain) * INTERVAL_WIDTH
+    ? forestTicks(domain)
+    : sparseTicks(domain, anchorScore);
 }
 
 /** Where an estimate falls on an axis, with what the axis start cuts off. */
@@ -133,6 +145,13 @@ export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
  * the anchor, or a system with no votes.
  */
 type Unplaced = 'anchor' | 'unranked' | 'no-votes';
+
+/** What a forest prints in the row of a system it cannot place. */
+export const unplacedText: Record<Unplaced, string> = {
+  'anchor': 'no votes',
+  'unranked': 'unranked',
+  'no-votes': 'no votes',
+};
 
 /** One system's row in a static forest plot, labelled by its display `name`. */
 export type ForestRow = { system: string; name: string; href?: string } & (

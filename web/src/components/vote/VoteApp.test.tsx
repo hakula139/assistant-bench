@@ -298,7 +298,7 @@ describe('VoteApp', () => {
       await user.keyboard('a2u{Enter}');
       expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
       if (accepted) {
-        expect(screen.getByText('Vote accepted.')).toBeDefined();
+        expect(screen.getByText('Saved')).toBeDefined();
       } else {
         expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
           'ariaChecked',
@@ -332,7 +332,7 @@ describe('VoteApp', () => {
     },
   );
 
-  test('keeps acceptance visible when acquiring the next pair fails', async () => {
+  test('keeps acceptance visible once, as Saved, when acquiring the next pair fails', async () => {
     const api = stubApi({ prior: 1 });
     const user = await startSession();
     const original = globalThis.fetch;
@@ -344,8 +344,10 @@ describe('VoteApp', () => {
     });
 
     await user.keyboard('a{Enter}');
-    await screen.findByText('Vote accepted.');
+    await screen.findByRole('button', { name: 'Retry connection' });
 
+    expect(screen.getByText('Saved')).toBeDefined();
+    expect(screen.queryByText('Vote accepted.')).toBeNull();
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);

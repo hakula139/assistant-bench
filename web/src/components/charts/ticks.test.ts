@@ -8,6 +8,7 @@ describe('logTicks', () => {
     ['fewer ticks per decade when the axis is narrow', [0.5, 400], 4, [1, 10, 100]],
     ['every few powers of ten when one per decade is too many', [0.0002, 20], 4, [0.01, 1]],
     ['linear ticks within one short span', [20.1, 48.2], 4, [30, 40]],
+    ['both ends when one round tick falls inside a short span', [11, 29], 2, [11, 29]],
     ['linear ticks including a free metric', [0, 1], 4, [0, 0.5, 1]],
     ['one tick when every metric is zero', [0, 0], 4, [0]],
   ])('marks %s', (_, domain, count, ticks) => {

@@ -84,22 +84,26 @@ describe('Forest', () => {
   test.each<[[number, number], string, string[]]>([
     [[600, 1400], '@max-[10rem]:hidden', ['800', '1,200']],
     [[400, 1100], '@max-[17.5rem]:hidden', ['500', '600', '700', '800', '900', '1,000']],
-  ])('hides the dense labels of %j below 2.5rem an interval with %s', (domain, hidden, dense) => {
-    const { container } = render(
-      <Forest caption="Example" domain={domain} rows={[]} anchorScore={1000} />,
-    );
+    [[900, 1900], '@max-[25rem]:hidden', ['1,000', '1,200', '1,400', '1,600', '1,800']],
+  ])(
+    'hides the dense labels of %j below 2.5rem a narrowest interval with %s',
+    (domain, hidden, dense) => {
+      const { container } = render(
+        <Forest caption="Example" domain={domain} rows={[]} anchorScore={1000} />,
+      );
 
-    const labels = [...container.querySelectorAll('thead [aria-hidden] span')];
+      const labels = [...container.querySelectorAll('thead [aria-hidden] span')];
 
-    expect(
-      labels.filter((label) => label.classList.contains(hidden)).map((l) => l.textContent),
-    ).toEqual(dense);
-    expect(
-      labels.every(
-        (label) => !label.className.includes('@max-') || label.classList.contains(hidden),
-      ),
-    ).toBe(true);
-  });
+      expect(
+        labels.filter((label) => label.classList.contains(hidden)).map((l) => l.textContent),
+      ).toEqual(dense);
+      expect(
+        labels.every(
+          (label) => !label.className.includes('@max-') || label.classList.contains(hidden),
+        ),
+      ).toBe(true);
+    },
+  );
 
   test('centers every legend mark in a key of one width', () => {
     const { container } = render(

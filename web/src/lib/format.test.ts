@@ -1,6 +1,24 @@
 import { describe, expect, test } from 'vitest';
 
-import { formatLengthBias, formatPercentRange } from '@/lib/format';
+import { formatLengthBias, formatPercentRange, formatScore, formatTau } from '@/lib/format';
+
+describe('formatScore', () => {
+  test.each([
+    [-161.4, '\u2212161'],
+    [1628.2, '1,628'],
+  ])('prints %d as a whole score with a minus sign', (score, text) => {
+    expect(formatScore(score)).toBe(text);
+  });
+});
+
+describe('formatTau', () => {
+  test.each([
+    [-0.25, '\u22120.25'],
+    [0.6, '0.60'],
+  ])('prints %d with a minus sign where it is negative', (value, text) => {
+    expect(formatTau(value)).toBe(text);
+  });
+});
 
 describe('formatPercentRange', () => {
   test.each([
