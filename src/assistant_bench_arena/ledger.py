@@ -112,7 +112,9 @@ class Ledger:
                 'A policy identity must bind its complete definition.'
             )
 
-        if policy.method.actor_cap != 100:
+        weights = policy.method.human_weights
+
+        if weights.name != 'actor-proportional-cap' or weights.cap != 100:
             raise OwnerInputError(
                 'A live ledger requires the 100-unit actor weighting cap.'
             )

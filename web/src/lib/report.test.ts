@@ -37,13 +37,13 @@ describe('reportSchema', () => {
     const row = parsed.results.standings.find((standing) => standing.system === 'acme-mini');
 
     expect(row?.defects).toEqual({
-      scope: 1,
-      facts: 1,
-      clarity: 1,
-      tone: 3,
-      mechanics: 3,
-      formulaic: 1,
-      length: 3,
+      scope: 2,
+      facts: 2,
+      clarity: 2,
+      tone: 2,
+      mechanics: 0,
+      formulaic: 2,
+      length: 1,
     });
     expect(Object.keys(row?.defects ?? {})).toEqual([
       'scope',

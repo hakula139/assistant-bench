@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { actorCapTerm, anchorTerm, fallbackAnchor, preliminaryTerm } from '@/lib/glossary';
+import { anchorTerm, effectiveVotesTerm, fallbackAnchor, preliminaryTerm } from '@/lib/glossary';
 import { reportSchema } from '@/lib/report';
 import { readFixture } from '@/test/fixture';
 
@@ -14,7 +14,7 @@ describe('recorded ranking terms', () => {
     const rules = { ...report.results.rules, preliminary_decisive_votes: 12 };
 
     expect(anchorTerm(method).definition).toContain('1,234');
-    expect(actorCapTerm(method).definition).toContain('more than 25 votes');
+    expect(effectiveVotesTerm(method).definition).toContain('more than 25 votes');
     expect(preliminaryTerm(rules).definition).toContain('12 raw votes');
     expect(
       fallbackAnchor('Historical Anchor', 'Historical Reference', method).definition,

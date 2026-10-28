@@ -263,11 +263,6 @@
           "title": "Sampling Point Snapshot Id",
           "type": "string"
         },
-        "status": {
-          "const": "ledger",
-          "title": "Status",
-          "type": "string"
-        },
         "weighted_evidence_digest": {
           "minLength": 1,
           "title": "Weighted Evidence Digest",
@@ -293,7 +288,6 @@
         "publication_id",
         "policy_id",
         "sampling_point_snapshot_id",
-        "status",
         "weighted_evidence_digest",
         "fitted_point_snapshot_id"
       ],

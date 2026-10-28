@@ -11,24 +11,61 @@ from pydantic import (
 from assistant_bench_arena.models import Category, Defect, FamilyName, Record
 
 
+class UnitHumanWeights(Record):
+    name: Literal['unit']
+    version: Literal[1]
+    repeat_handling: Literal['included']
+
+
+class CappedHumanWeights(Record):
+    name: Literal['actor-proportional-cap']
+    version: Literal[1]
+    cap: Annotated[int, Field(strict=True, gt=0)]
+    scope: Literal['family-evaluation']
+    repeat_handling: Literal['excluded']
+
+
+type HumanWeights = Annotated[
+    UnitHumanWeights | CappedHumanWeights, Field(discriminator='name')
+]
+
+
+class SettledWeights(Record):
+    name: Literal['sample-pair-share']
+    version: Literal[1]
+
+
 class VotesMethod(Record):
+    name: Literal['bradley-terry']
+    version: Literal[1]
+
     l2_penalty: Annotated[float, Field(gt=0)]
     """Penalty on system logits, excluding the sided intercept."""
 
     points_per_logit: Annotated[float, Field(gt=0)]
     anchor_score: float
-    actor_cap: Annotated[int, Field(strict=True, gt=0)]
-    """Each of an actor's `n` eligible choices weighs `min(1, actor_cap / n)`."""
+    human_weights: HumanWeights
+    settled_weights: SettledWeights
 
 
 class VotesRules(Record):
     preliminary_decisive_votes: Annotated[int, Field(strict=True, gt=0)]
-    """Raw decisive votes below which a standing is preliminary."""
+    """Raw coverage threshold, independent of inference availability."""
+
+    preliminary_decisive_vote_unit: Literal['raw-votes']
+    rater_agreement_floor: Annotated[float, Field(ge=0, le=1)]
+
+
+class UnavailableInference(Record):
+    status: Literal['unavailable']
+    target: Literal['new-cases-and-voters']
+    reason: Literal['population-method-not-validated']
 
 
 class AnalysisPolicy(Record):
     method: VotesMethod
     rules: VotesRules
+    inference: UnavailableInference
 
 
 class FamilyDefinition(Record):

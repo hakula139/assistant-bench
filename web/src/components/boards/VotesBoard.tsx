@@ -36,8 +36,8 @@ import {
   MISSING,
 } from '@/lib/format';
 import {
-  actorCapTerm,
   categoryTerm,
+  effectiveVotesTerm,
   fallbackAnchor,
   preliminaryTerm,
   anchorTerm as recordedAnchor,
@@ -128,7 +128,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
       >
         {formatCount(results.votes)}
       </Stat>
-      <Stat label={<Hint term={actorCapTerm(results.method)} />}>
+      <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
         {formatScore(results.effective_votes)}
       </Stat>
       <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>

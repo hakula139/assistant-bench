@@ -231,9 +231,9 @@ describe('family page', () => {
       'ranked from votes',
     ]);
     expect(new JSDOM(html).window.document.querySelector('dl dd')?.textContent).toBe(
-      '313 over 10 sessions, 47 left out',
+      '315 over 10 sessions, 42 left out',
     );
-    expect(text(html)).toContain('1 Acme Pro 1,041 115');
+    expect(text(html)).toContain('1 Acme Pro 1,068 98');
   });
 
   test('lists every system with no votes before the first round closes', async () => {
@@ -439,8 +439,8 @@ describe('family panel', () => {
 
     const leader = new JSDOM(html).window.document.querySelector('[aria-label="Leader"]');
 
-    expect(text(html)).toContain('Votes: Round 2026-10-21 · 313 votes');
-    expect(text(html)).toContain('Acme Pro 1,041');
+    expect(text(html)).toContain('Votes: Round 2026-10-21 · 315 votes');
+    expect(text(html)).toContain('Acme Pro 1,068');
     expect(leader).toBeNull();
     expect(islandHints(html, 'Leader')).toEqual([]);
   });
@@ -448,7 +448,7 @@ describe('family panel', () => {
   test("gives each row's point score a hint", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
-    expect(islandHints(html, 'Forest')).toContain('1,041');
+    expect(islandHints(html, 'Forest')).toContain('1,068');
   });
 
   test('keeps only the report\x27s unranked systems after the round', async () => {
@@ -532,12 +532,12 @@ describe('system page', () => {
 
     expect(text(html)).toContain('Writing Arena Writing Acme Pro Score');
     expect(headerStats(html)).toEqual([
-      'Score 1,041',
+      'Score 1,068',
       'Rank 1',
-      'Votes 115 (92 decisive)',
+      'Votes 98 (82 decisive)',
       'Round 2026-10-21',
     ]);
-    expect(islandHints(html, 'VotesStat')).toEqual(['(92 decisive)']);
+    expect(islandHints(html, 'VotesStat')).toEqual(['(82 decisive)']);
   });
 
   test('names the system, its family, and every other system by display name', async () => {
@@ -558,7 +558,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,041', '2026-10-07', '900']);
+    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,068', '2026-10-07', '900']);
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -573,12 +573,12 @@ describe('system page', () => {
     ];
     const html = await render(SystemPage, {
       family: await family(),
-      system: 'acme-mini',
+      system: 'acme-pro',
       boards: [],
     });
 
     expect(text(html)).toContain(
-      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Misses the brief 1 1% Wrong facts 1 1% Hard to follow 1 1% Wrong tone 3 3% Language errors 3 3% Formulaic 1 1% Too long 3 3%",
+      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Misses the brief 2 2% Wrong facts 3 3% Hard to follow 1 1% Wrong tone 0 0% Language errors 0 0% Formulaic 2 2% Too long 0 0%",
     );
     expect(islandHints(html, 'DefectsTable')).toEqual(
       prose.map((defect) => defectTerms[defect].term),
@@ -668,7 +668,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(headerStats(html).slice(0, 3)).toEqual(['Score 253', 'Rank 6', 'Votes 0 (0 decisive)']);
+    expect(headerStats(html).slice(0, 3)).toEqual(['Score 346', 'Rank 6', 'Votes 0 (0 decisive)']);
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain(
       'Issue Votes Share Misses the brief 0 – Wrong facts 0 – Hard to follow 0 – Wrong tone 0 – Language errors 0 –',

@@ -229,13 +229,13 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(stats(html)).toEqual([
-      ['Votes', '313 over 10 sessions, 47 left out'],
+      ['Votes', '315 over 10 sessions, 42 left out'],
       ['Effective votes', '286'],
-      ['Split-half τ', '0.80'],
-      ['Length bias', 'Favors shorter, 4.8'],
+      ['Split-half τ', '0.60'],
+      ['Length bias', 'Favors longer, 29.9'],
     ]);
     expect(statHints(html)).toEqual([
-      '47 left out',
+      '42 left out',
       'Effective votes',
       'Split-half τ',
       'Length bias',
@@ -265,7 +265,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
-    expect(stats(html)[0]).toEqual(['Votes', '313 over 10 sessions']);
+    expect(stats(html)[0]).toEqual(['Votes', '315 over 10 sessions']);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -354,8 +354,8 @@ describe('VotesBoard', () => {
   test("labels and titles each system's point with its display name and score", async () => {
     const html = render(await load());
 
-    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,041"]');
-    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,041');
+    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,068"]');
+    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,068');
     expect(point?.querySelector('[data-slot="score-track"]')).not.toBeNull();
   });
 
@@ -376,7 +376,7 @@ describe('VotesBoard', () => {
   test('counts the single session of an early round', async () => {
     const html = render(await load('report-early'));
 
-    expect(stats(html)[0]).toEqual(['Votes', '34 over 1 session, 2 left out']);
+    expect(stats(html)[0]).toEqual(['Votes', '33 over 1 session, 2 left out']);
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -446,7 +446,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toMatch(/^ Rank What Rank means System /);
-    expect(text(html)).toContain('1 Acme Pro 1,041 115');
+    expect(text(html)).toContain('1 Acme Pro 1,068 98');
   });
 
   test('labels each category board, header, and filter option in report order', async () => {
@@ -548,23 +548,23 @@ describe('VotesBoard', () => {
   });
 
   test.each([
-    ['all', 'text', 'text', '1,041', load, '115 votes, both bad 3%, gate failures 2%.'],
+    ['all', 'text', 'text', '1,068', load, '98 votes, both bad 8%, gate failures 0%.'],
     [
       'message',
       'text',
       'text',
-      '1,058',
+      '1,036',
       load,
-      '38 votes, both bad 3%, gate failures 2% across all categories.',
+      '33 votes, both bad 8%, gate failures 0% across all categories.',
     ],
-    ['all', 'diff', 'diff', '1,041', load, '115 votes, both bad 3%, failed tests 2%.'],
+    ['all', 'diff', 'diff', '1,068', load, '98 votes, both bad 8%, failed tests 0%.'],
     [
       'all',
       'tested diff',
       'diff',
-      '1,041',
+      '1,068',
       loadTested,
-      '115 votes, both bad 3%, pass rate 50% (20–80%).',
+      '98 votes, both bad 8%, pass rate 50% (20–80%).',
     ],
   ] as const)(
     "opens a system's votes and rates from its score on the %s board of a %s family",
@@ -666,9 +666,9 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('Acme Edge Preliminary 849 38 – –');
+    expect(text(html)).toContain('Acme Edge Preliminary 847 31 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
-    expect(text(html)).toContain('Acme Mini 791, 40 votes, preliminary – 904');
-    expect(text(html)).toContain('Acme Edge – 849, 38 votes, preliminary – Score');
+    expect(text(html)).toContain('Acme Mini 857, 36 votes, preliminary – 934');
+    expect(text(html)).toContain('Acme Edge – 847, 31 votes, preliminary – Score');
   });
 });

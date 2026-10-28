@@ -134,7 +134,6 @@ class LedgerProvenance(_Model):
     publication_id: Annotated[str, Field(min_length=1)]
     policy_id: Annotated[str, Field(min_length=1)]
     sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
-    status: Literal['ledger']
     weighted_evidence_digest: Annotated[str, Field(min_length=1)]
     fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
 

@@ -429,6 +429,20 @@ class TestReport:
             stale_fixture(TESTS_REPORT_FIXTURE, written)
 
 
+def close_frozen(frozen: dict[str, str | None]) -> Report:
+    write_outputs(
+        'smoke',
+        [make_output(case='echo', system='large', fingerprint='fingerprint')],
+    )
+    return report.close(
+        load_family('smoke'),
+        AT,
+        samples=1,
+        system_names={'large': 'Public large'},
+        frozen_fingerprints=frozen,
+    )
+
+
 class TestClose:
     def test_normalizes_an_offset_closing_time_before_naming_the_round(self) -> None:
         write_outputs('smoke', [make_output(case='echo', system='large')])
@@ -448,36 +462,20 @@ class TestClose:
         assert closed.closed_at.tzinfo == UTC
 
     @pytest.mark.parametrize(
-        ('frozen', 'refused'),
-        [
-            ({'large': 'fingerprint'}, False),
-            ({'large': None}, False),
-            ({'large': 'earlier'}, True),
-        ],
-        ids=['kept', 'unrecorded', 'changed'],
+        'frozen',
+        [{'large': 'fingerprint'}, {'large': None}],
+        ids=['kept', 'unrecorded'],
     )
-    def test_refuses_a_system_that_left_its_frozen_fingerprint(
-        self, frozen: dict[str, str | None], refused: bool
+    def test_keeps_a_frozen_or_unrecorded_fingerprint(
+        self, frozen: dict[str, str | None]
     ) -> None:
-        write_outputs(
-            'smoke',
-            [make_output(case='echo', system='large', fingerprint='fingerprint')],
-        )
+        closed = close_frozen(frozen)
 
-        def close() -> Report:
-            return report.close(
-                load_family('smoke'),
-                AT,
-                samples=1,
-                system_names={'large': 'Public large'},
-                frozen_fingerprints=frozen,
-            )
+        assert closed.systems['large'].fingerprint == 'fingerprint'
 
-        if refused:
-            with pytest.raises(ValueError, match='`large` changed its published'):
-                close()
-        else:
-            assert close().systems['large'].fingerprint == 'fingerprint'
+    def test_refuses_a_system_that_left_its_frozen_fingerprint(self) -> None:
+        with pytest.raises(ValueError, match='`large` changed its published'):
+            close_frozen({'large': 'earlier'})
 
     @pytest.mark.parametrize(
         ('trials', 'message'),

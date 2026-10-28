@@ -455,7 +455,7 @@ class TestAnalyzeExport:
     def test_rejects_a_sealed_policy_other_than_the_fixed_one(
         self, captures: Captures, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        rules = POLICY.rules.model_copy(update={'preliminary_decisive_votes': 12})
+        rules = POLICY.rules.model_copy(update={'rater_agreement_floor': 0.8})
         monkeypatch.setattr(
             snapshots, 'POLICY', POLICY.model_copy(update={'rules': rules})
         )
@@ -537,7 +537,6 @@ class TestAnalyzeExport:
         assert masses == pytest.approx({'owner': 100.0, 'visitor': 20.0})
         assert len(analysis.ordinary) == 150
         assert analysis.accepted == 151
-        assert analysis.provenance.status == 'ledger'
         assert snapshot.points.source_export_digest == captures.before.content_digest
         assert (
             snapshot.points.weighted_evidence_digest

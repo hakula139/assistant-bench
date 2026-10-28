@@ -241,7 +241,6 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
         systems=family.systems,
         defects=family.defects,
         provenance=LedgerProvenance(
-            status='ledger',
             schema_version=header.schema_version,
             export_id=header.id,
             export_digest=capture.content_digest,

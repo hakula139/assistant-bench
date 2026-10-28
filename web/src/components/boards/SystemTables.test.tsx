@@ -49,7 +49,7 @@ describe('RoundsTable', () => {
 
     const rows = [...container.querySelectorAll('tbody tr')];
     expect(rows.map((row) => row.textContent.includes('Preliminary'))).toEqual([true, false]);
-    await userEvent.setup().click(screen.getAllByRole('button', { name: '1,041' })[1]);
+    await userEvent.setup().click(screen.getAllByRole('button', { name: '1,068' })[1]);
 
     const historical = await screen.findByRole('dialog', { name: 'Round settings' });
     expect(historical.textContent).toContain('Historical Pro');

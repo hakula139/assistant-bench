@@ -67,7 +67,7 @@ export const terms = {
   leftOut: {
     term: 'Left out of the fit',
     definition:
-      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle, and side-swapped repeats of earlier votes.',
+      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle, plus side-swapped repeats of earlier votes.',
   },
   lengthBias: {
     term: 'Length bias',
@@ -213,7 +213,7 @@ export function anchorTerm(method: VotesMethod): Term {
 }
 
 /** The round's weighted vote total, naming the cap its method recorded. */
-export function actorCapTerm(method: VotesMethod): Term {
+export function effectiveVotesTerm(method: VotesMethod): Term {
   return {
     term: 'Effective votes',
     definition: `Votes after weighting, where a voter with more than ${method.actor_cap} votes shares a weight of ${method.actor_cap} across them. Scores, win rates and both-bad rates use these weights, while vote counts stay raw.`,

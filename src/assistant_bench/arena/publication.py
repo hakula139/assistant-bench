@@ -28,6 +28,7 @@ from assistant_bench_arena.releases import (
 from assistant_bench_arena.serialization import digest, source_identity
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
+    CappedHumanWeights,
     CaseContentApproval,
     CaseMetadata,
     EvaluationManifest,
@@ -37,12 +38,41 @@ from assistant_bench_arena.snapshots import (
     Presentation,
     PresentedCase,
     PublicApproval,
+    SettledWeights,
+    UnavailableInference,
+    VotesMethod,
+    VotesRules,
 )
 
 
-POLICY = AnalysisPolicy.model_validate(
-    {'method': METHOD.model_dump(), 'rules': RULES.model_dump()}
+POLICY = AnalysisPolicy(
+    method=VotesMethod(
+        name='bradley-terry',
+        version=1,
+        l2_penalty=METHOD.l2_penalty,
+        points_per_logit=METHOD.points_per_logit,
+        anchor_score=METHOD.anchor_score,
+        human_weights=CappedHumanWeights(
+            name='actor-proportional-cap',
+            version=1,
+            cap=METHOD.actor_cap,
+            scope='family-evaluation',
+            repeat_handling='excluded',
+        ),
+        settled_weights=SettledWeights(name='sample-pair-share', version=1),
+    ),
+    rules=VotesRules(
+        preliminary_decisive_votes=RULES.preliminary_decisive_votes,
+        preliminary_decisive_vote_unit='raw-votes',
+        rater_agreement_floor=0.7,
+    ),
+    inference=UnavailableInference(
+        status='unavailable',
+        target='new-cases-and-voters',
+        reason='population-method-not-validated',
+    ),
 )
+"""The report's method and rules in the policy shape the live ledger has sealed."""
 
 
 def public_catalog(releases: Sequence[Release]) -> tuple[FamilyView, ...]:

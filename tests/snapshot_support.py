@@ -1,11 +1,11 @@
 """Synthetic frozen evidence shared by offline report and snapshot tests."""
 
+import math
 from collections import defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
 from itertools import combinations, product
-
-import numpy as np
+from random import Random
 
 from assistant_bench.families import Category, Choice, Defect
 from assistant_bench.report import (
@@ -79,7 +79,6 @@ def make_analysis(
         systems=('a', 'b', 'x', 'y', 'unrated'),
         defects=('facts',),
         provenance=LedgerProvenance(
-            status='ledger',
             schema_version=1,
             export_id='export-1',
             export_digest='a' * 64,
@@ -177,9 +176,17 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
     of the outputs fail a gate and settle their pairs without a vote, while
     `acme-tiny` fails most cases, so it ranks through settlements alone. Each session
     pits `acme-edge` against `acme-nano` on two cases, which leaves them unranked,
-    and casts swapped repeats and votes on a retired case, which the round drops.
+    and counts some swapped repeats and votes on a retired case as dropped. Draws
+    use only `Random.random`, whose sequence Python keeps stable for a seed.
     """
-    rng = np.random.default_rng(7)
+    rng = Random(20)
+
+    def below(stop: int) -> int:
+        return int(rng.random() * stop)
+
+    def shuffled[T](items: list[T]) -> list[T]:
+        return sorted(items, key=lambda _: rng.random())
+
     everyone = list(ROUND_STRENGTHS)
     voted, strays = everyone[:5], everyone[5:7]
     cases: dict[str, Category | None] = {
@@ -190,7 +197,7 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
     lengths: defaultdict[tuple[str, str], list[int]] = defaultdict(list)
 
     def produce(case: str, system: str, failing: float) -> None:
-        length = int(rng.integers(40, 400))
+        length = 40 + below(360)
         failed = bool(rng.random() < failing)
         outputs.append(
             OutputMeasurement(
@@ -200,7 +207,7 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
                 verdict='fail' if failed else 'pass',
                 reward=None,
                 cost_usd=length * 2e-5 * (1 + everyone.index(system)),
-                latency_sec=float(rng.uniform(2, 40)),
+                latency_sec=2 + 38 * rng.random(),
                 output_tokens=length * 2,
             )
         )
@@ -225,7 +232,7 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
 
     def vote(session: str, actor: str, case: str, left: str, right: str) -> None:
         length_a, length_b = (
-            lengths[case, side][int(rng.integers(len(lengths[case, side])))]
+            lengths[case, side][below(len(lengths[case, side]))]
             for side in (left, right)
         )
         gap = ROUND_STRENGTHS[left] - ROUND_STRENGTHS[right] + 0.1
@@ -236,13 +243,11 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
             else 'both_bad'
             if draw < 0.2
             else 'a'
-            if rng.random() < 1 / (1 + np.exp(-gap))
+            if rng.random() < 1 / (1 + math.exp(-gap))
             else 'b'
         )
         tagged: tuple[Defect, ...] = (
-            (PROSE_DEFECTS[int(rng.integers(len(PROSE_DEFECTS)))],)
-            if rng.random() < 0.2
-            else ()
+            (PROSE_DEFECTS[below(len(PROSE_DEFECTS))],) if rng.random() < 0.2 else ()
         )
         ordinary.append(
             HumanEvidence(
@@ -264,13 +269,13 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
     for day in range(sessions):
         session = f'session-{day:02}'
         actor = 'owner' if day < OWNER_SESSIONS else f'visitor-{day:02}'
-        for case in rng.permutation(list(cases)):
+        for case in shuffled(list(cases)):
             if day > 0 and rng.random() < 0.1:
                 dropped += 1
                 continue
-            left, right = (str(system) for system in rng.choice(voted, 2, False))
+            left, right = shuffled(voted)[:2]
             if lengths[case, left] and lengths[case, right]:
-                vote(session, actor, str(case), left, right)
+                vote(session, actor, case, left, right)
         for case in clean:
             vote(session, actor, case, *strays)
             vote(session, actor, case, *reversed(strays))
@@ -288,7 +293,6 @@ def make_round(sessions: int, captured_at: datetime) -> AnalysisInput:
         systems=tuple(everyone),
         defects=PROSE_DEFECTS,
         provenance=LedgerProvenance(
-            status='ledger',
             schema_version=1,
             export_id=f'export-{sessions:02}',
             export_digest='a' * 64,

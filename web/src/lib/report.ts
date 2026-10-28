@@ -94,7 +94,6 @@ const provenance = z.strictObject({
   publication_id: z.string().min(1),
   policy_id: z.string().min(1),
   sampling_point_snapshot_id: z.string().min(1),
-  status: z.literal('ledger'),
   weighted_evidence_digest: z.string().min(1),
   fitted_point_snapshot_id: z.string().min(1),
 });
