@@ -1,0 +1,18 @@
+--- a/pipeline/state.py
++++ b/pipeline/state.py
+@@ -1,5 +1,6 @@
+ """Records of successful step runs, which decide the steps a build can skip."""
+
++import ast
+ import hashlib
+ import json
+ from dataclasses import dataclass, field
+@@ -30,7 +31,7 @@
+         # A repr keeps a TOML date apart from the string it formats as.
+         'params': repr(spec.params),
+         'outputs': spec.outputs,
+-        'source': hashlib.sha256(source).hexdigest(),
++        'source': hashlib.sha256(ast.dump(ast.parse(source)).encode()).hexdigest(),
+         'inputs': [
+             [path.relative_to(root).as_posix(), digest(path)] for path in inputs
+         ],

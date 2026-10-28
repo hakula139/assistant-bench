@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
-from .config import StepSpec
+from .config import RECORD_FILES, StepSpec
 
 
-STATE_PATH = Path('.pipeline') / 'state.json'
+STATE_PATH, TEMPORARY_PATH = (Path(path) for path in RECORD_FILES)
 STATE_VERSION = 1
 
 
@@ -27,14 +27,15 @@ def fingerprint(root: Path, spec: StepSpec, inputs: list[Path], source: bytes) -
     document = {
         'run': spec.run,
         'patterns': spec.inputs,
-        'params': spec.params,
+        # A repr keeps a TOML date apart from the string it formats as.
+        'params': repr(spec.params),
         'outputs': spec.outputs,
         'source': hashlib.sha256(source).hexdigest(),
         'inputs': [
             [path.relative_to(root).as_posix(), digest(path)] for path in inputs
         ],
     }
-    encoded = json.dumps(document, sort_keys=True, default=str).encode()
+    encoded = json.dumps(document, sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -84,7 +85,7 @@ class State:
         """Replace the records atomically, so an interrupted save keeps the old ones."""
         path = self.root / STATE_PATH
         path.parent.mkdir(exist_ok=True)
-        temporary = path.with_name(f'{path.name}.tmp')
+        temporary = self.root / TEMPORARY_PATH
         temporary.write_text(
             json.dumps(
                 {'version': STATE_VERSION, 'steps': self.records}, sort_keys=True

@@ -7,6 +7,19 @@ from .project import ProjectCase
 
 ALL = ['clean', 'report', 'publish']
 
+PAIR = """
+[steps.pair]
+run = "steps:pair"
+outputs = ["build/first.txt", "build/second.txt"]
+"""
+
+INDEX = """
+[steps.index]
+run = "steps:index"
+inputs = ["**/*.json"]
+outputs = ["site/files.txt"]
+"""
+
 
 class IncrementalBuildTest(ProjectCase):
     def setUp(self) -> None:
@@ -56,23 +69,78 @@ class IncrementalBuildTest(ProjectCase):
         self.assert_matches_clean_build()
 
     def test_parameter_changes(self) -> None:
-        config = self.root / 'pipeline.toml'
-        config.write_text(config.read_text().replace('"Weekly"', '"Daily"'))
+        self.edit('pipeline.toml', '"Weekly"', '"Daily"')
 
         self.assertEqual(self.build(), ['publish'])
         self.assertEqual((self.root / 'site/index.txt').read_text(), 'Daily: 3 rows\n')
 
-    def test_module_source_changes(self) -> None:
-        steps = self.root / 'steps.py'
-        steps.write_text(
-            steps.read_text().replace("SEPARATOR = ','", "SEPARATOR = ' | '")
-        )
+    def test_parameter_type_changes(self) -> None:
+        for old, new in (('"Weekly"', '2025-01-01'), ('2025-01-01', '"2025-01-01"')):
+            with self.subTest(title=new):
+                self.edit('pipeline.toml', f'title = {old}', f'title = {new}')
 
-        self.assertIn('clean', self.build())
+                self.assertEqual(self.build(), ['publish'])
+                self.assert_matches_clean_build()
+
+    def test_pattern_changes_with_the_same_matches(self) -> None:
+        self.edit('pipeline.toml', '["raw/*.csv"]', '["raw/*.csv", "raw/*.tsv"]')
+
+        self.assertEqual(self.build(), ['clean'])
         self.assert_matches_clean_build()
 
-        steps.write_text(steps.read_text().replace('rows\\n"', 'rows in total\\n"'))
-        self.assertIn('publish', self.build())
+    def test_run_changes_within_one_module(self) -> None:
+        self.edit('pipeline.toml', '"steps:publish"', '"steps:shout"')
+
+        self.assertEqual(self.build(), ['shout'])
+        self.assert_matches_clean_build()
+
+    def test_reordered_outputs(self) -> None:
+        config = self.root / 'pipeline.toml'
+        config.write_text(config.read_text() + PAIR)
+        self.assertEqual(self.build(), ['pair'])
+
+        self.edit(
+            'pipeline.toml',
+            '["build/first.txt", "build/second.txt"]',
+            '["build/second.txt", "build/first.txt"]',
+        )
+
+        self.assertEqual(self.build(), ['pair'])
+        self.assertEqual((self.root / 'build/second.txt').read_text(), 'first\n')
+        self.assert_matches_clean_build()
+
+    def test_recursive_patterns_see_only_project_files(self) -> None:
+        config = self.root / 'pipeline.toml'
+        config.write_text(config.read_text() + INDEX)
+        self.assertEqual(self.build(), ['index'])
+
+        self.assertEqual(self.build(), [])
+        self.assertEqual(
+            (self.root / 'site/files.txt').read_text(), 'build/summary.json\n'
+        )
+        self.assert_matches_clean_build()
+
+    def test_module_source_changes(self) -> None:
+        edits = [
+            ("SEPARATOR = ','", "SEPARATOR = ' | '"),
+            ('rows\\n"', 'rows in total\\n"'),
+            ('def _log(', '# Each step logs its runs.\ndef _log('),
+        ]
+        for old, new in edits:
+            with self.subTest(edit=new):
+                self.edit('steps.py', old, new)
+
+                self.assertEqual(self.build(), ALL)
+                self.assert_matches_clean_build()
+
+    def test_reexported_functions_follow_their_defining_module(self) -> None:
+        self.write('facade.py', 'from steps import publish as published\n')
+        self.edit('pipeline.toml', '"steps:publish"', '"facade:published"')
+        self.assertEqual(self.build(), ['publish'])
+
+        self.edit('steps.py', 'rows\\n"', 'rows in total\\n"')
+
+        self.assertEqual(self.build(), ALL)
         self.assert_matches_clean_build()
 
     def test_module_edits_between_builds_in_one_process(self) -> None:

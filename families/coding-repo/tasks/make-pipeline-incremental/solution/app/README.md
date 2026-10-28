@@ -24,6 +24,8 @@ outputs = ["build/report.txt", "build/summary.json"]
 
 The function receives a `pipeline.StepContext`. Its `inputs` are the existing files the patterns match, sorted, its `outputs` are the declared outputs in order, with their parent directories created, and its `params` and `root` are the step's parameters and the project directory. An exception from the function fails the step.
 
+A step must be deterministic: its outputs may depend only on the paths and contents of its inputs, the paths of its outputs, its params and the module that defines its function, and not on file metadata, environment variables, the clock, other modules or files, or what an earlier run wrote.
+
 ## Command line
 
 ```bash
@@ -36,10 +38,10 @@ The project defaults to the current directory. `build` runs every step after the
 
 ## Incremental builds
 
-`build` skips a step that is up to date, so it leaves the same outputs as a build from a clean project. A step is up to date when its last run succeeded with the same `run`, `inputs`, `params` and `outputs`, the same source in the module that defines its function, and the same paths and contents of the files its patterns match, and when its outputs still hold what that run wrote. Modification times play no part, so touching a file reruns nothing, and a step whose inputs come out of a rerun unchanged is skipped.
+`build` skips a step that is up to date, so it leaves the same outputs as a build from a clean project. A step is up to date when its last run succeeded with the same `run`, `inputs`, `params` and `outputs`, the same source in the module that defines its function, and the same paths and contents of the files its patterns match, and when its outputs still hold what that run wrote. The module that defines the function may differ from the one `run` names, which can re-export it. Modification times play no part, so touching a file reruns nothing, and a step whose inputs come out of a rerun unchanged is skipped.
 
-The records live in `.pipeline/state.json` under the project directory. A step's record is removed before it runs and written once it succeeds, so a failed or interrupted step runs again in the next build.
+The records live in `.pipeline/state.json` under the project directory, which input patterns never match and no step may declare as an output. A step's record is removed before it runs and written once it succeeds, so a failed or interrupted step runs again in the next build.
 
 ## Python API
 
-`pipeline.load(root)` reads a project into a `Pipeline`, raising `ConfigError` for an invalid one. `pipeline.build(pipeline, target=None, *, log=print)` builds it and returns a `BuildReport`, whose `ran` and `skipped` list step names in build order, and raises `StepFailed` when a step fails. A step module edited since a build in the same process ran it runs again from its new source. `pipeline.clean(pipeline)` deletes the outputs and returns the ones that existed.
+`pipeline.load(root)` reads a project into a `Pipeline`, raising `ConfigError` for an invalid one. `pipeline.build(pipeline, target=None, *, log=print)` builds it and returns a `BuildReport`, whose `ran` and `skipped` list step names in build order, and raises `StepFailed` when a step fails. A step module edited since a build in the same process ran it runs again from its new source. Step modules are imported by name, so one process can build several projects only when their step modules' names differ. `pipeline.clean(pipeline)` deletes the outputs and returns the ones that existed.

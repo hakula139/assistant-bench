@@ -9,6 +9,10 @@ from typing import Any, cast
 
 CONFIG_NAME = 'pipeline.toml'
 
+RECORDS = '.pipeline/state.json'
+RECORD_FILES = (RECORDS, f'{RECORDS}.tmp')
+"""The build records and their replacement, which no step reads or writes."""
+
 _STEP_NAME = re.compile(r'[a-z][a-z0-9_-]*')
 _CALLABLE = re.compile(r'[A-Za-z_][\w.]*:[A-Za-z_]\w*')
 
@@ -58,6 +62,8 @@ def load(root: Path) -> Pipeline:
     owners: dict[str, str] = {}
     for step in steps.values():
         for output in step.outputs:
+            if output in RECORD_FILES:
+                raise ConfigError(f'Step {step.name!r} may not write {output}.')
             if output in owners:
                 raise ConfigError(
                     f'Steps {owners[output]!r} and {step.name!r} both write {output}.'

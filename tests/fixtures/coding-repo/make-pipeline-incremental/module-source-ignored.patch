@@ -1,8 +1,8 @@
 --- a/pipeline/state.py
 +++ b/pipeline/state.py
-@@ -29,7 +29,6 @@
-         'patterns': spec.inputs,
-         'params': spec.params,
+@@ -30,7 +30,6 @@
+         # A repr keeps a TOML date apart from the string it formats as.
+         'params': repr(spec.params),
          'outputs': spec.outputs,
 -        'source': hashlib.sha256(source).hexdigest(),
          'inputs': [

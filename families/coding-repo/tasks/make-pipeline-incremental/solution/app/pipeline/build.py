@@ -1,10 +1,10 @@
 """Build a pipeline's steps in dependency order."""
 
-import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 
-from .config import Pipeline
+from .config import RECORD_FILES, Pipeline
 from .graph import order
 from .state import STATE_PATH, State, fingerprint
 from .steps import load_function, resolve_inputs, run_step
@@ -57,5 +57,8 @@ def clean(pipeline: Pipeline) -> list[str]:
                 path.unlink()
                 removed.append(output)
 
-    shutil.rmtree(pipeline.root / STATE_PATH.parent, ignore_errors=True)
+    for record in RECORD_FILES:
+        (pipeline.root / record).unlink(missing_ok=True)
+    with suppress(OSError):
+        (pipeline.root / STATE_PATH.parent).rmdir()
     return removed

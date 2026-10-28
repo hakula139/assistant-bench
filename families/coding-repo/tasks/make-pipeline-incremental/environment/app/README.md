@@ -24,6 +24,8 @@ outputs = ["build/report.txt", "build/summary.json"]
 
 The function receives a `pipeline.StepContext`. Its `inputs` are the existing files the patterns match, sorted, its `outputs` are the declared outputs in order, with their parent directories created, and its `params` and `root` are the step's parameters and the project directory. An exception from the function fails the step.
 
+A step must be deterministic: its outputs may depend only on the paths and contents of its inputs, the paths of its outputs, its params and the module that defines its function, and not on file metadata, environment variables, the clock, other modules or files, or what an earlier run wrote.
+
 ## Command line
 
 ```bash

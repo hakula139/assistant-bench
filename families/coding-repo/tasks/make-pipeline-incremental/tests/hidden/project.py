@@ -54,6 +54,24 @@ STEPS = textwrap.dedent(
         summary = json.loads(context.inputs[0].read_text())
         title = context.params['title']
         context.outputs[0].write_text(f"{title}: {summary['rows']} rows\\n")
+
+
+    def shout(context):
+        _log(context, 'shout')
+        summary = json.loads(context.inputs[0].read_text())
+        context.outputs[0].write_text(f"{summary['rows']} ROWS\\n")
+
+
+    def pair(context):
+        _log(context, 'pair')
+        for output, text in zip(context.outputs, ('first', 'second')):
+            output.write_text(text + '\\n')
+
+
+    def index(context):
+        _log(context, 'index')
+        names = [path.relative_to(context.root).as_posix() for path in context.inputs]
+        context.outputs[0].write_text(''.join(name + '\\n' for name in names))
     """
 )
 
@@ -83,13 +101,6 @@ SOURCES = {
     'raw/b.csv': 'c; 3\n',
     'templates/header.txt': 'Report\n',
 }
-
-OUTPUTS = (
-    'build/clean.csv',
-    'build/report.txt',
-    'build/summary.json',
-    'site/index.txt',
-)
 
 
 class ProjectCase(unittest.TestCase):
@@ -134,11 +145,20 @@ class ProjectCase(unittest.TestCase):
         log = self.root / 'runs.log'
         return log.read_text().split() if log.exists() else []
 
-    def outputs(self, root: Path) -> dict[str, bytes | None]:
+    def outputs(self, root: Path) -> dict[str, bytes]:
+        """Read every file under the output directories `build` and `site`."""
         return {
-            name: (root / name).read_bytes() if (root / name).exists() else None
-            for name in OUTPUTS
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for directory in ('build', 'site')
+            for path in sorted((root / directory).rglob('*'))
+            if path.is_file()
         }
+
+    def edit(self, name: str, old: str, new: str) -> None:
+        path = self.root / name
+        content = path.read_text()
+        self.assertIn(old, content)
+        path.write_text(content.replace(old, new))
 
     def assert_matches_clean_build(self) -> None:
         """Compare the outputs with those of a fresh copy of the current sources."""

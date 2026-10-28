@@ -29,9 +29,13 @@ envrc
 esbuild
 exog
 expit
+fdatasync
+fileno
 fsize
+fstat
 fsutil
 ftruncate
+getattr
 hakula
 hanzi
 httpx
@@ -80,6 +84,7 @@ pywrangler
 RDONLY
 redoc
 remoteip
+repr
 rlimit
 Sarasa
 scipy
