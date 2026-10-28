@@ -89,6 +89,11 @@ export const terms = {
     definition:
       'The share of trials whose tests pass, averaged over tasks so that each task counts once. A trial whose tests never ran fails.',
   },
+  passRateInterval: {
+    term: 'Pass rate',
+    definition:
+      'The share of trials whose tests pass, averaged over tasks so that each task counts once, above its 95% interval over tasks. A trial whose tests never ran fails.',
+  },
   passInterval: {
     term: '95% interval',
     definition:

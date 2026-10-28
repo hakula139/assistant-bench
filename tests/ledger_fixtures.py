@@ -151,7 +151,7 @@ def make_release(
             metadata=OutputMetadata(
                 source_digest=output_source(index, name),
                 errored=False,
-                reward=1.0,
+                reward=None,
                 cost_usd=None,
                 latency_sec=None,
                 output_tokens=None,

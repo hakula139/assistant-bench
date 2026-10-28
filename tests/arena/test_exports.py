@@ -493,6 +493,9 @@ class TestAnalyzeExport:
             for system, point in snapshot.points.points.items()
             if point.score is not None
         }
+        assert [row.pass_rate for row in closed.results.standings] == [None] * len(
+            closed.results.standings
+        )
 
         scores = {row.system: row.score for row in expected.results.standings}
         expected_points = point_snapshot(

@@ -60,6 +60,7 @@ def make_analysis(
             system=system,
             errored=False,
             verdict='pass',
+            reward=None,
             cost_usd=0.01,
             latency_sec=2.0,
             output_tokens=20,
