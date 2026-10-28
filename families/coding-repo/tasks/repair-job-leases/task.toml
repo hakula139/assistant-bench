@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/repair-job-leases"
 description = "Repair claiming, lease expiry and retries in a multi-process SQLite job queue"
-version = "1.0.0"
+version = "2.0.0"
 
 [metadata]
 category = "bug-fix"

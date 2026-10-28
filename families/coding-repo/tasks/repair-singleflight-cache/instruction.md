@@ -4,4 +4,4 @@ In the account service in `/app`, requests for the same account ID in different 
 
 Repair the cache and its service integration according to `README.md`. Preserve singleflight loading, completion-based TTLs, loader failure recovery and the documented public API.
 
-Add deterministic regression tests using controlled futures or events. Use only Python 3.14's standard library.
+Add deterministic regression tests using controlled futures or events. Use only Python 3.14's standard library. Verification runs the code as an unprivileged user from a copy of `/app` that it may not be able to write, so keep the files the code or its tests create in temporary directories.

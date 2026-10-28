@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from shlex import quote
+from types import ModuleType
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -26,6 +28,7 @@ from assistant_bench.paths import REPO_ROOT
 CODING = REPO_ROOT / 'families' / 'coding-repo'
 CODING_TASKS = sorted(path.parent for path in (CODING / 'tasks').glob('*/task.toml'))
 CODING_FIXTURES = REPO_ROOT / 'tests' / 'fixtures' / 'coding-repo'
+CODING_BYPASSES = sorted(path.stem for path in CODING_FIXTURES.glob('*.py'))
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
@@ -151,9 +154,63 @@ def test_coding_references_ship_their_changes_and_the_packages_they_change(
 
 
 def test_coding_fixture_directories_match_tasks() -> None:
-    assert {path.name for path in CODING_FIXTURES.iterdir()} <= {
+    assert {path.name for path in CODING_FIXTURES.iterdir() if path.is_dir()} <= {
         task.name for task in CODING_TASKS
     }
+
+
+def solved_workspace(task: Path, tmp_path: Path, *, solved: bool) -> Path:
+    """Copy a task's starter into `tmp_path`, with the reference applied if `solved`."""
+    workspace = tmp_path / 'app'
+    shutil.copytree(task / 'environment' / 'app', workspace)
+    if solved:
+        solve = (task / 'solution' / 'solve.sh').read_text()
+        solve = solve.replace(
+            '"${BASH_SOURCE[0]}"', quote(str(task / 'solution' / 'solve.sh'))
+        ).replace(' /app\n', f' {quote(str(workspace))}\n')
+        subprocess.run(
+            ['bash', '-s'],
+            input=solve,
+            cwd=workspace,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+    return workspace
+
+
+def run_verifier(task: Path, workspace: Path, logs: Path, tmp_path: Path) -> str:
+    """Run a task's `test.sh` against `workspace`, logging to `logs`, for its output."""
+    verifier = tmp_path / 'tests'
+    shutil.copytree(task / 'tests', verifier)
+    verify = verifier / 'verify.py'
+    verify.write_text(
+        verify.read_text().replace(
+            "pathlib.Path('/app')", f'pathlib.Path({str(workspace)!r})'
+        )
+    )
+    script = (
+        (verifier / 'test.sh')
+        .read_text()
+        .replace('/tests/verify.py', quote(str(verify)))
+        .replace('/logs/verifier', quote(str(logs)))
+    )
+    result = subprocess.run(
+        ['bash', '-s'],
+        input=script,
+        cwd=workspace,
+        env={
+            'PATH': os.pathsep.join(
+                [str(Path(sys.executable).parent), os.environ['PATH']]
+            ),
+            'TMPDIR': str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=180,
+    )
+    return result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -174,59 +231,16 @@ def test_coding_fixture_directories_match_tasks() -> None:
 def test_coding_verifiers_reward_only_the_reference(
     task: Path, candidate: str, tmp_path: Path
 ) -> None:
-    workspace = tmp_path / 'app'
-    shutil.copytree(task / 'environment' / 'app', workspace)
-    if candidate != 'starter':
-        solve = (task / 'solution' / 'solve.sh').read_text()
-        solve = solve.replace(
-            '"${BASH_SOURCE[0]}"', quote(str(task / 'solution' / 'solve.sh'))
-        ).replace(' /app\n', f' {quote(str(workspace))}\n')
-        subprocess.run(
-            ['bash', '-s'],
-            input=solve,
-            cwd=workspace,
-            text=True,
-            check=True,
-            timeout=60,
-        )
+    workspace = solved_workspace(task, tmp_path, solved=candidate != 'starter')
     if candidate not in {'starter', 'reference'}:
         patch = CODING_FIXTURES / task.name / f'{candidate}.patch'
         subprocess.run(['git', 'init', '--quiet'], cwd=workspace, check=True)
         subprocess.run(['git', 'apply', str(patch)], cwd=workspace, check=True)
-    verifier = tmp_path / 'tests'
-    shutil.copytree(task / 'tests', verifier)
-    verify = verifier / 'verify.py'
-    verify.write_text(
-        verify.read_text().replace(
-            "pathlib.Path('/app')", f'pathlib.Path({str(workspace)!r})'
-        )
-    )
     logs = tmp_path / 'logs'
-    script = (
-        (verifier / 'test.sh')
-        .read_text()
-        .replace('/tests/verify.py', quote(str(verify)))
-        .replace('/logs/verifier', quote(str(logs)))
-    )
 
-    result = subprocess.run(
-        ['bash', '-s'],
-        input=script,
-        cwd=workspace,
-        env={
-            'PATH': os.pathsep.join(
-                [str(Path(sys.executable).parent), os.environ['PATH']]
-            ),
-            'TMPDIR': str(tmp_path),
-        },
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=180,
-    )
+    output = run_verifier(task, workspace, logs, tmp_path)
 
     accepted = candidate == 'reference'
-    output = result.stdout + result.stderr
     assert (logs / 'reward.txt').read_text() == f'{int(accepted)}\n', output
     verdict = 'PASS' if accepted else 'FAIL'
     assert f'{verdict} the hidden behavior tests pass' in output, output
@@ -235,6 +249,116 @@ def test_coding_verifiers_reward_only_the_reference(
         assert not re.search(
             r'\b(ImportError|ModuleNotFoundError|NameError|SyntaxError)\b', output
         ), output
+
+
+@pytest.mark.parametrize(
+    ('task', 'bypass'),
+    [
+        pytest.param(task, bypass, id=f'{task.name}-{bypass}')
+        for task in CODING_TASKS
+        for bypass in CODING_BYPASSES
+    ],
+)
+def test_coding_verifiers_reject_bypasses_and_planted_rewards(
+    task: Path, bypass: str, tmp_path: Path
+) -> None:
+    workspace = solved_workspace(task, tmp_path, solved=True)
+    source = (CODING_FIXTURES / f'{bypass}.py').read_text()
+    for package in workspace.glob('*/__init__.py'):
+        if package.parent.name != 'tests':
+            package.write_text(package.read_text() + source)
+    logs = tmp_path / 'logs'
+    (logs / 'reward.json').mkdir(parents=True)
+    (logs / 'reward.json' / 'reward').write_text('1')
+    planted = tmp_path / 'planted'
+    planted.write_text('1')
+    (logs / 'reward.txt').symlink_to(planted)
+
+    output = run_verifier(task, workspace, logs, tmp_path)
+
+    reward = logs / 'reward.txt'
+    assert not reward.is_symlink() and reward.read_text() == '0\n', output
+    assert not (logs / 'reward.json').exists(), output
+    assert 'FAIL the hidden behavior tests pass' in output, output
+
+
+def load_coding_verifier() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        'coding_verify', CODING / 'shared' / 'tests' / 'verify.py'
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    ('record', 'expected', 'reason'),
+    [
+        pytest.param(
+            None,
+            None,
+            'The run left no record, as it exited early or ran past 60 s.',
+            id='no-record',
+        ),
+        pytest.param(
+            {'intact': False, 'passed': ['t.a'], 'successful': True},
+            None,
+            None,
+            id='workspace-passes-unchecked-machinery',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': ['t.a'], 'successful': False},
+            None,
+            'A test failed.',
+            id='workspace-failure',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': [], 'successful': True},
+            None,
+            'No test passed.',
+            id='workspace-without-passes',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': ['t.a', 't.b'], 'successful': True},
+            ['t.a', 't.b'],
+            None,
+            id='hidden-exact-match',
+        ),
+        pytest.param(
+            {'intact': False, 'passed': ['t.a', 't.b'], 'successful': True},
+            ['t.a', 't.b'],
+            'The run changed the `unittest` machinery.',
+            id='hidden-machinery-changed',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': ['t.a'], 'successful': True},
+            ['t.a', 't.b'],
+            'These tests did not pass: t.b',
+            id='hidden-missing-test',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': ['t.a', 't.b', 't.c'], 'successful': True},
+            ['t.a', 't.b'],
+            'Tests beyond the hidden test methods passed.',
+            id='hidden-extra-test',
+        ),
+        pytest.param(
+            {'intact': True, 'passed': ['t.a', 't.b'], 'successful': False},
+            ['t.a', 't.b'],
+            'A class or module fixture failed.',
+            id='hidden-fixture-failure',
+        ),
+    ],
+)
+def test_coding_verifier_judges_each_run_record(
+    record: dict[str, Any] | None, expected: list[str] | None, reason: str | None
+) -> None:
+    verify = load_coding_verifier()
+
+    judged = verify.judge(None if record is None else verify.Record(**record), expected)
+
+    assert judged == reason
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:
