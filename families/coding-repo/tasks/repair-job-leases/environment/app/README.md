@@ -20,7 +20,7 @@ A lease expires at `expires_at`, so it is valid only while the queue's clock rea
 
 `fail` records `error` as the job's `last_error`. A job with attempts left is queued again with `run_at` set `min(retry_delay * 2 ** (attempt - 1), max_retry_delay)` seconds after the failure, and a job that used its last attempt becomes dead.
 
-A lease that expires counts as a failed attempt whose error is `lease expired`, with no delay before the job is ready again. When it was the job's last attempt, the job becomes dead instead.
+A lease that expires counts as a failed attempt whose error is `lease expired`, with no delay before the job is ready again. When it was the job's last attempt, the job becomes dead instead. The queue reclaims an expired lease when the next claim runs, so until then `get`, `counts` and `dead_letters` may still report its job as `running`.
 
 ## Workers
 

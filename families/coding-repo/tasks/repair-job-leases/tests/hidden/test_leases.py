@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,31 @@ from pathlib import Path
 from typing import Any
 
 from jobq import Lease, LeaseLost, Queue, Worker
+
+
+STARTER_SCHEMA = """
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    dedupe_key TEXT,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done', 'dead')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    run_at REAL NOT NULL,
+    lease_owner TEXT,
+    lease_token TEXT,
+    lease_until REAL,
+    result TEXT,
+    last_error TEXT,
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
+CREATE INDEX jobs_ready ON jobs (status, run_at, id);
+CREATE UNIQUE INDEX jobs_active_dedupe ON jobs (dedupe_key)
+    WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');
+PRAGMA user_version = 1;
+"""
+"""The database format of the version operators already run."""
 
 
 class FakeClock:
@@ -75,13 +101,109 @@ class LeaseTest(unittest.TestCase):
         lease = self.claim(queue, 'w1', lease_seconds=10)
         self.clock.now += 10
 
-        with self.assertRaises(LeaseLost):
-            queue.heartbeat(lease)
-        with self.assertRaises(LeaseLost):
-            queue.complete(lease, 'late')
+        for action in (
+            lambda: queue.heartbeat(lease),
+            lambda: queue.complete(lease, 'late'),
+            lambda: queue.fail(lease, 'late failure'),
+        ):
+            with self.assertRaises(LeaseLost):
+                action()
 
-        self.assertNotEqual(queue.get(job_id).status, 'done')
+        job = queue.get(job_id)
+        self.assertIn(job.status, {'queued', 'running'})
+        self.assertEqual((job.attempts, job.result), (1, None))
+        self.assertNotEqual(job.last_error, 'late failure')
         self.assertEqual(self.claim(queue, 'w2').job_id, job_id)
+
+    def test_claims_take_the_earliest_run_at_then_the_lowest_id(self) -> None:
+        queue = self.open()
+        later = queue.enqueue('task', delay=10)
+        earlier = queue.enqueue('task')
+        tied = queue.enqueue('task', delay=10)
+        self.clock.now += 10
+
+        order = [self.claim(queue, 'w1').job_id for _ in range(3)]
+
+        self.assertEqual(order, [earlier, later, tied])
+
+    def test_opens_queues_written_by_the_current_version(self) -> None:
+        now = self.clock.now
+        rows: list[dict[str, Any]] = [
+            {'kind': 'ready', 'payload': '[1]', 'dedupe_key': 'q', 'run_at': now - 10},
+            {'kind': 'later', 'payload': '{}', 'run_at': now + 100},
+            {
+                'kind': 'held',
+                'payload': 'null',
+                'dedupe_key': 'r',
+                'status': 'running',
+                'attempts': 1,
+                'run_at': now - 5,
+                'lease_owner': 'gone',
+                'lease_token': 'stale',
+                'lease_until': now - 1,
+            },
+            {
+                'kind': 'finished',
+                'payload': '"x"',
+                'dedupe_key': 'd',
+                'status': 'done',
+                'attempts': 1,
+                'result': '{"ok": true}',
+                'finished_at': now - 25,
+            },
+            {
+                'kind': 'broken',
+                'payload': '2',
+                'dedupe_key': 'x',
+                'status': 'dead',
+                'attempts': 5,
+                'last_error': 'boom',
+                'finished_at': now - 25,
+            },
+        ]
+        db = sqlite3.connect(self.path)
+        db.executescript(STARTER_SCHEMA)
+        for job_id, row in enumerate(rows, 1):
+            row = {
+                'id': job_id,
+                'status': 'queued',
+                'run_at': now - 30,
+                'created_at': now - 40,
+                **row,
+            }
+            columns, values = ', '.join(row), ', '.join('?' * len(row))
+            db.execute(
+                f'INSERT INTO jobs ({columns}) VALUES ({values})', tuple(row.values())
+            )
+        db.commit()
+        db.close()
+
+        try:
+            queue = self.open()
+        except Exception as error:
+            self.fail(f'a queue in the current format fails to open: {error!r}')
+
+        done = queue.get(4)
+        self.assertEqual(
+            (done.status, done.result, done.payload), ('done', {'ok': True}, 'x')
+        )
+        self.assertEqual(
+            [(job.id, job.last_error) for job in queue.dead_letters()], [(5, 'boom')]
+        )
+        first = self.claim(queue, 'w1')
+        second = self.claim(queue, 'w2')
+        self.assertIsNone(queue.claim('w3'))
+        self.assertEqual((first.job_id, first.payload, first.attempt), (1, [1], 1))
+        self.assertEqual((second.job_id, second.attempt), (3, 2))
+        self.assertEqual(queue.get(3).last_error, 'lease expired')
+        self.assertEqual(queue.enqueue('ready', dedupe_key='q'), 1)
+        self.assertEqual(queue.enqueue('held', dedupe_key='r'), 3)
+        self.assertNotIn(queue.enqueue('finished', dedupe_key='d'), {1, 2, 3, 4, 5})
+        self.assertNotIn(queue.enqueue('broken', dedupe_key='x'), {1, 2, 3, 4, 5})
+        queue.complete(first, 'one')
+        self.assertEqual(
+            queue.counts(), {'queued': 3, 'running': 1, 'done': 2, 'dead': 1}
+        )
 
     def test_heartbeats_keep_the_lease(self) -> None:
         queue = self.open()

@@ -196,8 +196,17 @@ class Queue:
         return self.get(lease.job_id)
 
     def backoff(self, attempt: int) -> float:
-        """Seconds to wait before retrying a job whose `attempt` failed."""
-        return min(self.retry_delay * 2 ** (attempt - 1), self.max_retry_delay)
+        """Seconds to wait before retrying a job whose `attempt` failed.
+
+        Doubling stops at the cap, since `2 ** (attempt - 1)` overflows a float
+        from attempt 1025.
+        """
+        delay = self.retry_delay
+        for _ in range(attempt - 1):
+            if delay >= self.max_retry_delay:
+                break
+            delay *= 2
+        return min(delay, self.max_retry_delay)
 
     def get(self, job_id: int) -> Job:
         row = self._db.execute('SELECT * FROM jobs WHERE id = ?', (job_id,)).fetchone()

@@ -91,6 +91,11 @@ class LeaseTest(unittest.TestCase):
         self.clock.now += 3
         self.assertEqual(self.claim('w1').job_id, job_id)
 
+    def test_backoff_stays_at_the_cap_for_late_attempts(self) -> None:
+        delays = [self.queue.backoff(attempt) for attempt in (1, 8, 1025, 5000)]
+
+        self.assertEqual(delays, [3, 300, 300, 300])
+
     def test_finished_jobs_free_their_dedupe_key(self) -> None:
         first = self.queue.enqueue('sync', dedupe_key='k')
         self.queue.complete(self.claim('w1'))

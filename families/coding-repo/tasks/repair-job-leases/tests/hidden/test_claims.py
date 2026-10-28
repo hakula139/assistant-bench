@@ -8,14 +8,50 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from jobq import Lease, Queue
 
 
 ROUNDS = 5
-"""Lock-held races per test, each over two fresh jobs."""
+"""Races per test, each over two fresh jobs."""
 
-CLAIM = """
+STATEMENT_DELAY = 0.05
+"""Seconds each SQLite statement waits before it runs in the racing claims.
+
+The wait spaces a claim's statements far wider than the claims' start times
+differ, so a claim that reads a job and leases it in separate steps overlaps
+another claim's read.
+"""
+
+_connect = sqlite3.connect
+
+
+def slow_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+    db = _connect(*args, **kwargs)
+    db.set_trace_callback(lambda _: time.sleep(STATEMENT_DELAY))
+    return db
+
+
+SLOW_SQLITE = f"""
+import sqlite3
+import time
+
+_connect = sqlite3.connect
+
+
+def _slow_connect(*args, **kwargs):
+    db = _connect(*args, **kwargs)
+    db.set_trace_callback(lambda _: time.sleep({STATEMENT_DELAY}))
+    return db
+
+
+sqlite3.connect = _slow_connect
+"""
+
+CLAIM = (
+    SLOW_SQLITE
+    + """
 import json
 import sys
 from pathlib import Path
@@ -28,6 +64,7 @@ for _ in sys.stdin:
     lease = queue.claim(sys.argv[2])
     print(json.dumps(None if lease is None else lease.job_id), flush=True)
 """
+)
 
 DRAIN = """
 import json
@@ -47,7 +84,7 @@ print(json.dumps(claimed), flush=True)
 
 
 class ConcurrentClaimTest(unittest.TestCase):
-    """Claims queue up behind another connection's write lock, then race."""
+    """Claims start together and race, or queue up behind a write lock."""
 
     def setUp(self) -> None:
         self.path = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'jobs.db'
@@ -72,7 +109,8 @@ class ConcurrentClaimTest(unittest.TestCase):
         self.assertEqual(sorted(leased), sorted(jobs), f'round {attempt}: {claimed}')
 
     def test_threads(self) -> None:
-        queues = [self.enterContext(Queue(self.path)) for _ in range(6)]
+        with mock.patch('sqlite3.connect', slow_connect):
+            queues = [self.enterContext(Queue(self.path)) for _ in range(6)]
         claimed: list[int | None] = []
         errors: list[BaseException] = []
 
@@ -91,10 +129,8 @@ class ConcurrentClaimTest(unittest.TestCase):
                 threading.Thread(target=claim, args=(queue, f'w{index}'))
                 for index, queue in enumerate(queues)
             ]
-            self.hold_write_lock()
             for thread in threads:
                 thread.start()
-            self.release_write_lock()
             for thread in threads:
                 thread.join(30)
 
@@ -118,13 +154,20 @@ class ConcurrentClaimTest(unittest.TestCase):
             self.assertEqual(worker.stdout.readline(), 'ready\n')
         return workers
 
-    def release_workers(self, workers: list[subprocess.Popen[str]]) -> list[Any]:
-        """Let each worker run one step behind the write lock and read its result."""
+    def release_workers(
+        self, workers: list[subprocess.Popen[str]], *, locked: bool
+    ) -> list[Any]:
+        """Let each worker run one step and read its result.
+
+        When `locked`, the step waits behind the write lock until every worker
+        has started it.
+        """
         for worker in workers:
             assert worker.stdin is not None
             worker.stdin.write('go\n')
             worker.stdin.flush()
-        self.release_write_lock()
+        if locked:
+            self.release_write_lock()
 
         results: list[Any] = []
         for worker in workers:
@@ -142,8 +185,7 @@ class ConcurrentClaimTest(unittest.TestCase):
 
         for attempt in range(ROUNDS):
             jobs = self.enqueue(2)
-            self.hold_write_lock()
-            claimed = self.release_workers(workers)
+            claimed = self.release_workers(workers, locked=False)
 
             self.assert_distinct_leases(claimed, jobs, attempt)
         self.finish(workers)
@@ -154,7 +196,9 @@ class ConcurrentClaimTest(unittest.TestCase):
         self.hold_write_lock()
 
         claimed = [
-            job_id for result in self.release_workers(workers) for job_id in result
+            job_id
+            for result in self.release_workers(workers, locked=True)
+            for job_id in result
         ]
 
         self.finish(workers)
