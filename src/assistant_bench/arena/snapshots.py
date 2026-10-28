@@ -159,19 +159,6 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
     ordinary_rows = tuple(
         row for row in selected if row.repeat_of is None and eligible(row)
     )
-    ordinary_map = {row.seq: row for row in ordinary_rows}
-    repeat_rows: list[Receipt] = []
-    for row in selected:
-        if row.repeat_of is None or not eligible(row):
-            continue
-
-        original = ordinary_map.get(row.repeat_of)
-        if original is not None and (
-            row.actor_id == original.actor_id
-            and row.a_output == original.b_output
-            and row.b_output == original.a_output
-        ):
-            repeat_rows.append(row)
 
     def human(row: Receipt, weight: float) -> HumanEvidence:
         return HumanEvidence(
@@ -190,14 +177,12 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
                 row.case_key,
                 weight,
             ),
-            repeat_of=None if row.repeat_of is None else str(row.repeat_of),
         )
 
     assigned = actor_weights([row.actor_id for row in ordinary_rows])
     ordinary = tuple(
         human(row, weight) for row, weight in zip(ordinary_rows, assigned, strict=True)
     )
-    repeats = tuple(human(row, 0.0) for row in repeat_rows)
     numerical = tuple(
         Settlement.model_validate_json(canonical(row.value)) for row in numerics
     )
@@ -224,7 +209,6 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
                 }
                 for row in ordinary
             ],
-            'repeats': [row.receipt for row in repeats],
         }
     )
     points = {system.id: Point(score=None, component=None) for system in systems}
@@ -277,7 +261,6 @@ def analyze_export(capture: FrozenExport) -> SnapshotAnalysis:
         declared_categories=family.categories,
         categories=tuple((case.key, case.category) for case in cases),
         ordinary=ordinary,
-        repeats=repeats,
         settlements=settlements,
         outputs=tuple(
             OutputMeasurement(

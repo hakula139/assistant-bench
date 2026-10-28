@@ -17,51 +17,6 @@ function replaceField(payload: object, path: (string | number)[], value: unknown
   Reflect.set(parent, path[path.length - 1], value);
 }
 
-async function cappedReport() {
-  const payload = reportSchema.parse(await readFixture());
-  if (payload.results.scorer !== 'votes') {
-    throw new Error('Expected votes fixture');
-  }
-
-  const results = payload.results;
-  results.method.human_weights = {
-    name: 'actor-proportional-cap',
-    version: 1,
-    cap: 100,
-    scope: 'family-evaluation',
-    repeat_handling: 'excluded',
-  };
-  results.provenance = {
-    status: 'ledger',
-    schema_version: 1,
-    export_id: 'export-1',
-    export_digest: 'a'.repeat(64),
-    namespace: 'test-deployment',
-    captured_at: '2026-01-01T00:00:00Z',
-    event_cutoff: 30,
-    receipt_cutoff: 20,
-    family_revision: 4,
-    analysis_sequence: 30,
-    evaluation_id: 'evaluation-1',
-    publication_id: 'publication-1',
-    policy_id: 'b'.repeat(64),
-    sampling_point_snapshot_id: 'points-before',
-    weighted_evidence_digest: 'c'.repeat(64),
-    fitted_point_snapshot_id: 'points-after',
-  };
-  const aggregates = [
-    results,
-    ...results.standings,
-    ...results.head_to_head,
-    ...results.categories.flatMap((board) => [board, ...board.standings]),
-  ];
-  for (const aggregate of aggregates) {
-    aggregate.effective_votes = aggregate.votes / 2;
-  }
-
-  return payload;
-}
-
 describe('reportSchema', () => {
   test.each(['unknown', 'punctuation'])(
     'rejects the %s issue code in an aggregate',
@@ -82,13 +37,13 @@ describe('reportSchema', () => {
     const row = parsed.results.standings.find((standing) => standing.system === 'acme-mini');
 
     expect(row?.defects).toEqual({
-      scope: 0,
-      facts: 3,
-      clarity: 0,
-      tone: 4,
-      mechanics: 4,
-      formulaic: 0,
-      length: 1,
+      scope: 1,
+      facts: 1,
+      clarity: 1,
+      tone: 3,
+      mechanics: 3,
+      formulaic: 1,
+      length: 3,
     });
     expect(Object.keys(row?.defects ?? {})).toEqual([
       'scope',
@@ -115,104 +70,44 @@ describe('reportSchema', () => {
     expect(reportSchema.safeParse({ ...payload, [field]: value }).success).toBe(false);
   });
 
+  test.each(['report', 'report-early', 'report-ledger'] as const)(
+    'parses the %s votes round the pydantic models write',
+    async (name) => {
+      const payload = await readFixture(name);
+
+      const parsed = reportSchema.parse(payload);
+
+      expect(parsed).toEqual(payload);
+    },
+  );
+
   test.each([
-    'overall mass',
-    'head total',
-    'mirror mass',
-    'mirror outcomes',
-    'mirror rate',
-    'category row',
-    'category total',
-    'duplicate category',
-  ])('rejects capped cross-aggregate inconsistency in %s', async (change) => {
-    const payload = await cappedReport();
-    if (payload.results.scorer !== 'votes') {
-      throw new Error('Expected votes fixture');
-    }
-    const results = payload.results;
-    const first = results.head_to_head[0];
-    const mirror = results.head_to_head.find(
-      (row) => row.system === first.opponent && row.opponent === first.system,
-    );
-    if (mirror === undefined) {
-      throw new Error('Expected mirrored fixture');
-    }
-    switch (change) {
-      case 'overall mass':
-        results.effective_votes = 1;
-        break;
-      case 'head total':
-        results.votes += 1;
-        break;
-      case 'mirror mass':
-        first.effective_votes += 0.25;
-        mirror.effective_votes -= 0.25;
-        break;
-      case 'mirror outcomes':
-        first.wins += 1;
-        first.losses -= 1;
-        break;
-      case 'mirror rate':
-        first.win_rate = 0.1;
-        break;
-      case 'category row':
-        results.categories[0].effective_votes = 1;
-        break;
-      case 'category total':
-        results.categories[0].effective_votes +=
-          results.effective_votes -
-          results.categories.reduce((sum, board) => sum + board.effective_votes, 0) +
-          1;
-        break;
-      case 'duplicate category':
-        results.categories[1].category = results.categories[0].category;
-        break;
-    }
-
-    expect(reportSchema.safeParse(payload).success).toBe(false);
-  });
-
-  test('accepts capped fit mass with recorded ledger provenance', async () => {
-    const payload = await cappedReport();
-
-    const parsed = reportSchema.parse(payload);
-
-    expect(parsed).toEqual(payload);
-  });
-
-  const massPaths: [string, (string | number)[]][] = [
-    ['overall', []],
     ['standing', ['standings', 0]],
     ['head-to-head', ['head_to_head', 0]],
     ['category', ['categories', 0]],
     ['category standing', ['categories', 0, 'standings', 0]],
-  ];
-  test.each(
-    massPaths.flatMap(([scope, path]) =>
-      [-1, Infinity, NaN, 1000].map((value) => [scope, path, value] as const),
-    ),
-  )('rejects %s capped effective mass at %j: %s', async (_, path, value) => {
-    const payload = await cappedReport();
-    replaceField(payload, ['results', ...path, 'effective_votes'], value);
+  ] satisfies [string, (string | number)[]][])(
+    'rejects a negative %s effective vote total',
+    async (_, path) => {
+      const payload = await readFixture();
+      replaceField(payload, ['results', ...path, 'effective_votes'], -1);
 
-    expect(reportSchema.safeParse(payload).success).toBe(false);
-  });
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
 
   test.each([
     ['missing provenance', ['provenance'], undefined],
     ['unrecorded provenance', ['provenance'], { status: 'unrecorded' }],
     ['negative cutoff', ['provenance', 'receipt_cutoff'], -1],
     ['private actor', ['provenance', 'actor_id'], 'private-actor'],
-    ['unknown method', ['method', 'human_weights', 'name'], 'unknown-method'],
-    ['unknown version', ['method', 'human_weights', 'version'], 2],
-    ['nonpositive cap', ['method', 'human_weights', 'cap'], 0],
-    ['boolean cap', ['method', 'human_weights', 'cap'], true],
-    ['category cap', ['method', 'human_weights', 'scope'], 'category'],
-    ['ranked repeats', ['method', 'human_weights', 'repeat_handling'], 'included'],
+    ['nonpositive cap', ['method', 'actor_cap'], 0],
+    ['boolean cap', ['method', 'actor_cap'], true],
+    ['retired method name', ['method', 'name'], 'bradley-terry'],
   ] satisfies [string, (string | number)[], unknown][])(
-    'rejects capped reports with %s',
+    'rejects votes rounds with %s',
     async (_, path, value) => {
-      const payload = await cappedReport();
+      const payload = await readFixture();
       replaceField(payload, ['results', ...path], value);
 
       expect(reportSchema.safeParse(payload).success).toBe(false);
@@ -249,29 +144,14 @@ describe('reportSchema', () => {
 
   test.each([
     ['interval', ['standings', 0, 'interval'], { lower: 900, upper: 1100 }],
-    ['best rank', ['standings', 0, 'best_rank'], 1],
-    ['worst rank', ['standings', 0, 'worst_rank'], 2],
-    [
-      'category interval',
-      ['categories', 0, 'standings', 0, 'interval'],
-      { lower: 900, upper: 1100 },
-    ],
-    ['separability', ['separability'], 0.5],
-    ['decision', ['decision'], { leader: 'acme-large', separated: true, tie_break: 'score' }],
     ['standing fingerprint', ['standings', 0, 'fingerprint'], 'duplicate'],
     ['preliminary flag', ['standings', 0, 'preliminary'], true],
     ['category preliminary flag', ['categories', 0, 'standings', 0, 'preliminary'], true],
-    ['overall mass', ['effective_votes'], 0.25],
-    ['standing mass', ['standings', 0, 'effective_votes'], 0.25],
-    ['category mass', ['categories', 0, 'effective_votes'], 0.25],
-    ['category standing mass', ['categories', 0, 'standings', 0, 'effective_votes'], 0.25],
-    ['head to head mass', ['head_to_head', 0, 'effective_votes'], 0.25],
     ['unknown reference', ['reference'], 'unknown'],
     ['unknown anchor', ['anchor'], 'unknown'],
     ['unranked anchor', ['anchor'], 'acme-edge'],
     ['duplicate membership', ['unranked'], ['acme-large']],
     ['category duplicate membership', ['categories', 0, 'unranked'], ['acme-large']],
-    ['contradictory repeat floor', ['rater_agreement', 'below_floor'], true],
     ['unknown opponent', ['head_to_head', 0, 'opponent'], 'unknown'],
     ['unknown category', ['categories', 0, 'category'], 'unknown'],
     ['unknown unranked system', ['unranked'], ['unknown']],
@@ -325,11 +205,9 @@ describe('reportSchema', () => {
       l2_penalty: 0.25,
       points_per_logit: 200,
       anchor_score: 1234,
+      actor_cap: 50,
     });
-    Object.assign(payload.results.rules, {
-      preliminary_decisive_votes: 12,
-      rater_agreement_floor: 0.5,
-    });
+    Object.assign(payload.results.rules, { preliminary_decisive_votes: 12 });
 
     const parsed = reportSchema.parse(payload);
 
@@ -345,17 +223,13 @@ describe('reportSchema', () => {
   });
 
   test('preserves genuine capped ledger weights and provenance on the wire', async () => {
-    const payload = await readFixture('report-ledger');
+    const parsed = reportSchema.parse(await readFixture('report-ledger'));
 
-    const parsed = reportSchema.parse(payload);
-
-    expect(parsed).toEqual(payload);
     if (parsed.results.scorer !== 'votes') {
       throw new Error('Expected genuine votes fixture');
     }
     const results = parsed.results;
-    expect(results.method.human_weights.name).toBe('actor-proportional-cap');
-    expect(results.provenance?.status).toBe('ledger');
+    expect(results.method.actor_cap).toBe(100);
     expect(results.votes).toBe(150);
     expect(results.dropped_votes).toBe(1);
     expect(results.effective_votes).toBeCloseTo(120);

@@ -12,11 +12,7 @@ describe('isPreliminary', () => {
   ])(
     'derives %i decisive votes against the recorded threshold %i',
     (decisive, threshold, expected) => {
-      const rules: VotesRules = {
-        preliminary_decisive_votes: threshold,
-        preliminary_decisive_vote_unit: 'raw-votes',
-        rater_agreement_floor: 0.7,
-      };
+      const rules: VotesRules = { preliminary_decisive_votes: threshold };
 
       const preliminary = isPreliminary({ decisive_votes: decisive }, rules);
 

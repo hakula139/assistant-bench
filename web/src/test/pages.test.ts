@@ -205,7 +205,7 @@ describe('family page', () => {
 
     expect(text(html)).toContain('Small');
     expect(text(html)).toContain('Large');
-    expect(text(html)).toContain('Effective vote mass 120');
+    expect(text(html)).toContain('Effective votes 120');
     expect(text(html)).not.toContain('No round has closed yet.');
   });
 
@@ -231,9 +231,9 @@ describe('family page', () => {
       'ranked from votes',
     ]);
     expect(new JSDOM(html).window.document.querySelector('dl dd')?.textContent).toBe(
-      '340 over 10 sessions, 20 left out',
+      '313 over 10 sessions, 47 left out',
     );
-    expect(text(html)).toContain('1 Acme Pro 1,004 114');
+    expect(text(html)).toContain('1 Acme Pro 1,041 115');
   });
 
   test('lists every system with no votes before the first round closes', async () => {
@@ -434,22 +434,21 @@ describe('family panel', () => {
     expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
   });
 
-  test("draws the latest round's points and states unavailable inference", async () => {
+  test("draws the latest round's points without a leader", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
     const leader = new JSDOM(html).window.document.querySelector('[aria-label="Leader"]');
 
-    expect(text(html)).toContain('Votes: Round 2026-10-21 · 340 votes');
-    expect(text(html)).toContain('Acme Pro 1,004');
+    expect(text(html)).toContain('Votes: Round 2026-10-21 · 313 votes');
+    expect(text(html)).toContain('Acme Pro 1,041');
     expect(leader).toBeNull();
-    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
     expect(islandHints(html, 'Leader')).toEqual([]);
   });
 
   test("gives each row's point score a hint", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 
-    expect(islandHints(html, 'Forest')).toContain('1,004');
+    expect(islandHints(html, 'Forest')).toContain('1,041');
   });
 
   test('keeps only the report\x27s unranked systems after the round', async () => {
@@ -487,8 +486,7 @@ describe('system page', () => {
 
     const html = await render(SystemPage, { family: closed, system: 'large', boards: [] });
 
-    expect(text(html)).toContain('Win rates use the recorded actor weights.');
-    expect(text(html)).toContain('Counts show raw ordinary votes.');
+    expect(text(html)).toContain("Counts show raw votes, while win rates use each voter's weight.");
     expect(text(html)).toContain('58%');
     expect(text(html)).not.toContain('57%');
     expect(html).toContain('<title>Large on Writing · Synthetic writing | HAKULA†BENCH</title>');
@@ -534,12 +532,12 @@ describe('system page', () => {
 
     expect(text(html)).toContain('Writing Arena Writing Acme Pro Score');
     expect(headerStats(html)).toEqual([
-      'Score 1,004',
+      'Score 1,041',
       'Rank 1',
-      'Votes 114 (89 decisive)',
+      'Votes 115 (92 decisive)',
       'Round 2026-10-21',
     ]);
-    expect(islandHints(html, 'VotesStat')).toEqual(['(89 decisive)']);
+    expect(islandHints(html, 'VotesStat')).toEqual(['(92 decisive)']);
   });
 
   test('names the system, its family, and every other system by display name', async () => {
@@ -560,7 +558,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,004', '2026-10-07', '900']);
+    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,041', '2026-10-07', '900']);
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -580,7 +578,7 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain(
-      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Misses the brief 0 0% Wrong facts 3 2% Hard to follow 0 0% Wrong tone 4 3% Language errors 4 3% Formulaic 0 0% Too long 1 1%",
+      "Issues Votes that tagged this system's output with each issue. Issue Votes Share Misses the brief 1 1% Wrong facts 1 1% Hard to follow 1 1% Wrong tone 3 3% Language errors 3 3% Formulaic 1 1% Too long 3 3%",
     );
     expect(islandHints(html, 'DefectsTable')).toEqual(
       prose.map((defect) => defectTerms[defect].term),
@@ -670,7 +668,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(headerStats(html).slice(0, 3)).toEqual(['Score 233', 'Rank 6', 'Votes 0 (0 decisive)']);
+    expect(headerStats(html).slice(0, 3)).toEqual(['Score 253', 'Rank 6', 'Votes 0 (0 decisive)']);
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain(
       'Issue Votes Share Misses the brief 0 – Wrong facts 0 – Hard to follow 0 – Wrong tone 0 – Language errors 0 –',

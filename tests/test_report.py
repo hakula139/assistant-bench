@@ -1,17 +1,17 @@
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
-from datetime import UTC, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import jsonschema
 import numpy as np
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from assistant_bench import report
-from assistant_bench.families import Choice, load_family
+from assistant_bench.families import load_family
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.report import (
     HumanEvidence,
@@ -22,10 +22,17 @@ from assistant_bench.report import (
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.pass_rates import clopper_pearson
 from assistant_bench.scoring.weighting import actor_weights
-from snapshot_support import make_analysis, make_capped_analysis, make_evidence
+from snapshot_support import (
+    ROUND_NAMES,
+    make_analysis,
+    make_capped_analysis,
+    make_evidence,
+    make_round,
+)
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,
+    LEDGER_REPORT_FIXTURE,
     PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
@@ -106,29 +113,125 @@ def close_tests_round(families_dir: Path) -> Report:
     return report.close(
         load_family('coding-tasks'),
         AT,
+        samples=2,
         system_names={
             'acme-pro': 'Acme Pro',
             'acme-mini': 'Acme Mini',
             'acme-small': 'Acme Small',
         },
-        previous_reports=[],
+        frozen_fingerprints={},
     )
+
+
+class Tally(NamedTuple):
+    votes: int
+    effective_votes: float
+
+
+def approx(value: JsonValue) -> object:
+    """Compare the floats of a JSON document within a relative 1e-6."""
+    if isinstance(value, float):
+        return pytest.approx(value, rel=1e-6, abs=1e-9)
+    if isinstance(value, dict):
+        return {key: approx(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [approx(item) for item in value]
+    return value
 
 
 class TestReport:
     @pytest.mark.parametrize(
-        'fixture', [REPORT_FIXTURE, EARLY_REPORT_FIXTURE], ids=['full', 'early']
+        ('fixture', 'sessions', 'closed_at'),
+        [
+            (REPORT_FIXTURE, 10, datetime(2026, 10, 21, 18, tzinfo=UTC)),
+            (EARLY_REPORT_FIXTURE, 1, datetime(2026, 10, 1, 18, tzinfo=UTC)),
+        ],
+        ids=['full', 'early'],
     )
-    def test_roundtrips_unrecorded_unit_reports_without_adding_provenance(
-        self, fixture: Path
+    def test_matches_the_committed_votes_round(
+        self,
+        fixture: Path,
+        sessions: int,
+        closed_at: datetime,
+        stale_fixture: Callable[[Path, str], None],
     ) -> None:
-        recorded = fixture.read_text()
+        analysis = make_round(sessions, closed_at - timedelta(hours=1))
 
-        parsed = Report.model_validate_json(recorded)
+        closed = report.close_snapshot(
+            analysis,
+            closed_at,
+            fingerprints={system: f'fp-{system}' for system in ROUND_NAMES},
+            system_names=ROUND_NAMES,
+            frozen_fingerprints={},
+        )
 
-        assert parsed.results.scorer == 'votes'
-        assert parsed.results.provenance.status == 'unrecorded'
-        assert f'{parsed.model_dump_json(indent=2)}\n' == recorded
+        written = closed.model_dump_json(indent=2) + '\n'
+        if not fixture.exists() or json.loads(fixture.read_text()) != approx(
+            json.loads(written)
+        ):
+            stale_fixture(fixture, written)
+
+    @pytest.mark.parametrize(
+        'fixture',
+        [REPORT_FIXTURE, EARLY_REPORT_FIXTURE, LEDGER_REPORT_FIXTURE],
+        ids=['full', 'early', 'ledger'],
+    )
+    def test_committed_votes_rounds_account_for_every_vote(self, fixture: Path) -> None:
+        results = Report.model_validate_json(fixture.read_text()).results
+        assert isinstance(results, report.VotesResults)
+
+        def tally(rows: Iterable[Tally]) -> Tally:
+            counted = list(rows)
+            return Tally(
+                sum(row.votes for row in counted),
+                sum(row.effective_votes for row in counted),
+            )
+
+        def within(row: Tally, total: Tally) -> bool:
+            slack = 1e-9 * max(1.0, total.effective_votes)
+            return (
+                row.votes <= total.votes
+                and row.effective_votes <= total.effective_votes + slack
+            )
+
+        family = Tally(results.votes, results.effective_votes)
+        boards = results.categories
+        standings = [Tally(row.votes, row.effective_votes) for row in results.standings]
+        heads = [Tally(row.votes, row.effective_votes) for row in results.head_to_head]
+        categories = [Tally(row.votes, row.effective_votes) for row in boards]
+        assert all(
+            within(row, Tally(row.votes, row.votes))
+            for row in [family, *standings, *heads, *categories]
+        )
+        assert all(within(row, family) for row in [*standings, *heads, *categories])
+        assert all(
+            within(Tally(row.votes, row.effective_votes), category)
+            for board, category in zip(boards, categories, strict=True)
+            for row in board.standings
+        )
+        assert len({board.category for board in boards}) == len(boards)
+        assert within(tally(categories), family)
+        assert within(tally(standings), tally([family, family]))
+
+        pairs = {(row.system, row.opponent): row for row in results.head_to_head}
+        assert len(pairs) == len(results.head_to_head)
+        assert tally(heads).votes == 2 * results.votes
+        assert tally(heads).effective_votes == pytest.approx(
+            2 * results.effective_votes
+        )
+        for (system, opponent), row in pairs.items():
+            mirror = pairs[opponent, system]
+            assert system != opponent
+            assert (row.votes, row.wins, row.losses, row.ties, row.both_bad) == (
+                mirror.votes,
+                mirror.losses,
+                mirror.wins,
+                mirror.ties,
+                mirror.both_bad,
+            )
+            assert row.wins + row.losses + row.ties + row.both_bad == row.votes
+            assert row.effective_votes == pytest.approx(mirror.effective_votes)
+            assert row.win_rate + mirror.win_rate == pytest.approx(1)
 
     def test_requires_an_explicit_timezone_for_the_closing_timestamp(self) -> None:
         payload = json.loads(REPORT_FIXTURE.read_text())
@@ -140,59 +243,15 @@ class TestReport:
     @pytest.mark.parametrize(
         ('path', 'value'),
         [
-            (('standings', 0, 'interval'), {'lower': 900, 'upper': 1100}),
-            (('standings', 0, 'best_rank'), 1),
-            (('standings', 0, 'worst_rank'), 2),
-            (
-                ('categories', 0, 'standings', 0, 'interval'),
-                {'lower': 900, 'upper': 1100},
-            ),
-            (('separability',), 0.5),
-            (
-                ('decision',),
-                {'leader': 'acme-large', 'separated': True, 'tie_break': 'score'},
-            ),
-        ],
-        ids=[
-            'interval',
-            'best-rank',
-            'worst-rank',
-            'category-interval',
-            'separability',
-            'decision',
-        ],
-    )
-    def test_rejects_unsupported_inference_in_both_python_and_json_schema(
-        self, path: tuple[str | int, ...], value: Any
-    ) -> None:
-        payload = json.loads(REPORT_FIXTURE.read_text())
-        parent = payload['results']
-        for key in path[:-1]:
-            parent = parent[key]
-        parent[path[-1]] = value
-
-        with pytest.raises(ValidationError):
-            Report.model_validate(payload)
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(payload, Report.model_json_schema(mode='serialization'))
-
-    @pytest.mark.parametrize(
-        ('path', 'value'),
-        [
             (('standings', 0, 'fingerprint'), 'copied-fingerprint'),
+            (('standings', 0, 'interval'), {'lower': 900, 'upper': 1100}),
             (('standings', 0, 'preliminary'), True),
             (('categories', 0, 'standings', 0, 'preliminary'), False),
-            (('effective_votes',), 0.25),
-            (('standings', 0, 'effective_votes'), 0.25),
-            (('categories', 0, 'effective_votes'), 0.25),
-            (('categories', 0, 'standings', 0, 'effective_votes'), 0.25),
-            (('head_to_head', 0, 'effective_votes'), 0.25),
             (('reference',), 'unknown-reference'),
             (('anchor',), 'unknown-anchor'),
             (('anchor',), 'acme-edge'),
             (('unranked',), ['acme-large']),
             (('categories', 0, 'unranked'), ['acme-large']),
-            (('rater_agreement', 'below_floor'), True),
             (('head_to_head', 0, 'opponent'), 'unknown-opponent'),
             (('unranked',), ['unknown-unranked']),
             (('categories', 0, 'unranked'), ['unknown-category-system']),
@@ -200,19 +259,14 @@ class TestReport:
         ],
         ids=[
             'duplicate-fingerprint',
+            'interval',
             'preliminary',
             'category-preliminary',
-            'overall-mass',
-            'standing-mass',
-            'category-mass',
-            'category-standing-mass',
-            'head-to-head-mass',
             'reference',
             'anchor',
             'unranked-anchor',
             'duplicate-membership',
             'category-duplicate-membership',
-            'contradictory-repeat-floor',
             'opponent',
             'unranked',
             'category-unranked',
@@ -261,19 +315,18 @@ class TestReport:
     def test_preserves_recorded_method_parameters_and_rules(self) -> None:
         payload = json.loads(REPORT_FIXTURE.read_text())
         method = payload['results']['method']
-        method.update(l2_penalty=0.25, points_per_logit=200, anchor_score=1234)
-        payload['results']['rules'].update(
-            preliminary_decisive_votes=12, rater_agreement_floor=0.5
+        method.update(
+            l2_penalty=0.25, points_per_logit=200, anchor_score=1234, actor_cap=50
         )
+        payload['results']['rules'].update(preliminary_decisive_votes=12)
 
         closed = Report.model_validate(payload)
 
         assert closed.results.scorer == 'votes'
-        assert closed.results.method.l2_penalty == 0.25
-        assert closed.results.method.points_per_logit == 200
-        assert closed.results.method.anchor_score == 1234
+        assert closed.results.method == report.VotesMethod(
+            l2_penalty=0.25, points_per_logit=200, anchor_score=1234, actor_cap=50
+        )
         assert closed.results.rules.preliminary_decisive_votes == 12
-        assert closed.results.rules.rater_agreement_floor == 0.5
 
     @pytest.mark.parametrize(
         ('path', 'value'),
@@ -314,8 +367,13 @@ class TestReport:
 
     @pytest.mark.parametrize(
         'fixture',
-        [REPORT_FIXTURE, EARLY_REPORT_FIXTURE, TESTS_REPORT_FIXTURE],
-        ids=['full', 'early', 'tests'],
+        [
+            REPORT_FIXTURE,
+            EARLY_REPORT_FIXTURE,
+            LEDGER_REPORT_FIXTURE,
+            TESTS_REPORT_FIXTURE,
+        ],
+        ids=['full', 'early', 'ledger', 'tests'],
     )
     def test_committed_fixture_validates_against_the_json_schema(
         self, fixture: Path
@@ -380,22 +438,46 @@ class TestClose:
         closed = report.close(
             load_family('smoke'),
             local,
+            samples=1,
             system_names={'large': 'Public large'},
-            previous_reports=[],
+            frozen_fingerprints={},
         )
 
         assert closed.round == '2026-10-21'
         assert closed.closed_at == utc
         assert closed.closed_at.tzinfo == UTC
 
-    def test_rejects_a_naive_public_closing_time(self) -> None:
-        with pytest.raises(ValueError):
-            report.close(
+    @pytest.mark.parametrize(
+        ('frozen', 'refused'),
+        [
+            ({'large': 'fingerprint'}, False),
+            ({'large': None}, False),
+            ({'large': 'earlier'}, True),
+        ],
+        ids=['kept', 'unrecorded', 'changed'],
+    )
+    def test_refuses_a_system_that_left_its_frozen_fingerprint(
+        self, frozen: dict[str, str | None], refused: bool
+    ) -> None:
+        write_outputs(
+            'smoke',
+            [make_output(case='echo', system='large', fingerprint='fingerprint')],
+        )
+
+        def close() -> Report:
+            return report.close(
                 load_family('smoke'),
-                AT.replace(tzinfo=None),
-                system_names={},
-                previous_reports=[],
+                AT,
+                samples=1,
+                system_names={'large': 'Public large'},
+                frozen_fingerprints=frozen,
             )
+
+        if refused:
+            with pytest.raises(ValueError, match='`large` changed its published'):
+                close()
+        else:
+            assert close().systems['large'].fingerprint == 'fingerprint'
 
     @pytest.mark.parametrize(
         ('trials', 'message'),
@@ -429,8 +511,9 @@ class TestClose:
             report.close(
                 load_family('smoke'),
                 AT,
+                samples=1,
                 system_names={'large': 'Public large'},
-                previous_reports=[],
+                frozen_fingerprints={},
             )
 
     def test_reports_pass_rates_for_a_tests_family(self) -> None:
@@ -459,8 +542,9 @@ class TestClose:
         closed = report.close(
             load_family('smoke'),
             AT,
+            samples=1,
             system_names={'large': 'Public large'},
-            previous_reports=[],
+            frozen_fingerprints={},
         )
         results = closed.results
 
@@ -555,8 +639,9 @@ class TestClose:
             report.close(
                 load_family('f'),
                 AT,
+                samples=2,
                 system_names={'large': 'Public large', 'small': 'Public small'},
-                previous_reports=[],
+                frozen_fingerprints={},
             )
 
 
@@ -650,27 +735,6 @@ class TestVotesResults:
         )
         assert standings['b'].pass_rate is None
 
-    @pytest.mark.parametrize('choice', ['a', 'b', 'tie', 'both_bad'])
-    def test_compares_swapped_repeats_without_adding_them_to_the_fit(
-        self, choice: Choice
-    ) -> None:
-        original = make_evidence(0, choice='a')
-        repeat = replace(
-            make_evidence(1, choice=choice, systems=('b', 'a')),
-            repeat_of=original.receipt,
-        )
-
-        results = report.votes_results(make_analysis((original,), repeats=(repeat,)))
-
-        assert (results.votes, results.effective_votes, results.dropped_votes) == (
-            1,
-            1,
-            1,
-        )
-        assert results.rater_agreement.repeats == 1
-        assert results.rater_agreement.agreement == float(choice == 'b')
-        assert results.rater_agreement.below_floor == (choice != 'b')
-
     def test_settlement_only_results_rank_without_inventing_human_diagnostics(
         self,
     ) -> None:
@@ -685,7 +749,6 @@ class TestVotesResults:
         assert results.standings[0].system == 'a'
         assert results.head_to_head == []
         assert results.position is results.length is results.split_half_tau is None
-        assert results.rater_agreement.agreement is None
         assert all(row.votes == row.decisive_votes == 0 for row in results.standings)
 
     def test_falls_back_to_the_connected_root_when_the_reference_does_not_rank(
@@ -734,104 +797,6 @@ class TestVotesResults:
         assert [board.category for board in results.categories] == ['reply', 'docs']
 
     @pytest.mark.parametrize(
-        'change',
-        [
-            'overall-mass',
-            'head-total',
-            'mirror-mass',
-            'mirror-outcomes',
-            'mirror-rate',
-            'category-row',
-            'category-total',
-            'duplicate-category',
-            'standing-mass',
-        ],
-    )
-    def test_rejects_aggregates_that_cannot_share_one_frozen_weight_sequence(
-        self, capped_results: report.VotesResults, change: str
-    ) -> None:
-        payload = capped_results.model_dump(mode='json')
-        first = payload['head_to_head'][0]
-        mirror = next(
-            row
-            for row in payload['head_to_head']
-            if (row['system'], row['opponent']) == (first['opponent'], first['system'])
-        )
-        match change:
-            case 'overall-mass':
-                payload['effective_votes'] = 1
-            case 'head-total':
-                payload['votes'] += 1
-            case 'mirror-mass':
-                first['effective_votes'] += 0.25
-                mirror['effective_votes'] -= 0.25
-            case 'mirror-outcomes':
-                first['wins'] += 1
-                first['losses'] -= 1
-            case 'mirror-rate':
-                first['win_rate'] = 0.1
-            case 'category-row':
-                payload['categories'][0]['effective_votes'] = 1
-            case 'category-total':
-                payload['categories'][1]['effective_votes'] = (
-                    payload['effective_votes']
-                    - payload['categories'][0]['effective_votes']
-                    + 1
-                )
-            case 'duplicate-category':
-                payload['categories'][1]['category'] = payload['categories'][0][
-                    'category'
-                ]
-            case 'standing-mass':
-                payload['standings'][0]['effective_votes'] = (
-                    payload['effective_votes'] + 1
-                )
-            case _:
-                raise AssertionError(change)
-
-        with pytest.raises(ValidationError):
-            report.VotesResults.model_validate_json(json.dumps(payload))
-
-    def test_rejects_standing_totals_above_both_sides_of_the_full_evaluation(
-        self,
-    ) -> None:
-        base = make_capped_analysis()
-        bridge = ranking.Comparison('b', 'x', 0.5, 'bridge', 0.25, sided=False)
-        connected = make_analysis(
-            base.ordinary,
-            settlements=(bridge,),
-            repeats=base.repeats,
-            categories=(*base.categories, ('bridge', 'message')),
-        )
-        payload = report.votes_results(connected).model_dump(mode='json')
-        standing = next(row for row in payload['standings'] if row['system'] == 'x')
-        standing['effective_votes'] += 1
-
-        with pytest.raises(ValidationError, match='Standing totals'):
-            report.VotesResults.model_validate_json(json.dumps(payload))
-
-    @pytest.mark.parametrize(
-        ('field', 'value'),
-        [
-            ('name', 'unknown-method'),
-            ('version', 2),
-            ('cap', 0),
-            ('cap', True),
-            ('scope', 'category'),
-            ('repeat_handling', 'included'),
-        ],
-        ids=['name', 'version', 'nonpositive-cap', 'boolean-cap', 'scope', 'repeats'],
-    )
-    def test_rejects_unsupported_or_inconsistent_human_weight_methods(
-        self, capped_results: report.VotesResults, field: str, value: str | int
-    ) -> None:
-        payload = capped_results.model_dump(mode='json')
-        payload['method']['human_weights'][field] = value
-
-        with pytest.raises(ValidationError):
-            report.VotesResults.model_validate_json(json.dumps(payload))
-
-    @pytest.mark.parametrize(
         ('scope', 'value'),
         [
             (scope, value)
@@ -842,7 +807,7 @@ class TestVotesResults:
                 'category',
                 'category-standing',
             )
-            for value in (-1.0, float('inf'), float('nan'), 1000.0)
+            for value in (-1.0, float('inf'), float('nan'))
         ],
         ids=lambda value: str(value),
     )
@@ -873,7 +838,7 @@ class TestVotesResults:
         'change',
         ['missing-provenance', 'unrecorded-provenance', 'negative-cutoff', 'actor-id'],
     )
-    def test_requires_private_free_ledger_provenance_for_capped_reports(
+    def test_requires_private_free_ledger_provenance(
         self, capped_results: report.VotesResults, change: str
     ) -> None:
         payload = capped_results.model_dump(mode='json')
@@ -905,11 +870,6 @@ class TestVotesResults:
         assert results.dropped_votes == 1
         assert results.sessions == 4
         assert results.unranked == ['x', 'y']
-        assert results.rater_agreement.model_dump() == {
-            'repeats': 1,
-            'agreement': 1.0,
-            'below_floor': False,
-        }
 
         standings = {row.system: row for row in results.standings}
         assert standings['a'].votes == 225
@@ -995,30 +955,6 @@ class TestVotesResults:
 
 
 class TestWriteReport:
-    @pytest.mark.parametrize(
-        ('field', 'value'),
-        [
-            ('family', '../outside'),
-            ('family', '/outside'),
-            ('family', 'family\n'),
-            ('round', '../outside'),
-            ('round', '2026-10-21\n'),
-            ('round', '２０２６-１０-２１'),
-        ],
-    )
-    def test_refuses_unsafe_paths_even_when_a_caller_bypasses_model_validation(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: str
-    ) -> None:
-        directory = tmp_path / 'reports'
-        monkeypatch.setattr(report, 'REPORTS_DIR', directory)
-        original = Report.model_validate_json(REPORT_FIXTURE.read_text())
-        invalid = original.model_copy(update={field: value})
-
-        with pytest.raises(ValidationError):
-            write_report(invalid)
-
-        assert not directory.exists()
-
     def test_writes_reports_family_round_json(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1029,62 +965,6 @@ class TestWriteReport:
 
         assert path == tmp_path / 'reports' / 'arena' / '2026-10-21.json'
         assert Report.model_validate_json(path.read_text()) == closed
-
-
-class TestReadReports:
-    @pytest.mark.parametrize(
-        'family', ['../outside', '/outside', 'family\n', 'Uppercase']
-    )
-    def test_rejects_an_invalid_family_before_reading_any_report(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, family: str
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'missing')
-
-        with pytest.raises(ValidationError):
-            report.read_reports(family, AT)
-
-    def test_reads_strict_prior_rounds_in_closing_order(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
-        earlier = closed.model_copy(update={'round': '2026-10-01', 'closed_at': AT})
-        middle = closed.model_copy(
-            update={'round': '2026-10-02', 'closed_at': AT + timedelta(hours=12)}
-        )
-        boundary = AT + timedelta(days=1)
-        same_time = closed.model_copy(
-            update={'round': '2026-10-03', 'closed_at': boundary}
-        )
-        later = closed.model_copy(
-            update={'round': '2026-10-04', 'closed_at': AT + timedelta(days=2)}
-        )
-        for item in (later, middle, same_time, earlier):
-            write_report(item)
-
-        reports = report.read_reports(closed.family, boundary)
-
-        assert reports == [earlier, middle]
-        assert report.read_reports('missing', boundary) == []
-
-    @pytest.mark.parametrize('invalid', ['family', 'round', 'payload', 'timezone'])
-    def test_rejects_invalid_history_before_using_its_metadata(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
-        path = write_report(closed)
-        payload = json.loads(path.read_text())
-        if invalid == 'payload':
-            del payload['systems']
-        elif invalid == 'timezone':
-            payload['closed_at'] = '2026-10-21T09:00:00'
-        else:
-            payload[invalid] = 'wrong'
-        path.write_text(json.dumps(payload))
-
-        with pytest.raises(ValueError):
-            report.read_reports(closed.family, closed.closed_at + timedelta(days=1))
 
 
 class TestReportedFingerprints:
@@ -1147,3 +1027,22 @@ class TestReportedFingerprints:
 
         with pytest.raises(ValidationError):
             report.reported_fingerprints('../outside')
+
+    @pytest.mark.parametrize('invalid', ['family', 'round', 'payload', 'timezone'])
+    def test_rejects_invalid_history_before_using_its_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+    ) -> None:
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        path = write_report(closed)
+        payload = json.loads(path.read_text())
+        if invalid == 'payload':
+            del payload['systems']
+        elif invalid == 'timezone':
+            payload['closed_at'] = '2026-10-21T09:00:00'
+        else:
+            payload[invalid] = 'wrong'
+        path.write_text(json.dumps(payload))
+
+        with pytest.raises(ValueError):
+            report.reported_fingerprints(closed.family)

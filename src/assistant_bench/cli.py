@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated, NoReturn
+from typing import Annotated, NoReturn, assert_never
 
 import typer
 from dotenv import find_dotenv, load_dotenv
@@ -26,6 +26,7 @@ from assistant_bench.catalog import (
 from assistant_bench.families import (
     Case,
     Family,
+    TaskTestsSettings,
     VotesSettings,
     case_task,
     family_names,
@@ -208,46 +209,55 @@ def close(
 ) -> None:
     """Write a frozen vote report or aggregate a test-scored family's trials."""
     if snapshot is not None:
-        try:
-            frozen = analyze_export(read_export(snapshot))
-            if frozen.analysis.family != family:
-                raise ValueError('The snapshot belongs to another family.')
+        closed = _close_snapshot(family, snapshot)
+    else:
+        _known_families([family])
+        selected = _load_family(family)
+        match selected.settings:
+            case VotesSettings():
+                _fail(
+                    'Votes require a saved canonical D1 export. '
+                    'Use `--snapshot <path>`.'
+                )
+            case TaskTestsSettings(samples=samples):
+                closed = _close_tests(selected, samples)
+            case _:
+                assert_never(selected.settings)
 
-            closed_at = datetime.now(UTC)
-            closed = report.close_snapshot(
-                frozen.analysis,
-                closed_at,
-                fingerprints=frozen.fingerprints,
-                system_names=frozen.system_names,
-                previous_reports=report.read_reports(family, closed_at),
-            )
-        except (OSError, ValueError) as error:
-            _fail(str(error))
+    typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
-        typer.echo(f'Report written to `{report.write_report(closed)}`.')
-        return
 
-    _known_families([family])
-    selected = _load_family(family)
-    if isinstance(selected.settings, VotesSettings):
-        _fail('Votes require a saved canonical D1 export. Use `--snapshot <path>`.')
-
-    _collect(selected)
+def _close_snapshot(family: str, snapshot: Path) -> report.Report:
     try:
-        closed_at = datetime.now(UTC)
-        systems = _load_systems()
-        closed = report.close(
-            selected,
-            closed_at,
+        frozen = analyze_export(read_export(snapshot))
+        if frozen.analysis.family != family:
+            raise ValueError('The snapshot belongs to another family.')
+
+        return report.close_snapshot(
+            frozen.analysis,
+            datetime.now(UTC),
+            fingerprints=frozen.fingerprints,
+            system_names=frozen.system_names,
+            frozen_fingerprints=report.reported_fingerprints(family),
+        )
+    except (OSError, ValueError) as error:
+        _fail(str(error))
+
+
+def _close_tests(family: Family, samples: int) -> report.Report:
+    _collect(family)
+    try:
+        return report.close(
+            family,
+            datetime.now(UTC),
+            samples=samples,
             system_names={
-                name: system.display_name for name, system in systems.items()
+                name: system.display_name for name, system in _load_systems().items()
             },
-            previous_reports=report.read_reports(family, closed_at),
+            frozen_fingerprints=report.reported_fingerprints(family.name),
         )
     except ValueError as error:
         _fail(str(error))
-
-    typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
 
 @app.command()

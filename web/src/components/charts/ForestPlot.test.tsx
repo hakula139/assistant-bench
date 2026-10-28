@@ -13,11 +13,7 @@ import type { Category } from '@/lib/categories';
 import type { CategoryBoard, CategoryStanding } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
-const rules = {
-  preliminary_decisive_votes: 40,
-  preliminary_decisive_vote_unit: 'raw-votes' as const,
-  rater_agreement_floor: 0.7,
-};
+const rules = { preliminary_decisive_votes: 40 };
 const refit = (system: string, score: number, decisive = 40) => ({
   system,
   score,

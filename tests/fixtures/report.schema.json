@@ -1,44 +1,5 @@
 {
   "$defs": {
-    "CappedHumanWeights": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "const": "actor-proportional-cap",
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "const": 1,
-          "title": "Version",
-          "type": "integer"
-        },
-        "cap": {
-          "exclusiveMinimum": 0,
-          "title": "Cap",
-          "type": "integer"
-        },
-        "scope": {
-          "const": "family-evaluation",
-          "title": "Scope",
-          "type": "string"
-        },
-        "repeat_handling": {
-          "const": "excluded",
-          "title": "Repeat Handling",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "version",
-        "cap",
-        "scope",
-        "repeat_handling"
-      ],
-      "title": "CappedHumanWeights",
-      "type": "object"
-    },
     "Category": {
       "enum": [
         "bug-fix",
@@ -107,10 +68,6 @@
           "title": "Score",
           "type": "number"
         },
-        "interval": {
-          "title": "Interval",
-          "type": "null"
-        },
         "votes": {
           "minimum": 0,
           "title": "Votes",
@@ -130,7 +87,6 @@
       "required": [
         "system",
         "score",
-        "interval",
         "votes",
         "effective_votes",
         "decisive_votes"
@@ -184,7 +140,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Human choices between two systems, with half credit for either tie.",
+      "description": "Human choices between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `effective_votes` and `win_rate` use\nthe actors' weights.",
       "properties": {
         "system": {
           "title": "System",
@@ -238,23 +194,6 @@
       ],
       "title": "HeadToHead",
       "type": "object"
-    },
-    "HumanWeights": {
-      "discriminator": {
-        "mapping": {
-          "actor-proportional-cap": "#/$defs/CappedHumanWeights",
-          "unit": "#/$defs/UnitHumanWeights"
-        },
-        "propertyName": "name"
-      },
-      "oneOf": [
-        {
-          "$ref": "#/$defs/UnitHumanWeights"
-        },
-        {
-          "$ref": "#/$defs/CappedHumanWeights"
-        }
-      ]
     },
     "LedgerProvenance": {
       "additionalProperties": false,
@@ -383,23 +322,6 @@
       "title": "PassRate",
       "type": "object"
     },
-    "Provenance": {
-      "discriminator": {
-        "mapping": {
-          "ledger": "#/$defs/LedgerProvenance",
-          "unrecorded": "#/$defs/UnrecordedProvenance"
-        },
-        "propertyName": "status"
-      },
-      "oneOf": [
-        {
-          "$ref": "#/$defs/UnrecordedProvenance"
-        },
-        {
-          "$ref": "#/$defs/LedgerProvenance"
-        }
-      ]
-    },
     "PublicSystem": {
       "additionalProperties": false,
       "properties": {
@@ -428,38 +350,6 @@
       "title": "PublicSystem",
       "type": "object"
     },
-    "RaterAgreement": {
-      "additionalProperties": false,
-      "description": "Descriptive agreement of side-swapped repeats with their originals.",
-      "properties": {
-        "repeats": {
-          "title": "Repeats",
-          "type": "integer"
-        },
-        "agreement": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Agreement"
-        },
-        "below_floor": {
-          "title": "Below Floor",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "repeats",
-        "agreement",
-        "below_floor"
-      ],
-      "title": "RaterAgreement",
-      "type": "object"
-    },
     "Results": {
       "discriminator": {
         "mapping": {
@@ -481,27 +371,6 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
       "type": "string"
     },
-    "SettledWeights": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "const": "sample-pair-share",
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "const": 1,
-          "title": "Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "name",
-        "version"
-      ],
-      "title": "SettledWeights",
-      "type": "object"
-    },
     "Share": {
       "maximum": 1,
       "minimum": 0,
@@ -519,22 +388,10 @@
           "title": "Score",
           "type": "number"
         },
-        "interval": {
-          "title": "Interval",
-          "type": "null"
-        },
         "rank": {
           "description": "Competition rank of the point score.",
           "title": "Rank",
           "type": "integer"
-        },
-        "best_rank": {
-          "title": "Best Rank",
-          "type": "null"
-        },
-        "worst_rank": {
-          "title": "Worst Rank",
-          "type": "null"
         },
         "votes": {
           "minimum": 0,
@@ -648,10 +505,7 @@
       "required": [
         "system",
         "score",
-        "interval",
         "rank",
-        "best_rank",
-        "worst_rank",
         "votes",
         "effective_votes",
         "decisive_votes",
@@ -854,88 +708,9 @@
       "title": "TestsStanding",
       "type": "object"
     },
-    "UnavailableInference": {
-      "additionalProperties": false,
-      "properties": {
-        "status": {
-          "const": "unavailable",
-          "title": "Status",
-          "type": "string"
-        },
-        "target": {
-          "const": "new-cases-and-voters",
-          "title": "Target",
-          "type": "string"
-        },
-        "reason": {
-          "const": "population-method-not-validated",
-          "title": "Reason",
-          "type": "string"
-        }
-      },
-      "required": [
-        "status",
-        "target",
-        "reason"
-      ],
-      "title": "UnavailableInference",
-      "type": "object"
-    },
-    "UnitHumanWeights": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "const": "unit",
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "const": 1,
-          "title": "Version",
-          "type": "integer"
-        },
-        "repeat_handling": {
-          "const": "included",
-          "title": "Repeat Handling",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "version",
-        "repeat_handling"
-      ],
-      "title": "UnitHumanWeights",
-      "type": "object"
-    },
-    "UnrecordedProvenance": {
-      "additionalProperties": false,
-      "properties": {
-        "status": {
-          "const": "unrecorded",
-          "title": "Status",
-          "type": "string"
-        }
-      },
-      "required": [
-        "status"
-      ],
-      "title": "UnrecordedProvenance",
-      "type": "object"
-    },
     "VotesMethod": {
       "additionalProperties": false,
       "properties": {
-        "name": {
-          "const": "bradley-terry",
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "const": 1,
-          "title": "Version",
-          "type": "integer"
-        },
         "l2_penalty": {
           "description": "Penalty on system logits, excluding the sided intercept.",
           "exclusiveMinimum": 0,
@@ -951,21 +726,18 @@
           "title": "Anchor Score",
           "type": "number"
         },
-        "human_weights": {
-          "$ref": "#/$defs/HumanWeights"
-        },
-        "settled_weights": {
-          "$ref": "#/$defs/SettledWeights"
+        "actor_cap": {
+          "description": "Each of an actor's `n` eligible choices weighs `min(1, actor_cap / n)`.",
+          "exclusiveMinimum": 0,
+          "title": "Actor Cap",
+          "type": "integer"
         }
       },
       "required": [
-        "name",
-        "version",
         "l2_penalty",
         "points_per_logit",
         "anchor_score",
-        "human_weights",
-        "settled_weights"
+        "actor_cap"
       ],
       "title": "VotesMethod",
       "type": "object"
@@ -985,14 +757,8 @@
         "rules": {
           "$ref": "#/$defs/VotesRules"
         },
-        "inference": {
-          "$ref": "#/$defs/UnavailableInference"
-        },
         "provenance": {
-          "$ref": "#/$defs/Provenance",
-          "default": {
-            "status": "unrecorded"
-          }
+          "$ref": "#/$defs/LedgerProvenance"
         },
         "reference": {
           "description": "Configured reference, whether or not comparisons connect it.",
@@ -1079,10 +845,6 @@
           "description": "Score points per length-difference standard deviation, if identifiable.",
           "title": "Length"
         },
-        "separability": {
-          "title": "Separability",
-          "type": "null"
-        },
         "split_half_tau": {
           "anyOf": [
             {
@@ -1094,20 +856,13 @@
           ],
           "description": "Order agreement between alternating eligible sessions, when measurable.",
           "title": "Split Half Tau"
-        },
-        "rater_agreement": {
-          "$ref": "#/$defs/RaterAgreement"
-        },
-        "decision": {
-          "title": "Decision",
-          "type": "null"
         }
       },
       "required": [
         "scorer",
         "method",
         "rules",
-        "inference",
+        "provenance",
         "reference",
         "anchor",
         "votes",
@@ -1120,10 +875,7 @@
         "categories",
         "position",
         "length",
-        "separability",
-        "split_half_tau",
-        "rater_agreement",
-        "decision"
+        "split_half_tau"
       ],
       "title": "VotesResults",
       "type": "object"
@@ -1132,27 +884,14 @@
       "additionalProperties": false,
       "properties": {
         "preliminary_decisive_votes": {
-          "description": "Raw coverage threshold, independent of inference availability.",
+          "description": "Raw decisive votes below which a standing is preliminary.",
           "exclusiveMinimum": 0,
           "title": "Preliminary Decisive Votes",
           "type": "integer"
-        },
-        "preliminary_decisive_vote_unit": {
-          "const": "raw-votes",
-          "title": "Preliminary Decisive Vote Unit",
-          "type": "string"
-        },
-        "rater_agreement_floor": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Rater Agreement Floor",
-          "type": "number"
         }
       },
       "required": [
-        "preliminary_decisive_votes",
-        "preliminary_decisive_vote_unit",
-        "rater_agreement_floor"
+        "preliminary_decisive_votes"
       ],
       "title": "VotesRules",
       "type": "object"

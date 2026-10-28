@@ -1,6 +1,6 @@
 import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
-import { formatPercent, formatScore } from '@/lib/format';
+import { formatScore } from '@/lib/format';
 import type { VotesMethod, VotesRules } from '@/lib/report';
 
 /** A term as the boards label it, with what it means. */
@@ -59,11 +59,6 @@ export const terms = {
     definition:
       "The mean cost of a solution at list prices and the median time of the agent's whole run on a task.",
   },
-  raterAgreement: {
-    term: 'Rater agreement',
-    definition:
-      'How often a side-swapped repeat matched the original vote. This describes repeat consistency.',
-  },
   splitHalf: {
     term: 'Split-half τ',
     definition:
@@ -72,7 +67,7 @@ export const terms = {
   leftOut: {
     term: 'Left out of the fit',
     definition:
-      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle.',
+      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle, and side-swapped repeats of earlier votes.',
   },
   lengthBias: {
     term: 'Length bias',
@@ -217,17 +212,18 @@ export function anchorTerm(method: VotesMethod): Term {
   };
 }
 
+/** The round's weighted vote total, naming the cap its method recorded. */
+export function actorCapTerm(method: VotesMethod): Term {
+  return {
+    term: 'Effective votes',
+    definition: `Votes after weighting, where a voter with more than ${method.actor_cap} votes shares a weight of ${method.actor_cap} across them. Scores, win rates and both-bad rates use these weights, while vote counts stay raw.`,
+  };
+}
+
 export function preliminaryTerm(rules: VotesRules): Term {
   return {
     ...terms.preliminary,
     definition: `Fewer than ${rules.preliminary_decisive_votes} raw votes with a winner. This marks coverage and does not measure confidence.`,
-  };
-}
-
-export function agreementTerm(rules: VotesRules): Term {
-  return {
-    ...terms.raterAgreement,
-    definition: `${terms.raterAgreement.definition} Below ${formatPercent(rules.rater_agreement_floor)} is flagged as low consistency.`,
   };
 }
 

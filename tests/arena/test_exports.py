@@ -76,7 +76,6 @@ class Captures:
     before: FrozenExport
     after: FrozenExport
     reread: FrozenExport
-    first: Receipt
 
 
 def close(snapshot: SnapshotAnalysis) -> report.Report:
@@ -85,7 +84,7 @@ def close(snapshot: SnapshotAnalysis) -> report.Report:
         AT + timedelta(days=2),
         fingerprints=snapshot.fingerprints,
         system_names=snapshot.system_names,
-        previous_reports=[],
+        frozen_fingerprints={},
     )
 
 
@@ -257,7 +256,7 @@ def captures(tmp_path_factory: pytest.TempPathFactory) -> Captures:
         async with runtime.client() as (ledger, _):
             reread = await capture_export(ledger, header)
 
-        return Captures(before, after, reread, first)
+        return Captures(before, after, reread)
 
     directory = tmp_path_factory.mktemp('offline-export-runtime')
     with D1Runtime(directory).owner() as runtime:
@@ -456,7 +455,7 @@ class TestAnalyzeExport:
     def test_rejects_a_sealed_policy_other_than_the_fixed_one(
         self, captures: Captures, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        rules = POLICY.rules.model_copy(update={'rater_agreement_floor': 0.8})
+        rules = POLICY.rules.model_copy(update={'preliminary_decisive_votes': 12})
         monkeypatch.setattr(
             snapshots, 'POLICY', POLICY.model_copy(update={'rules': rules})
         )
@@ -526,7 +525,7 @@ class TestAnalyzeExport:
         if comparison != json.loads(written):
             stale_fixture(REPORT_FIXTURE, written)
 
-    def test_caps_the_complete_actor_across_sessions_and_keeps_repeats_separate(
+    def test_caps_the_complete_actor_across_sessions_and_drops_repeats(
         self, captures: Captures
     ) -> None:
         snapshot = analyze_export(captures.before)
@@ -537,9 +536,6 @@ class TestAnalyzeExport:
 
         assert masses == pytest.approx({'owner': 100.0, 'visitor': 20.0})
         assert len(analysis.ordinary) == 150
-        assert len(analysis.repeats) == 1
-        assert analysis.repeats[0].comparison.weight == 0
-        assert analysis.repeats[0].repeat_of == str(captures.first.seq)
         assert analysis.accepted == 151
         assert analysis.provenance.status == 'ledger'
         assert snapshot.points.source_export_digest == captures.before.content_digest
@@ -562,7 +558,6 @@ class TestAnalyzeExport:
         assert [row.comparison.weight for row in owner_after] == pytest.approx(
             [100 / 129] * 129
         )
-        assert after.repeats == ()
         assert after.accepted == before.accepted == 151
         results = report.votes_results(after)
         assert results.votes == 149
@@ -588,7 +583,6 @@ class TestAnalyzeExport:
         assert closed.results.dropped_votes == 1
         assert closed.results.effective_votes == pytest.approx(120)
         assert set(closed.systems) == {'large', 'small'}
-        assert closed.results.inference.status == 'unavailable'
 
         directory = tmp_path / 'reports'
         monkeypatch.setattr(report, 'REPORTS_DIR', directory)

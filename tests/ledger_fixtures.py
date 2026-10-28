@@ -18,7 +18,6 @@ from assistant_bench_arena.releases import (
 from assistant_bench_arena.serialization import digest, source_identity
 from assistant_bench_arena.snapshots import (
     AnalysisPolicy,
-    CappedHumanWeights,
     CaseApproval,
     CaseContentApproval,
     CaseMetadata,
@@ -30,8 +29,6 @@ from assistant_bench_arena.snapshots import (
     Presentation,
     PresentedCase,
     PublicApproval,
-    SettledWeights,
-    UnavailableInference,
     VotesMethod,
     VotesRules,
 )
@@ -39,30 +36,9 @@ from assistant_bench_arena.snapshots import (
 
 POLICY = AnalysisPolicy(
     method=VotesMethod(
-        name='bradley-terry',
-        version=1,
-        l2_penalty=0.01,
-        points_per_logit=100.0,
-        anchor_score=1_000.0,
-        human_weights=CappedHumanWeights(
-            name='actor-proportional-cap',
-            version=1,
-            cap=100,
-            scope='family-evaluation',
-            repeat_handling='excluded',
-        ),
-        settled_weights=SettledWeights(name='sample-pair-share', version=1),
+        l2_penalty=0.01, points_per_logit=100.0, anchor_score=1_000.0, actor_cap=100
     ),
-    rules=VotesRules(
-        preliminary_decisive_votes=10,
-        preliminary_decisive_vote_unit='raw-votes',
-        rater_agreement_floor=0.5,
-    ),
-    inference=UnavailableInference(
-        status='unavailable',
-        target='new-cases-and-voters',
-        reason='population-method-not-validated',
-    ),
+    rules=VotesRules(preliminary_decisive_votes=10),
 )
 
 

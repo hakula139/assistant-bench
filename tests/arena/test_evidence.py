@@ -84,7 +84,7 @@ async def moderate(
 
 class TestReplay:
     @pytest.mark.parametrize('history', ['selected', 'withdrawn', 'superseded'])
-    def test_restoration_keeps_only_the_latest_eligible_receipt_and_its_repeat(
+    def test_restoration_keeps_only_the_latest_eligible_receipt(
         self, runtime: D1Runtime, history: str
     ) -> None:
         async def scenario() -> None:
@@ -120,7 +120,7 @@ class TestReplay:
                         repeat_of=original.seq,
                     ),
                 )
-                repeated = await ledger.accept(
+                await ledger.accept(
                     Context(command_id='repeat-vote', principal='owner', now=now + 1),
                     Accept(
                         lease_id=lease.id,
@@ -196,14 +196,6 @@ class TestReplay:
                     []
                     if history == 'withdrawn'
                     else [(str(latest.seq), latest.choice, 1.0)]
-                )
-                assert [
-                    (row.receipt, row.repeat_of, row.comparison.weight)
-                    for row in snapshot.analysis.repeats
-                ] == (
-                    [(str(repeated.seq), str(original.seq), 0.0)]
-                    if history == 'selected'
-                    else []
                 )
                 assert snapshot.analysis.accepted == (
                     3 if history == 'superseded' else 2

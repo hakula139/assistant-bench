@@ -2,6 +2,7 @@ import { z } from 'astro/zod';
 
 import { categories } from '@/lib/categories';
 import { defects } from '@/lib/defects';
+import { FAMILY_NAME_MAX_LENGTH, familyNamePattern } from '@/lib/family-name';
 
 // ── Shared ──
 
@@ -25,10 +26,7 @@ const passRate = z.strictObject({ rate: share, lower: share, upper: share });
 const standing = z.strictObject({
   system: z.string(),
   score: z.number(),
-  interval: z.null(),
   rank: z.int(),
-  best_rank: z.null(),
-  worst_rank: z.null(),
   votes: z.int().nonnegative(),
   effective_votes: z.number().nonnegative(),
   decisive_votes: z.int().nonnegative(),
@@ -58,7 +56,6 @@ const headToHead = z.strictObject({
 const categoryStanding = z.strictObject({
   system: z.string(),
   score: z.number(),
-  interval: z.null(),
   votes: z.int().nonnegative(),
   effective_votes: z.number().nonnegative(),
   decisive_votes: z.int().nonnegative(),
@@ -72,78 +69,41 @@ const categoryBoard = z.strictObject({
   unranked: z.array(z.string()),
 });
 
-const raterAgreement = z.strictObject({
-  repeats: z.int(),
-  agreement: z.number().nullable(),
-  below_floor: z.boolean(),
-});
-
 const votesMethod = z.strictObject({
-  name: z.literal('bradley-terry'),
-  version: z.literal(1),
   l2_penalty: z.number().positive(),
   points_per_logit: z.number().positive(),
   anchor_score: z.number(),
-  human_weights: z.discriminatedUnion('name', [
-    z.strictObject({
-      name: z.literal('unit'),
-      version: z.literal(1),
-      repeat_handling: z.literal('included'),
-    }),
-    z.strictObject({
-      name: z.literal('actor-proportional-cap'),
-      version: z.literal(1),
-      cap: z.int().positive(),
-      scope: z.literal('family-evaluation'),
-      repeat_handling: z.literal('excluded'),
-    }),
-  ]),
-  settled_weights: z.strictObject({
-    name: z.literal('sample-pair-share'),
-    version: z.literal(1),
-  }),
+  actor_cap: z.int().positive(),
 });
 
 const votesRules = z.strictObject({
   preliminary_decisive_votes: z.int().positive(),
-  preliminary_decisive_vote_unit: z.literal('raw-votes'),
-  rater_agreement_floor: z.number().min(0).max(1),
 });
 
-const unavailableInference = z.strictObject({
-  status: z.literal('unavailable'),
-  target: z.literal('new-cases-and-voters'),
-  reason: z.literal('population-method-not-validated'),
+const provenance = z.strictObject({
+  schema_version: z.literal(1),
+  export_id: z.string().min(1),
+  export_digest: z.string().min(1),
+  namespace: z.string().min(1),
+  captured_at: z.iso.datetime({ offset: true }),
+  event_cutoff: z.int().nonnegative(),
+  receipt_cutoff: z.int().nonnegative(),
+  family_revision: z.int().nonnegative(),
+  analysis_sequence: z.int().nonnegative(),
+  evaluation_id: z.string().min(1),
+  publication_id: z.string().min(1),
+  policy_id: z.string().min(1),
+  sampling_point_snapshot_id: z.string().min(1),
+  status: z.literal('ledger'),
+  weighted_evidence_digest: z.string().min(1),
+  fitted_point_snapshot_id: z.string().min(1),
 });
-
-const provenance = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('unrecorded') }),
-  z.strictObject({
-    status: z.literal('ledger'),
-    schema_version: z.literal(1),
-    export_id: z.string().min(1),
-    export_digest: z.string().min(1),
-    namespace: z.string().min(1),
-    captured_at: z.iso.datetime({ offset: true }),
-    event_cutoff: z.int().nonnegative(),
-    receipt_cutoff: z.int().nonnegative(),
-    family_revision: z.int().nonnegative(),
-    analysis_sequence: z.int().nonnegative(),
-    evaluation_id: z.string().min(1),
-    publication_id: z.string().min(1),
-    policy_id: z.string().min(1),
-    sampling_point_snapshot_id: z.string().min(1),
-    weighted_evidence_digest: z.string().min(1),
-    fitted_point_snapshot_id: z.string().min(1),
-  }),
-]);
 
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   method: votesMethod,
   rules: votesRules,
-  inference: unavailableInference,
-  provenance: provenance.optional(),
+  provenance,
   reference: z.string(),
   anchor: z.string(),
   votes: z.int().nonnegative(),
@@ -156,10 +116,7 @@ const votesResults = z.strictObject({
   categories: z.array(categoryBoard),
   position: z.number().nullable(),
   length: z.number().nullable(),
-  separability: z.null(),
   split_half_tau: z.number().nullable(),
-  rater_agreement: raterAgreement,
-  decision: z.null(),
 });
 
 // ── Tests Results ──
@@ -195,10 +152,7 @@ const testsResults = z.strictObject({
 /** Mirrors the pydantic `Report` model, which writes `reports/<family>/<round>.json`. */
 export const reportSchema = z
   .strictObject({
-    family: z
-      .string()
-      .max(256)
-      .regex(/^[a-z0-9][a-z0-9-]*$/),
+    family: z.string().max(FAMILY_NAME_MAX_LENGTH).regex(familyNamePattern),
     round: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/),
     closed_at: z.iso.datetime({ offset: true }),
     systems: z.record(z.string().min(1), publicSystem),
@@ -236,108 +190,6 @@ export const reportSchema = z
       results.categories.forEach(({ standings, unranked }) => {
         membership(standings, unranked);
       });
-
-      const aggregates = [
-        results,
-        ...results.standings,
-        ...results.head_to_head,
-        ...results.categories.flatMap((board) => [board, ...board.standings]),
-      ];
-
-      if (
-        results.method.human_weights.name === 'unit' &&
-        aggregates.some(({ votes, effective_votes }) => effective_votes !== votes)
-      ) {
-        reject('Unit human weights require effective_votes to equal votes');
-      }
-
-      if (aggregates.some(({ votes, effective_votes }) => effective_votes > votes)) {
-        reject('Effective votes cannot exceed raw votes');
-      }
-
-      if (
-        results.method.human_weights.name === 'actor-proportional-cap' &&
-        results.provenance?.status !== 'ledger'
-      ) {
-        reject('Capped human weights require sealed ledger provenance');
-      }
-
-      if (results.method.human_weights.name === 'actor-proportional-cap') {
-        const close = (left: number, right: number) =>
-          Math.abs(left - right) <=
-          Math.max(1e-9, 1e-9 * Math.max(Math.abs(left), Math.abs(right)));
-        const bounded = (row: { votes: number; effective_votes: number }, total: typeof row) =>
-          row.votes <= total.votes &&
-          (row.effective_votes <= total.effective_votes ||
-            close(row.effective_votes, total.effective_votes));
-        const totals = (rows: { votes: number; effective_votes: number }[]) => ({
-          votes: rows.reduce((sum, row) => sum + row.votes, 0),
-          effective_votes: rows.reduce((sum, row) => sum + row.effective_votes, 0),
-        });
-
-        if (
-          [...results.standings, ...results.head_to_head, ...results.categories].some(
-            (row) => !bounded(row, results),
-          )
-        ) {
-          reject('Subset counts cannot exceed complete family evidence');
-        }
-
-        if (
-          new Set(results.categories.map(({ category }) => category)).size !==
-            results.categories.length ||
-          !bounded(totals(results.categories), results)
-        ) {
-          reject('Category boards must partition eligible family evidence');
-        }
-
-        if (
-          results.categories.some((board) => board.standings.some((row) => !bounded(row, board)))
-        ) {
-          reject('Category standings cannot exceed category evidence');
-        }
-
-        const sided = { votes: 2 * results.votes, effective_votes: 2 * results.effective_votes };
-        if (!bounded(totals(results.standings), sided)) {
-          reject('Standing totals cannot exceed both sides of each vote');
-        }
-
-        const headTotals = totals(results.head_to_head);
-        const heads = new Map(
-          results.head_to_head.map((row) => [JSON.stringify([row.system, row.opponent]), row]),
-        );
-        if (
-          heads.size !== results.head_to_head.length ||
-          headTotals.votes !== sided.votes ||
-          !close(headTotals.effective_votes, sided.effective_votes)
-        ) {
-          reject('Head-to-head totals must account for both sides of each vote');
-        }
-
-        for (const row of heads.values()) {
-          const mirror = heads.get(JSON.stringify([row.opponent, row.system]));
-          if (
-            row.system === row.opponent ||
-            !mirror ||
-            row.votes !== mirror.votes ||
-            !close(row.effective_votes, mirror.effective_votes) ||
-            row.wins !== mirror.losses ||
-            row.losses !== mirror.wins ||
-            row.ties !== mirror.ties ||
-            row.both_bad !== mirror.both_bad ||
-            row.wins + row.losses + row.ties + row.both_bad !== row.votes ||
-            !close(row.win_rate + mirror.win_rate, 1)
-          ) {
-            reject('Head-to-head rows must describe mirrored choices');
-          }
-        }
-      }
-
-      const { agreement, below_floor } = results.rater_agreement;
-
-      if (below_floor !== (agreement !== null && agreement < results.rules.rater_agreement_floor)) {
-        reject('Rater agreement must use the recorded floor');
-      }
     }
 
     if (results.scorer === 'tests') {
@@ -387,7 +239,6 @@ export const reportSchema = z
 export type PublicSystem = z.infer<typeof publicSystem>;
 export type VotesMethod = z.infer<typeof votesMethod>;
 export type VotesRules = z.infer<typeof votesRules>;
-export type UnavailableInference = z.infer<typeof unavailableInference>;
 export type Distribution = z.infer<typeof distribution>;
 export type Standing = z.infer<typeof standing>;
 export type HeadToHead = z.infer<typeof headToHead>;

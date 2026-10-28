@@ -15,50 +15,31 @@
   "results": {
     "scorer": "votes",
     "method": {
-      "name": "bradley-terry",
-      "version": 1,
       "l2_penalty": 0.01,
       "points_per_logit": 173.71779276130073,
       "anchor_score": 1000.0,
-      "human_weights": {
-        "name": "actor-proportional-cap",
-        "version": 1,
-        "cap": 100,
-        "scope": "family-evaluation",
-        "repeat_handling": "excluded"
-      },
-      "settled_weights": {
-        "name": "sample-pair-share",
-        "version": 1
-      }
+      "actor_cap": 100
     },
     "rules": {
-      "preliminary_decisive_votes": 40,
-      "preliminary_decisive_vote_unit": "raw-votes",
-      "rater_agreement_floor": 0.7
-    },
-    "inference": {
-      "status": "unavailable",
-      "target": "new-cases-and-voters",
-      "reason": "population-method-not-validated"
+      "preliminary_decisive_votes": 40
     },
     "provenance": {
       "schema_version": 1,
       "export_id": "before",
-      "export_digest": "230a325d1b4c23597c2dfbb1e06bc93eabc5137a6d874c355e5fb7296fe4cfa3",
+      "export_digest": "03ecd86fb93324ab200c970b11cdd9dd7304951d7b86a5e8c5d467c18968c9b4",
       "namespace": "synthetic-export",
       "captured_at": "2026-10-22T09:00:00.102000Z",
       "event_cutoff": 152,
       "receipt_cutoff": 152,
       "family_revision": 1,
       "analysis_sequence": 152,
-      "evaluation_id": "1c3dddbf1468d9715ca7905afc8c7a9fb17902723fb6f01f6bd30c739998405d",
-      "publication_id": "cbc2c7ad72ce224462c1e409ff1b844c2adb4d198501c6ae1b7c50a897c8c8a1",
-      "policy_id": "50868d7f116faa7aeec5e06e04ac92fcd43a431f741d3d436276628355656a47",
-      "sampling_point_snapshot_id": "4bd434ed7e508ff7b5505b3a2dc8ddbdd645bcfab8f9e2c30fbc70ac676d4cb6",
+      "evaluation_id": "51f0c3f555d878e585e51129a7674c59856b06ba0cd5ce35029e3cbe46b2135b",
+      "publication_id": "425d1dba3523aa6a8baeb46876f0fb77ddc8fe31627dabfc8f9339fa673f5bb7",
+      "policy_id": "345dc15a5347d499c372f3005e219e9f636c51916b96179049ce46d3a4d5fc6b",
+      "sampling_point_snapshot_id": "06b1bbf43be61b8ab64913cea19d4fd7d52ca969dbfc07021a1330b05a4aa085",
       "status": "ledger",
-      "weighted_evidence_digest": "a867cd995e386d2eb728092ff9bfc5b517e23ba2147ceba6d2d73f9a7ad6095b",
-      "fitted_point_snapshot_id": "1e45fa88acc0af621bab01808e5573c326abb7c312b5081a7d11170ab1513049"
+      "weighted_evidence_digest": "5c1ecba1f8a94894ccaac4b280180f87481d2469ae4e295d8f3d77d17230eb15",
+      "fitted_point_snapshot_id": "dc15bd1e1dabf3b09a14a3be7caebcf63461f4e46a524e1c724e8a12ef53f2d9"
     },
     "reference": "large",
     "anchor": "large",
@@ -69,11 +50,8 @@
     "standings": [
       {
         "system": "small",
-        "score": 1000.0139186361542,
-        "interval": null,
+        "score": 1000.0139186361307,
         "rank": 1,
-        "best_rank": null,
-        "worst_rank": null,
         "votes": 150,
         "effective_votes": 120.0,
         "decisive_votes": 86,
@@ -92,10 +70,7 @@
       {
         "system": "large",
         "score": 1000.0,
-        "interval": null,
         "rank": 2,
-        "best_rank": null,
-        "worst_rank": null,
         "votes": 150,
         "effective_votes": 120.0,
         "decisive_votes": 86,
@@ -138,15 +113,8 @@
       }
     ],
     "categories": [],
-    "position": 58.46497345947126,
+    "position": 58.464973459447876,
     "length": null,
-    "separability": null,
-    "split_half_tau": 1.0,
-    "rater_agreement": {
-      "repeats": 1,
-      "agreement": 1.0,
-      "below_floor": false
-    },
-    "decision": null
+    "split_half_tau": 1.0
   }
 }

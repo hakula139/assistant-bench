@@ -118,7 +118,7 @@ describe('VotesBoard', () => {
     cleanup();
   });
 
-  test('separates genuine raw coverage from accepted choices and explains weighted rates', async () => {
+  test('shows raw votes beside the effective votes after the actor cap, then the capture time', async () => {
     const round = await load('report-ledger');
 
     const html = render(round);
@@ -126,26 +126,11 @@ describe('VotesBoard', () => {
     expect(stats(html)).toEqual(
       expect.arrayContaining([
         ['Votes', '150 over 3 sessions, 1 left out'],
-        ['Accepted choices', '151 including repeats and choices excluded from this fit'],
-        ['Effective vote mass', '120 after the complete family actor cap'],
+        ['Effective votes', '120'],
       ]),
     );
-    expect(text(html)).toContain(
-      'Scores, win rates and both-bad rates use the recorded actor weights.',
-    );
-    expect(text(html)).toContain('Repeats contribute only to consistency diagnostics.');
+    expect(parse(html).querySelector('[role="status"]')?.textContent).toContain('Captured');
     expect(text(html)).not.toMatch(/refresh deadline|confidence interval/i);
-  });
-
-  test('does not query live freshness for a historical unit report', async () => {
-    const fetch = vi.fn();
-    vi.stubGlobal('fetch', fetch);
-    stubPlotFrame();
-
-    renderInDom(<VotesBoard base={BOARD} round={await load()} labels={CASES} />);
-
-    expect(screen.queryByRole('status')).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
   });
 
   test('draws the labels, coverage marks, and copy of the round it shows', async () => {
@@ -154,7 +139,6 @@ describe('VotesBoard', () => {
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
     current.systems['acme-pro'].display_name = 'Current Pro';
     earlier.results.rules.preliminary_decisive_votes = 12;
-    earlier.results.rules.rater_agreement_floor = 0.5;
     earlier.results.method.anchor_score = 1234;
     for (const row of earlier.results.standings) {
       row.score += 234;
@@ -184,7 +168,6 @@ describe('VotesBoard', () => {
     expect(text(historical)).not.toContain('Current Pro');
     expect(text(historical)).toContain('anchor 1234');
     expect(text(historical)).toContain('12 raw decisive votes');
-    expect(text(historical)).toContain('floor is 0.5');
 
     const latest = draw(current);
 
@@ -242,18 +225,18 @@ describe('VotesBoard', () => {
     expect(systemHeader?.getAttribute('aria-sort')).toBe('descending');
   });
 
-  test('shows descriptive diagnostics and unavailable population inference', async () => {
+  test('shows the vote counts and descriptive diagnostics', async () => {
     const html = render(await load());
 
     expect(stats(html)).toEqual([
-      ['Votes', '340 over 10 sessions, 20 left out'],
-      ['Rater agreement', '83% on 23 repeats'],
-      ['Split-half τ', '0.60'],
-      ['Length bias', 'Favors shorter, 6.5'],
+      ['Votes', '313 over 10 sessions, 47 left out'],
+      ['Effective votes', '286'],
+      ['Split-half τ', '0.80'],
+      ['Length bias', 'Favors shorter, 4.8'],
     ]);
     expect(statHints(html)).toEqual([
-      '20 left out',
-      'Rater agreement',
+      '47 left out',
+      'Effective votes',
       'Split-half τ',
       'Length bias',
     ]);
@@ -282,7 +265,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
-    expect(stats(html)[0]).toEqual(['Votes', '340 over 10 sessions']);
+    expect(stats(html)[0]).toEqual(['Votes', '313 over 10 sessions']);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -371,8 +354,8 @@ describe('VotesBoard', () => {
   test("labels and titles each system's point with its display name and score", async () => {
     const html = render(await load());
 
-    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,004"]');
-    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,004');
+    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,041"]');
+    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,041');
     expect(point?.querySelector('[data-slot="score-track"]')).not.toBeNull();
   });
 
@@ -390,23 +373,10 @@ describe('VotesBoard', () => {
     },
   );
 
-  test('warns when rater agreement falls below the floor', async () => {
-    const round = await load();
-    round.results.rater_agreement.below_floor = true;
-
-    const html = render(round);
-
-    expect(parse(html).body.textContent).toContain(
-      'Repeat consistency is below the recorded 70% floor.',
-    );
-  });
-
-  test('keeps population inference unavailable for a preliminary round', async () => {
+  test('counts the single session of an early round', async () => {
     const html = render(await load('report-early'));
 
     expect(stats(html)[0]).toEqual(['Votes', '34 over 1 session, 2 left out']);
-    expect(stats(html).map(([label]) => label)).not.toContain('Leader');
-    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -476,7 +446,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toMatch(/^ Rank What Rank means System /);
-    expect(text(html)).toContain('1 Acme Pro 1,004 114');
+    expect(text(html)).toContain('1 Acme Pro 1,041 115');
   });
 
   test('labels each category board, header, and filter option in report order', async () => {
@@ -578,23 +548,23 @@ describe('VotesBoard', () => {
   });
 
   test.each([
-    ['all', 'text', 'text', '1,004', load, '114 votes, both bad 5%, gate failures 2%.'],
+    ['all', 'text', 'text', '1,041', load, '115 votes, both bad 3%, gate failures 2%.'],
     [
       'message',
       'text',
       'text',
-      '972',
+      '1,058',
       load,
-      '34 votes, both bad 5%, gate failures 2% across all categories.',
+      '38 votes, both bad 3%, gate failures 2% across all categories.',
     ],
-    ['all', 'diff', 'diff', '1,004', load, '114 votes, both bad 5%, failed tests 2%.'],
+    ['all', 'diff', 'diff', '1,041', load, '115 votes, both bad 3%, failed tests 2%.'],
     [
       'all',
       'tested diff',
       'diff',
-      '1,004',
+      '1,041',
       loadTested,
-      '114 votes, both bad 5%, pass rate 50% (20–80%).',
+      '115 votes, both bad 3%, pass rate 50% (20–80%).',
     ],
   ] as const)(
     "opens a system's votes and rates from its score on the %s board of a %s family",
@@ -696,9 +666,9 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(text(html)).toContain('Acme Edge Preliminary 890 41 – –');
+    expect(text(html)).toContain('Acme Edge Preliminary 849 38 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
-    expect(text(html)).toContain('Acme Mini 769, 38 votes, preliminary – 789');
-    expect(text(html)).toContain('Acme Edge – 890, 41 votes, preliminary – Score');
+    expect(text(html)).toContain('Acme Mini 791, 40 votes, preliminary – 904');
+    expect(text(html)).toContain('Acme Edge – 849, 38 votes, preliminary – Score');
   });
 });

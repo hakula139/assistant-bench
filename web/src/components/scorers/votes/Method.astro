@@ -26,7 +26,7 @@ const columns: GlossaryEntry[] = [
   terms.gateFailures,
   terms.costLatency,
 ];
-const diagnostics = [terms.raterAgreement, terms.splitHalf, terms.leftOut, terms.lengthBias];
+const diagnostics = [terms.splitHalf, terms.leftOut, terms.lengthBias];
 ---
 
 <MethodStrip scorer="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
@@ -45,15 +45,14 @@ const diagnostics = [terms.raterAgreement, terms.splitHalf, terms.leftOut, terms
 <Part id={id('scores')} title={votesParts.scores}>
   <p>
     A penalized Bradley-Terry model fits Elo-like point scores to human votes and settled pairs.
-    Ties and both-bad votes count half a win. Each round records its human weighting policy. Ledger
-    rounds cap each actor's complete family contribution before fitting category or component
-    subsets, and use repeats only for consistency diagnostics. Historical rounds may record unit
-    weights. Each settled output pairing receives its share of that case's sample pairs.
+    Ties and both-bad votes count half a win. Each voter's votes share a capped weight across the
+    whole family before any category is fitted. Each settled output pairing receives its share of
+    that case's sample pairs.
   </p>
   <p>
     Compare scores within one round of one family. Each closed board records its point method,
-    anchor, weighting policy and coverage rules under Round settings. Categories refit their own
-    comparisons while retaining that round's settings.
+    anchor, voter cap and coverage rule under Round settings. Categories refit their own comparisons
+    while retaining that round's settings.
   </p>
 </Part>
 

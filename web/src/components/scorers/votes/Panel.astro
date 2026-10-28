@@ -1,7 +1,6 @@
 ---
 import { panelForest } from '@/components/scorers/votes/forest';
 import { Forest } from '@/components/site/Forest';
-import { inferenceNote } from '@/lib/glossary';
 import { latest, type Family } from '@/lib/reports';
 
 interface Props {
@@ -15,16 +14,13 @@ const results = latest(family)?.results;
 ---
 
 {results?.scorer === 'votes' ? (
-  <>
-    <Forest
-      client:visible
-      caption={`${title} point scores`}
-      rows={rows}
-      domain={domain}
-      anchorScore={anchorScore}
-    />
-    <p class="text-sm text-muted-foreground">{inferenceNote}</p>
-  </>
+  <Forest
+    client:visible
+    caption={`${title} point scores`}
+    rows={rows}
+    domain={domain}
+    anchorScore={anchorScore}
+  />
 ) : (
   <Forest
     client:visible

@@ -6,7 +6,7 @@ Votes families rank by point scores from pairwise votes, and tests families by [
 
 ## The Fit
 
-Each row compares system A with B. Its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. An actor with `n` eligible ordinary choices receives weight `min(1, 100 / n)` on each choice. These weights are assigned across the complete family evaluation before selecting components, categories or diagnostics. Swapped repeats measure consistency and carry zero fitting weight. Each report records its weighting method, including unit weights in existing closed rounds.
+Each row compares system A with B. Its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. An actor with `n` eligible ordinary choices receives weight `min(1, 100 / n)` on each choice. These weights are assigned across the complete family evaluation before selecting components, categories or diagnostics. Each report records the cap as `method.actor_cap`.
 
 A settled output pair has weight `1 / (samples_a * samples_b)` on its case. Listed systems and systems with recorded votes can rank through settled comparisons even without a human choice.
 
@@ -22,22 +22,19 @@ Only comparisons connect strengths. Every entrant in the selected component keep
 
 ## Uncertainty
 
-The target is performance on new cases and voters. Population uncertainty is unavailable until a suitable method is calibrated. Reports record `inference.status = "unavailable"`, target `"new-cases-and-voters"` and reason `"population-method-not-validated"`.
-
-Intervals, best and worst ranks, separability and leader decisions are explicitly null. The strict report schema rejects non-null claims for this method state. Point scores and ranks remain available.
+The target is performance on new cases and voters. No method for that target is calibrated yet, so voted reports publish point scores and ranks without intervals or leader decisions.
 
 ## Counts and Diagnostics
 
-`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Repeats and inactive choices remain in the accepted denominator and contribute to `dropped_votes`.
+`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Swapped repeats and inactive choices stay out of the fit and count in `dropped_votes`.
 
-| Field             | Meaning                                                                                                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `position`        | Fitted left-pane advantage in score points, null without human sided rows in the ranked component                                                                |
-| `length`          | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
-| `split_half_tau`  | Kendall's τ between odd- and even-session point orders over systems both halves connect to their root                                                            |
-| `rater_agreement` | Agreement of swapped repeats with their originals. `below_floor` uses the report's recorded repeat-consistency floor, currently 0.7                              |
+| Field            | Meaning                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `position`       | Fitted left-pane advantage in score points, null without human sided rows in the ranked component                                                                |
+| `length`         | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
+| `split_half_tau` | Kendall's τ between odd- and even-session point orders over systems both halves connect to their root                                                            |
 
-Lengths count each Han character and each other whitespace-separated run as one unit. Length association and repeat consistency describe the observed evidence and supply no population interval.
+Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed evidence and supply no population interval.
 
 ## Test Pass Rates
 

@@ -6,7 +6,7 @@ from pydantic import JsonValue
 
 from assistant_bench.families import Case, Family, VotesSettings
 from assistant_bench.outputs import Output as CollectedOutput, system_fingerprints
-from assistant_bench.report import INFERENCE, METHOD, RULES
+from assistant_bench.report import METHOD, RULES
 from assistant_bench.scoring.length import text_length
 from assistant_bench_arena.ledger_models import (
     Case as FrozenCase,
@@ -41,11 +41,7 @@ from assistant_bench_arena.snapshots import (
 
 
 POLICY = AnalysisPolicy.model_validate(
-    {
-        'method': METHOD.model_dump(),
-        'rules': RULES.model_dump(),
-        'inference': INFERENCE.model_dump(),
-    }
+    {'method': METHOD.model_dump(), 'rules': RULES.model_dump()}
 )
 
 
