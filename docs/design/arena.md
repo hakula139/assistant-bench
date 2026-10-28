@@ -44,7 +44,7 @@ The browser receives the approved instruction and checklist, two output panes an
 
 A browser session belongs to one family. The server retains its current lease and accepted choices, so tabs and retries share one authoritative state. A submitted command keeps its identity while its outcome is unresolved. Changing families preserves that pending command for its original session.
 
-Only different outputs that passed their gates can form a human comparison. The scheduler balances initial pair coverage, then uses stored sampling points to favor close pairs with little evidence. Swapped repeats measure consistency and carry zero fitting mass. The offline actor cap also limits cumulative browser influence across the complete family evaluation.
+Only different outputs that passed their gates can form a human comparison. The scheduler balances initial pair coverage, then uses stored sampling points to favor close pairs with little evidence. Swapped repeats stay out of the fit. The offline actor cap also limits cumulative browser influence across the complete family evaluation.
 
 Gate failures and identical outputs settle comparisons without a browser vote. A failing output loses, two failing outputs count as both bad, and identical outputs tie. Every pairing of two systems' samples on a case carries weight 1 / (the product of their sample counts), so one case contributes at most one settled vote per pair of systems. Settled comparisons have no display side.
 

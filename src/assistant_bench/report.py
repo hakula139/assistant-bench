@@ -4,7 +4,6 @@ A report holds aggregates under public system names and nothing else: no case,
 instruction, output text, route, or request ID.
 """
 
-import math
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -30,7 +29,6 @@ from assistant_bench.families import (
     Defect,
     Family,
     FamilyName,
-    TaskTestsSettings,
     load_cases,
 )
 from assistant_bench.outputs import (
@@ -94,91 +92,32 @@ class PassRate(_Model):
 # ── Votes Method ──
 
 
-class UnitHumanWeights(_Model):
-    name: Literal['unit']
-    version: Literal[1]
-    repeat_handling: Literal['included']
-
-
-class CappedHumanWeights(_Model):
-    name: Literal['actor-proportional-cap']
-    version: Literal[1]
-    cap: Annotated[int, Field(strict=True, gt=0)]
-    scope: Literal['family-evaluation']
-    repeat_handling: Literal['excluded']
-
-
-type HumanWeights = Annotated[
-    UnitHumanWeights | CappedHumanWeights, Field(discriminator='name')
-]
-
-
-class SettledWeights(_Model):
-    name: Literal['sample-pair-share']
-    version: Literal[1]
-
-
 class VotesMethod(_Model):
-    name: Literal['bradley-terry']
-    version: Literal[1]
-
     l2_penalty: Annotated[float, Field(gt=0)]
     """Penalty on system logits, excluding the sided intercept."""
 
     points_per_logit: Annotated[float, Field(gt=0)]
     anchor_score: float
-    human_weights: HumanWeights
-    settled_weights: SettledWeights
+    actor_cap: Annotated[int, Field(strict=True, gt=0)]
+    """Each of an actor's `n` eligible choices weighs `min(1, actor_cap / n)`."""
 
 
 class VotesRules(_Model):
     preliminary_decisive_votes: Annotated[int, Field(strict=True, gt=0)]
-    """Raw coverage threshold, independent of inference availability."""
-
-    preliminary_decisive_vote_unit: Literal['raw-votes']
-    rater_agreement_floor: Annotated[float, Field(ge=0, le=1)]
-
-
-class UnavailableInference(_Model):
-    status: Literal['unavailable']
-    target: Literal['new-cases-and-voters']
-    reason: Literal['population-method-not-validated']
+    """Raw decisive votes below which a standing is preliminary."""
 
 
 METHOD = VotesMethod(
-    name='bradley-terry',
-    version=1,
     l2_penalty=ranking.L2_PENALTY,
     points_per_logit=ranking.ELO_PER_LOGIT,
     anchor_score=ranking.ANCHOR,
-    human_weights=CappedHumanWeights(
-        name='actor-proportional-cap',
-        version=1,
-        cap=weighting.CAP,
-        scope='family-evaluation',
-        repeat_handling='excluded',
-    ),
-    settled_weights=SettledWeights(name='sample-pair-share', version=1),
+    actor_cap=weighting.CAP,
 )
 
-RULES = VotesRules(
-    preliminary_decisive_votes=40,
-    preliminary_decisive_vote_unit='raw-votes',
-    rater_agreement_floor=0.7,
-)
-
-INFERENCE = UnavailableInference(
-    status='unavailable',
-    target='new-cases-and-voters',
-    reason='population-method-not-validated',
-)
+RULES = VotesRules(preliminary_decisive_votes=40)
 
 
 # ── Votes Schema ──
-
-
-class UnrecordedProvenance(_Model):
-    status: Literal['unrecorded']
 
 
 class LedgerProvenance(_Model):
@@ -195,14 +134,8 @@ class LedgerProvenance(_Model):
     publication_id: Annotated[str, Field(min_length=1)]
     policy_id: Annotated[str, Field(min_length=1)]
     sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
-    status: Literal['ledger']
     weighted_evidence_digest: Annotated[str, Field(min_length=1)]
     fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
-
-
-type Provenance = Annotated[
-    UnrecordedProvenance | LedgerProvenance, Field(discriminator='status')
-]
 
 
 class Standing(_Model):
@@ -210,11 +143,8 @@ class Standing(_Model):
     score: float
     """Point estimate on the round's recorded score scale."""
 
-    interval: None
     rank: int
     """Competition rank of the point score."""
-    best_rank: None
-    worst_rank: None
 
     votes: Annotated[int, Field(ge=0)]
     effective_votes: Annotated[float, Field(ge=0)]
@@ -239,7 +169,11 @@ class Standing(_Model):
 
 
 class HeadToHead(_Model):
-    """Human choices between two systems, with half credit for either tie."""
+    """Human choices between two systems, with half credit for either tie.
+
+    The outcome counts are raw choices, while `effective_votes` and `win_rate` use
+    the actors' weights.
+    """
 
     system: str
     opponent: str
@@ -255,7 +189,6 @@ class HeadToHead(_Model):
 class CategoryStanding(_Model):
     system: str
     score: float
-    interval: None
     votes: Annotated[int, Field(ge=0)]
     effective_votes: Annotated[float, Field(ge=0)]
     decisive_votes: Annotated[int, Field(ge=0)]
@@ -271,25 +204,13 @@ class CategoryBoard(_Model):
     unranked: list[str]
 
 
-class RaterAgreement(_Model):
-    """Descriptive agreement of side-swapped repeats with their originals."""
-
-    repeats: int
-    agreement: float | None
-    below_floor: bool
-
-
 class VotesResults(_Model):
     """Point estimates and descriptive diagnostics on eligible comparisons."""
 
     scorer: Literal['votes']
     method: VotesMethod
     rules: VotesRules
-    inference: UnavailableInference
-    provenance: Provenance = Field(
-        default=UnrecordedProvenance(status='unrecorded'),
-        exclude_if=lambda value: isinstance(value, UnrecordedProvenance),
-    )
+    provenance: LedgerProvenance
 
     reference: str
     """Configured reference, whether or not comparisons connect it."""
@@ -315,124 +236,8 @@ class VotesResults(_Model):
     """Left-pane advantage in score points, null without ranked human rows."""
     length: float | None
     """Score points per length-difference standard deviation, if identifiable."""
-    separability: None
     split_half_tau: float | None
     """Order agreement between alternating eligible sessions, when measurable."""
-    rater_agreement: RaterAgreement
-    decision: None
-
-    @model_validator(mode='after')
-    def validate_rules(self) -> VotesResults:
-        aggregates = [
-            (self.votes, self.effective_votes),
-            *((row.votes, row.effective_votes) for row in self.standings),
-            *((row.votes, row.effective_votes) for row in self.head_to_head),
-            *((board.votes, board.effective_votes) for board in self.categories),
-            *(
-                (row.votes, row.effective_votes)
-                for board in self.categories
-                for row in board.standings
-            ),
-        ]
-        if isinstance(self.method.human_weights, UnitHumanWeights) and any(
-            raw != effective for raw, effective in aggregates
-        ):
-            raise ValueError(
-                'Unit human weights require effective votes to equal raw votes.'
-            )
-
-        if any(effective > raw for raw, effective in aggregates):
-            raise ValueError('Effective votes cannot exceed raw votes.')
-
-        if isinstance(self.method.human_weights, CappedHumanWeights) and not isinstance(
-            self.provenance, LedgerProvenance
-        ):
-            raise ValueError('Capped human weights require sealed ledger provenance.')
-
-        if isinstance(self.method.human_weights, CappedHumanWeights):
-            self._validate_capped_aggregates()
-
-        agreement = self.rater_agreement.agreement
-        below = agreement is not None and agreement < self.rules.rater_agreement_floor
-        if self.rater_agreement.below_floor != below:
-            raise ValueError('Rater agreement must use the recorded agreement floor.')
-
-        return self
-
-    def _validate_capped_aggregates(self) -> None:
-        def close(left: float, right: float) -> bool:
-            return math.isclose(left, right, rel_tol=1e-9, abs_tol=1e-9)
-
-        def bounded(raw: int, effective: float, total: int, mass: float) -> bool:
-            return raw <= total and (effective <= mass or close(effective, mass))
-
-        children: list[Standing | HeadToHead | CategoryBoard] = [
-            *self.standings,
-            *self.head_to_head,
-            *self.categories,
-        ]
-        if any(
-            not bounded(
-                row.votes, row.effective_votes, self.votes, self.effective_votes
-            )
-            for row in children
-        ):
-            raise ValueError('Subset counts cannot exceed complete family evidence.')
-
-        categories = [board.category for board in self.categories]
-        if len(categories) != len(set(categories)) or not bounded(
-            sum(board.votes for board in self.categories),
-            sum(board.effective_votes for board in self.categories),
-            self.votes,
-            self.effective_votes,
-        ):
-            raise ValueError('Category boards must partition eligible family evidence.')
-
-        for board in self.categories:
-            if any(
-                not bounded(
-                    row.votes, row.effective_votes, board.votes, board.effective_votes
-                )
-                for row in board.standings
-            ):
-                raise ValueError('Category standings cannot exceed category evidence.')
-
-        if not bounded(
-            sum(row.votes for row in self.standings),
-            sum(row.effective_votes for row in self.standings),
-            2 * self.votes,
-            2 * self.effective_votes,
-        ):
-            raise ValueError('Standing totals cannot exceed both sides of each vote.')
-
-        heads = {(row.system, row.opponent): row for row in self.head_to_head}
-        if (
-            len(heads) != len(self.head_to_head)
-            or sum(row.votes for row in self.head_to_head) != 2 * self.votes
-            or not close(
-                sum(row.effective_votes for row in self.head_to_head),
-                2 * self.effective_votes,
-            )
-        ):
-            raise ValueError(
-                'Head-to-head totals must account for both sides of each vote.'
-            )
-
-        for (system, opponent), row in heads.items():
-            mirror = heads.get((opponent, system))
-            if (
-                system == opponent
-                or mirror is None
-                or row.votes != mirror.votes
-                or not close(row.effective_votes, mirror.effective_votes)
-                or row.wins != mirror.losses
-                or row.losses != mirror.wins
-                or row.ties != mirror.ties
-                or row.both_bad != mirror.both_bad
-                or row.wins + row.losses + row.ties + row.both_bad != row.votes
-                or not close(row.win_rate + mirror.win_rate, 1)
-            ):
-                raise ValueError('Head-to-head rows must describe mirrored choices.')
 
 
 # ── Tests Schema ──
@@ -579,14 +384,15 @@ def close(
     family: Family,
     closed_at: datetime,
     *,
+    samples: int,
     system_names: Mapping[str, str],
-    previous_reports: Sequence[Report],
+    frozen_fingerprints: Mapping[str, str | None],
 ) -> Report:
-    """Aggregate current test-scored outputs under their public system names."""
-    if not isinstance(family.settings, TaskTestsSettings):
-        raise ValueError('Votes require a saved canonical D1 export.')
+    """Aggregate a tests family's current outputs under their public system names.
 
-    closed_at = TypeAdapter(AwareDatetime).validate_python(closed_at).astimezone(UTC)
+    `closed_at` is an aware time, and its UTC date names the round.
+    """
+    closed_at = closed_at.astimezone(UTC)
     categories = {case.id: case.category for case in load_cases(family)}
     outputs = [
         output for output in read_outputs(family.name) if output.case in categories
@@ -595,9 +401,8 @@ def close(
     if not outputs:
         raise ValueError(f'Family `{family.name}` has no outputs on its current cases.')
 
-    fingerprints = system_fingerprints(outputs)
-    _require_every_trial(outputs, categories, family.settings.samples)
-    results = _tests_results(outputs, categories, family.settings.samples)
+    _require_every_trial(outputs, categories, samples)
+    results = _tests_results(outputs, categories, samples)
 
     return Report(
         family=family.name,
@@ -605,11 +410,9 @@ def close(
         closed_at=closed_at,
         systems=_public_systems(
             _referenced_systems(results),
-            fingerprints,
+            system_fingerprints(outputs),
             system_names,
-            previous_reports,
-            family.name,
-            closed_at,
+            frozen_fingerprints,
         ),
         results=results,
     )
@@ -621,10 +424,13 @@ def close_snapshot(
     *,
     fingerprints: Mapping[str, str],
     system_names: Mapping[str, str],
-    previous_reports: Sequence[Report],
+    frozen_fingerprints: Mapping[str, str | None],
 ) -> Report:
-    """Close frozen evidence under the fingerprints and names its release recorded."""
-    closed_at = TypeAdapter(AwareDatetime).validate_python(closed_at).astimezone(UTC)
+    """Close frozen evidence under the fingerprints and names its release recorded.
+
+    `closed_at` is an aware time, and its UTC date names the round.
+    """
+    closed_at = closed_at.astimezone(UTC)
     results = votes_results(analysis)
     return Report(
         family=analysis.family,
@@ -634,9 +440,7 @@ def close_snapshot(
             _referenced_systems(results),
             fingerprints,
             system_names,
-            previous_reports,
-            analysis.family,
-            closed_at,
+            frozen_fingerprints,
         ),
         results=results,
     )
@@ -646,60 +450,27 @@ def _public_systems(
     referenced: set[str],
     fingerprints: Mapping[str, str | None],
     names: Mapping[str, str],
-    previous_reports: Sequence[Report],
-    family: str,
-    closed_at: datetime,
+    frozen: Mapping[str, str | None],
 ) -> dict[str, PublicSystem]:
-    history: dict[str, PublicSystem] = {}
-    ordered = sorted(previous_reports, key=lambda report: report.closed_at)
-    for previous in ordered:
-        if previous.family != family or previous.closed_at >= closed_at:
-            raise ValueError(
-                'Prior reports must belong to this family and close earlier.'
-            )
-        history.update(previous.systems)
-    frozen = _frozen_fingerprints(ordered)
-
+    """Name each referenced system after checking it keeps its frozen fingerprint."""
     public: dict[str, PublicSystem] = {}
     for system in sorted(referenced):
         fingerprint = fingerprints.get(system)
-        prior = history.get(system)
         known = frozen.get(system)
         if known is not None and fingerprint is not None and known != fingerprint:
             raise ValueError(f'System `{system}` changed its published fingerprint.')
-        if system in names:
-            public[system] = PublicSystem(
-                display_name=names[system], fingerprint=fingerprint
-            )
-        elif (
-            prior is not None
-            and fingerprint is not None
-            and prior.fingerprint == fingerprint
-        ):
-            public[system] = prior
-        else:
-            raise ValueError(
-                f'System `{system}` lacks verified public metadata. Restore its '
-                'metadata or close a report before retiring it.'
-            )
+
+        public[system] = PublicSystem(
+            display_name=names[system], fingerprint=fingerprint
+        )
 
     return public
 
 
 def write_report(report: Report) -> Path:
-    TypeAdapter(FamilyName).validate_python(report.family)
-    TypeAdapter(RoundName).validate_python(report.round)
-
     path = REPORTS_DIR / report.family / f'{report.round}.json'
     write_atomically(path, f'{report.model_dump_json(indent=2)}\n')
     return path
-
-
-def read_reports(family: str, before: datetime) -> list[Report]:
-    family = TypeAdapter(FamilyName).validate_python(family)
-    before = TypeAdapter(AwareDatetime).validate_python(before)
-    reports = [report for report in _closed(family) if report.closed_at < before]
-    return sorted(reports, key=lambda report: report.closed_at)
 
 
 def reported_fingerprints(family: str) -> dict[str, str | None]:
@@ -760,8 +531,6 @@ class HumanEvidence:
     comparison: ranking.Comparison
     """Weight assigned once over the complete eligible family evaluation."""
 
-    repeat_of: str | None = None
-
     @property
     def systems(self) -> tuple[str, str]:
         return self.comparison.left, self.comparison.right
@@ -798,7 +567,6 @@ class AnalysisInput:
     """Every frozen case, with None marking an explicitly uncategorized case."""
 
     ordinary: tuple[HumanEvidence, ...]
-    repeats: tuple[HumanEvidence, ...]
     settlements: tuple[ranking.Comparison, ...]
     outputs: tuple[OutputMeasurement, ...]
     sessions: tuple[str, ...]
@@ -851,7 +619,6 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         scorer='votes',
         method=METHOD,
         rules=RULES,
-        inference=INFERENCE,
         provenance=analysis.provenance,
         reference=analysis.reference,
         anchor=board.anchor,
@@ -874,12 +641,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         ),
         position=ratings.position if connected else None,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
-        separability=None,
         split_half_tau=_split_half_tau(votes, analysis.sessions, board.root),
-        rater_agreement=_rater_agreement(
-            votes, analysis.repeats, RULES.rater_agreement_floor
-        ),
-        decision=None,
     )
 
 
@@ -910,10 +672,7 @@ def _standing(
     return Standing(
         system=system,
         score=score,
-        interval=None,
         rank=rank,
-        best_rank=None,
-        worst_rank=None,
         votes=len(votes),
         effective_votes=effective,
         decisive_votes=decisive,
@@ -1025,7 +784,6 @@ def _categories(
                 CategoryStanding(
                     system=system,
                     score=float(ratings.score[i]),
-                    interval=None,
                     votes=len(mine),
                     effective_votes=sum(row.comparison.weight for row in mine),
                     decisive_votes=decisive,
@@ -1089,24 +847,6 @@ def _split_half_tau(
     shared = sorted(first.keys() & second.keys())
     return ranking.rank_agreement(
         np.array([first[s] for s in shared]), np.array([second[s] for s in shared])
-    )
-
-
-def _rater_agreement(
-    votes: Sequence[HumanEvidence], repeats: Sequence[HumanEvidence], floor: float
-) -> RaterAgreement:
-    originals = {vote.receipt: vote for vote in votes}
-    matches = [
-        vote.choice == SWAPPED[originals[vote.repeat_of].choice]
-        for vote in repeats
-        if vote.repeat_of in originals
-    ]
-    agreement = _share(matches)
-
-    return RaterAgreement(
-        repeats=len(matches),
-        agreement=agreement,
-        below_floor=agreement is not None and agreement < floor,
     )
 
 

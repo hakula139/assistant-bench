@@ -1,5 +1,3 @@
-import { cn } from 'cn';
-import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { Filter } from '@/components/boards/Filter';
@@ -32,17 +30,15 @@ import {
   formatCount,
   formatCountOf,
   formatLengthBias,
-  formatPercent,
   formatScore,
   formatSeconds,
   formatTau,
   MISSING,
 } from '@/lib/format';
 import {
-  agreementTerm,
   categoryTerm,
+  effectiveVotesTerm,
   fallbackAnchor,
-  inferenceNote,
   preliminaryTerm,
   anchorTerm as recordedAnchor,
   terms,
@@ -113,59 +109,33 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
 }
 
 function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBias: Term }) {
-  const { rater_agreement: agreement, length } = results;
+  const { length } = results;
 
   return (
-    <div className="flex flex-col gap-3">
-      <dl className={statList}>
-        <Stat
-          label={terms.votes.term}
-          detail={
-            <>
-              over {formatCountOf(results.sessions, 'session')}
-              {results.dropped_votes > 0 && (
-                <>
-                  , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
-                </>
-              )}
-            </>
-          }
-        >
-          {formatCount(results.votes)}
-        </Stat>
-        {results.method.human_weights.name === 'actor-proportional-cap' && (
+    <dl className={statList}>
+      <Stat
+        label={terms.votes.term}
+        detail={
           <>
-            <Stat
-              label="Accepted choices"
-              detail="including repeats and choices excluded from this fit"
-            >
-              {formatCount(results.votes + results.dropped_votes)}
-            </Stat>
-            <Stat label="Effective vote mass" detail="after the complete family actor cap">
-              {formatScore(results.effective_votes)}
-            </Stat>
+            over {formatCountOf(results.sessions, 'session')}
+            {results.dropped_votes > 0 && (
+              <>
+                , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
+              </>
+            )}
           </>
-        )}
-        <Stat
-          label={<Hint term={agreementTerm(results.rules)} />}
-          detail={`on ${formatCountOf(agreement.repeats, 'repeat')}`}
-        >
-          {formatPercent(agreement.agreement)}
-        </Stat>
-        <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
-        {length !== null && (
-          <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
-        )}
-      </dl>
-      <p className={note}>{inferenceNote}</p>
-      {agreement.below_floor && (
-        <p className={cn(note, 'flex gap-2')}>
-          <TriangleAlert className="h-lh w-4 shrink-0" aria-hidden="true" />
-          Repeat consistency is below the recorded{' '}
-          {formatPercent(results.rules.rater_agreement_floor)} floor.
-        </p>
+        }
+      >
+        {formatCount(results.votes)}
+      </Stat>
+      <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
+        {formatScore(results.effective_votes)}
+      </Stat>
+      <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
+      {length !== null && (
+        <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
       )}
-    </div>
+    </dl>
   );
 }
 
@@ -243,18 +213,10 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       )}
 
       <RoundSummary results={results} lengthBias={labels.lengthBias} />
-      {results.provenance?.status === 'ledger' && (
-        <SnapshotStatus
-          exportId={results.provenance.export_id}
-          capturedAt={results.provenance.captured_at}
-        />
-      )}
-      {results.method.human_weights.name === 'actor-proportional-cap' && (
-        <p className={note}>
-          Vote counts show raw ordinary coverage. Scores, win rates and both-bad rates use the
-          recorded actor weights. Repeats contribute only to consistency diagnostics.
-        </p>
-      )}
+      <SnapshotStatus
+        exportId={results.provenance.export_id}
+        capturedAt={results.provenance.captured_at}
+      />
       <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>

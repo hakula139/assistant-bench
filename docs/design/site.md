@@ -12,7 +12,7 @@ Each board uses the shared scorer and render registries for its steps, labels, a
 
 A votes board shows one round, with its category filter kept in the URL. The category filter shows each category's label while the URL keeps its ID:
 
-- **Summary:** vote and session counts, excluded votes, repeat consistency and split-half diagnostics. The uncertainty note states that inference for new cases and voters remains unavailable until calibrated. Round settings show the recorded method and rules.
+- **Summary:** vote, session and effective vote counts, excluded votes, split-half agreement and length bias. Round settings show the recorded method and rules.
 - **Leaderboard:** a sortable table with point scores on one shared axis. Preliminary systems use hollow dots, derived from that round's decisive counts and threshold. The axis begins at most 600 points below the top score and represents clipped points with arrowheads. A category selection uses its refit and labels family-wide columns. When a round's outputs have test rewards, a family-wide pass rate with its 95% interval replaces the gate-failure column. Unranked systems follow by name.
 - **Categories:** point plots share an axis starting at the lowest of their own cuts, and follow the family's declared category order. Rows follow the family board's order, followed by systems ranked only in that category.
 - **Cost and latency:** point scores against mean cost per output and p50 latency, with a labelled Pareto frontier. Each metric uses a log axis when every value is positive and a linear axis when it includes zero. A chart without priced or timed systems is omitted.
@@ -33,7 +33,7 @@ Nothing is preselected. Each new pair clears the previous control's focus so the
 
 ## Design Direction
 
-The site is named HAKULA†BENCH, after the owner's blog HAKULA†CHANNEL, with the dagger as part of the name. The wordmark and favicon retain decorative capped-line artwork. Actual ranking plots show point estimates and state the unavailable uncertainty contract.
+The site is named HAKULA†BENCH, after the owner's blog HAKULA†CHANNEL, with the dagger as part of the name. The wordmark and favicon retain decorative capped-line artwork. Votes ranking plots show point estimates without intervals.
 
 The remaining design uses ink text, one ultramarine accent, tabular numbers, and no card grid or hero number. IBM Plex Sans sets text, Sarasa Gothic SC or Source Han Sans SC supplies Chinese where installed, and Maple Mono sets code. Charts use one series hue and one emphasis hue for the hovered or current system.
 

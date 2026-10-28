@@ -28,7 +28,7 @@ Drop a test once another covers everything it checks.
 ## Cross-Checks and the Report Fixture
 
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss or the design that moves the estimates fails. The penalty barely moves those estimates, so the test of a system that wins every vote bounds its gap tightly enough that a tenfold change to the penalty in either direction fails.
-- `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten sessions and after one, `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all three. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
+- `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten sessions and after one, which `make_round` in `snapshot_support.py` simulates and the capped close path closes. `report-ledger.json` is closed from a canonical export of the test ledger in `tests/arena/test_exports.py`. `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all four. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
 
 ## Accessibility
 

@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench.arena.publication import (
+    POLICY,
     case_key,
     output_key,
     prepare,
@@ -483,3 +484,12 @@ class TestPrepare:
             row.key for row in original.outputs
         }
         assert regraded.evaluation.id != original.evaluation.id
+
+
+class TestPolicy:
+    def test_keeps_the_policy_the_production_ledger_sealed(self) -> None:
+        sealed = digest(POLICY)
+
+        assert (
+            sealed == '50868d7f116faa7aeec5e06e04ac92fcd43a431f741d3d436276628355656a47'
+        )

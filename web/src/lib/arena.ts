@@ -2,12 +2,12 @@ import { z } from 'zod/mini';
 
 import { categories } from '@/lib/categories';
 import { defects } from '@/lib/defects';
+import { FAMILY_NAME_MAX_LENGTH, familyNamePattern } from '@/lib/family-name';
 
 export const identifier = z.string().check(z.minLength(1), z.maxLength(256));
-/** Mirrors the shared JSON Schema's true-end constraint across validators. */
 export const familyName = z
   .string()
-  .check(z.maxLength(256), z.regex(/^[a-z0-9][a-z0-9-]*(?![\s\S])/));
+  .check(z.maxLength(FAMILY_NAME_MAX_LENGTH), z.regex(familyNamePattern));
 
 const command = { command_id: z.uuid() };
 const capability = z.string().check(z.minLength(1), z.maxLength(2048));
