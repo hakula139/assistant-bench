@@ -95,6 +95,11 @@ class MessageResult:
         details: dict[str, Any] = {
             'finish_reason': finish if self.complete else None,
             'native_stop_reason': stop,
+            'stop_details': message.stop_details.model_dump(
+                mode='json', include={'type', 'category', 'explanation'}
+            )
+            if message and message.stop_details
+            else None,
             'response_status': 'completed' if self.complete else 'incomplete',
             'response_model': message.model if message else None,
             'response_id': message.id if message else None,

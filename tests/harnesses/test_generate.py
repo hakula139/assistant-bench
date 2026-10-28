@@ -14,13 +14,14 @@ from harbor.models.agent.context import AgentContext
 from openai.types.responses import Response
 
 from assistant_bench import jobs
-from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price
+from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import Gate, VotesSettings, load_cases, load_family
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from assistant_bench.harnesses.messages import MessageStreamError
+from assistant_bench.outputs import Output
 from assistant_bench.scoring.gates import failed_gates
 from support import (
     StubEndpoint,
@@ -60,6 +61,36 @@ def run_agent(
     context = AgentContext()
     asyncio.run(agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context))
     return context, logs_dir / OUTPUT_FILE
+
+
+def collect_reply(
+    endpoint: StubEndpoint, logs_dir: Path, data_dir: Path, system: System
+) -> tuple[AgentContext, Output]:
+    """Run `system` on the first `smoke-text` case and collect its one output."""
+    family = load_family('smoke-text')
+    family = family.model_copy(
+        update={
+            'settings': family.settings.model_copy(
+                update={'systems': [system.name], 'reference': system.name}
+            )
+        }
+    )
+    (task,) = jobs.render_tasks(family, load_cases(family)[:1])
+    config = jobs.job(family, jobs.family_systems(family, [system]), [task])
+    context, output = run_agent(endpoint, logs_dir, **agent_kwargs(system))
+    write_trial(
+        data_dir / 'jobs' / family.name / 'job-1',
+        'en-greeting__1',
+        config.agents[0],
+        task=f'{family.name}/en-greeting',
+        output=output.read_text(),
+        context=context,
+        instruction=None,
+        environment=config.environment,
+        verifier_disabled=config.verifier.disable,
+    )
+    (collected,) = jobs.collect(family, {system.name: system})
+    return context, collected
 
 
 class TestGenerate:
@@ -115,36 +146,14 @@ class TestGenerate:
                 else 'prompt_tokens_details'
             )
             endpoint.response['usage'][details]['cache_write_tokens'] = writes
-            family = load_family('smoke-text')
             system = make_system(
                 api=api,
                 price=Price(input=2.0, output=10.0, cache_read=0.2),
             )
-            family = family.model_copy(
-                update={
-                    'settings': family.settings.model_copy(
-                        update={'systems': [system.name], 'reference': system.name}
-                    )
-                }
-            )
-            (task,) = jobs.render_tasks(family, load_cases(family)[:1])
-            config = jobs.job(family, jobs.family_systems(family, [system]), [task])
 
-            context, output = run_agent(
-                endpoint, tmp_path / 'agent', **agent_kwargs(system)
+            context, collected = collect_reply(
+                endpoint, tmp_path / 'agent', data_dir, system
             )
-            write_trial(
-                data_dir / 'jobs' / family.name / 'job-1',
-                'en-greeting__1',
-                config.agents[0],
-                task=f'{family.name}/en-greeting',
-                output=output.read_text(),
-                context=context,
-                instruction=None,
-                environment=config.environment,
-                verifier_disabled=config.verifier.disable,
-            )
-            (collected,) = jobs.collect(family, {system.name: system})
 
             assert collected.text == 'Hello there.'
             assert (
@@ -304,6 +313,64 @@ class TestGenerate:
             assert sent.body['thinking'] == {'type': 'adaptive'}
             assert sent.body['output_config'] == {'effort': 'high'}
             assert sent.body['max_tokens'] == 128000
+
+        @pytest.mark.parametrize(
+            ('stop', 'details', 'finish', 'recorded'),
+            [
+                (
+                    'refusal',
+                    {
+                        'type': 'refusal',
+                        'category': 'cyber',
+                        'explanation': 'Exploit development.',
+                        'recommended_model': None,
+                    },
+                    'refusal',
+                    {
+                        'type': 'refusal',
+                        'category': 'cyber',
+                        'explanation': 'Exploit development.',
+                    },
+                ),
+                (
+                    'refusal',
+                    {'type': 'refusal', 'category': 'novel', 'explanation': None},
+                    'refusal',
+                    {'type': 'refusal', 'category': 'novel', 'explanation': None},
+                ),
+                (
+                    'refusal',
+                    {'type': 'refusal', 'category': None, 'explanation': None},
+                    'refusal',
+                    {'type': 'refusal', 'category': None, 'explanation': None},
+                ),
+                ('end_turn', None, 'stop', None),
+            ],
+            ids=['named-category', 'unlisted-category', 'no-category', 'answered'],
+        )
+        def test_collects_the_native_refusal_detail_into_the_output_record(
+            self,
+            endpoint: StubEndpoint,
+            tmp_path: Path,
+            data_dir: Path,
+            stop: str,
+            details: dict[str, Any] | None,
+            finish: str,
+            recorded: dict[str, Any] | None,
+        ) -> None:
+            endpoint.stream = message_stream(
+                message(stop_reason=stop, stop_details=details)
+            )
+            system = make_system(
+                api='anthropic-messages', thinking_mode='anthropic-adaptive'
+            )
+
+            _, collected = collect_reply(endpoint, tmp_path / 'agent', data_dir, system)
+
+            assert collected.model_dump(include={'finish_reason', 'stop_details'}) == {
+                'finish_reason': finish,
+                'stop_details': recorded,
+            }
 
         def test_never_publishes_a_clean_early_eof_as_an_answer(
             self, endpoint: StubEndpoint, tmp_path: Path

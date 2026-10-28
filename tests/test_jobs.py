@@ -1193,6 +1193,7 @@ class TestCollect:
             'reward': None,
             'gate_failures': [],
             'finish_reason': 'stop',
+            'stop_details': None,
             'input_tokens': 1_000,
             'cached_tokens': 600,
             'cache_write_tokens': None,

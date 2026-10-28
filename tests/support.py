@@ -474,6 +474,7 @@ def message(
     *,
     message_id: str = 'msg-1',
     stop_reason: str = 'end_turn',
+    stop_details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         'id': message_id,
@@ -490,6 +491,7 @@ def message(
         ],
         'stop_reason': stop_reason,
         'stop_sequence': None,
+        'stop_details': stop_details,
         'usage': {
             'input_tokens': 20,
             'cache_read_input_tokens': 100,
@@ -501,7 +503,11 @@ def message(
 
 def message_stream(payload: dict[str, Any]) -> list[bytes]:
     """Encode native events, including thinking and signature deltas, for the SDK."""
-    start: dict[str, Any] = payload | {'content': [], 'stop_reason': None}
+    start: dict[str, Any] = payload | {
+        'content': [],
+        'stop_reason': None,
+        'stop_details': None,
+    }
     if payload.get('usage') is not None:
         start['usage'] = payload['usage'] | {'output_tokens': 0}
     events: list[dict[str, Any]] = [{'type': 'message_start', 'message': start}]
@@ -539,6 +545,7 @@ def message_stream(payload: dict[str, Any]) -> list[bytes]:
                 'delta': {
                     'stop_reason': payload['stop_reason'],
                     'stop_sequence': payload['stop_sequence'],
+                    'stop_details': payload['stop_details'],
                 },
                 'usage': payload.get('usage') or {},
             },

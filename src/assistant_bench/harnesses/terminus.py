@@ -319,6 +319,10 @@ class Terminus(Terminus2):
             if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
                 if isinstance(self._llm, MessagesLLM):
                     context.metadata['message_attempts'] = self._llm.attempts
+                    if self._llm.attempts:
+                        context.metadata['stop_details'] = self._llm.attempts[-1][
+                            'stop_details'
+                        ]
                 elif isinstance(self._llm, ResponsesLLM):
                     context.metadata['response_attempts'] = self._llm.attempts
                 context.metadata['cache_write_unpriced'] = any(

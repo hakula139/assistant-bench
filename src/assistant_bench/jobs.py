@@ -833,6 +833,7 @@ def _output(
             errored=exception is not None,
         ),
         finish_reason=finish_reason,
+        stop_details=metadata.get('stop_details'),
         input_tokens=context.n_input_tokens,
         cached_tokens=context.n_cache_tokens,
         cache_write_tokens=metadata.get('cache_write_tokens'),
