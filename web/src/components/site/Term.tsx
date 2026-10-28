@@ -1,5 +1,5 @@
 import { Anchor, Hourglass, type LucideIcon } from 'lucide-react';
-import { useId, type ReactNode } from 'react';
+import { useId, type ComponentProps, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import {
@@ -30,13 +30,15 @@ export const statusIcons = { preliminary: Hourglass, anchor: Anchor } satisfies 
 
 export type Status = keyof typeof statusIcons;
 
-function Definition({ term }: { term: Term }) {
+type Side = ComponentProps<typeof PopoverContent>['side'];
+
+function Definition({ term, side = 'top' }: { term: Term; side?: Side }) {
   const title = useId();
   const description = useId();
 
   return (
     <PopoverContent
-      side="top"
+      side={side}
       align="start"
       collisionPadding={16}
       aria-labelledby={title}
@@ -53,13 +55,13 @@ function Definition({ term }: { term: Term }) {
 }
 
 /** Requires hydration. `children` overrides the visible label. */
-export function Hint({ term, children }: { term: Term; children?: ReactNode }) {
+export function Hint({ term, side, children }: { term: Term; side?: Side; children?: ReactNode }) {
   return (
     <Popover>
       <PopoverTrigger className="cursor-help text-left underline decoration-faint decoration-dotted underline-offset-4">
         {children ?? term.term}
       </PopoverTrigger>
-      <Definition term={term} />
+      <Definition term={term} side={side} />
     </Popover>
   );
 }

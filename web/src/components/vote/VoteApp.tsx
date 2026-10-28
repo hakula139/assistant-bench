@@ -220,7 +220,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
-            {pair.category !== null && <Hint term={categoryTerm(pair.category)} />}
+            {pair.category !== null && <Hint term={categoryTerm(pair.category)} side="bottom" />}
             <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
               <section
