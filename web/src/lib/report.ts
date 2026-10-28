@@ -16,6 +16,10 @@ const distribution = z.strictObject({
   p90: z.number(),
 });
 
+const share = z.number().min(0).max(1);
+
+const passRate = z.strictObject({ rate: share, lower: share, upper: share });
+
 // ── Votes Results ──
 
 const standing = z.strictObject({
@@ -31,7 +35,7 @@ const standing = z.strictObject({
   both_bad_rate: z.number().nullable(),
   outputs: z.int(),
   gate_failure_rate: z.number().nullable(),
-  pass_rate: z.number().nullable(),
+  pass_rate: passRate.nullable(),
   mean_cost_usd: z.number().nullable(),
   p50_latency_sec: z.number().nullable(),
   output_tokens: distribution.nullable(),
@@ -159,10 +163,6 @@ const votesResults = z.strictObject({
 });
 
 // ── Tests Results ──
-
-const share = z.number().min(0).max(1);
-
-const passRate = z.strictObject({ rate: share, lower: share, upper: share });
 
 const testsStanding = z.strictObject({
   system: z.string(),

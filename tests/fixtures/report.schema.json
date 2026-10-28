@@ -583,14 +583,13 @@
         "pass_rate": {
           "anyOf": [
             {
-              "type": "number"
+              "$ref": "#/$defs/PassRate"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Task-test pass rate as tests results define it, null for untested families.",
-          "title": "Pass Rate"
+          "description": "The tests pass rate over tasks, null when the system's outputs lack rewards."
         },
         "mean_cost_usd": {
           "anyOf": [

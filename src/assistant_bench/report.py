@@ -80,6 +80,17 @@ class Distribution(_Model):
     p90: float
 
 
+type Share = Annotated[float, Field(ge=0, le=1)]
+
+
+class PassRate(_Model):
+    """A mean of per-task shares with its 95% Clopper-Pearson interval over tasks."""
+
+    rate: Share
+    lower: Share
+    upper: Share
+
+
 # ── Votes Method ──
 
 
@@ -215,8 +226,8 @@ class Standing(_Model):
     """Outputs that finished without an error."""
     gate_failure_rate: float | None
     """Failure share among outputs with a verdict, including errored agents."""
-    pass_rate: float | None
-    """Task-test pass rate as tests results define it, null for untested families."""
+    pass_rate: PassRate | None
+    """The tests pass rate over tasks, null when the system's outputs lack rewards."""
 
     mean_cost_usd: float | None
     p50_latency_sec: float | None
@@ -425,17 +436,6 @@ class VotesResults(_Model):
 
 
 # ── Tests Schema ──
-
-
-type Share = Annotated[float, Field(ge=0, le=1)]
-
-
-class PassRate(_Model):
-    """A mean of per-task shares with its 95% Clopper-Pearson interval over tasks."""
-
-    rate: Share
-    lower: Share
-    upper: Share
 
 
 class TestsStanding(_Model):
@@ -819,7 +819,6 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     if not comparisons:
         raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
 
-    tested = any(output.reward is not None for output in outputs)
     board, *_ = ranking.rate_components(
         comparisons, analysis.systems, analysis.reference
     )
@@ -844,7 +843,6 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             [vote for vote in votes if system in vote.systems],
             [output for output in outputs if output.system == system],
             analysis.defects,
-            tested=tested,
         )
         for i, system in enumerate(ratings.systems)
     ]
@@ -892,13 +890,7 @@ def _standing(
     votes: list[HumanEvidence],
     outputs: list[OutputMeasurement],
     listed: Sequence[Defect],
-    *,
-    tested: bool,
 ) -> Standing:
-    """Summarize one system's votes and outputs.
-
-    `tested` marks a family whose outputs carry task-test rewards.
-    """
     choices = Counter(vote.choice for vote in votes)
     defects = Counter(
         defect
@@ -934,8 +926,8 @@ def _standing(
         outputs=len(finished),
         gate_failure_rate=_share(output.verdict == 'fail' for output in graded),
         pass_rate=(
-            _task_mean((output.case, tests_pass(output.reward)) for output in outputs)
-            if tested and outputs
+            _pass_rate(_pass_shares(outputs).values())
+            if any(output.reward is not None for output in outputs)
             else None
         ),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
@@ -1150,20 +1142,15 @@ def _require_every_trial(
 def _tests_results(
     outputs: list[Output], categories: Mapping[str, str], samples: int
 ) -> TestsResults:
-    by_system: defaultdict[str, defaultdict[str, list[Output]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:
-        by_system[output.system][output.case].append(output)
+        by_system[output.system].append(output)
 
-    shares = {
-        system: {task: _pass_share(trials) for task, trials in tasks.items()}
-        for system, tasks in by_system.items()
-    }
+    shares = {system: _pass_shares(trials) for system, trials in by_system.items()}
     standings = sorted(
         (
-            _tests_standing(system, tasks, shares[system], samples)
-            for system, tasks in by_system.items()
+            _tests_standing(system, trials, shares[system], samples)
+            for system, trials in by_system.items()
         ),
         key=lambda row: (-row.pass_rate.rate, row.system),
     )
@@ -1187,17 +1174,16 @@ def _tests_results(
 
 def _tests_standing(
     system: str,
-    tasks: Mapping[str, list[Output]],
+    trials: Sequence[Output],
     shares: Mapping[str, float],
     samples: int,
 ) -> TestsStanding:
-    """Summarize one system's trials, keyed by task, and its pass share per task."""
-    trials = [output for outputs in tasks.values() for output in outputs]
+    """Summarize one system's trials and its pass share per task."""
     finished = [output for output in trials if output.error is None]
 
     return TestsStanding(
         system=system,
-        tasks=len(tasks),
+        tasks=len(shares),
         trials=len(trials),
         errored=len(trials) - len(finished),
         pass_rate=_pass_rate(shares.values()),
@@ -1247,8 +1233,13 @@ def _separated(leader: Mapping[str, float], other: Mapping[str, float]) -> bool:
     )
 
 
-def _pass_share(trials: Sequence[Output]) -> float:
-    return sum(tests_pass(output.reward) for output in trials) / len(trials)
+def _pass_shares(trials: Iterable[Output | OutputMeasurement]) -> dict[str, float]:
+    """Map each task to its share of trials whose tests passed."""
+    passes: defaultdict[str, list[bool]] = defaultdict(list)
+    for trial in trials:
+        passes[trial.case].append(tests_pass(trial.reward))
+
+    return {task: sum(flags) / len(flags) for task, flags in passes.items()}
 
 
 def _pass_rate(shares: Iterable[float]) -> PassRate:
@@ -1265,15 +1256,6 @@ def _pass_rate(shares: Iterable[float]) -> PassRate:
 def _share(flags: Iterable[bool]) -> float | None:
     values = list(flags)
     return sum(values) / len(values) if values else None
-
-
-def _task_mean(passes: Iterable[tuple[str, bool]]) -> float:
-    """Average each task's share of passing trials over `(task, passed)` pairs."""
-    by_task: defaultdict[str, list[bool]] = defaultdict(list)
-    for task, passed in passes:
-        by_task[task].append(passed)
-
-    return statistics.fmean(sum(flags) / len(flags) for flags in by_task.values())
 
 
 def _mean(values: Iterable[float | None]) -> float | None:

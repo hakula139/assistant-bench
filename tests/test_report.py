@@ -611,13 +611,14 @@ class TestVotesResults:
         assert standings['b'].mean_cost_usd == pytest.approx(50.005)
         assert standings['a'].pass_rate is None
 
-    def test_rates_test_passes_per_task_when_outputs_carry_rewards(self) -> None:
+    def test_rates_test_passes_per_task_for_systems_with_rewards(self) -> None:
         analysis = make_analysis((make_evidence(0), make_evidence(1)))
         trials = [
             ('case-0', 'a', False, 1.0),
             ('case-0', 'a', False, 0.0),
+            ('case-0', 'a', True, None),
             ('case-1', 'a', True, 1.0),
-            ('case-0', 'b', False, 1.0),
+            ('case-0', 'b', True, None),
             ('case-1', 'b', True, None),
         ]
         outputs = tuple(
@@ -625,7 +626,11 @@ class TestVotesResults:
                 case=case,
                 system=system,
                 errored=errored,
-                verdict='ungraded' if reward is None else 'pass',
+                verdict='ungraded'
+                if reward is None
+                else 'pass'
+                if reward >= 1
+                else 'fail',
                 reward=reward,
                 cost_usd=None,
                 latency_sec=None,
@@ -637,8 +642,13 @@ class TestVotesResults:
         results = report.votes_results(replace(analysis, outputs=outputs))
 
         standings = {row.system: row for row in results.standings}
-        assert standings['a'].pass_rate == pytest.approx((1 / 2 + 1) / 2)
-        assert standings['b'].pass_rate == pytest.approx(1 / 2)
+        rated = standings['a'].pass_rate
+        assert rated is not None
+        assert rated.rate == pytest.approx((1 / 3 + 1) / 2)
+        assert (rated.lower, rated.upper) == pytest.approx(
+            clopper_pearson(rated.rate, 2)
+        )
+        assert standings['b'].pass_rate is None
 
     @pytest.mark.parametrize('choice', ['a', 'b', 'tie', 'both_bad'])
     def test_compares_swapped_repeats_without_adding_them_to_the_fit(

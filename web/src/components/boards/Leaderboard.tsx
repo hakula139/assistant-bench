@@ -24,9 +24,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { forestDomain, legendMarks, type LegendMark } from '@/lib/forest';
-import { formatCount, formatCountOf, formatPercent, formatScore, MISSING } from '@/lib/format';
+import {
+  formatCount,
+  formatCountOf,
+  formatPercent,
+  formatPercentRange,
+  formatScore,
+  MISSING,
+} from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
-import type { Standing } from '@/lib/report';
+import type { PassRate, Standing } from '@/lib/report';
 
 /** Score fields belong to the selected overall or category fit. */
 export interface LeaderboardRow {
@@ -63,8 +70,8 @@ interface ColumnMeta {
   forest?: boolean;
   wraps?: boolean;
   term?: Term;
-  /** A figure that narrow screens leave out and the row's score opens instead. */
-  detail?: boolean;
+  /** Summarizes a figure that narrow screens leave out, for the popover the row's score opens. */
+  detail?: (row: LeaderboardRow) => string;
 }
 
 const features = tableFeatures({
@@ -104,24 +111,37 @@ function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   return null;
 }
 
+/** Labels a family-wide rate for a row's score popover. */
+const rateDetail = (term: Term, rate: number | null) =>
+  `${term.term.toLowerCase()} ${formatPercent(rate)}`;
+
+const passRateDetail = (rate: PassRate | null) =>
+  rate === null
+    ? rateDetail(terms.passRateInterval, null)
+    : `${rateDetail(terms.passRateInterval, rate.rate)} (${formatPercentRange(rate)})`;
+
 /**
  * The figures of a row's `detail` columns, which its score opens on tap, click, or Enter, since
  * narrow screens leave those columns out.
  */
-function rowDetails(
-  row: LeaderboardRow,
-  ranked: boolean,
-  gateFailures: Term,
-  tested: boolean,
-): Term {
-  const passes = tested
-    ? `, ${terms.passRate.term.toLowerCase()} ${formatPercent(row.standing?.pass_rate ?? null)}`
-    : '';
-  const rates = `${terms.bothBad.term.toLowerCase()} ${formatPercent(row.standing?.both_bad_rate ?? null)}, ${gateFailures.term.toLowerCase()} ${formatPercent(row.standing?.gate_failure_rate ?? null)}${passes}`;
+function rowDetails(row: LeaderboardRow, details: string[], ranked: boolean): Term {
   return {
     term: row.name,
-    definition: `${formatCountOf(row.votes, 'vote')}, ${rates}${ranked ? '' : ' across all categories'}.`,
+    definition: `${details.join(', ')}${ranked ? '' : ' across all categories'}.`,
   };
+}
+
+function PassRateCell({ rate }: { rate: PassRate | null }) {
+  if (rate === null) {
+    return MISSING;
+  }
+
+  return (
+    <span className="flex flex-col items-end leading-tight">
+      {formatPercent(rate.rate)}
+      <span className="text-xs text-muted-foreground">{formatPercentRange(rate)}</span>
+    </span>
+  );
 }
 
 const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
@@ -205,9 +225,17 @@ export function Leaderboard({
       helper.accessor('score', {
         header: 'Score',
         sortDescFirst: true,
-        cell: ({ row }) => (
+        cell: ({ row, table }) => (
           <span className="flex flex-col items-end leading-tight">
-            <Hint term={rowDetails(row.original, ranked, gateFailures, tested)}>
+            <Hint
+              term={rowDetails(
+                row.original,
+                table
+                  .getAllLeafColumns()
+                  .flatMap((column) => column.columnDef.meta?.detail?.(row.original) ?? []),
+                ranked,
+              )}
+            >
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
           </span>
@@ -218,7 +246,11 @@ export function Leaderboard({
         header: terms.votes.term,
         sortDescFirst: true,
         cell: ({ getValue }) => formatCount(getValue()),
-        meta: { numeric: true, term: terms.votes, detail: true },
+        meta: {
+          numeric: true,
+          term: terms.votes,
+          detail: (row) => formatCountOf(row.votes, 'vote'),
+        },
       }),
       helper.accessor((row) => row.standing?.both_bad_rate ?? undefined, {
         id: 'both-bad',
@@ -226,39 +258,41 @@ export function Leaderboard({
         sortDescFirst: false,
         sortUndefined: 'last',
         cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: terms.bothBad, detail: true },
+        meta: {
+          numeric: true,
+          term: terms.bothBad,
+          detail: (row) => rateDetail(terms.bothBad, row.standing?.both_bad_rate ?? null),
+        },
       }),
-      helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
-        id: 'gate-failures',
-        header: familyWide(gateFailures.term),
-        sortDescFirst: false,
-        sortUndefined: 'last',
-        cell: ({ getValue }) => formatPercent(getValue() ?? null),
-        meta: { numeric: true, term: gateFailures, detail: true },
-      }),
-      ...(tested
-        ? [
-            helper.accessor((row) => row.standing?.pass_rate ?? undefined, {
-              id: 'pass-rate',
-              header: familyWide(terms.passRate.term),
-              sortDescFirst: true,
-              sortUndefined: 'last',
-              cell: ({ getValue }) => formatPercent(getValue() ?? null),
-              meta: { numeric: true, term: terms.passRate, detail: true },
-            }),
-          ]
-        : []),
+      tested
+        ? helper.accessor((row) => row.standing?.pass_rate?.rate, {
+            id: 'pass-rate',
+            header: familyWide(terms.passRateInterval.term),
+            sortDescFirst: true,
+            sortUndefined: 'last',
+            cell: ({ row: { original } }) => (
+              <PassRateCell rate={original.standing?.pass_rate ?? null} />
+            ),
+            meta: {
+              numeric: true,
+              term: terms.passRateInterval,
+              detail: (row) => passRateDetail(row.standing?.pass_rate ?? null),
+            },
+          })
+        : helper.accessor((row) => row.standing?.gate_failure_rate ?? undefined, {
+            id: 'gate-failures',
+            header: familyWide(gateFailures.term),
+            sortDescFirst: false,
+            sortUndefined: 'last',
+            cell: ({ getValue }) => formatPercent(getValue() ?? null),
+            meta: {
+              numeric: true,
+              term: gateFailures,
+              detail: (row) => rateDetail(gateFailures, row.standing?.gate_failure_rate ?? null),
+            },
+          }),
     ]);
-  }, [
-    ranked,
-    tested,
-    domain,
-    anchor,
-    anchorSystem,
-    anchorTerm,
-    preliminaryTerm,
-    gateFailures,
-  ]);
+  }, [ranked, tested, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, gateFailures]);
 
   const table = useTable({
     features,
