@@ -353,10 +353,21 @@ class TestReport:
     ) -> None:
         written = f'{close_tests_round(families_dir).model_dump_json(indent=2)}\n'
 
-        if (
-            not TESTS_REPORT_FIXTURE.exists()
-            or TESTS_REPORT_FIXTURE.read_text() != written
-        ):
+        if not TESTS_REPORT_FIXTURE.exists():
+            stale_fixture(TESTS_REPORT_FIXTURE, written)
+            return
+
+        comparison = json.loads(TESTS_REPORT_FIXTURE.read_text())
+        results = comparison['results']
+        # SciPy's beta quantiles can differ in the last bit across platforms.
+        for row in results['standings'] + [
+            row for board in results['categories'] for row in board['standings']
+        ]:
+            for bound in ('lower', 'upper'):
+                row['pass_rate'][bound] = pytest.approx(
+                    row['pass_rate'][bound], rel=0, abs=1e-12
+                )
+        if comparison != json.loads(written):
             stale_fixture(TESTS_REPORT_FIXTURE, written)
 
 
