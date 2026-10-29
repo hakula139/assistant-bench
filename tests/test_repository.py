@@ -208,7 +208,7 @@ def run_verifier(task: Path, workspace: Path, logs: Path, tmp_path: Path) -> str
         capture_output=True,
         text=True,
         check=True,
-        timeout=180,
+        timeout=2 * load_coding_verifier().TIMEOUT_SEC + 60,
     )
     return result.stdout + result.stderr
 
@@ -298,7 +298,7 @@ def load_coding_verifier() -> ModuleType:
         pytest.param(
             None,
             None,
-            'The run left no record, as it exited early or ran past 60 s.',
+            'The run left no record, as it exited early or ran past 300 s.',
             id='no-record',
         ),
         pytest.param(
@@ -359,6 +359,20 @@ def test_coding_verifier_judges_each_run_record(
     judged = verify.judge(None if record is None else verify.Record(**record), expected)
 
     assert judged == reason
+
+
+@pytest.mark.parametrize('task', CODING_TASKS, ids=lambda task: task.name)
+def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
+    config = tomllib.loads((task / 'task.toml').read_text())
+
+    timeout = load_coding_verifier().TIMEOUT_SEC
+
+    assert (timeout, config['environment']['cpus']) == (5 * 60, 2)
+    assert (
+        'fails either run that takes more than five minutes on two CPUs.'
+        in (task / 'instruction.md').read_text()
+    )
+    assert config['verifier']['timeout_sec'] >= 2 * timeout + 60
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:

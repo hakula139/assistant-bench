@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "coding-repo/make-pipeline-incremental"
 description = "Make a file-based build pipeline skip exactly the steps whose inputs, declaration, module source and output files are unchanged"
-version = "2.0.0"
+version = "3.0.0"
 
 [metadata]
 category = "refactor"
@@ -16,7 +16,7 @@ timeout_sec = 1800.0
 
 [verifier]
 environment_mode = "separate"
-timeout_sec = 600.0
+timeout_sec = 900.0
 
 [environment]
 build_timeout_sec = 600.0
