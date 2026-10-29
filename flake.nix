@@ -122,8 +122,8 @@
         };
 
         nodeTools = with pkgs; [
-          nodejs_24
-          pnpm
+          nodejs_26
+          (pnpm.override { nodejs-slim = nodejs-slim_26; })
         ];
 
         # These hooks run the tools pinned in node_modules and uv.lock, which the Nix sandbox lacks.
