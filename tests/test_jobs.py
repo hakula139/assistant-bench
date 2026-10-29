@@ -1609,10 +1609,14 @@ class TestCollect:
                 id='graded-error-over-ungraded-errors',
             ),
             pytest.param(
-                [(0.0, 'AgentTimeoutError'), (1.0, 'AgentTimeoutError')],
+                [
+                    (0.5, 'AgentTimeoutError'),
+                    (1.0, 'AgentTimeoutError'),
+                    (0.0, 'AgentTimeoutError'),
+                ],
                 'job-1',
                 'AgentTimeoutError',
-                0.0,
+                0.5,
                 [Gate.TESTS],
                 id='oldest-graded-error',
             ),
@@ -1626,7 +1630,7 @@ class TestCollect:
             ),
         ],
     )
-    def test_prefers_a_success_then_a_graded_error_then_the_oldest(
+    def test_ranks_a_success_then_a_graded_then_an_ungraded_error_oldest_first(
         self,
         families_dir: Path,
         data_dir: Path,

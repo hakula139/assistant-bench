@@ -586,8 +586,8 @@ class _Candidate:
         return exception.exception_type if exception else None
 
     @property
-    def ungraded_error(self) -> bool:
-        return self.error is not None and _reward(self.trial.result) is None
+    def graded(self) -> bool:
+        return _reward(self.trial.result) is not None
 
 
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
@@ -599,8 +599,8 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
     keeping only trials whose recorded generation, environment, and verifier
     settings match the current job. A successful trial comes first, then an
-    errored trial its tests graded, then one they never graded, and trials within
-    each tier keep their original order, whatever their rewards.
+    errored trial its tests graded, then one they never graded, with the oldest
+    first within each tier whatever its reward.
     Costs come from the current catalog price. A system without a price reports
     as unpriced.
 
@@ -635,7 +635,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     candidates.sort(
         key=lambda candidate: (
             candidate.error is not None,
-            candidate.ungraded_error,
+            not candidate.graded,
             candidate.job,
             candidate.name,
         )
