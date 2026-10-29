@@ -59,7 +59,6 @@ messages-protocol = 1
 anthropic-api-version = "2023-06-01"
 
 [tool.uv]
-required-version = ">=0.13.4"
 # Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
 python-preference = "only-managed"
 
