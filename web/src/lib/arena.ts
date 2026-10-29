@@ -178,7 +178,10 @@ export const resolveVote = (body: ReceiptQuery) =>
   request(voteAcknowledgment, 'POST', '/votes/resolve', receiptQuery.parse(body));
 export const undoVote = (body: z.infer<typeof withdrawRequest>) =>
   request(z.undefined(), 'POST', '/sessions/withdraw', withdrawRequest.parse(body));
-/** Asks whether a round closed at these cutoffs still holds every counted vote of the family. */
+/**
+ * Asks whether a round closed at these cutoffs still holds every counted vote of the family. A
+ * null cutoff marks a store the round did not read, so the query leaves it out.
+ */
 export function checkFreshness(
   family: string,
   cutoffs: Record<'production' | 'local', number | null>,

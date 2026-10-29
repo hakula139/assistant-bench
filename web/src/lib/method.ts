@@ -10,7 +10,7 @@ export function roundMethod(method: VotesMethod, rules: VotesRules): string {
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
   /** The stage, where a run's stage names what it yields: text, a page, a diff, or a trial. */
-  step: 'text' | 'html' | 'diff' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
+  step: 'text' | 'diff' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
   title: string;
   detail: string;
   /** What the step means on a family's board, which its detail opens. */
@@ -100,13 +100,13 @@ interface RenderView {
 
 const range = "Each system's median and 10th to 90th percentile range";
 
-/** A case family's run, which yields a `step` of text or a page. */
-const caseRun = (step: 'text' | 'html', answer: string): RuledStep => ({
-  step,
+/** A case family's run, which yields text. */
+const caseRun: RuledStep = {
+  step: 'text',
   title: 'Run',
   detail: 'same cases for all',
-  rule: () => `Every system answers each case ${answer}.`,
-});
+  rule: () => 'Every system answers each case in text.',
+};
 
 const cases: Omit<RenderView, 'run'> = {
   gate: { step: 'gates', title: 'Gates', detail: 'failing outputs lose', rule: gateRule },
@@ -121,8 +121,7 @@ const cases: Omit<RenderView, 'run'> = {
 };
 
 const renders: Record<VotesConfig['render'], RenderView> = {
-  text: { run: caseRun('text', 'in text'), ...cases },
-  html: { run: caseRun('html', 'with an HTML page'), ...cases },
+  text: { run: caseRun, ...cases },
   diff: {
     run: { step: 'diff', title: 'Run', detail: 'same tasks for all', rule: agentRule },
     gate: {

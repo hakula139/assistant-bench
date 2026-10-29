@@ -59,18 +59,15 @@ describe('SnapshotStatus', () => {
     },
   );
 
-  test('sends the cutoff of every store the round counted', () => {
+  test.each([
+    [{ production: 337, local: 12 }, 'production=337&local=12'],
+    [{ production: 0, local: null }, 'production=0'],
+  ])('sends the cutoff of every store the round read in %j', (read, query) => {
     const fetch = stubFetch(Promise.withResolvers<Response>().promise);
 
-    render(
-      <SnapshotStatus
-        family="writing-zh"
-        closedAt={closedAt}
-        cutoffs={{ production: 337, local: 12 }}
-      />,
-    );
+    render(<SnapshotStatus family="writing-zh" closedAt={closedAt} cutoffs={read} />);
 
-    expect(fetch.mock.calls[0][0]).toBe('/api/freshness?family=writing-zh&production=337&local=12');
+    expect(fetch.mock.calls[0][0]).toBe(`/api/freshness?family=writing-zh&${query}`);
   });
 
   test.each([

@@ -244,18 +244,6 @@ describe('family page', () => {
     expect(text(noneHtml)).toContain('Systems: –');
   });
 
-  test('draws the run of a family that renders pages as a page', async () => {
-    const pages: Family = {
-      ...(await family()),
-      config: { ...arenaConfig, render: 'html' },
-      rounds: [],
-    };
-
-    const html = await render(FamilyPage, { family: pages, boards: [] });
-
-    expect(html).toContain('lucide-app-window');
-  });
-
   test("draws a tests family's steps and its pass rates", async () => {
     const html = await render(FamilyPage, { family: await testsFamily(), boards: [] });
 
