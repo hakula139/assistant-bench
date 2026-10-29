@@ -65,7 +65,6 @@ describe('gateRule', () => {
 describe('methodSteps', () => {
   test.each([
     ['text', { render: 'text' }, 'text: Every system answers each case in text.'],
-    ['html', { render: 'html' }, 'html: Every system answers each case with an HTML page.'],
     [
       'diffs under an agent and a turn budget',
       { render: 'diff', harness: 'terminus-2', max_turns: 40 },

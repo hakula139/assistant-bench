@@ -115,7 +115,8 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
   });
 }
 
-function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBias: Term }) {
+function RoundSummary({ round, lengthBias }: { round: VotesRound; lengthBias: Term }) {
+  const { results } = round;
   const { length } = results;
 
   return (
@@ -125,7 +126,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
           label={terms.votes.term}
           detail={
             <>
-              over {formatCountOf(results.sessions, 'session')}
+              from {formatCountOf(results.voters, 'voter')}
               {results.dropped_votes > 0 && (
                 <>
                   , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
@@ -144,10 +145,7 @@ function RoundSummary({ results, lengthBias }: { results: VotesResults; lengthBi
           <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
         )}
       </dl>
-      <SnapshotStatus
-        exportId={results.provenance.export_id}
-        capturedAt={results.provenance.captured_at}
-      />
+      <SnapshotStatus family={round.family} closedAt={round.closed_at} cutoffs={results.cutoffs} />
       <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>
@@ -264,7 +262,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
         />
       )}
 
-      <RoundSummary results={results} lengthBias={labels.lengthBias} />
+      <RoundSummary round={round} lengthBias={labels.lengthBias} />
 
       <div className="flex flex-col gap-4">
         <Leaderboard

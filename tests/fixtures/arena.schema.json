@@ -891,24 +891,6 @@
     "title": "WithdrawRequest",
     "type": "object"
   },
-  "freshnessRequest": {
-    "$defs": {
-      "Identifier": {
-        "maxLength": 256,
-        "minLength": 1,
-        "type": "string"
-      }
-    },
-    "additionalProperties": false,
-    "properties": {
-      "export_id": {
-        "$ref": "#/$defs/Identifier"
-      }
-    },
-    "required": ["export_id"],
-    "title": "FreshnessRequest",
-    "type": "object"
-  },
   "freshnessView": {
     "additionalProperties": false,
     "properties": {

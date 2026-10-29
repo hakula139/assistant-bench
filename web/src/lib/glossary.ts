@@ -62,12 +62,12 @@ export const terms = {
   splitHalf: {
     term: 'Split-half τ',
     definition:
-      "Kendall's τ between the orders fit to odd and to even sessions, where 1 means the same order.",
+      "Kendall's τ between the orders fit to odd and to even votes, where 1 means the same order.",
   },
   leftOut: {
     term: 'Left out of the fit',
     definition:
-      'Votes on a retired case, on an output since removed or now failing a gate, or on a pair the outputs now settle, plus side-swapped repeats of earlier votes.',
+      'Votes a moderator excluded, plus votes on an output since removed or now failing a gate, or on a pair the outputs now settle.',
   },
   lengthBias: {
     term: 'Length bias',

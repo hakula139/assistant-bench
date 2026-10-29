@@ -1,6 +1,6 @@
 # Coding
 
-`coding-repo` measures repository work by AI agents: reading a small unfamiliar project, following its conventions, changing several files, running its tests, and stopping when the request is met. Each task's hidden tests decide whether a solution passes, and collection preserves its diff for inspection. The family uses the votes scorer but stays unpublished (`public = false`). Online preparation supports rendered case families.
+`coding-repo` measures repository work by AI agents: reading a small unfamiliar project, following its conventions, changing several files, running its tests, and stopping when the request is met. Each task's hidden tests decide whether a solution passes, and collection preserves its diff for inspection. The family uses the votes scorer with `public_voting = true`, so `bench arena prepare` publishes its committed synthetic tasks' passing diffs for voting in production, where the `tests` gate decides each verdict. Its board stays off the site (`public = false`) until its first round closes.
 
 ## Systems and Samples
 

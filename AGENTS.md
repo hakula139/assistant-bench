@@ -8,7 +8,7 @@ This file specifies the rules for every change and points to the conventions for
 uv run bench check                               # Validate every family and its reference solutions
 uv run bench run --system <name>                  # Generate a system's missing trials
 uv run bench arena status production writing-zh  # Inspect the published voting family
-uv run bench close writing-zh --snapshot <path>   # Close a voted round from canonical evidence
+uv run bench close writing-zh                    # Close a voted round from the production votes
 ```
 
 ## Project Layout
@@ -57,7 +57,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
-- Keep no compatibility layers: no data migrations, ID aliases, redirects, case lineage, or readers for old formats. A case, family, or schema change that would orphan votes drops them. Guards that refuse mismatched data may stay. Once a replacement is verified, delete the superseded state, code, and docs with no archive. The arena's D1 schema is the one exception, as [Arena](docs/design/arena.md#vote-store) describes.
+- Keep no compatibility layers: no data migrations, ID aliases, redirects, case lineage, or readers for old formats. A case, family, or schema change that would orphan votes drops them. Guards that refuse mismatched data may stay. Once a replacement is verified, delete the superseded state, code, and docs with no archive. The arena's D1 schema is the one exception, as [Arena](docs/design/arena.md#schema-changes) describes.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, the shared Renovate preset, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 
 ## Verification

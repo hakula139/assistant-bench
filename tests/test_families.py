@@ -167,7 +167,7 @@ class TestLoadFamily:
             defects = [
               "scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"
             ]
-            render = "html"
+            render = "text"
             public = true
             """,
             cases=True,
@@ -187,7 +187,7 @@ class TestLoadFamily:
                 samples=2,
                 reference='large',
                 defects=list(PROSE_DEFECTS),
-                render='html',
+                render='text',
                 public=True,
             ),
         )
@@ -389,7 +389,7 @@ class TestLoadFamily:
                 True,
                 False,
                 'Family `f`: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"` or `"html"`.',
+                'to `"text"`.',
                 id='cases-with-diffs',
             ),
             pytest.param(

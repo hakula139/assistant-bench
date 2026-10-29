@@ -1,6 +1,5 @@
 import { cn } from 'cn';
 import {
-  AppWindow,
   ChevronRight,
   Columns2,
   FileDiff,
@@ -24,7 +23,6 @@ import { methodSteps, scorers, type MethodStep } from '@/lib/method';
 
 const stepIcons: Record<MethodStep['step'], LucideIcon> = {
   text: FileText,
-  html: AppWindow,
   diff: FileDiff,
   trial: Play,
   gates: ShieldCheck,

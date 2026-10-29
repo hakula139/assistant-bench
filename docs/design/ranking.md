@@ -2,7 +2,7 @@
 
 Votes families rank by point scores from pairwise votes, and tests families by [pass rates](#test-pass-rates).
 
-`scoring/ranking.py` fits a family's point scores. `report.py` records them with the method, rules and descriptive diagnostics. Every vote that [reconciles](arena.md#sessions-and-pairs) with the export's frozen approved inventory enters the cumulative evaluation. Other votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
+`scoring/ranking.py` fits a family's point scores. `report.py` records them with the method, rules and descriptive diagnostics. Every vote that [counts](arena.md#publication-and-closing) against the cut's active publication enters the cumulative evaluation. Excluded and other uncounted votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
 
 ## The Fit
 
@@ -14,7 +14,7 @@ The weighted Bradley-Terry logistic objective uses +1 for A and −1 for B. Huma
 
 ## Point Scores
 
-Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective human weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. These settings and the actor cap are constants in `scoring/`, and the rules are constants in `report.py`. Publication seals them into each release, closing refuses an export sealed under other values, and reports record them in `method` and `rules`.
+Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective human weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order. These settings and the actor cap are constants in `scoring/`, and the rules are constants in `report.py`. Reports record them in `method` and `rules`.
 
 Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
 
@@ -26,13 +26,13 @@ The target is performance on new cases and voters. No method for that target is 
 
 ## Counts and Diagnostics
 
-`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Swapped repeats and inactive choices stay out of the fit and count in `dropped_votes`.
+`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Excluded votes and votes on outputs that no longer count stay out of the fit and count in `dropped_votes`.
 
 | Field            | Meaning                                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `position`       | Fitted left-pane advantage in score points, null without human sided rows in the ranked component                                                                |
 | `length`         | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
-| `split_half_tau` | Kendall's τ between odd- and even-session point orders over systems both halves connect to their root                                                            |
+| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by store and ID, over systems both halves connect to their root                           |
 
 Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed evidence and supply no population interval.
 

@@ -3,6 +3,9 @@ import os
 import subprocess
 import textwrap
 from collections import defaultdict
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +21,7 @@ from rich.text import Text
 from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, jobs, manifest, report
+from assistant_bench.arena import publication, votes
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -29,12 +33,16 @@ from assistant_bench.cli import app
 from assistant_bench.families import Family, Gate, family_names, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
-from assistant_bench.outputs import Output
+from assistant_bench.outputs import Output, write_outputs
 from support import (
     REPORT_FIXTURE,
+    SQLiteDatabase,
+    arena_database,
     finish_job,
     make_output,
     make_system,
+    passing_outputs,
+    record_vote,
     write_case_family,
     write_task_family,
     write_trial,
@@ -75,6 +83,17 @@ def trials(
         make_output(case=case, system=system, reward=reward, error=error)
         for _ in range(jobs.CHECK_ATTEMPTS)
     ]
+
+
+CLOSE_CASES = {'c1': 'reply', 'c2': 'docs'}
+
+
+@dataclass(frozen=True)
+class Store:
+    database: SQLiteDatabase
+    published: publication.Publication
+    targets: list[str]
+    """Each target a command connected to."""
 
 
 def write_job(job_dir: Path) -> None:
@@ -1391,40 +1410,146 @@ class TestCollect:
 
 
 class TestClose:
-    def test_requires_a_saved_export_for_votes_without_collecting_current_trials(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.fixture
+    def store(
+        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Store:
+        """Publish family `f` to a store that serves every target."""
+        write_votes_family(
+            families_dir, 'f', ['large', 'small'], CLOSE_CASES, public_voting=True
+        )
+        family = load_family('f')
+        outputs = list(
+            passing_outputs(CLOSE_CASES, ['large', 'small'], cost_usd=0.5).values()
+        )
+        write_outputs('f', outputs)
+        published = publication.prepare(
+            family,
+            load_cases(family),
+            outputs,
+            {'large': 'Public Large', 'small': 'Public Small'},
+            'production',
+        )
+        store = Store(arena_database(), published, [])
+        publication.publish(store.database, published, datetime.now(UTC))
+
+        def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
+            store.targets.append(target)
+            return nullcontext(store.database)
+
+        monkeypatch.setattr(cli, 'connect', connect)
+        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
+        return store
+
+    def test_saves_the_production_cut_and_closes_from_it(
+        self,
+        store: Store,
+        data_dir: Path,
+        tmp_path: Path,
     ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], {'c1': 'reply'})
+        now = datetime.now(UTC)
+        for case, actor in enumerate(('first', 'second')):
+            record_vote(
+                store.database,
+                store.published,
+                now,
+                actor=actor,
+                age=timedelta(hours=1),
+                case=case,
+            )
+        last = record_vote(
+            store.database, store.published, now, actor='third', age=timedelta(hours=1)
+        )
+        record_vote(
+            store.database, store.published, now, actor='late', age=timedelta(minutes=1)
+        )
 
-        def refuse_collection(family: Family) -> None:
-            pytest.fail(f'Votes tried to collect current family {family.name}.')
+        result = invoke('close', 'f')
 
-        monkeypatch.setattr(cli, '_collect', refuse_collection)
+        assert result.exit_code == 0, result.output
+        assert store.targets == ['production']
+        (snapshot,) = (data_dir / 'votes' / 'f').glob('*.json')
+        assert f'Votes saved to `{snapshot}`.' in result.output
+        (path,) = (tmp_path / 'reports' / 'f').iterdir()
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.results.scorer == 'votes'
+        assert closed.results.cutoffs == report.Cutoffs(production=last, local=None)
+        assert (closed.results.votes, closed.results.voters) == (3, 3)
+        assert closed.systems['large'] == report.PublicSystem(
+            display_name='Public Large', fingerprint='fp-large'
+        )
+        assert closed.results.standings[0].mean_cost_usd == 0.5
+
+    def test_recloses_a_saved_snapshot_without_reading_the_store(
+        self,
+        store: Store,
+        tmp_path: Path,
+    ) -> None:
+        now = datetime.now(UTC)
+        record_vote(
+            store.database, store.published, now, actor='a', age=timedelta(hours=1)
+        )
+        cut = votes.read_cut(store.database, 'f', now)
+        path = votes.write_snapshot(
+            votes.Snapshot(family='f', taken_at=now, production=cut, local=None)
+        )
+
+        result = invoke('close', 'f', '--snapshot', str(path))
+
+        assert result.exit_code == 0, result.output
+        assert store.targets == []
+        assert (tmp_path / 'reports' / 'f').is_dir()
+
+    def test_names_the_publish_command_when_production_has_no_publication(
+        self, store: Store
+    ) -> None:
+        store.database.execute('DELETE FROM active')
 
         result = invoke('close', 'f')
 
         assert result.exit_code == 1
-        assert 'Votes require a saved canonical D1 export.' in result.output
-        assert '--snapshot <path>' in result.output
+        assert result.stderr == (
+            'Family `f` has no active publication in production, so it has no votes '
+            'to close. Publish one with `uv run bench arena publish production '
+            '<file>`.\n'
+        )
+
+    def test_refuses_votes_of_a_family_without_public_voting(
+        self, families_dir: Path
+    ) -> None:
+        write_votes_family(families_dir, 'f', ['large', 'small'], CLOSE_CASES)
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            'Family `f` sets no `public_voting`, so no store holds its votes.\n'
+        )
 
     @pytest.mark.parametrize('exists', [False, True], ids=['missing', 'malformed'])
-    def test_rejects_an_unreadable_export_without_reading_current_family_inputs(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exists: bool
+    def test_rejects_an_unreadable_snapshot_without_a_traceback(
+        self, families_dir: Path, tmp_path: Path, exists: bool
     ) -> None:
-        snapshot = tmp_path / 'capture.json'
+        write_votes_family(families_dir, 'f', ['large', 'small'], CLOSE_CASES)
+        snapshot = tmp_path / 'snapshot.json'
         if exists:
             snapshot.write_text('{')
-
-        def refuse_family(name: str) -> None:
-            pytest.fail(f'Frozen close tried to load current family {name}.')
-
-        monkeypatch.setattr(cli, '_load_family', refuse_family)
 
         result = invoke('close', 'f', '--snapshot', str(snapshot))
 
         assert result.exit_code == 1
         assert 'Report written' not in result.output
-        assert 'Traceback' not in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+    def test_refuses_a_snapshot_for_a_tests_family(
+        self, families_dir: Path, tmp_path: Path
+    ) -> None:
+        write_task_family(families_dir, 'echo')
+
+        result = invoke('close', 'f', '--snapshot', str(tmp_path / 'snapshot.json'))
+
+        assert result.exit_code == 1
+        assert result.stderr == 'Family `f` is scored by tests, so it has no votes.\n'
 
     def test_collects_real_test_trials_before_writing_their_aggregate(
         self,

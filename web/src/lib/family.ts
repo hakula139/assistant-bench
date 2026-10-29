@@ -33,7 +33,7 @@ export const familyConfigSchema = z
     z.object({
       scorer: z.literal('votes'),
       reference: z.string(),
-      render: z.enum(['text', 'html', 'diff']).default('text'),
+      render: z.enum(['text', 'diff']).default('text'),
       language: z.enum(['en', 'zh']).optional(),
       gates: gatesSchema.default({}),
       ...shared,

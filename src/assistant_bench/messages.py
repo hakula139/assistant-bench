@@ -10,6 +10,11 @@ def code(values: Iterable[object]) -> str:
     return ', '.join(f'`{value}`' for value in values)
 
 
+def count_of(value: int, noun: str) -> str:
+    """Return the count with its noun, adding an `s` unless the count is 1."""
+    return f'{value} {noun}' if value == 1 else f'{value} {noun}s'
+
+
 def sentence(text: str) -> str:
     return text if text.endswith('.') else f'{text}.'
 

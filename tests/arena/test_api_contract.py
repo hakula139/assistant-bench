@@ -32,7 +32,6 @@ def input_schemas() -> dict[str, JsonSchemaValue]:
         'voteRequest': api.VoteRequest,
         'voteAcknowledgment': api.VoteAcknowledgment,
         'withdrawRequest': api.WithdrawRequest,
-        'freshnessRequest': api.FreshnessRequest,
         'freshnessView': api.FreshnessView,
         'errorView': api.ErrorView,
         'taggedDefects': Defects,

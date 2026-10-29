@@ -94,6 +94,42 @@
       "title": "CategoryStanding",
       "type": "object"
     },
+    "Cutoffs": {
+      "additionalProperties": false,
+      "description": "Each store's largest vote ID older than the undo window at closing.\n\n0 means the store held no such vote, and null means closing did not read it.",
+      "properties": {
+        "production": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Production"
+        },
+        "local": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Local"
+        }
+      },
+      "required": [
+        "production",
+        "local"
+      ],
+      "title": "Cutoffs",
+      "type": "object"
+    },
     "Defect": {
       "enum": [
         "facts",
@@ -193,105 +229,6 @@
         "win_rate"
       ],
       "title": "HeadToHead",
-      "type": "object"
-    },
-    "LedgerProvenance": {
-      "additionalProperties": false,
-      "properties": {
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "export_id": {
-          "minLength": 1,
-          "title": "Export Id",
-          "type": "string"
-        },
-        "export_digest": {
-          "minLength": 1,
-          "title": "Export Digest",
-          "type": "string"
-        },
-        "namespace": {
-          "minLength": 1,
-          "title": "Namespace",
-          "type": "string"
-        },
-        "captured_at": {
-          "format": "date-time",
-          "title": "Captured At",
-          "type": "string"
-        },
-        "event_cutoff": {
-          "minimum": 0,
-          "title": "Event Cutoff",
-          "type": "integer"
-        },
-        "receipt_cutoff": {
-          "minimum": 0,
-          "title": "Receipt Cutoff",
-          "type": "integer"
-        },
-        "family_revision": {
-          "minimum": 0,
-          "title": "Family Revision",
-          "type": "integer"
-        },
-        "analysis_sequence": {
-          "minimum": 0,
-          "title": "Analysis Sequence",
-          "type": "integer"
-        },
-        "evaluation_id": {
-          "minLength": 1,
-          "title": "Evaluation Id",
-          "type": "string"
-        },
-        "publication_id": {
-          "minLength": 1,
-          "title": "Publication Id",
-          "type": "string"
-        },
-        "policy_id": {
-          "minLength": 1,
-          "title": "Policy Id",
-          "type": "string"
-        },
-        "sampling_point_snapshot_id": {
-          "minLength": 1,
-          "title": "Sampling Point Snapshot Id",
-          "type": "string"
-        },
-        "weighted_evidence_digest": {
-          "minLength": 1,
-          "title": "Weighted Evidence Digest",
-          "type": "string"
-        },
-        "fitted_point_snapshot_id": {
-          "minLength": 1,
-          "title": "Fitted Point Snapshot Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "schema_version",
-        "export_id",
-        "export_digest",
-        "namespace",
-        "captured_at",
-        "event_cutoff",
-        "receipt_cutoff",
-        "family_revision",
-        "analysis_sequence",
-        "evaluation_id",
-        "publication_id",
-        "policy_id",
-        "sampling_point_snapshot_id",
-        "weighted_evidence_digest",
-        "fitted_point_snapshot_id"
-      ],
-      "title": "LedgerProvenance",
       "type": "object"
     },
     "PassRate": {
@@ -751,8 +688,8 @@
         "rules": {
           "$ref": "#/$defs/VotesRules"
         },
-        "provenance": {
-          "$ref": "#/$defs/LedgerProvenance"
+        "cutoffs": {
+          "$ref": "#/$defs/Cutoffs"
         },
         "reference": {
           "description": "Configured reference, whether or not comparisons connect it.",
@@ -777,13 +714,13 @@
           "type": "number"
         },
         "dropped_votes": {
-          "description": "Accepted choices excluded from the fit, including repeats and moderation.",
+          "description": "Excluded votes plus votes on outputs the publications no longer admit.",
           "title": "Dropped Votes",
           "type": "integer"
         },
-        "sessions": {
-          "description": "Sessions containing at least one eligible human choice.",
-          "title": "Sessions",
+        "voters": {
+          "description": "Browsers with at least one eligible human choice.",
+          "title": "Voters",
           "type": "integer"
         },
         "standings": {
@@ -848,7 +785,7 @@
               "type": "null"
             }
           ],
-          "description": "Order agreement between alternating eligible sessions, when measurable.",
+          "description": "Order agreement between alternating eligible votes, when measurable.",
           "title": "Split Half Tau"
         }
       },
@@ -856,13 +793,13 @@
         "scorer",
         "method",
         "rules",
-        "provenance",
+        "cutoffs",
         "reference",
         "anchor",
         "votes",
         "effective_votes",
         "dropped_votes",
-        "sessions",
+        "voters",
         "standings",
         "unranked",
         "head_to_head",

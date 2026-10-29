@@ -34,8 +34,8 @@ Vote-only fields:
 | Field           | Required      | Meaning                                                                                                                                |
 | --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `reference`     | yes           | One of `systems`, anchored at 1,000 when the round ranks it                                                                            |
-| `public_voting` | no            | Opt a rendered case family into [approved public publication](../design/arena.md#publication-and-evidence). Defaults to `false`        |
-| `render`        | task families | `text` (default) or sandboxed `html` for cases. Tasks require `diff`, showing each solution against `environment/app/`                 |
+| `public_voting` | no            | Vote on the family's public and synthetic cases in [production](../design/arena.md#publication-and-closing). Defaults to `false`       |
+| `render`        | task families | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                     |
 | `defects`       | no            | Unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. See [Voting](voting.md#casting-a-vote) for shortcuts |
 | `language`      | no            | `zh` or `en` for a case family's language gate                                                                                         |
 | `[gates]`       | no            | A case family's `min_chars`, `max_chars`, and `script = "hans"` settings, defined in [Writing](../design/families/writing.md#gates)    |

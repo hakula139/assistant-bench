@@ -7,6 +7,7 @@ import type { Report, TestsResults, VotesResults } from '@/lib/report';
 import { resolveSystemNames, type SystemNames } from '@/lib/systems';
 
 export interface VotesRound {
+  family: string;
   round: string;
   closed_at: string;
   systems: Report['systems'];
@@ -159,8 +160,14 @@ export function latest(family: Family): Report | undefined {
 }
 
 /** Returns a round's fields that its board shows when votes scored it, or nothing otherwise. */
-export function votesRound({ round, closed_at, systems, results }: Report): VotesRound | undefined {
-  return results.scorer === 'votes' ? { round, closed_at, systems, results } : undefined;
+export function votesRound({
+  family,
+  round,
+  closed_at,
+  systems,
+  results,
+}: Report): VotesRound | undefined {
+  return results.scorer === 'votes' ? { family, round, closed_at, systems, results } : undefined;
 }
 
 /** Returns a round's fields that its board shows when task tests scored it, or nothing otherwise. */

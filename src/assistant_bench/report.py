@@ -120,22 +120,14 @@ RULES = VotesRules(preliminary_decisive_votes=40)
 # ── Votes Schema ──
 
 
-class LedgerProvenance(_Model):
-    schema_version: Literal[1]
-    export_id: Annotated[str, Field(min_length=1)]
-    export_digest: Annotated[str, Field(min_length=1)]
-    namespace: Annotated[str, Field(min_length=1)]
-    captured_at: AwareDatetime
-    event_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    receipt_cutoff: Annotated[int, Field(strict=True, ge=0)]
-    family_revision: Annotated[int, Field(strict=True, ge=0)]
-    analysis_sequence: Annotated[int, Field(strict=True, ge=0)]
-    evaluation_id: Annotated[str, Field(min_length=1)]
-    publication_id: Annotated[str, Field(min_length=1)]
-    policy_id: Annotated[str, Field(min_length=1)]
-    sampling_point_snapshot_id: Annotated[str, Field(min_length=1)]
-    weighted_evidence_digest: Annotated[str, Field(min_length=1)]
-    fitted_point_snapshot_id: Annotated[str, Field(min_length=1)]
+class Cutoffs(_Model):
+    """Each store's largest vote ID older than the undo window at closing.
+
+    0 means the store held no such vote, and null means closing did not read it.
+    """
+
+    production: Annotated[int, Field(strict=True, ge=0)] | None
+    local: Annotated[int, Field(strict=True, ge=0)] | None
 
 
 class Standing(_Model):
@@ -210,7 +202,7 @@ class VotesResults(_Model):
     scorer: Literal['votes']
     method: VotesMethod
     rules: VotesRules
-    provenance: LedgerProvenance
+    cutoffs: Cutoffs
 
     reference: str
     """Configured reference, whether or not comparisons connect it."""
@@ -222,9 +214,9 @@ class VotesResults(_Model):
     effective_votes: Annotated[float, Field(ge=0)]
     """Eligible human row weight across every component, excluding settlements."""
     dropped_votes: int
-    """Accepted choices excluded from the fit, including repeats and moderation."""
-    sessions: int
-    """Sessions containing at least one eligible human choice."""
+    """Excluded votes plus votes on outputs the publications no longer admit."""
+    voters: int
+    """Browsers with at least one eligible human choice."""
 
     standings: list[Standing]
     unranked: list[str]
@@ -237,7 +229,7 @@ class VotesResults(_Model):
     length: float | None
     """Score points per length-difference standard deviation, if identifiable."""
     split_half_tau: float | None
-    """Order agreement between alternating eligible sessions, when measurable."""
+    """Order agreement between alternating eligible votes, when measurable."""
 
 
 # ── Tests Schema ──
@@ -418,7 +410,7 @@ def close(
     )
 
 
-def close_snapshot(
+def close_votes(
     analysis: AnalysisInput,
     closed_at: datetime,
     *,
@@ -426,7 +418,7 @@ def close_snapshot(
     system_names: Mapping[str, str],
     frozen_fingerprints: Mapping[str, str | None],
 ) -> Report:
-    """Close frozen evidence under the fingerprints and names its release recorded.
+    """Close a round's votes under the fingerprints and names its publications record.
 
     `closed_at` is an aware time, and its UTC date names the round.
     """
@@ -522,7 +514,6 @@ def _closed(family: str) -> list[Report]:
 class HumanEvidence:
     receipt: str
     actor: str
-    session: str
     choice: Choice
     defects_a: tuple[Defect, ...]
     defects_b: tuple[Defect, ...]
@@ -560,20 +551,19 @@ class AnalysisInput:
     """Frozen system order, which breaks ties between weighted roots."""
 
     defects: tuple[Defect, ...]
-    provenance: LedgerProvenance
+    cutoffs: Cutoffs
     declared_categories: tuple[Category, ...]
     """The family's declared category IDs, whose order the boards keep."""
     categories: tuple[tuple[str, Category | None], ...]
     """Every frozen case, with None marking an explicitly uncategorized case."""
 
     ordinary: tuple[HumanEvidence, ...]
+    """Eligible human choices, ordered by store and then by vote ID."""
+
     settlements: tuple[ranking.Comparison, ...]
     outputs: tuple[OutputMeasurement, ...]
-    sessions: tuple[str, ...]
-    """Eligible session IDs ordered by their frozen start time and stable ID."""
-
-    accepted: int
-    """Every accepted choice, including repeats and inactive receipts."""
+    dropped: int
+    """Votes left out of `ordinary`, including excluded ones."""
 
 
 # ── Votes Results ──
@@ -619,13 +609,13 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         scorer='votes',
         method=METHOD,
         rules=RULES,
-        provenance=analysis.provenance,
+        cutoffs=analysis.cutoffs,
         reference=analysis.reference,
         anchor=board.anchor,
         votes=len(votes),
         effective_votes=sum(row.comparison.weight for row in votes),
-        dropped_votes=analysis.accepted - len(votes),
-        sessions=len(analysis.sessions),
+        dropped_votes=analysis.dropped,
+        voters=len({row.actor for row in votes}),
         standings=standings,
         unranked=sorted({output.system for output in outputs} - ranked),
         head_to_head=_head_to_head(
@@ -641,7 +631,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         ),
         position=ratings.position if connected else None,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
-        split_half_tau=_split_half_tau(votes, analysis.sessions, board.root),
+        split_half_tau=_split_half_tau(votes, board.root),
     )
 
 
@@ -824,19 +814,13 @@ def _length_feature(votes: list[HumanEvidence]) -> ranking.Floats | None:
     return feature
 
 
-def _split_half_tau(
-    votes: list[HumanEvidence], sessions: Sequence[str], root: str
-) -> float | None:
+def _split_half_tau(votes: list[HumanEvidence], root: str) -> float | None:
     """Compare the systems both halves connect to the root, if each has it.
 
-    `sessions` lists the sessions holding `votes` in the order they started, and
-    alternate sessions form each half.
+    Alternate votes form each half, since a round may have only two or three
+    voters.
     """
-    parity = {session: i % 2 for i, session in enumerate(sessions)}
-    halves = [
-        [row.comparison for row in votes if parity[row.session] == half]
-        for half in (0, 1)
-    ]
+    halves = [[row.comparison for row in votes[half::2]] for half in (0, 1)]
     if not all(any(root in (c.left, c.right) for c in half) for half in halves):
         return None
 

@@ -29,14 +29,13 @@ vi.mock('@/lib/use-search-param', () => ({
   ],
 }));
 
-async function load(
-  name: 'report' | 'report-early' | 'report-ledger' = 'report',
-): Promise<VotesRound> {
+async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRound> {
   const report = reportSchema.parse(await readFixture(name));
   if (report.results.scorer !== 'votes') {
     throw new Error('the fixture is a votes report');
   }
   return {
+    family: report.family,
     round: report.round,
     closed_at: report.closed_at,
     systems: report.systems,
@@ -116,21 +115,6 @@ describe('VotesBoard', () => {
   afterEach(() => {
     search.delete('category');
     cleanup();
-  });
-
-  test('shows raw votes beside the effective votes after the actor cap, then the capture time', async () => {
-    const round = await load('report-ledger');
-
-    const html = render(round);
-
-    expect(stats(html)).toEqual(
-      expect.arrayContaining([
-        ['Votes', '150 over 3 sessions, 1 left out'],
-        ['Effective votes', '120'],
-      ]),
-    );
-    expect(parse(html).querySelector('[role="status"]')?.textContent).toContain('Captured');
-    expect(text(html)).not.toMatch(/refresh deadline|confidence interval/i);
   });
 
   test('draws the labels, coverage marks, and copy of the round it shows', async () => {
@@ -229,9 +213,9 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(stats(html)).toEqual([
-      ['Votes', '315 over 10 sessions, 42 left out'],
+      ['Votes', '315 from 7 voters, 42 left out'],
       ['Effective votes', '286'],
-      ['Split-half τ', '0.60'],
+      ['Split-half τ', '0.40'],
       ['Length bias', 'Favors longer, 29.9'],
     ]);
     expect(statHints(html)).toEqual([
@@ -240,6 +224,7 @@ describe('VotesBoard', () => {
       'Split-half τ',
       'Length bias',
     ]);
+    expect(parse(html).querySelector('[role="status"]')?.textContent).toMatch(/^Closed /);
   });
 
   test.each([
@@ -265,7 +250,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
-    expect(stats(html)[0]).toEqual(['Votes', '315 over 10 sessions']);
+    expect(stats(html)[0]).toEqual(['Votes', '315 from 7 voters']);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -318,12 +303,16 @@ describe('VotesBoard', () => {
   });
 
   test('names the reference the stand-in anchor replaces', async () => {
-    const { round, results, systems, closed_at } = await load();
+    const { family, round, results, systems, closed_at } = await load();
     results.reference = 'acme-new';
     systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
     stubPlotFrame();
     renderInDom(
-      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
+      <VotesBoard
+        base={BOARD}
+        round={{ family, round, results, systems, closed_at }}
+        labels={CASES}
+      />,
     );
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Anchor' }));
@@ -376,10 +365,10 @@ describe('VotesBoard', () => {
     },
   );
 
-  test('counts the single session of an early round', async () => {
+  test('counts the single voter of an early round', async () => {
     const html = render(await load('report-early'));
 
-    expect(stats(html)[0]).toEqual(['Votes', '33 over 1 session, 2 left out']);
+    expect(stats(html)[0]).toEqual(['Votes', '33 from 1 voter, 2 left out']);
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -487,11 +476,15 @@ describe('VotesBoard', () => {
       throw new Error('the fixture has a message category');
     }
     categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
-    const { round, results, systems, closed_at } = report;
+    const { family, round, results, systems, closed_at } = report;
     stubPlotFrame();
     const user = userEvent.setup();
     renderInDom(
-      <VotesBoard base={BOARD} round={{ round, results, systems, closed_at }} labels={CASES} />,
+      <VotesBoard
+        base={BOARD}
+        round={{ family, round, results, systems, closed_at }}
+        labels={CASES}
+      />,
     );
     const select = screen.getByLabelText<HTMLSelectElement>('Category');
 

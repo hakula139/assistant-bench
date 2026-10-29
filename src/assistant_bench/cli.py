@@ -14,9 +14,9 @@ from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 
 from assistant_bench import jobs, manifest, report
+from assistant_bench.arena import votes
 from assistant_bench.arena.commands import app as arena_app
-from assistant_bench.arena.exports import read_export
-from assistant_bench.arena.snapshots import analyze_export
+from assistant_bench.arena.d1 import D1Error, connect
 from assistant_bench.catalog import (
     SYSTEMS_FILE,
     System,
@@ -36,7 +36,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import code
-from assistant_bench.outputs import Output, tests_pass
+from assistant_bench.outputs import Output, read_outputs, tests_pass
 
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
@@ -47,7 +47,9 @@ SYSTEM_RENAME_GUIDE = (
 )
 
 app = typer.Typer(no_args_is_help=True)
-app.add_typer(arena_app, name='arena', help='Prepare and manage frozen arena evidence.')
+app.add_typer(
+    arena_app, name='arena', help='Publish outputs for voting and inspect votes.'
+)
 
 
 # ── Arguments ──
@@ -202,43 +204,74 @@ def close(
     family: Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)],
     snapshot: Annotated[
         Path | None,
-        typer.Option(
-            help='Close a saved ledger export without collecting current trials.'
-        ),
+        typer.Option(help='Close a saved vote snapshot instead of reading the store.'),
     ] = None,
 ) -> None:
-    """Write a frozen vote report or aggregate a test-scored family's trials."""
-    if snapshot is not None:
-        closed = _close_snapshot(family, snapshot)
-    else:
-        _known_families([family])
-        selected = _load_family(family)
-        match selected.settings:
-            case VotesSettings():
-                _fail(
-                    'Votes require a saved canonical D1 export. '
-                    'Use `--snapshot <path>`.'
-                )
-            case TaskTestsSettings(samples=samples):
-                closed = _close_tests(selected, samples)
-            case _:
-                assert_never(selected.settings)
+    """Close a round of the family and write its report.
+
+    A votes family takes the votes production can no longer undo, saves them to
+    votes/<family>/ in the data directory, and closes from that file. A tests
+    family aggregates its collected trials.
+    """
+    _known_families([family])
+    selected = _load_family(family)
+    match selected.settings:
+        case VotesSettings():
+            closed = _close_votes(
+                selected,
+                _take_snapshot(selected) if snapshot is None else snapshot,
+            )
+        case TaskTestsSettings(samples=samples):
+            if snapshot is not None:
+                _fail(f'Family `{family}` is scored by tests, so it has no votes.')
+            closed = _close_tests(selected, samples)
+        case _:
+            assert_never(selected.settings)
 
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
 
-def _close_snapshot(family: str, snapshot: Path) -> report.Report:
-    try:
-        frozen = analyze_export(read_export(snapshot))
-        if frozen.analysis.family != family:
-            raise ValueError('The snapshot belongs to another family.')
+def _take_snapshot(family: Family) -> Path:
+    """Save production's cut of the family's votes and return the snapshot's path."""
+    assert isinstance(family.settings, VotesSettings)
+    if not family.settings.public_voting:
+        _fail(
+            f'Family `{family.name}` sets no `public_voting`, so no store holds its '
+            'votes.'
+        )
 
-        return report.close_snapshot(
-            frozen.analysis,
+    taken_at = datetime.now(UTC)
+    try:
+        with connect('production') as database:
+            cut = votes.read_cut(database, family.name, taken_at)
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
+
+    if cut is None:
+        _fail(
+            f'Family `{family.name}` has no active publication in production, so it '
+            'has no votes to close. Publish one with `uv run bench arena publish '
+            'production <file>`.'
+        )
+
+    path = votes.write_snapshot(
+        votes.Snapshot(
+            family=family.name, taken_at=taken_at, production=cut, local=None
+        )
+    )
+    typer.echo(f'Votes saved to `{path}`.')
+    return path
+
+
+def _close_votes(family: Family, path: Path) -> report.Report:
+    try:
+        snapshot = votes.read_snapshot(path)
+        return report.close_votes(
+            votes.voting_input(snapshot, family, read_outputs(family.name)),
             datetime.now(UTC),
-            fingerprints=frozen.fingerprints,
-            system_names=frozen.system_names,
-            frozen_fingerprints=report.reported_fingerprints(family),
+            fingerprints=votes.fingerprints(snapshot),
+            system_names=votes.system_names(snapshot),
+            frozen_fingerprints=report.reported_fingerprints(family.name),
         )
     except (OSError, ValueError) as error:
         _fail(str(error))

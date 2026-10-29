@@ -11,9 +11,11 @@ import pytest
 from pydantic import JsonValue, ValidationError
 
 from assistant_bench import report
-from assistant_bench.families import load_family
+from assistant_bench.arena import votes
+from assistant_bench.families import Category, Choice, load_family
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.report import (
+    AnalysisInput,
     HumanEvidence,
     OutputMeasurement,
     Report,
@@ -22,22 +24,16 @@ from assistant_bench.report import (
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.pass_rates import clopper_pearson
 from assistant_bench.scoring.weighting import actor_weights
-from snapshot_support import (
-    ROUND_NAMES,
-    make_analysis,
-    make_capped_analysis,
-    make_evidence,
-    make_round,
-)
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,
-    LEDGER_REPORT_FIXTURE,
     PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
+    ROUND_FAMILY,
     TESTS_REPORT_FIXTURE,
     make_output,
+    make_round,
     write_task_family,
 )
 
@@ -64,6 +60,113 @@ TESTS_USAGE = {
     'acme-mini': (0.05, 12.0),
     'acme-small': (0.01, 8.0),
 }
+
+
+def make_evidence(
+    index: int,
+    *,
+    actor: str = 'owner',
+    choice: Choice = 'a',
+    systems: tuple[str, str] = ('a', 'b'),
+    weight: float = 1.0,
+    length_a: int = 10,
+    length_b: int = 10,
+) -> HumanEvidence:
+    return HumanEvidence(
+        receipt=f'production:{index}',
+        actor=actor,
+        choice=choice,
+        defects_a=(),
+        defects_b=(),
+        length_a=length_a,
+        length_b=length_b,
+        comparison=ranking.Comparison(
+            *systems, ranking.LEFT_SCORE[choice], f'case-{index}', weight
+        ),
+    )
+
+
+def make_analysis(
+    ordinary: tuple[HumanEvidence, ...] = (),
+    *,
+    settlements: tuple[ranking.Comparison, ...] = (),
+    dropped: int = 0,
+    categories: tuple[tuple[str, Category | None], ...] | None = None,
+) -> AnalysisInput:
+    comparisons = tuple(row.comparison for row in ordinary) + settlements
+    resolved: tuple[tuple[str, Category | None], ...] = (
+        tuple((row.case, 'docs') for row in comparisons)
+        if categories is None
+        else categories
+    )
+    outputs = tuple(
+        OutputMeasurement(
+            case=row.case,
+            system=system,
+            errored=False,
+            verdict='pass',
+            reward=None,
+            cost_usd=0.01,
+            latency_sec=2.0,
+            output_tokens=20,
+        )
+        for row in comparisons
+        for system in (row.left, row.right)
+    )
+    return AnalysisInput(
+        family='f',
+        reference='a',
+        systems=('a', 'b', 'x', 'y', 'unrated'),
+        defects=('facts',),
+        cutoffs=report.Cutoffs(production=len(ordinary) + dropped, local=None),
+        declared_categories=tuple(
+            dict.fromkeys(category for _, category in resolved if category is not None)
+        ),
+        categories=resolved,
+        ordinary=ordinary,
+        settlements=settlements,
+        outputs=outputs,
+        dropped=dropped,
+    )
+
+
+def make_capped_analysis() -> AnalysisInput:
+    choices: tuple[Choice, ...] = ('a', 'a', 'a', 'both_bad', 'tie')
+    ordinary = tuple(
+        make_evidence(
+            index,
+            choice=choices[index % len(choices)],
+            systems=('a', 'b') if index < 200 else ('x', 'y'),
+            length_a=10 + index % 7,
+            length_b=10,
+        )
+        for index in range(250)
+    ) + tuple(
+        make_evidence(
+            250 + index,
+            actor='visitor',
+            choice='b',
+            length_a=9 + index % 5,
+        )
+        for index in range(25)
+    )
+    weights = actor_weights(('owner',) * 250 + ('visitor',) * 25)
+    weighted = tuple(
+        replace(row, comparison=row.comparison._replace(weight=weight))
+        for row, weight in zip(ordinary, weights, strict=True)
+    )
+    categories: tuple[tuple[str, Category | None], ...] = tuple(
+        (
+            row.comparison.case,
+            'review'
+            if index in range(200, 250)
+            else 'docs'
+            if index < 10 or index in range(250, 255)
+            else 'message',
+        )
+        for index, row in enumerate(weighted)
+    )
+    return make_analysis(weighted, dropped=1, categories=categories)
 
 
 @pytest.fixture(scope='module')
@@ -141,7 +244,7 @@ def approx(value: JsonValue) -> object:
 
 class TestReport:
     @pytest.mark.parametrize(
-        ('fixture', 'sessions', 'closed_at'),
+        ('fixture', 'days', 'closed_at'),
         [
             (REPORT_FIXTURE, 10, datetime(2026, 10, 21, 18, tzinfo=UTC)),
             (EARLY_REPORT_FIXTURE, 1, datetime(2026, 10, 1, 18, tzinfo=UTC)),
@@ -151,17 +254,17 @@ class TestReport:
     def test_matches_the_committed_votes_round(
         self,
         fixture: Path,
-        sessions: int,
+        days: int,
         closed_at: datetime,
         stale_fixture: Callable[[Path, str], None],
     ) -> None:
-        analysis = make_round(sessions, closed_at - timedelta(hours=1))
+        snapshot, outputs = make_round(days, closed_at - timedelta(hours=1))
 
-        closed = report.close_snapshot(
-            analysis,
+        closed = report.close_votes(
+            votes.voting_input(snapshot, ROUND_FAMILY, outputs),
             closed_at,
-            fingerprints={system: f'fp-{system}' for system in ROUND_NAMES},
-            system_names=ROUND_NAMES,
+            fingerprints=votes.fingerprints(snapshot),
+            system_names=votes.system_names(snapshot),
             frozen_fingerprints={},
         )
 
@@ -173,8 +276,8 @@ class TestReport:
 
     @pytest.mark.parametrize(
         'fixture',
-        [REPORT_FIXTURE, EARLY_REPORT_FIXTURE, LEDGER_REPORT_FIXTURE],
-        ids=['full', 'early', 'ledger'],
+        [REPORT_FIXTURE, EARLY_REPORT_FIXTURE],
+        ids=['full', 'early'],
     )
     def test_committed_votes_rounds_account_for_every_vote(self, fixture: Path) -> None:
         results = Report.model_validate_json(fixture.read_text()).results
@@ -370,10 +473,9 @@ class TestReport:
         [
             REPORT_FIXTURE,
             EARLY_REPORT_FIXTURE,
-            LEDGER_REPORT_FIXTURE,
             TESTS_REPORT_FIXTURE,
         ],
-        ids=['full', 'early', 'ledger', 'tests'],
+        ids=['full', 'early', 'tests'],
     )
     def test_committed_fixture_validates_against_the_json_schema(
         self, fixture: Path
@@ -742,7 +844,7 @@ class TestVotesResults:
 
         results = report.votes_results(analysis)
 
-        assert (results.votes, results.effective_votes, results.sessions) == (0, 0, 0)
+        assert (results.votes, results.effective_votes, results.voters) == (0, 0, 0)
         assert results.anchor == 'a'
         assert results.standings[0].system == 'a'
         assert results.head_to_head == []
@@ -833,22 +935,19 @@ class TestVotesResults:
             report.VotesResults.model_validate_json(json.dumps(payload))
 
     @pytest.mark.parametrize(
-        'change',
-        ['missing-provenance', 'unrecorded-provenance', 'negative-cutoff', 'actor-id'],
+        'change', ['missing-cutoffs', 'negative-cutoff', 'actor-id']
     )
-    def test_requires_private_free_ledger_provenance(
+    def test_requires_private_free_cutoffs(
         self, capped_results: report.VotesResults, change: str
     ) -> None:
         payload = capped_results.model_dump(mode='json')
         match change:
-            case 'missing-provenance':
-                del payload['provenance']
-            case 'unrecorded-provenance':
-                payload['provenance'] = {'status': 'unrecorded'}
+            case 'missing-cutoffs':
+                del payload['cutoffs']
             case 'negative-cutoff':
-                payload['provenance']['receipt_cutoff'] = -1
+                payload['cutoffs']['production'] = -1
             case 'actor-id':
-                payload['provenance']['actor_id'] = 'private-actor'
+                payload['cutoffs']['actor_id'] = 'private-actor'
             case _:
                 raise AssertionError(change)
 
@@ -866,7 +965,7 @@ class TestVotesResults:
         assert results.votes == 275
         assert results.effective_votes == pytest.approx(125)
         assert results.dropped_votes == 1
-        assert results.sessions == 4
+        assert results.voters == 2
         assert results.unranked == ['x', 'y']
 
         standings = {row.system: row for row in results.standings}
@@ -918,36 +1017,17 @@ class TestVotesResults:
 
         assert results.length == pytest.approx(expected * ranking.ELO_PER_LOGIT)
 
-    def test_preserves_full_evaluation_weights_when_splitting_sessions(self) -> None:
-        rows: list[HumanEvidence] = []
-        actors: list[str] = []
-        for session, visitor_choices in (('early', 16), ('late', 10)):
-            for actor, winner, count in (
-                ('owner', 'a', 76),
-                ('owner', 'b', 50),
-                ('visitor', 'b', visitor_choices),
-            ):
-                for index in range(count):
-                    systems = ('a', 'b') if index % 2 else ('b', 'a')
-                    rows.append(
-                        make_evidence(
-                            len(rows),
-                            actor=actor,
-                            session=session,
-                            systems=systems,
-                            choice='a' if systems[0] == winner else 'b',
-                        )
-                    )
-                    actors.append(actor)
-
-        weights = actor_weights(actors)
-        ordinary = tuple(
-            replace(row, comparison=row.comparison._replace(weight=weight))
-            for row, weight in zip(rows, weights, strict=True)
+    def test_splits_alternate_votes_under_their_family_weights(self) -> None:
+        rows = tuple(
+            make_evidence(index)
+            if index % 2 == 0
+            else make_evidence(index, weight=0.1)
+            if index % 4 == 1
+            else make_evidence(index, actor='visitor', choice='b')
+            for index in range(20)
         )
-        analysis = make_analysis(ordinary)
 
-        results = report.votes_results(analysis)
+        results = report.votes_results(make_analysis(rows))
 
         assert results.split_half_tau == pytest.approx(-1.0)
 

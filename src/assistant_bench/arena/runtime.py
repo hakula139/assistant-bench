@@ -11,16 +11,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
+from assistant_bench.arena.d1 import TargetName, account_id
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench_arena.models import FamilyView, Record
 from assistant_bench_arena.runtime_models import Profile
 
-
-type TargetName = Literal['staging', 'production']
 
 CONFIG = REPO_ROOT / 'wrangler.toml'
 
@@ -57,7 +55,6 @@ class _Environment(BaseModel):
 
     name: str
     compatibility_date: str | None = None
-    account_id: str | None = None
     main: str | None = None
 
     vars: dict[str, JsonValue]
@@ -69,7 +66,6 @@ class _Manifest(BaseModel):
     model_config = ConfigDict(extra='allow', strict=True)
 
     compatibility_date: str
-    account_id: str
     main: str | None = None
     env: dict[str, _Environment] = Field(default_factory=dict)
 
@@ -105,11 +101,7 @@ def load_target(name: TargetName, *, manifest_path: Path = CONFIG) -> RuntimeTar
             if environment.compatibility_date is not None
             else manifest.compatibility_date
         ),
-        account_id=(
-            environment.account_id
-            if environment.account_id is not None
-            else manifest.account_id
-        ),
+        account_id=account_id(),
         profile=profile,
         database_id=databases[0].database_id,
     )

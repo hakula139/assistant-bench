@@ -38,4 +38,4 @@ Pick two different names from `systems` in [`families/smoke-text/family.toml`](.
 
 The run makes one request per case and selected system, then collects the replies into `outputs/smoke-text.jsonl`. Repeating it sends nothing until a case or system is added, though it retries every trial that errored.
 
-The smoke run validates generation and collection. Public voting uses reviewed releases published to the online arena, as [Arena](../design/arena.md) describes. Open [the vote page](https://bench.hakula.xyz/vote/) to vote on an available family. Voting needs two systems with passing, different replies on the same case. Failed gates or identical replies can leave no eligible pair even after both systems run.
+The smoke run validates generation and collection. Public voting uses reviewed publications in the online arena, as [Arena](../design/arena.md) describes. Open [the vote page](https://bench.hakula.xyz/vote/) to vote on an available family. Voting needs two systems with passing, different replies on the same case. Failed gates or identical replies can leave no eligible pair even after both systems run.

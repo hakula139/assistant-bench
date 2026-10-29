@@ -68,13 +68,13 @@ export function shownSlugs(html: string, names: SystemNames = FIXTURE_NAMES): st
 }
 
 const fixtures = import.meta.glob<Record<string, unknown>>(
-  '../../../tests/fixtures/{report,report-early,report-ledger,report-tests,report.schema}.json',
+  '../../../tests/fixtures/{report,report-early,report-tests,report.schema}.json',
   { import: 'default' },
 );
 
 /** Each result is an independent mutable copy. */
 export async function readFixture(
-  name: 'report' | 'report-early' | 'report-ledger' | 'report-tests' | 'report.schema' = 'report',
+  name: 'report' | 'report-early' | 'report-tests' | 'report.schema' = 'report',
 ): Promise<Record<string, unknown>> {
   return structuredClone(await fixtures[`../../../tests/fixtures/${name}.json`]());
 }
