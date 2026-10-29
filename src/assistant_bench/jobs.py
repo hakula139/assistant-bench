@@ -585,6 +585,10 @@ class _Candidate:
         exception = self.trial.result.exception_info
         return exception.exception_type if exception else None
 
+    @property
+    def ungraded_error(self) -> bool:
+        return self.error is not None and _reward(self.trial.result) is None
+
 
 def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     """Read the family's trials into `outputs/<family>.jsonl`.
@@ -594,8 +598,9 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
     keeping only trials whose recorded generation, environment, and verifier
-    settings match the current job. A successful trial replaces an errored one,
-    while equivalent successful trials keep their original order.
+    settings match the current job. A successful trial comes first, then an
+    errored trial its tests graded, then one they never graded, and trials within
+    each tier keep their original order, whatever their rewards.
     Costs come from the current catalog price. A system without a price reports
     as unpriced.
 
@@ -630,6 +635,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
     candidates.sort(
         key=lambda candidate: (
             candidate.error is not None,
+            candidate.ungraded_error,
             candidate.job,
             candidate.name,
         )
