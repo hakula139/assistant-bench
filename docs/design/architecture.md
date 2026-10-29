@@ -13,12 +13,12 @@ src/assistant_bench/
 ├── manifest.py                             # The committed manifest of every runnable system's fingerprint
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
-│   ├── commands.py                         # Publication, status and deploy commands
+│   ├── commands.py                         # Publication, status, moderation and deploy commands
 │   ├── d1.py                               # The D1 REST client and each target's database
 │   ├── management.py                       # Authenticated native Service client
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   ├── runtime.py                          # Named native targets and Service-only configuration
-│   └── votes.py                            # Vote cuts, the snapshots that save them, and the round they close
+│   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints

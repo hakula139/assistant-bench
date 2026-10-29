@@ -1,15 +1,17 @@
-"""Vote cuts from a store, the snapshots that save them, and the round they close."""
+"""A store's vote cuts and moderation, the snapshots that save cuts, and rounds."""
 
+import json
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations, product
 from pathlib import Path
-from typing import Literal
+from statistics import median
+from typing import Literal, Protocol, get_args
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Json
 
-from assistant_bench.arena.d1 import Database
+from assistant_bench.arena.d1 import Database, Param, Row
 from assistant_bench.arena.publication import (
     CaseFacts,
     Inventory,
@@ -168,22 +170,17 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
     if cutoff == 0:
         return Cut(cutoff=0, inventory=inventory, votes=(), excluded=0)
 
-    votes: list[Vote] = []
-    while True:
-        page = database.execute(
-            'SELECT id, actor_id, case_key, a_output, b_output, a_system, b_system, '
-            'choice, defects, elapsed_ms FROM votes WHERE family = ? '
-            'AND exclusion IS NULL AND id > ? AND id <= ? '
-            f'ORDER BY id LIMIT {PAGE_ROWS}',
-            [family, votes[-1].id if votes else 0, cutoff],
-        ).rows
-        votes.extend(
-            Vote(actor=row.actor_id, **row.model_dump(exclude={'actor_id'}))
-            for row in map(_VoteRow.model_validate, page)
-        )
-        if len(page) < PAGE_ROWS:
-            break
-
+    rows = _paged(
+        database,
+        _VoteRow.model_validate,
+        'id, actor_id, case_key, a_output, b_output, a_system, b_system, choice, '
+        'defects, elapsed_ms',
+        'family = ? AND exclusion IS NULL AND id <= ?',
+        [family, cutoff],
+    )
+    votes = [
+        Vote(actor=row.actor_id, **row.model_dump(exclude={'actor_id'})) for row in rows
+    ]
     excluded = database.execute(
         'SELECT count(*) AS excluded FROM votes WHERE family = ? '
         'AND exclusion IS NOT NULL AND id <= ?',
@@ -193,6 +190,34 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
     return Cut(
         cutoff=cutoff, inventory=inventory, votes=tuple(votes), excluded=excluded
     )
+
+
+class _Keyed(Protocol):
+    @property
+    def id(self) -> int: ...
+
+
+def _paged[T: _Keyed](
+    database: Database,
+    parse: Callable[[Row], T],
+    columns: str,
+    where: str,
+    params: Sequence[Param],
+) -> list[T]:
+    """Select `columns`, which include `id`, from the votes `where` holds, in ID order.
+
+    Each request reads one keyset page of at most `PAGE_ROWS` rows.
+    """
+    rows: list[T] = []
+    while True:
+        page = database.execute(
+            f'SELECT {columns} FROM votes WHERE {where} AND id > ? '
+            f'ORDER BY id LIMIT {PAGE_ROWS}',
+            [*params, rows[-1].id if rows else 0],
+        ).rows
+        rows.extend(map(parse, page))
+        if len(page) < PAGE_ROWS:
+            return rows
 
 
 class FamilyStatus(BaseModel):
@@ -232,6 +257,155 @@ def status(database: Database, family: str | None) -> list[FamilyStatus]:
         [family, family],
     ).rows
     return [FamilyStatus.model_validate(row) for row in rows]
+
+
+# ── Moderation ──
+
+
+Grouping = Literal['ip', 'actor']
+
+CHOICES: tuple[Choice, ...] = get_args(Choice.__value__)
+
+
+class Selector(_Model):
+    """The votes of one network tag or one browser, or the votes with given IDs."""
+
+    column: Literal['ip_tag', 'actor_id', 'id']
+    values: tuple[str, ...] | tuple[int, ...]
+
+    def condition(self) -> tuple[str, Param]:
+        """Return the SQL condition and its one parameter, which binds any count."""
+        return (
+            f'{self.column} IN (SELECT value FROM json_each(?))',
+            json.dumps(self.values),
+        )
+
+
+class ListedVote(_Model):
+    id: int
+    actor: str
+    ip_tag: str | None
+    """Null once retention cleared it."""
+
+    a_system: str
+    b_system: str
+    choice: Choice
+    elapsed_ms: int
+    recorded_at: int
+    """Milliseconds since the epoch."""
+
+    exclusion: str | None
+
+
+class Group(_Model):
+    """One network tag's or one browser's votes in a family, excluded ones included."""
+
+    subject: str | None
+    """The network tag or browser, or null for votes whose tag retention cleared."""
+
+    votes: int
+    peers: int
+    """The browsers behind a network tag, or the network tags of a browser."""
+
+    shares: dict[Choice, float]
+    median_elapsed_ms: float
+    first_at: int
+    last_at: int
+    excluded: int
+
+
+def listed(
+    database: Database, family: str, selector: Selector | None
+) -> list[ListedVote]:
+    """Return the family's votes, or only the selected ones, in ID order."""
+    where = 'family = ?'
+    params: list[Param] = [family]
+    if selector is not None:
+        condition, param = selector.condition()
+        where = f'{where} AND {condition}'
+        params.append(param)
+
+    return _paged(
+        database,
+        ListedVote.model_validate,
+        'id, actor_id AS actor, ip_tag, a_system, b_system, choice, elapsed_ms, '
+        'recorded_at, exclusion',
+        where,
+        params,
+    )
+
+
+def groups(database: Database, family: str, by: Grouping) -> list[Group]:
+    """Summarize the family's votes per network tag or per browser, most votes first."""
+    grouped: defaultdict[str | None, list[ListedVote]] = defaultdict(list)
+    for vote in listed(database, family, None):
+        grouped[vote.ip_tag if by == 'ip' else vote.actor].append(vote)
+
+    summaries = [
+        Group(
+            subject=subject,
+            votes=len(rows),
+            peers=len(
+                {row.actor for row in rows}
+                if by == 'ip'
+                else {row.ip_tag for row in rows if row.ip_tag is not None}
+            ),
+            shares={
+                choice: sum(row.choice == choice for row in rows) / len(rows)
+                for choice in CHOICES
+            },
+            median_elapsed_ms=median(row.elapsed_ms for row in rows),
+            first_at=min(row.recorded_at for row in rows),
+            last_at=max(row.recorded_at for row in rows),
+            excluded=sum(row.exclusion is not None for row in rows),
+        )
+        for subject, rows in grouped.items()
+    ]
+    return sorted(
+        summaries,
+        key=lambda group: (-group.votes, group.subject is None, group.subject or ''),
+    )
+
+
+def check_reason(reason: str) -> None:
+    """Refuse an exclusion reason that is blank.
+
+    Raises
+    ------
+    ValueError
+        The reason is blank.
+    """
+    if not reason.strip():
+        raise ValueError('Give a reason for the exclusion.')
+
+
+def exclude(database: Database, family: str, selector: Selector, reason: str) -> int:
+    """Exclude the selected votes for `reason`, returning how many changed.
+
+    A vote excluded earlier keeps its first reason.
+
+    Raises
+    ------
+    ValueError
+        The reason is blank.
+    """
+    check_reason(reason)
+    condition, param = selector.condition()
+    return database.execute(
+        'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '
+        f'AND {condition}',
+        [reason, family, param],
+    ).changes
+
+
+def restore(database: Database, family: str, selector: Selector) -> int:
+    """Count the selected excluded votes again, returning how many changed."""
+    condition, param = selector.condition()
+    return database.execute(
+        'UPDATE votes SET exclusion = NULL WHERE family = ? AND exclusion IS NOT NULL '
+        f'AND {condition}',
+        [family, param],
+    ).changes
 
 
 # ── Snapshots ──

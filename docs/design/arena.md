@@ -47,6 +47,14 @@ Production D1 is the sole source of real votes, including votes cast from a MacB
 
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/0001_init.sql` defines. Until the voting Worker launches, the older Worker keeps serving its starter round from its own ledger databases, which `wrangler.toml` at the repository root configures. No command reads the votes cast there, and they are dropped at the launch.
 
+## Moderation
+
+Each vote row keeps its browser's actor ID, a keyed tag of its network and `elapsed_ms`, the time the voting Worker measured from issuing the pair to recording the vote. A tag is a digest of the network address under a key only the Worker holds, so `bench arena votes` lists tags as opaque handles and the owner selects one by copying it. The listing reads a family's votes in keyset pages and aggregates them in the `bench` process, which keeps the medians out of SQL.
+
+`exclude` and `restore` are each one `UPDATE` of the `exclusion` column, selected by family and by one tag, one actor or a list of vote IDs bound as a single JSON parameter. A null `exclusion` means counted. Excluding skips votes already excluded, so each keeps its first reason, and the reported count is the votes that changed. The update covers only the votes recorded when it runs and blocks nothing, so later votes from the same tag or actor count until excluded too. An excluded vote stays in the store and keeps its comparison in `votes_comparison`, so its browser cannot vote that comparison again, while the cut, `status` and the round count it apart from the counted votes.
+
+Speed, minority preferences and disagreement with the owner are signals to investigate. No vote is excluded automatically or for its outcome alone.
+
 ## Schema Changes
 
 `web/migrations/` holds the arena's schema as Wrangler D1 migration files. `wrangler d1 migrations apply` records each applied file in `d1_migrations` and skips it afterward. The operator applies them to staging and production with the commands in [Running](../guide/running.md#setting-up-a-vote-store), while the Python tests apply the same files to an in-memory store. The voting Worker has not launched yet, so `0001_init.sql` is the whole schema: a schema change edits it, and the operator recreates the staging and production databases, dropping their votes.
