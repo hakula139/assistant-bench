@@ -1594,6 +1594,78 @@ class TestCollect:
         assert output.text == (GREETING_DIFF if diff else None)
 
     @pytest.mark.parametrize(
+        ('attempts', 'job', 'error', 'reward', 'verdict'),
+        [
+            pytest.param(
+                [
+                    (None, 'InternalServerError'),
+                    (None, 'CancelledError'),
+                    (1.0, 'AgentTimeoutError'),
+                ],
+                'job-3',
+                'AgentTimeoutError',
+                1.0,
+                [],
+                id='graded-error-over-ungraded-errors',
+            ),
+            pytest.param(
+                [
+                    (0.5, 'AgentTimeoutError'),
+                    (1.0, 'AgentTimeoutError'),
+                    (0.0, 'AgentTimeoutError'),
+                ],
+                'job-1',
+                'AgentTimeoutError',
+                0.5,
+                [Gate.TESTS],
+                id='oldest-graded-error',
+            ),
+            pytest.param(
+                [(0.0, 'AgentTimeoutError'), (0.0, None)],
+                'job-2',
+                None,
+                0.0,
+                [Gate.TESTS],
+                id='success-over-graded-error',
+            ),
+        ],
+    )
+    def test_ranks_a_success_then_a_graded_then_an_ungraded_error_oldest_first(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        attempts: list[tuple[float | None, str | None]],
+        job: str,
+        error: str | None,
+        reward: float,
+        verdict: list[Gate],
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        agent = current_agent(family)
+        for index, (attempt_reward, attempt_error) in enumerate(attempts, start=1):
+            record_trial(
+                data_dir / 'jobs' / 'f' / f'job-{index}',
+                f'echo__{index}',
+                agent,
+                task='f/echo',
+                reward=attempt_reward,
+                error=attempt_error,
+                instruction=None,
+                version='1.0.0',
+                workspace={'greeting.txt': 'hello\n'},
+                family=family,
+            )
+
+        (output,) = jobs.collect(family, {'acme-large': make_system()})
+
+        assert (
+            output.job,
+            output.error,
+            output.reward,
+            output.gate_failures,
+        ) == (job, error, reward, verdict)
+
+    @pytest.mark.parametrize(
         ('regrades', 'verdict'),
         [
             pytest.param(1, [], id='regrade'),
