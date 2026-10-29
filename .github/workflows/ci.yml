@@ -305,7 +305,6 @@ jobs:
         if: steps.pr.outputs.open
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Wrangler appends one JSON record per command to this file, including the Preview's URLs.
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.ndjson
         shell: bash
@@ -416,5 +415,4 @@ jobs:
         if: steps.head.outputs.current
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: nix develop -c uv run bench arena deploy production

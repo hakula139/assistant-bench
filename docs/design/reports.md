@@ -12,7 +12,7 @@ Voted closure uses the cut's active publication, the collected measurements and 
 
 `Report` holds `family`, `round`, `closed_at`, `systems` and `results`. `systems` maps exactly every ID referenced by the results to its public `display_name` and output `fingerprint`. An unknown fingerprint stays null. Standing rows reference this shared identity map. A historical round's labels and fingerprints never depend on today's catalog.
 
-Voted systems get labels and fingerprints from the sealed publication and evaluation. Test-scored systems get labels from the resolved public catalog and fingerprints from actual outputs. A known fingerprint that differs from the one an earlier report froze under the same ID fails closure, while display names may change between rounds.
+Voted systems get labels, fingerprints and the reference from the publication the closing cut read. Test-scored systems get labels from the resolved public catalog and fingerprints from actual outputs. A known fingerprint that differs from the one an earlier report froze under the same ID fails closure, while display names may change between rounds.
 
 ## Results
 

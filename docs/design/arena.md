@@ -21,11 +21,11 @@ Each case votes in exactly one store. Production votes on the public and synthet
 
 `bench close` for a votes family takes a cut from production, saves it as `votes/<family>/<taken-at>.json` in the data directory, and closes the round from that file. `--snapshot <path>` recloses a saved file without the store.
 
-- **A cut** holds the largest vote ID older than the ten-minute undo window, the active publication without content, the counted votes up to that ID and the number of excluded ones. It carries no network tags.
+- **A cut** holds the largest vote ID older than the ten-minute undo window, or 0 when no vote is, the active publication without content, the counted votes up to that ID and the number of excluded ones. It carries no network tags.
 - **Counting.** A vote counts when both of its outputs are still in the active publication and still pass, and when their content differs. Every other vote, and every excluded one, counts in `dropped_votes`. Actors are prefixed with their store, so the actor cap and `voters` count each browser once.
 - **Settlements** come from the publication's verdicts and content digests by the rule in [Sessions and Pairs](#sessions-and-pairs).
 - **Measurements.** Latency, tokens and cost come from the collected `outputs/<family>.jsonl`, matched by output key. An output missing from the file contributes null.
-- **The report** names its evidence by each store's cutoff, without any digest of private content.
+- **The report** names its evidence by each store's cutoff, null for a store closing did not read, without any digest of private content. It anchors on the reference the publication froze.
 
 ## Blinding
 
@@ -49,7 +49,7 @@ Production D1 is the sole source of real votes, including votes cast from a MacB
 
 ## Schema Changes
 
-`web/migrations/` holds the arena's schema as Wrangler D1 migration files. `wrangler d1 migrations apply` records each applied file in `d1_migrations` and skips it afterward. The operator applies them to staging and production, while the Python tests apply the same files to an in-memory store. The voting Worker has not launched yet, so `0001_init.sql` is the whole schema: a schema change edits it, and the operator recreates the staging and production databases, dropping their votes.
+`web/migrations/` holds the arena's schema as Wrangler D1 migration files. `wrangler d1 migrations apply` records each applied file in `d1_migrations` and skips it afterward. The operator applies them to staging and production with the commands in [Running](../guide/running.md#setting-up-a-vote-store), while the Python tests apply the same files to an in-memory store. The voting Worker has not launched yet, so `0001_init.sql` is the whole schema: a schema change edits it, and the operator recreates the staging and production databases, dropping their votes.
 
 ## Vote API
 
