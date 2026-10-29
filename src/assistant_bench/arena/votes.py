@@ -17,6 +17,7 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.families import Choice, Defect, Family, FamilyName, VotesSettings
+from assistant_bench.messages import code
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
@@ -32,7 +33,7 @@ from assistant_bench.scoring.weighting import actor_weights
 type Store = Literal['production', 'local']
 
 UNDO_WINDOW_MS = 10 * 60_000
-"""How long a voter can undo a vote, which matches the Worker's window."""
+"""How long a voter can undo a vote, which bounds the voting Worker's undo window."""
 
 PAGE_ROWS = 1000
 
@@ -62,8 +63,8 @@ class Vote(_Model):
 class Cut(_Model):
     """A store's counted votes that can no longer change, with what they rate."""
 
-    cutoff: int | None
-    """The largest ID among the family's votes older than the undo window."""
+    cutoff: int
+    """The largest ID among the family's votes older than the undo window, or 0."""
 
     inventory: Inventory
     votes: tuple[Vote, ...]
@@ -87,6 +88,7 @@ class Snapshot(_Model):
 
 class _ActiveRow(BaseModel):
     id: str
+    reference: str
     systems: Json[dict[str, str]]
     defects: Json[tuple[Defect, ...]]
 
@@ -121,9 +123,9 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
     Returns None when the store has no active publication for the family.
     """
     active = database.execute(
-        'SELECT publications.id, publications.systems, publications.defects '
-        'FROM active JOIN publications ON publications.id = active.publication_id '
-        'WHERE active.family = ?',
+        'SELECT publications.id, publications.reference, publications.systems, '
+        'publications.defects FROM active JOIN publications '
+        'ON publications.id = active.publication_id WHERE active.family = ?',
         [family],
     ).rows
     if not active:
@@ -143,6 +145,7 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
     inventory = Inventory(
         id=publication.id,
         family=family,
+        reference=publication.reference,
         systems=publication.systems,
         defects=publication.defects,
         cases=tuple(CaseFacts.model_validate(row) for row in cases),
@@ -157,13 +160,14 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
 
     window_start = int(now.timestamp() * 1000) - UNDO_WINDOW_MS
     cutoff = database.execute(
-        'SELECT max(id) AS cutoff FROM votes WHERE family = ? AND recorded_at <= ?',
+        'SELECT coalesce(max(id), 0) AS cutoff FROM votes '
+        'WHERE family = ? AND recorded_at <= ?',
         [family, window_start],
     ).rows[0]['cutoff']
-    if cutoff is None:
-        return Cut(cutoff=None, inventory=inventory, votes=(), excluded=0)
-
     assert isinstance(cutoff, int)
+    if cutoff == 0:
+        return Cut(cutoff=0, inventory=inventory, votes=(), excluded=0)
+
     votes: list[Vote] = []
     while True:
         page = database.execute(
@@ -265,7 +269,8 @@ def voting_input(
     ------
     ValueError
         The family is not scored by votes, the snapshot belongs to another
-        family or holds no cut, or two cuts name a system differently.
+        family or holds no cut, or two cuts name a system or the reference
+        differently.
     """
     settings = family.settings
     if not isinstance(settings, VotesSettings):
@@ -320,7 +325,7 @@ def voting_input(
     measured = {output_key(family.name, output): output for output in outputs}
     return AnalysisInput(
         family=family.name,
-        reference=settings.reference,
+        reference=reference(snapshot),
         systems=tuple(system_names(snapshot)),
         defects=cuts[0][1].inventory.defects,
         cutoffs=Cutoffs(
@@ -366,6 +371,23 @@ def system_names(snapshot: Snapshot) -> dict[str, str]:
                     f'and `{name}`.'
                 )
     return names
+
+
+def reference(snapshot: Snapshot) -> str:
+    """Return the reference the cuts' publications froze.
+
+    Raises
+    ------
+    ValueError
+        The cuts froze different references, or the snapshot holds none.
+    """
+    references = {cut.inventory.reference for _, cut in stored_cuts(snapshot)}
+    if len(references) != 1:
+        raise ValueError(
+            f'The stores anchor on {code(sorted(references))}, so the round has no '
+            'single reference.'
+        )
+    return references.pop()
 
 
 def fingerprints(snapshot: Snapshot) -> dict[str, str]:

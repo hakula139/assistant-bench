@@ -12,18 +12,19 @@ import httpx
 import typer
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
+from assistant_bench.messages import sentence
 from assistant_bench.paths import REPO_ROOT
 
 
 WRANGLER_CONFIG = REPO_ROOT / 'web' / 'wrangler.toml'
 TOKEN_FILE_VAR = 'BENCH_D1_TOKEN_FILE'
 API_BASE_URL = 'https://api.cloudflare.com/client/v4'
-TIMEOUT_SEC = 30.0
+TIMEOUT_SEC = 120.0
+"""Long enough to upload a statement of several megabytes over a slow link."""
 
-type TargetName = Literal['staging', 'production']
+TargetName = Literal['staging', 'production']
 Target = Annotated[
-    Literal['staging', 'production'],
-    typer.Argument(help='The vote store: staging or production.'),
+    TargetName, typer.Argument(help='The vote store: staging or production.')
 ]
 
 type Param = str | int | float | None
@@ -31,7 +32,7 @@ type Row = dict[str, JsonValue]
 
 
 class D1Error(Exception):
-    """A request D1 refused, carrying the API's messages."""
+    """A request D1 refused or that never reached it, with the reason."""
 
 
 @dataclass(frozen=True)
@@ -77,9 +78,16 @@ class RestDatabase:
         self._path = f'/accounts/{account_id}/d1/database/{database_id}/query'
 
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
-        response = self._client.post(
-            self._path, json={'sql': sql, 'params': list(params)}
-        )
+        try:
+            response = self._client.post(
+                self._path, json={'sql': sql, 'params': list(params)}
+            )
+        except httpx.TransportError as error:
+            raise D1Error(
+                f'D1 could not be reached: {sentence(str(error))} '
+                'Every command is safe to rerun.'
+            ) from error
+
         try:
             payload = _Response.model_validate_json(response.content)
         except ValidationError as error:

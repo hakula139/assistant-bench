@@ -81,6 +81,7 @@ class Inventory(_Model):
 
     id: str
     family: FamilyName
+    reference: str
     systems: dict[str, str]
     """Each system's display name, in the family's order."""
 
@@ -98,8 +99,11 @@ class Publication(_Model):
     aspect: str | None
     render: Literal['text', 'diff']
     defects: tuple[Defect, ...]
+    reference: str
+    """The system that anchors the round, frozen so closing uses what voters saw."""
+
     systems: dict[str, str]
-    """Each system's display name, in the family's order."""
+    """Each published system's and the reference's display name, in family order."""
 
     cases: tuple[PublishedCase, ...]
     outputs: tuple[PublishedOutput, ...]
@@ -204,10 +208,11 @@ def prepare(
         aspect=settings.aspect,
         render=settings.render,
         defects=tuple(settings.defects),
+        reference=settings.reference,
         systems={
             system: system_names[system]
             for system in settings.systems
-            if system in fingerprints
+            if system in fingerprints or system == settings.reference
         },
         cases=tuple(
             sorted(
@@ -381,8 +386,8 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
     milliseconds = int(now.timestamp() * 1000)
     database.execute(
         'INSERT INTO publications (id, family, display_name, aspect, render, '
-        'defects, systems, case_count, output_count, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
+        'defects, reference, systems, case_count, output_count, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
         [
             publication.id,
             publication.family,
@@ -390,6 +395,7 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
             publication.aspect,
             publication.render,
             json.dumps(publication.defects),
+            publication.reference,
             json.dumps(publication.systems, ensure_ascii=False),
             len(publication.cases),
             len(publication.outputs),

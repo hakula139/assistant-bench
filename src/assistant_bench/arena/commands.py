@@ -9,18 +9,15 @@ from pydantic import TypeAdapter
 
 from assistant_bench import jobs
 from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import D1Error, Target, connect
-from assistant_bench.arena.runtime import (
-    TargetName,
-    deploy as deploy_target,
-    load_target,
-)
+from assistant_bench.arena.d1 import D1Error, Target, TargetName, connect
+from assistant_bench.arena.runtime import deploy as deploy_target, load_target
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.families import load_cases, load_family
+from assistant_bench.messages import count_of
 
 
 app = typer.Typer(no_args_is_help=True)
-_TARGET = TypeAdapter[TargetName](TargetName.__value__)
+_TARGET = TypeAdapter[TargetName](TargetName)
 
 FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
 
@@ -67,8 +64,8 @@ def prepare(
         _fail(str(error))
 
     typer.echo(
-        f'Publication of `{family}` with {len(prepared.cases)} cases and '
-        f'{len(prepared.outputs)} outputs written to `{path}`. Review '
+        f'Publication of `{family}` with {count_of(len(prepared.cases), "case")} '
+        f'and {count_of(len(prepared.outputs), "output")} written to `{path}`. Review '
         f'`{path.with_suffix(".md")}`, then publish that file.'
     )
 
@@ -97,7 +94,8 @@ def publish(
 
     typer.echo(
         f'Published `{prepared.family}` to `{target}`: publication `{prepared.id}` '
-        f'with {len(prepared.cases)} cases and {len(prepared.outputs)} outputs.'
+        f'with {count_of(len(prepared.cases), "case")} and '
+        f'{count_of(len(prepared.outputs), "output")}.'
     )
 
 
@@ -124,9 +122,11 @@ def status(
         latest = 'none' if row.latest_vote_at is None else _time(row.latest_vote_at)
         typer.echo(
             f'Family `{row.family}`: publication `{row.publication_id}` active since '
-            f'{_time(row.activated_at)}, with {row.case_count} cases and '
-            f'{row.output_count} outputs. {row.votes} counted votes from '
-            f'{row.voters} voters, {row.excluded} excluded, latest at {latest}.'
+            f'{_time(row.activated_at)}, with {count_of(row.case_count, "case")} and '
+            f'{count_of(row.output_count, "output")}. '
+            f'{count_of(row.votes, "counted vote")} from '
+            f'{count_of(row.voters, "voter")}, {row.excluded} excluded, '
+            f'latest at {latest}.'
         )
 
 

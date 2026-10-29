@@ -5,9 +5,8 @@ from textwrap import dedent
 import pytest
 from pydantic import ValidationError
 
-from assistant_bench.arena.d1 import account_id
+from assistant_bench.arena.d1 import TargetName, account_id
 from assistant_bench.arena.runtime import (
-    TargetName,
     facade_config,
     load_target,
     management_config,

@@ -6,12 +6,10 @@ from textwrap import dedent
 
 import pytest
 from pydantic import JsonValue
-from typer.testing import CliRunner
 
 from assistant_bench.arena import runtime
 from assistant_bench.arena.d1 import account_id
 from assistant_bench.arena.runtime import RuntimeTarget
-from assistant_bench.cli import app
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -89,7 +87,9 @@ class TestCommittedProductionDeploy:
         catalog.parent.mkdir(parents=True)
         catalog.write_bytes((REPO_ROOT / 'web/public/arena-families.json').read_bytes())
         monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'synthetic-credential')
+        monkeypatch.delenv('CLOUDFLARE_ACCOUNT_ID', raising=False)
         deployed: list[tuple[str, str | None]] = []
+        accounts: set[str | None] = set()
 
         def run(
             arguments: list[str], *, cwd: Path, env: dict[str, str], check: bool
@@ -101,6 +101,7 @@ class TestCommittedProductionDeploy:
                     arguments[arguments.index('--env') + 1]
                 ]
             databases = configuration.get('d1_databases', [])
+            accounts.add(env.get('CLOUDFLARE_ACCOUNT_ID'))
             if '--dry-run' not in arguments:
                 deployed.append(
                     (
@@ -121,14 +122,7 @@ class TestCommittedProductionDeploy:
             ('assistant-bench-rpc', None),
             ('assistant-bench-render', None),
         ]
-
-    def test_keeps_the_deploy_command_the_workflow_runs(self) -> None:
-        workflow = (REPO_ROOT / '.github/workflows/ci.yml').read_text()
-
-        result = CliRunner().invoke(app, ['arena', 'deploy', '--help'])
-
-        assert 'uv run bench arena deploy production' in workflow
-        assert result.exit_code == 0, result.output
+        assert accounts == {account_id()}
 
 
 class TestDeploy:

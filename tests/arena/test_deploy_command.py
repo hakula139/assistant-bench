@@ -4,7 +4,8 @@ import pytest
 from typer.testing import CliRunner
 
 from assistant_bench.arena import commands
-from assistant_bench.arena.runtime import RuntimeTarget, TargetName
+from assistant_bench.arena.d1 import TargetName
+from assistant_bench.arena.runtime import RuntimeTarget
 from assistant_bench_arena.runtime_models import Profile
 
 

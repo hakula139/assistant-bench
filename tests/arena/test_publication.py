@@ -204,6 +204,20 @@ class TestPrepare:
         ]
         assert published.systems == ARENA_NAMES
 
+    def test_freezes_the_reference_and_names_it_without_outputs(self) -> None:
+        published = prepare(
+            make_votes_family(),
+            [make_case('c')],
+            [make_trial('c', 'acme-small'), make_trial('c', 'acme-pro')],
+        )
+
+        assert published.reference == 'acme-large'
+        assert published.systems == ARENA_NAMES
+        assert {output.system for output in published.outputs} == {
+            'acme-small',
+            'acme-pro',
+        }
+
     def test_keeps_the_keys_of_unchanged_cases_and_outputs_across_republication(
         self,
     ) -> None:
@@ -323,6 +337,22 @@ class TestPublish:
         assert rows(
             database, "SELECT count(*) FROM outputs WHERE verdict != 'pass'"
         ) == rows(database, 'SELECT count(*) FROM outputs WHERE content IS NULL')
+
+    def test_splits_inserts_within_the_parameter_limit(self) -> None:
+        cases = [make_case(f'case-{index}') for index in range(25)]
+        published = prepare(
+            make_votes_family(),
+            cases,
+            [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
+        )
+        recording = RecordingDatabase(arena_database())
+
+        publication.publish(recording, published, NOW)
+
+        inserts = [sql.split()[2] for sql in recording.statements if 'VALUES' in sql]
+        assert inserts.count('cases') == 2
+        assert inserts.count('outputs') == 8
+        assert rows(recording.database, 'SELECT count(*) FROM outputs') == [(75,)]
 
     def test_changes_nothing_for_the_active_publication(self) -> None:
         database = arena_database()

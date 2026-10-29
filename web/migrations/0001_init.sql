@@ -5,6 +5,7 @@ CREATE TABLE publications (
     aspect TEXT,
     render TEXT NOT NULL CHECK (render IN ('text', 'diff')),
     defects TEXT NOT NULL CHECK (json_valid(defects)),
+    reference TEXT NOT NULL,
     systems TEXT NOT NULL CHECK (json_valid(systems)),
     case_count INTEGER NOT NULL,
     output_count INTEGER NOT NULL,

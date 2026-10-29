@@ -11,17 +11,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
-from assistant_bench.arena.d1 import account_id
+from assistant_bench.arena.d1 import TargetName, account_id
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench_arena.models import FamilyView, Record
 from assistant_bench_arena.runtime_models import Profile
 
-
-type TargetName = Literal['staging', 'production']
 
 CONFIG = REPO_ROOT / 'wrangler.toml'
 

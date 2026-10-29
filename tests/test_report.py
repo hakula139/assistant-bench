@@ -244,7 +244,7 @@ def approx(value: JsonValue) -> object:
 
 class TestReport:
     @pytest.mark.parametrize(
-        ('fixture', 'sessions', 'closed_at'),
+        ('fixture', 'days', 'closed_at'),
         [
             (REPORT_FIXTURE, 10, datetime(2026, 10, 21, 18, tzinfo=UTC)),
             (EARLY_REPORT_FIXTURE, 1, datetime(2026, 10, 1, 18, tzinfo=UTC)),
@@ -254,11 +254,11 @@ class TestReport:
     def test_matches_the_committed_votes_round(
         self,
         fixture: Path,
-        sessions: int,
+        days: int,
         closed_at: datetime,
         stale_fixture: Callable[[Path, str], None],
     ) -> None:
-        snapshot, outputs = make_round(sessions, closed_at - timedelta(hours=1))
+        snapshot, outputs = make_round(days, closed_at - timedelta(hours=1))
 
         closed = report.close_votes(
             votes.voting_input(snapshot, ROUND_FAMILY, outputs),

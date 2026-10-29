@@ -88,13 +88,16 @@ def snapshot(
     *,
     excluded: int = 0,
     local: tuple[Vote, ...] | None = None,
+    reference: str = 'acme-large',
+    local_reference: str = 'acme-large',
 ) -> Snapshot:
-    def cut(rows: tuple[Vote, ...], excluded: int) -> Cut:
+    def cut(rows: tuple[Vote, ...], excluded: int, reference: str) -> Cut:
         return Cut(
-            cutoff=max((row.id for row in rows), default=None),
+            cutoff=max((row.id for row in rows), default=0),
             inventory=Inventory(
                 id='publication',
                 family=FAMILY.name,
+                reference=reference,
                 systems=ARENA_NAMES,
                 defects=('facts',),
                 cases=tuple(
@@ -110,8 +113,8 @@ def snapshot(
     return Snapshot(
         family=FAMILY.name,
         taken_at=NOW,
-        production=cut(production, excluded),
-        local=None if local is None else cut(local, 0),
+        production=cut(production, excluded, reference),
+        local=None if local is None else cut(local, 0, local_reference),
     )
 
 
@@ -178,6 +181,7 @@ class TestReadCut:
         assert cut.inventory == Inventory(
             id=published.id,
             family=published.family,
+            reference=published.reference,
             systems=published.systems,
             defects=published.defects,
             cases=tuple(
@@ -200,7 +204,7 @@ class TestReadCut:
         cut = votes.read_cut(database, FAMILY.name, NOW)
 
         assert cut is not None
-        assert (cut.cutoff, cut.votes, cut.excluded) == (None, (), 0)
+        assert (cut.cutoff, cut.votes, cut.excluded) == (0, (), 0)
 
     def test_returns_none_for_a_family_without_an_active_publication(self) -> None:
         assert votes.read_cut(arena_database(), FAMILY.name, NOW) is None
@@ -268,6 +272,37 @@ class TestVotingInput:
         assert [row.receipt for row in analysis.ordinary] == ['production:1']
         assert analysis.dropped == 5
         assert analysis.cutoffs == Cutoffs(production=4, local=None)
+
+    def test_drops_a_vote_on_a_case_whose_text_changed(self) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        stale = vote(1, a, b).model_copy(update={'case_key': 'edited'})
+
+        analysis = votes.voting_input(snapshot((a, b), (stale,)), FAMILY, [])
+
+        assert (analysis.ordinary, analysis.dropped) == ((), 1)
+
+    def test_records_cutoff_0_for_a_store_without_a_vote(self) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+
+        analysis = votes.voting_input(snapshot((a, b)), FAMILY, [])
+
+        assert analysis.cutoffs == Cutoffs(production=0, local=None)
+
+    def test_anchors_on_the_reference_the_publication_froze(self) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+
+        analysis = votes.voting_input(
+            snapshot((a, b), reference='acme-small'), FAMILY, []
+        )
+
+        assert analysis.reference == 'acme-small'
+
+    def test_refuses_cuts_that_froze_different_references(self) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        both = snapshot((a, b), local=(), local_reference='acme-small')
+
+        with pytest.raises(ValueError, match='no single reference'):
+            votes.voting_input(both, FAMILY, [])
 
     def test_prefixes_actors_and_receipts_with_their_store(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')

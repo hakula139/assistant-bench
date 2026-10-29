@@ -927,8 +927,12 @@ def record_vote(
 
 
 def arena_database() -> SQLiteDatabase:
-    """Return an in-memory store built from the Worker's migration files, in order."""
+    """Return an in-memory store built from the Worker's migration files, in order.
+
+    The store binds at most 100 parameters per statement, as D1 does.
+    """
     connection = sqlite3.connect(':memory:', isolation_level=None)
+    connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 100)
     connection.execute('PRAGMA foreign_keys = ON')
     for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
         connection.executescript(path.read_text())
@@ -952,7 +956,7 @@ ROUND_STRENGTHS = {
 
 ROUND_NAMES = {system: system.replace('-', ' ').title() for system in ROUND_STRENGTHS}
 ROUND_CATEGORIES: tuple[Category, ...] = ('docs', 'message', 'reply')
-OWNER_SESSIONS = 4
+OWNER_DAYS = 4
 ROUND_FAMILY = Family(
     name='arena',
     source='cases',
@@ -969,16 +973,16 @@ ROUND_FAMILY = Family(
 )
 
 
-def make_round(sessions: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
-    """Simulate family `arena` over `sessions` daily sessions of about 30 votes each.
+def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
+    """Simulate family `arena` over `days` days of about 30 votes each.
 
     Returns the production snapshot and the collected outputs. A seeded rater
     follows Bradley-Terry with the strengths above and a small left bias, ties 15%
-    of the time and calls both bad 5%. The owner votes in the first four
-    sessions, past the actor cap, and a new visitor in each later one. About 3%
+    of the time and calls both bad 5%. The owner votes on the first four
+    days, past the actor cap, and a new visitor on each later one. About 3%
     of the outputs fail a gate and settle their pairs without a vote, while
     `acme-tiny` fails most cases, so it ranks through settlements alone. Each
-    session pits `acme-edge` against `acme-nano` on two cases, which leaves them
+    day pits `acme-edge` against `acme-nano` on two cases, which leaves them
     unranked, and drops some votes on retired outputs and two excluded ones.
     Draws use only `Random.random`, whose sequence Python keeps stable for a seed.
     """
@@ -1099,8 +1103,8 @@ def make_round(sessions: int, taken_at: datetime) -> tuple[Snapshot, list[Output
             )
         )
 
-    for day in range(sessions):
-        actor = 'owner' if day < OWNER_SESSIONS else f'visitor-{day:02}'
+    for day in range(days):
+        actor = 'owner' if day < OWNER_DAYS else f'visitor-{day:02}'
         for case in shuffled(list(cases)):
             if day > 0 and rng.random() < 0.1:
                 retired(actor, case)
@@ -1115,6 +1119,7 @@ def make_round(sessions: int, taken_at: datetime) -> tuple[Snapshot, list[Output
     inventory = Inventory(
         id='publication-1',
         family='arena',
+        reference='acme-large',
         systems=ROUND_NAMES,
         defects=PROSE_DEFECTS,
         cases=tuple(CaseFacts(key=case, category=c) for case, c in cases.items()),
@@ -1124,7 +1129,7 @@ def make_round(sessions: int, taken_at: datetime) -> tuple[Snapshot, list[Output
         cutoff=len(votes),
         inventory=inventory,
         votes=tuple(votes),
-        excluded=2 * sessions,
+        excluded=2 * days,
     )
     snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
     return snapshot, outputs

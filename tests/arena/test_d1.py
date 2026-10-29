@@ -107,6 +107,17 @@ class TestRestDatabase:
 
         assert str(raised.value) == message
 
+    def test_raises_a_transport_failure_as_a_safe_to_rerun_refusal(self) -> None:
+        def unreachable(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout('timed out', request=request)
+
+        with pytest.raises(D1Error) as raised:
+            rest_database(unreachable).execute('SELECT 1')
+
+        assert str(raised.value) == (
+            'D1 could not be reached: timed out. Every command is safe to rerun.'
+        )
+
 
 class TestConnect:
     @pytest.fixture

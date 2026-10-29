@@ -121,7 +121,10 @@ RULES = VotesRules(preliminary_decisive_votes=40)
 
 
 class Cutoffs(_Model):
-    """The largest vote ID each store contributed, null for a store without a cut."""
+    """Each store's largest vote ID older than the undo window at closing.
+
+    0 means the store held no such vote, and null means closing did not read it.
+    """
 
     production: Annotated[int, Field(strict=True, ge=0)] | None
     local: Annotated[int, Field(strict=True, ge=0)] | None

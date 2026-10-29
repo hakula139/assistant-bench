@@ -191,7 +191,7 @@ class TestStatus:
         assert result.stdout.startswith(
             f'Family `writing-f`: publication `{published.id}` active since '
         )
-        assert 'with 2 cases and 4 outputs. 1 counted votes from 1 voters' in (
+        assert 'with 2 cases and 4 outputs. 1 counted vote from 1 voter,' in (
             result.stdout
         )
 
