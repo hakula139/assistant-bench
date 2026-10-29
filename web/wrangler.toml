@@ -16,7 +16,9 @@ enabled = true
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "assistant-bench-arena-staging"
+database_id = "fbd5e88f-8765-4c2c-8ec9-bbc4719df6d8"
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "assistant-bench-arena-production"
+database_id = "069f7ef2-7c84-4865-b654-a7cd507b5624"
