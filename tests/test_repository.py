@@ -29,6 +29,7 @@ CODING = REPO_ROOT / 'families' / 'coding-repo'
 CODING_TASKS = sorted(path.parent for path in (CODING / 'tasks').glob('*/task.toml'))
 CODING_FIXTURES = REPO_ROOT / 'tests' / 'fixtures' / 'coding-repo'
 CODING_BYPASSES = sorted(path.stem for path in CODING_FIXTURES.glob('*.py'))
+SOLVE_TIMEOUT_SEC = 60
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
@@ -174,7 +175,7 @@ def solved_workspace(task: Path, tmp_path: Path, *, solved: bool) -> Path:
             cwd=workspace,
             text=True,
             check=True,
-            timeout=60,
+            timeout=SOLVE_TIMEOUT_SEC,
         )
     return workspace
 
@@ -208,7 +209,7 @@ def run_verifier(task: Path, workspace: Path, logs: Path, tmp_path: Path) -> str
         capture_output=True,
         text=True,
         check=True,
-        timeout=2 * load_coding_verifier().TIMEOUT_SEC + 60,
+        timeout=verifier_wait_sec(),
     )
     return result.stdout + result.stderr
 
@@ -292,6 +293,12 @@ def load_coding_verifier() -> ModuleType:
     return module
 
 
+def verifier_wait_sec() -> int:
+    """Return the longest a coding verifier runs: both timed runs, plus a minute."""
+    timeout: int = load_coding_verifier().TIMEOUT_SEC
+    return 2 * timeout + 60
+
+
 @pytest.mark.parametrize(
     ('record', 'expected', 'reason'),
     [
@@ -364,6 +371,9 @@ def test_coding_verifier_judges_each_run_record(
 @pytest.mark.parametrize('task', CODING_TASKS, ids=lambda task: task.name)
 def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
     config = tomllib.loads((task / 'task.toml').read_text())
+    pytest_config = tomllib.loads((REPO_ROOT / 'pyproject.toml').read_text())['tool'][
+        'pytest'
+    ]['ini_options']
 
     timeout = load_coding_verifier().TIMEOUT_SEC
 
@@ -372,7 +382,10 @@ def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
         'fails either run that takes more than five minutes on two CPUs.'
         in (task / 'instruction.md').read_text()
     )
-    assert config['verifier']['timeout_sec'] >= 2 * timeout + 60
+    assert config['verifier']['timeout_sec'] >= verifier_wait_sec()
+    assert (
+        pytest_config['faulthandler_timeout'] > SOLVE_TIMEOUT_SEC + verifier_wait_sec()
+    )
 
 
 def family_systems(config: dict[str, Any]) -> set[str]:
