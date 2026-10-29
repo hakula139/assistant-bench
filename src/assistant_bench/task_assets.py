@@ -7,17 +7,10 @@ from assistant_bench.paths import REPO_ROOT
 
 
 def shared_files(root: Path) -> list[Path]:
-    """Return each shared file, relative to the coding family's directory.
-
-    Bytecode caches under `__pycache__`, which Harbor leaves out of a task, are
-    not shared files.
-    """
+    """Return each file under `shared/`, relative to it, skipping `__pycache__`."""
     shared = root / 'families' / 'coding-repo' / 'shared'
-    return sorted(
-        path.relative_to(shared)
-        for path in shared.rglob('*')
-        if path.is_file() and '__pycache__' not in path.relative_to(shared).parts
-    )
+    files = (path.relative_to(shared) for path in shared.rglob('*') if path.is_file())
+    return sorted(path for path in files if '__pycache__' not in path.parts)
 
 
 def sync(root: Path) -> list[Path]:
