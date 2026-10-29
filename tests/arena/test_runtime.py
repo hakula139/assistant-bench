@@ -5,6 +5,7 @@ from textwrap import dedent
 import pytest
 from pydantic import ValidationError
 
+from assistant_bench.arena.d1 import account_id
 from assistant_bench.arena.runtime import (
     TargetName,
     facade_config,
@@ -16,7 +17,6 @@ from assistant_bench.arena.runtime import (
 
 _MANIFEST = dedent("""
     compatibility_date = "2026-10-24"
-    account_id = "synthetic-account"
 
     [env.staging]
     name = "synthetic-arena"
@@ -44,7 +44,7 @@ class TestLoadTarget:
         assert target.manifest_path == path.resolve()
         assert target.worker_name == 'synthetic-arena'
         assert target.compatibility_date == '2026-10-24'
-        assert target.account_id == 'synthetic-account'
+        assert target.account_id == account_id()
         assert target.database_id == 'synthetic-preview'
         assert target.profile.namespace == 'synthetic'
         assert target.profile.app_origin == 'https://app.example.com'
@@ -68,9 +68,8 @@ class TestLoadTarget:
                 'compatibility_date = 20261024',
                 'compatibility_date',
             ),
-            ('account_id = "synthetic-account"', '', 'account_id'),
         ],
-        ids=['missing-date', 'invalid-date', 'missing-account'],
+        ids=['missing-date', 'invalid-date'],
     )
     def test_requires_native_deployment_identity(
         self, tmp_path: Path, original: str, replacement: str, field: str
@@ -118,38 +117,17 @@ class TestLoadTarget:
         assert target.worker_name == 'synthetic-arena'
         assert target.compatibility_date == '2026-10-24'
 
-    @pytest.mark.parametrize(
-        ('override', 'account', 'date'),
-        [
-            ('account_id = "selected-account"', 'selected-account', '2026-10-24'),
-            (
-                'compatibility_date = "2000-01-01"',
-                'synthetic-account',
-                '2000-01-01',
-            ),
-            (
-                dedent("""
-                    account_id = "selected-account"
-                    compatibility_date = "2000-01-01"
-                """),
-                'selected-account',
-                '2000-01-01',
-            ),
-        ],
-        ids=['account', 'date', 'both'],
-    )
-    def test_resolves_each_native_environment_override_independently(
-        self, tmp_path: Path, override: str, account: str, date: str
-    ) -> None:
+    def test_resolves_the_environment_compatibility_date(self, tmp_path: Path) -> None:
         path = tmp_path / 'wrangler.toml'
         path.write_text(
-            _MANIFEST.replace('[env.staging]', f'[env.staging]\n{override}')
+            _MANIFEST.replace(
+                '[env.staging]', '[env.staging]\ncompatibility_date = "2000-01-01"'
+            )
         )
 
         target = load_target('staging', manifest_path=path)
 
-        assert target.account_id == account
-        assert target.compatibility_date == date
+        assert target.compatibility_date == '2000-01-01'
 
     @pytest.mark.parametrize(
         ('original', 'replacement'),
@@ -198,7 +176,7 @@ class TestManagementConfig:
             assert configuration == {
                 'name': 'assistant-bench-management-client',
                 'compatibility_date': '2026-10-24',
-                'account_id': 'synthetic-account',
+                'account_id': account_id(),
                 'services': [
                     {
                         'binding': 'MANAGEMENT',
@@ -228,7 +206,7 @@ class TestFacadeConfig:
                 'name': 'synthetic-arena-rpc',
                 'main': str(tmp_path / 'arena/rpc.ts'),
                 'compatibility_date': '2026-10-24',
-                'account_id': 'synthetic-account',
+                'account_id': account_id(),
                 'workers_dev': False,
                 'preview_urls': False,
                 'routes': [],

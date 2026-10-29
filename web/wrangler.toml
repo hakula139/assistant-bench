@@ -1,4 +1,5 @@
 name = "assistant-bench-preview"
+account_id = "d9f3ff9721b3da6e674c0ce9db8b468e"
 compatibility_date = "2026-10-01"
 
 workers_dev = false
@@ -11,3 +12,11 @@ not_found_handling = "404-page"
 
 [observability.logs]
 enabled = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-arena-staging"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-arena-production"

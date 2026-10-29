@@ -3,7 +3,6 @@ name = "assistant-bench"
 main = "src/app.py"
 compatibility_date = "2026-10-24"
 compatibility_flags = ["python_workers"]
-account_id = "d9f3ff9721b3da6e674c0ce9db8b468e"
 workers_dev = false
 preview_urls = false
 

@@ -6,9 +6,13 @@ from textwrap import dedent
 
 import pytest
 from pydantic import JsonValue
+from typer.testing import CliRunner
 
 from assistant_bench.arena import runtime
+from assistant_bench.arena.d1 import account_id
 from assistant_bench.arena.runtime import RuntimeTarget
+from assistant_bench.cli import app
+from assistant_bench.paths import REPO_ROOT
 
 
 _FAMILY: dict[str, JsonValue] = {
@@ -35,11 +39,9 @@ def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RuntimeTarget:
         dedent("""
             main = "src/app.py"
             compatibility_date = "2026-10-24"
-            account_id = "root-account"
 
             [env.production]
             name = "synthetic-owner"
-            account_id = "selected-account"
             compatibility_date = "2026-10-25"
             d1_databases = [{binding = "DB", database_id = "synthetic-database"}]
 
@@ -68,6 +70,67 @@ class TestRouting:
             assert assets['run_worker_first'] == ['/api/*', '/vote/']
 
 
+class TestCommittedProductionDeploy:
+    """The deploy on merge keeps the voting Worker on its live database."""
+
+    def test_deploys_the_live_worker_from_the_committed_inputs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for relative in (
+            'wrangler.toml',
+            'src/app.py',
+            'src/render.py',
+            'arena/rpc.ts',
+        ):
+            copy = tmp_path / relative
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes((REPO_ROOT / relative).read_bytes())
+        catalog = tmp_path / 'web' / 'dist' / 'arena-families.json'
+        catalog.parent.mkdir(parents=True)
+        catalog.write_bytes((REPO_ROOT / 'web/public/arena-families.json').read_bytes())
+        monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'synthetic-credential')
+        deployed: list[tuple[str, str | None]] = []
+
+        def run(
+            arguments: list[str], *, cwd: Path, env: dict[str, str], check: bool
+        ) -> subprocess.CompletedProcess[str]:
+            path = Path(arguments[arguments.index('--config') + 1])
+            configuration = tomllib.loads(path.read_text())
+            if '--env' in arguments:
+                configuration = configuration['env'][
+                    arguments[arguments.index('--env') + 1]
+                ]
+            databases = configuration.get('d1_databases', [])
+            if '--dry-run' not in arguments:
+                deployed.append(
+                    (
+                        configuration['name'],
+                        databases[0]['database_id'] if databases else None,
+                    )
+                )
+            return subprocess.CompletedProcess(arguments, 0)
+
+        monkeypatch.setattr(subprocess, 'run', run)
+
+        runtime.deploy(
+            runtime.load_target('production', manifest_path=tmp_path / 'wrangler.toml')
+        )
+
+        assert deployed == [
+            ('assistant-bench', '62c412ee-5117-48ee-9cec-66ea7c69985f'),
+            ('assistant-bench-rpc', None),
+            ('assistant-bench-render', None),
+        ]
+
+    def test_keeps_the_deploy_command_the_workflow_runs(self) -> None:
+        workflow = (REPO_ROOT / '.github/workflows/ci.yml').read_text()
+
+        result = CliRunner().invoke(app, ['arena', 'deploy', '--help'])
+
+        assert 'uv run bench arena deploy production' in workflow
+        assert result.exit_code == 0, result.output
+
+
 class TestDeploy:
     def test_checks_all_native_bundles_before_deploying_the_same_descriptors(
         self, target: RuntimeTarget, monkeypatch: pytest.MonkeyPatch
@@ -81,7 +144,7 @@ class TestDeploy:
         ) -> subprocess.CompletedProcess[str]:
             assert cwd == target.manifest_path.parent
             assert check
-            assert env['CLOUDFLARE_ACCOUNT_ID'] == 'selected-account'
+            assert env['CLOUDFLARE_ACCOUNT_ID'] == account_id()
             assert 'BENCH_API_KEY' not in env and 'SESSION_KEYS' not in env
             assert env['WRANGLER_SEND_METRICS'] == 'false'
             path = Path(arguments[arguments.index('--config') + 1])
@@ -91,7 +154,7 @@ class TestDeploy:
                 assert arguments[arguments.index('--env') + 1] == 'production'
             else:
                 name = configuration['name']
-                assert configuration['account_id'] == 'selected-account'
+                assert configuration['account_id'] == account_id()
                 assert configuration['compatibility_date'] == '2026-10-25'
                 assert '--env' not in arguments
             assert arguments[arguments.index('--env-file') + 1] == '/dev/null'
