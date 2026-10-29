@@ -1,472 +1,224 @@
-import asyncio
 import json
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, nullcontext
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from stat import S_IMODE
-from typing import cast
 
 import pytest
-from pydantic import TypeAdapter
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
-from arena_support import (
-    BASE_MS,
-    RETENTION_MS,
-    NativeManagement,
-    native_management,
-    vote_capture,
+from assistant_bench import jobs
+from assistant_bench.arena import commands, publication
+from assistant_bench.arena.d1 import D1Error
+from assistant_bench.catalog import System
+from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.outputs import Output
+from support import (
+    SQLiteDatabase,
+    arena_database,
+    make_system,
+    passing_outputs,
+    record_vote,
+    write_votes_family,
 )
-from assistant_bench.arena import commands
-from assistant_bench.arena.exports import read_export
-from assistant_bench.arena.management import Management
-from assistant_bench.arena.publication import POLICY
-from assistant_bench.arena.publishing import publish_release
-from assistant_bench.arena.runtime import RuntimeTarget, TargetName
-from assistant_bench.arena.snapshots import analyze_export
-from assistant_bench_arena import management_models as command
-from assistant_bench_arena.ledger_models import (
-    BootstrapConfiguration,
-    Moderation,
-    Receipt,
-    Target,
-)
-from assistant_bench_arena.management_domain import PRINCIPAL
-from assistant_bench_arena.runtime_models import Profile
-from assistant_bench_arena.serialization import canonical
-from ledger_fixtures import make_release
-from ledger_support import D1Runtime
 
 
 runner = CliRunner()
+CATEGORIES = {'first': 'reply', 'second': 'docs'}
+SYSTEMS = {
+    name: make_system(name=name, display_name=f'Public {name.title()}')
+    for name in ('large', 'small')
+}
 
 
-@pytest.fixture(scope='module')
-def runtime(tmp_path_factory: pytest.TempPathFactory) -> Iterator[D1Runtime]:
-    with D1Runtime(tmp_path_factory.mktemp('native-admin')).owner() as owner:
-        yield owner
+def invoke(*args: str) -> Result:
+    return runner.invoke(commands.app, list(args), env={'COLUMNS': '200'})
 
 
-def use_management(
-    monkeypatch: pytest.MonkeyPatch, management: NativeManagement
-) -> None:
-    @asynccontextmanager
-    async def connection(
-        name: str,
-    ) -> AsyncGenerator[tuple[Management, command.ManagementStatus]]:
-        assert name == 'production'
-        status = await management.domain(
-            command.Status(), TypeAdapter(command.ManagementStatus | None)
-        )
-        assert status is not None
-        yield management, status
-
-    monkeypatch.setattr(commands, '_connection', connection)
+def collected() -> list[Output]:
+    return list(passing_outputs(CATEGORIES, SYSTEMS).values())
 
 
-class TestConnection:
-    @pytest.mark.parametrize(
-        ('operation', 'namespace'),
-        [
-            pytest.param('health', None, id='health-missing'),
-            pytest.param('health', 'different', id='health-different'),
-            pytest.param('health', 'same', id='health-ready'),
-            pytest.param('status', None, id='status-missing'),
-            pytest.param('status', 'different', id='status-different'),
-        ],
+@pytest.fixture
+def family(families_dir: Path) -> Family:
+    write_votes_family(
+        families_dir, 'writing-f', list(SYSTEMS), CATEGORIES, public_voting=True
     )
-    def test_checks_the_namespace_before_sending_the_operation(
-        self,
-        runtime: D1Runtime,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        operation: str,
-        namespace: str | None,
-    ) -> None:
-        async def scenario() -> None:
-            async with runtime.client() as (ledger, transport):
-                await transport.reset()
-
-                if namespace is not None:
-                    await transport.bootstrap(
-                        BootstrapConfiguration(
-                            namespace='synthetic-management',
-                            quotas=(),
-                            attribution_ms=RETENTION_MS,
-                        )
-                    )
-
-                management = NativeManagement(ledger)
-                target = RuntimeTarget(
-                    name='production',
-                    manifest_path=tmp_path / 'wrangler.toml',
-                    worker_name='synthetic-owner',
-                    compatibility_date='2026-10-01',
-                    account_id='synthetic-account',
-                    database_id='synthetic-database',
-                    profile=Profile(
-                        namespace='synthetic-management'
-                        if namespace == 'same'
-                        else 'different-valid-namespace',
-                        app_origin='https://app.example',
-                        render_origin='https://render.example',
-                    ),
-                )
-
-                def selected(name: TargetName) -> RuntimeTarget:
-                    assert name == 'production'
-                    return target
-
-                @asynccontextmanager
-                async def connection(config: Path) -> AsyncGenerator[Management]:
-                    assert config.is_file()
-                    yield management
-
-                monkeypatch.setattr(commands, 'load_target', selected)
-                monkeypatch.setattr(commands, 'connect', connection)
-
-                arguments = [operation, 'production']
-
-                if operation == 'status':
-                    arguments.append('writing')
-
-                result = await asyncio.to_thread(runner.invoke, commands.app, arguments)
-
-                if namespace == 'same':
-                    assert result.exit_code == 0, result.output
-                    assert (
-                        result.output.strip()
-                        == 'The arena has no overdue network associations.'
-                    )
-                else:
-                    assert result.exit_code == 1
-                    assert (
-                        'The arena deployment is not initialized.'
-                        if namespace is None
-                        else 'does not match the selected target'
-                    ) in result.output
-
-                assert [row.operation for row in management.operations] == ['status']
-
-        asyncio.run(scenario())
+    return load_family('writing-f')
 
 
-class _ReplyProcess:
-    def __init__(self, reply: dict[str, object]) -> None:
-        self.stdin = self
-        self.stdout = self
-        self.reply = (json.dumps(reply) + '\n').encode()
-
-    def write(self, payload: bytes) -> None:
-        return None
-
-    async def drain(self) -> None:
-        return None
-
-    async def readline(self) -> bytes:
-        return self.reply
-
-
-class TestManagementTransport:
-    @pytest.mark.parametrize(
-        ('reason', 'detail', 'message'),
-        [
-            (
-                'invalid_request',
-                'A moderation plan must name its management principal.',
-                'must name its management principal',
-            ),
-            (
-                'unavailable',
-                'The management bridge closed.',
-                'management bridge closed',
-            ),
-        ],
-        ids=['invalid-command', 'bridge-failure'],
+@pytest.fixture
+def prepared(family: Family) -> Path:
+    return publication.write(
+        publication.prepare(
+            family,
+            load_cases(family),
+            collected(),
+            {name: system.display_name for name, system in SYSTEMS.items()},
+            'production',
+        ),
+        collected(),
     )
-    def test_surfaces_the_owner_diagnosis(
-        self, reason: str, detail: str, message: str
-    ) -> None:
-        process = _ReplyProcess(
-            {'id': 0, 'error': {'reason': reason, 'detail': detail}}
-        )
-        management = Management(cast(asyncio.subprocess.Process, process))
 
-        with pytest.raises(ValueError, match=message):
-            asyncio.run(
-                management.domain(
-                    command.Status(), TypeAdapter(command.ManagementStatus | None)
-                )
-            )
+
+@pytest.fixture
+def store(monkeypatch: pytest.MonkeyPatch) -> tuple[SQLiteDatabase, list[str]]:
+    """Serve one in-memory store for every target, recording the targets."""
+    database = arena_database()
+    targets: list[str] = []
+
+    def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
+        targets.append(target)
+        return nullcontext(database)
+
+    monkeypatch.setattr(commands, 'connect', connect)
+    return database, targets
+
+
+@pytest.fixture
+def collections(monkeypatch: pytest.MonkeyPatch) -> list[Family]:
+    """Serve `SYSTEMS` as the catalog and `collected()` as every family's outputs."""
+    families: list[Family] = []
+
+    def load_systems(export: object) -> dict[str, System]:
+        return SYSTEMS
+
+    def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+        assert systems == SYSTEMS
+        families.append(family)
+        return collected()
+
+    monkeypatch.setattr(commands, 'load_export', lambda: None)
+    monkeypatch.setattr(commands, 'load_systems', load_systems)
+    monkeypatch.setattr(jobs, 'collect', collect)
+    return families
 
 
 class TestPrepare:
-    @pytest.mark.parametrize('via_symlink', [False, True], ids=['direct', 'symlink'])
-    @pytest.mark.parametrize('operation', ['prepare', 'catalog'])
-    def test_keeps_non_report_artifacts_out_of_the_reports_directory(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        operation: str,
-        via_symlink: bool,
+    def test_writes_the_publication_and_its_listing_from_current_outputs(
+        self, family: Family, data_dir: Path, collections: list[Family]
     ) -> None:
-        reports = tmp_path / 'reports'
-        reports.mkdir()
-        monkeypatch.setattr(commands, 'REPORTS_DIR', reports)
-        directory = reports
+        result = invoke('prepare', 'writing-f')
 
-        if via_symlink:
-            directory = tmp_path / 'alias'
-            directory.symlink_to(reports, target_is_directory=True)
+        assert result.exit_code == 0, result.output
+        (path,) = (data_dir / 'publications' / 'writing-f').glob('*.json')
+        written = publication.read(path)
+        assert written.systems == {'large': 'Public Large', 'small': 'Public Small'}
+        assert path.with_suffix('.md').is_file()
+        assert f'written to `{path}`' in result.stdout
+        assert collections == [family]
 
-        output = directory / 'artifact.json'
-        source = tmp_path / 'missing-input.json'
-        arguments = (
-            ['prepare', str(source), str(output)]
-            if operation == 'prepare'
-            else ['catalog', str(output), str(source)]
-        )
+    def test_refuses_a_family_without_public_voting(
+        self, families_dir: Path, collections: list[Family]
+    ) -> None:
+        write_votes_family(families_dir, 'writing-f', list(SYSTEMS), CATEGORIES)
 
-        result = runner.invoke(commands.app, arguments)
+        result = invoke('prepare', 'writing-f')
 
         assert result.exit_code == 1
-        assert 'Only `bench close` writes under reports/.' in result.output
-        assert not output.exists()
+        assert 'sets no `public_voting`' in result.stderr
 
 
 class TestPublish:
-    def test_refuses_an_invalid_reviewed_artifact_before_connecting(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_activates_the_file_once_and_reports_a_repeat(
+        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
-        path = tmp_path / 'release.json'
-        payload = make_release(cases=2).model_dump(mode='json')
-        payload['unexpected'] = 'private-invalid-input'
-        path.write_text(json.dumps(payload))
+        database, targets = store
+        identifier = prepared.stem
 
-        def refuse_connection(name: str) -> None:
-            pytest.fail(f'Invalid artifact contacted target {name}.')
+        first = invoke('publish', 'staging', str(prepared))
+        second = invoke('publish', 'staging', str(prepared))
 
-        monkeypatch.setattr(commands, '_connection', refuse_connection)
-
-        result = runner.invoke(commands.app, ['publish', 'production', str(path)])
-
-        assert result.exit_code == 1
-        assert 'Extra inputs are not permitted' in result.output
-
-
-class TestExportEvidence:
-    def test_refuses_to_overwrite_a_saved_cut_before_connecting(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        path = tmp_path / 'existing.json'
-        path.write_text('previous immutable capture')
-
-        def refuse_connection(name: str) -> None:
-            pytest.fail(f'Existing evidence contacted target {name}.')
-
-        monkeypatch.setattr(commands, '_connection', refuse_connection)
-
-        result = runner.invoke(
-            commands.app, ['export', 'production', 'writing', str(path)]
+        assert first.exit_code == second.exit_code == 0, first.output
+        assert targets == ['staging', 'staging']
+        assert first.stdout == (
+            f'Published `writing-f` to `staging`: publication `{identifier}` with '
+            '2 cases and 4 outputs.\n'
         )
+        assert second.stdout == (
+            f'Publication `{identifier}` is already active for `writing-f` in '
+            '`staging`, so nothing changed.\n'
+        )
+        assert database.execute('SELECT publication_id FROM active').rows == [
+            {'publication_id': identifier}
+        ]
+
+    def test_refuses_an_edited_file_before_connecting(
+        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+    ) -> None:
+        payload = json.loads(prepared.read_text())
+        payload['display_name'] = 'Edited'
+        prepared.write_text(json.dumps(payload))
+
+        result = invoke('publish', 'production', str(prepared))
 
         assert result.exit_code == 1
-        assert 'evidence output already exists' in result.output
-        assert path.read_text() == 'previous immutable capture'
+        assert 'was edited' in result.stderr
+        assert store[1] == []
 
-    def test_exports_a_complete_private_cut_and_refreshes_its_actual_fit(
-        self,
-        runtime: D1Runtime,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+    def test_prints_what_d1_refused(
+        self, prepared: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def scenario() -> None:
-            async with native_management(runtime) as management:
-                use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=POLICY)
-                await publish_release(management, release)
-                await vote_capture(management, release)
-                path = tmp_path / 'evidence.json'
+        def refuse(target: str) -> AbstractContextManager[SQLiteDatabase]:
+            raise D1Error('D1 refused the statement with HTTP 403. Forbidden.')
 
-                exported = await asyncio.to_thread(
-                    runner.invoke,
-                    commands.app,
-                    ['export', 'production', 'writing', str(path)],
-                )
-                assert exported.exit_code == 0, exported.output
-                capture = read_export(path)
-                snapshot = analyze_export(capture)
+        monkeypatch.setattr(commands, 'connect', refuse)
 
-                assert snapshot.analysis.accepted == 1
-                assert S_IMODE(path.stat().st_mode) == 0o600
-                assert len(capture.sections) == 13
-                refreshed = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['refresh', 'production', str(path)]
-                )
-                assert refreshed.exit_code == 0, refreshed.output
-                current = await management.ledger.read.family('writing')
-                assert current is not None and current.point_id == snapshot.points.id
-                repeated = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['refresh', 'production', str(path)]
-                )
-                assert repeated.exit_code == 0, repeated.output
-                assert await management.ledger.read.family('writing') == current
+        result = invoke('publish', 'production', str(prepared))
 
-                status = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['status', 'production', 'writing']
-                )
-                assert status.exit_code == 0, status.output
-                assert 'Sampling points activated at revision' in refreshed.output
-                assert 'fitted sampling points are already active' in repeated.output
-                assert capture.header.id in status.output
+        assert result.exit_code == 1
+        assert result.stderr == 'D1 refused the statement with HTTP 403. Forbidden.\n'
 
-        asyncio.run(scenario())
+    def test_rejects_an_unknown_target_by_name(self, prepared: Path) -> None:
+        result = invoke('publish', 'prod', str(prepared))
 
-
-class TestHealth:
-    @pytest.mark.parametrize(
-        ('lag', 'failed'),
-        [
-            (0, False),
-            (1_234, False),
-            (300_000, False),
-            (300_001, True),
-        ],
-        ids=['current', 'within-grace', 'at-grace', 'overdue'],
-    )
-    def test_fails_only_when_native_network_associations_are_overdue(
-        self,
-        runtime: D1Runtime,
-        monkeypatch: pytest.MonkeyPatch,
-        lag: int,
-        failed: bool,
-    ) -> None:
-        async def scenario() -> None:
-            async with native_management(runtime) as management:
-                use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=POLICY)
-                await publish_release(management, release)
-                await vote_capture(management, release)
-                management.now = BASE_MS + RETENTION_MS + 2 + lag
-
-                result = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['health', 'production']
-                )
-
-                assert result.exit_code == (1 if failed else 0), result.output
-                assert result.output.strip() == (
-                    'The arena has expired network associations awaiting cleanup.'
-                    if failed
-                    else 'The arena has no overdue network associations.'
-                )
-
-        asyncio.run(scenario())
+        assert result.exit_code == 2
+        assert "'staging'" in result.stderr and "'production'" in result.stderr
 
 
 class TestStatus:
-    def test_reports_aggregate_expiry_lag_with_the_active_family_status(
-        self, runtime: D1Runtime, monkeypatch: pytest.MonkeyPatch
+    def test_summarizes_the_active_families(
+        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
-        async def scenario() -> None:
-            async with native_management(runtime) as management:
-                use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=POLICY)
-                await publish_release(management, release)
-                await vote_capture(management, release)
-                management.now = BASE_MS + RETENTION_MS + 2 + 1_234
-                deployment = await management.ledger.status()
-                family = await management.ledger.investigation.status('writing')
-                assert deployment is not None and family is not None
+        database, _ = store
+        published = publication.read(prepared)
+        now = datetime.now(UTC)
+        publication.publish(database, published, now)
+        record_vote(database, published, now, actor='voter', age=timedelta(hours=1))
 
-                result = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['status', 'production', 'writing']
-                )
-                assert result.exit_code == 0, result.output
-
-                assert json.loads(result.output) == {
-                    'deployment': {
-                        **deployment.model_dump(mode='json'),
-                        'expiry_lag_ms': 1_234,
-                    },
-                    'family': family.model_dump(mode='json'),
-                }
-
-        asyncio.run(scenario())
-
-
-class TestModerate:
-    def test_replays_the_exact_reviewed_plan_after_a_committed_reply_is_lost(
-        self,
-        runtime: D1Runtime,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        async def scenario() -> None:
-            async with native_management(runtime) as management:
-                use_management(monkeypatch, management)
-                release = make_release(cases=2, policy=POLICY)
-                await publish_release(management, release)
-                capture = await vote_capture(management, release)
-                receipt = Receipt.model_validate_json(
-                    canonical(capture.rows('receipts')[0])
-                )
-                claims = await management.ledger.read.claims('writing', 'owner')
-                claim = next(row for row in claims.rows if row.id == 'claim')
-                plan = Moderation(
-                    id='reviewed-plan',
-                    family='writing',
-                    principal=PRINCIPAL,
-                    action='exclude',
-                    reason='Synthetic abuse investigation.',
-                    created_at=management.now,
-                    targets=(
-                        Target(receipt_seq=receipt.seq, claim_version=claim.version),
-                    ),
-                )
-                path = tmp_path / 'moderation.json'
-                path.write_text(plan.model_dump_json())
-                management.lose_reply = 'moderate'
-
-                failed = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['moderate', 'production', str(path)]
-                )
-                assert failed.exit_code == 1
-                assert 'response was lost' in failed.output
-
-                before = await management.ledger.read.family('writing')
-                retried = await asyncio.to_thread(
-                    runner.invoke, commands.app, ['moderate', 'production', str(path)]
-                )
-                assert retried.exit_code == 0, retried.output
-
-                assert await management.ledger.read.family('writing') == before
-                chunks = [
-                    row
-                    for row in management.operations
-                    if isinstance(row, command.Moderate)
-                ]
-                assert len(chunks) == 2 and chunks[0] == chunks[1]
-                status = await management.ledger.investigation.status('writing')
-                assert status is not None and status.eligible_votes == 0
-
-        asyncio.run(scenario())
-
-
-class TestCatalog:
-    def test_writes_only_approved_public_family_labels(self, tmp_path: Path) -> None:
-        release = make_release(family='synthetic-public', cases=2)
-        path = tmp_path / 'release.json'
-        path.write_text(release.model_dump_json())
-        output = tmp_path / 'catalog.json'
-
-        result = runner.invoke(commands.app, ['catalog', str(output), str(path)])
+        result = invoke('status', 'production', 'writing-f')
 
         assert result.exit_code == 0, result.output
-        assert json.loads(output.read_text()) == [
-            {
-                'name': 'synthetic-public',
-                'aspect': None,
-                'display_name': 'synthetic-public 1',
-                'defects': ['tone'],
-            }
-        ]
+        assert result.stdout.startswith(
+            f'Family `writing-f`: publication `{published.id}` active since '
+        )
+        assert 'with 2 cases and 4 outputs. 1 counted votes from 1 voters' in (
+            result.stdout
+        )
+
+    @pytest.mark.parametrize(
+        ('args', 'code', 'message'),
+        [
+            (
+                ('status', 'staging'),
+                0,
+                'No family has an active publication in `staging`.\n',
+            ),
+            (
+                ('status', 'staging', 'writing-f'),
+                1,
+                'Family `writing-f` has no active publication in `staging`.\n',
+            ),
+        ],
+        ids=['every', 'named'],
+    )
+    def test_says_when_no_family_is_active(
+        self,
+        store: tuple[SQLiteDatabase, list[str]],
+        args: tuple[str, ...],
+        code: int,
+        message: str,
+    ) -> None:
+        result = invoke(*args)
+
+        assert result.exit_code == code
+        assert result.output == message

@@ -1,322 +1,139 @@
-"""Reviewed artifact publication and private native arena management."""
+"""Publication and inspection of the arena's vote stores."""
 
-import asyncio
-import json
-from collections.abc import AsyncGenerator, Coroutine
-from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
-from uuid import uuid4
+from typing import Annotated, NoReturn
 
 import typer
 from pydantic import TypeAdapter
 
-from assistant_bench.arena.exports import capture_export, read_export, write_export
-from assistant_bench.arena.management import Management, connect
-from assistant_bench.arena.preparation import Preparation, prepare_selection
-from assistant_bench.arena.publication import public_catalog
-from assistant_bench.arena.publishing import publish_points, publish_release
+from assistant_bench import jobs
+from assistant_bench.arena import publication, votes
+from assistant_bench.arena.d1 import D1Error, Target, connect
 from assistant_bench.arena.runtime import (
     TargetName,
     deploy as deploy_target,
     load_target,
-    management_config,
 )
-from assistant_bench.arena.snapshots import analyze_export
-from assistant_bench.paths import REPORTS_DIR, write_atomically
-from assistant_bench_arena import management_models as command
-from assistant_bench_arena.investigation_models import (
-    FamilyStatus,
-    InvestigationPage,
-    ReceiptFilter,
-)
-from assistant_bench_arena.ledger_models import (
-    MODERATION_CHUNK_SIZE,
-    Event,
-    Export,
-    Moderation,
-)
-from assistant_bench_arena.models import FamilyView
-from assistant_bench_arena.releases import Release
-from assistant_bench_arena.serialization import digest
-from assistant_bench_arena.transport import CommandRejected
+from assistant_bench.catalog import load_export, load_systems
+from assistant_bench.families import load_cases, load_family
 
 
 app = typer.Typer(no_args_is_help=True)
 _TARGET = TypeAdapter[TargetName](TargetName.__value__)
-_EXPORT = TypeAdapter(Export)
-_STATUS = TypeAdapter(command.ManagementStatus | None)
-_FAMILY = TypeAdapter(FamilyStatus | None)
-_INVESTIGATION = TypeAdapter(InvestigationPage)
-_EVENT = TypeAdapter(Event)
-_NONE = TypeAdapter(type(None))
-_CATALOG = TypeAdapter(tuple[FamilyView, ...])
 
-_CLEANUP_GRACE_MS = 5 * 60_000
-
-Target = Annotated[str, typer.Argument(help='Configured staging or production target.')]
-Artifact = Annotated[
-    Path, typer.Argument(help='A reviewed immutable release JSON file.')
-]
-
-
-@asynccontextmanager
-async def _connection(
-    name: str,
-) -> AsyncGenerator[tuple[Management, command.ManagementStatus]]:
-    target = load_target(_TARGET.validate_python(name))
-
-    with management_config(target) as config:
-        async with connect(config) as management:
-            status = await management.domain(command.Status(), _STATUS)
-
-            if status is None:
-                raise ValueError('The arena deployment is not initialized.')
-
-            if status.namespace != target.profile.namespace:
-                raise ValueError(
-                    'The connected arena does not match the selected target.'
-                )
-
-            yield management, status
-
-
-def _run(operation: Coroutine[None, None, None]) -> None:
-    try:
-        asyncio.run(operation)
-    except (OSError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(1) from error
-    except CommandRejected as error:
-        typer.echo(f'The arena refused the command: `{error.reason}`.', err=True)
-        raise typer.Exit(1) from error
+FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
 
 
 @app.command()
-def deploy(target: Target) -> None:
+def deploy(
+    target: Annotated[
+        str, typer.Argument(help='Configured staging or production target.')
+    ],
+) -> None:
     """Deploy the prepared site and voting services to a configured target."""
     try:
         deploy_target(load_target(_TARGET.validate_python(target)))
     except (OSError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(1) from error
+        _fail(str(error))
 
     typer.echo(f'Deployed voting services for `{target}`.')
 
 
 @app.command()
 def prepare(
-    selection: Annotated[
-        Path,
-        typer.Argument(help='Exact selected solutions and public approval JSON.'),
-    ],
-    output: Annotated[
-        Path, typer.Argument(help='The private prepared release JSON file.')
-    ],
+    family: Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)],
 ) -> None:
-    """Prove selected current task inputs and prepare an exact reviewed release."""
+    """Write the family's production publication from its current outputs.
+
+    The file goes to publications/<family>/ in the data directory with a Markdown
+    listing beside it. Reviewing the listing and publishing that exact file
+    approves it.
+    """
     try:
-        _check_output(output)
-        release = prepare_selection(
-            Preparation.model_validate_json(selection.read_bytes())
+        selected = load_family(family)
+        systems = load_systems(load_export())
+        listed = jobs.listed_systems(selected, systems)
+        outputs = jobs.collect(selected, systems)
+        prepared = publication.prepare(
+            selected,
+            load_cases(selected),
+            outputs,
+            {system.name: system.display_name for system in listed},
+            'production',
         )
-        write_atomically(output, release.model_dump_json(indent=2) + '\n')
-    except (OSError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(1) from error
+        path = publication.write(prepared, outputs)
+    except (OSError, RuntimeError, ValueError) as error:
+        _fail(str(error))
 
-    typer.echo(f'Prepared release written to `{output}`.')
+    typer.echo(
+        f'Publication of `{family}` with {len(prepared.cases)} cases and '
+        f'{len(prepared.outputs)} outputs written to `{path}`. Review '
+        f'`{path.with_suffix(".md")}`, then publish that file.'
+    )
 
 
 @app.command()
-def publish(target: Target, release: Artifact) -> None:
-    """Stage and activate an approved release without resetting fitted scores."""
-    _run(_publish(target, release))
-
-
-async def _publish(target: str, path: Path) -> None:
-    release = Release.model_validate_json(path.read_bytes())
-
-    async with _connection(target) as (management, _):
-        event = await publish_release(management, release)
-
-    if event is None:
-        typer.echo('The approved release is already active.')
-    else:
-        typer.echo(
-            f'Published `{release.evaluation.family}` at revision `{event.seq}`.'
-        )
-
-
-@app.command(name='export')
-def export_evidence(
+def publish(
     target: Target,
-    family: Annotated[str, typer.Argument(help='An active arena family.')],
-    output: Annotated[
-        Path, typer.Argument(help='The private evidence file to create.')
+    file: Annotated[
+        Path, typer.Argument(help='A reviewed publication written by `prepare`.')
     ],
 ) -> None:
-    """Capture a registered immutable evidence cut through bounded native pages."""
-    _run(_export(target, family, output))
+    """Stage a reviewed publication in the vote store and activate it."""
+    try:
+        prepared = publication.read(file)
+        with connect(target) as database:
+            changed = publication.publish(database, prepared, datetime.now(UTC))
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
 
-
-async def _export(target: str, family: str, output: Path) -> None:
-    _check_output(output)
-
-    if output.exists():
-        raise ValueError('The evidence output already exists.')
-
-    async with _connection(target) as (management, _):
-        header = await management.domain(
-            command.Freeze(export_id=uuid4().hex, family=family), _EXPORT
+    if not changed:
+        typer.echo(
+            f'Publication `{prepared.id}` is already active for `{prepared.family}` '
+            f'in `{target}`, so nothing changed.'
         )
-        capture = await capture_export(management, header)
+        return
 
-    write_export(capture, output)
-    typer.echo(f'Evidence written to `{output}`.')
-
-
-@app.command()
-def refresh(
-    target: Target,
-    snapshot: Annotated[Path, typer.Argument(help='A saved ledger evidence cut.')],
-) -> None:
-    """Fit frozen evidence offline and publish the resulting sampling points."""
-    _run(_refresh(target, snapshot))
-
-
-async def _refresh(target: str, path: Path) -> None:
-    frozen = analyze_export(read_export(path))
-
-    async with _connection(target) as (management, _):
-        event = await publish_points(management, frozen.analysis.family, frozen.points)
-
-    if event is None:
-        typer.echo('The fitted sampling points are already active.')
-    else:
-        typer.echo(f'Sampling points activated at revision `{event.seq}`.')
-
-
-@app.command()
-def health(target: Target) -> None:
-    """Fail when the selected arena has overdue network-association cleanup."""
-    _run(_health(target))
-
-
-async def _health(target: str) -> None:
-    async with _connection(target) as (_, current):
-        if current.expiry_lag_ms > _CLEANUP_GRACE_MS:
-            raise ValueError(
-                'The arena has expired network associations awaiting cleanup.'
-            )
-
-    typer.echo('The arena has no overdue network associations.')
+    typer.echo(
+        f'Published `{prepared.family}` to `{target}`: publication `{prepared.id}` '
+        f'with {len(prepared.cases)} cases and {len(prepared.outputs)} outputs.'
+    )
 
 
 @app.command()
 def status(
     target: Target,
-    family: Annotated[str, typer.Argument(help='An active arena family.')],
+    family: Annotated[
+        str | None, typer.Argument(metavar='[FAMILY]', help=FAMILY_HELP)
+    ] = None,
 ) -> None:
-    """Show active identities, sampling provenance and current raw coverage."""
-    _run(_status(target, family))
-
-
-async def _status(target: str, family: str) -> None:
-    async with _connection(target) as (management, deployment):
-        current = await management.domain(command.FamilyStatus(family=family), _FAMILY)
-
-    if current is None:
-        raise ValueError(f'Family `{family}` is not active.')
-
-    typer.echo(
-        json.dumps(
-            {
-                'deployment': deployment.model_dump(mode='json'),
-                'family': current.model_dump(mode='json'),
-            },
-            indent=2,
-        )
-    )
-
-
-@app.command()
-def investigate(
-    target: Target,
-    filters: Annotated[Path, typer.Argument(help='Private receipt filter JSON.')],
-    after: Annotated[
-        int, typer.Option(min=0, help='Continue after this receipt sequence.')
-    ] = 0,
-) -> None:
-    """Inspect one bounded page of receipts and searchable network associations."""
-    _run(_investigate(target, filters, after))
-
-
-async def _investigate(target: str, path: Path, after: int) -> None:
-    filters = ReceiptFilter.model_validate_json(path.read_bytes())
-
-    async with _connection(target) as (management, _):
-        page = await management.domain(
-            command.Investigate(filters=filters, after=after), _INVESTIGATION
-        )
-
-    typer.echo(page.model_dump_json(indent=2))
-
-
-@app.command()
-def moderate(
-    target: Target,
-    plan: Annotated[Path, typer.Argument(help='Reviewed moderation plan JSON.')],
-) -> None:
-    """Apply or resume the exact reviewed exclusion or restoration plan."""
-    _run(_moderate(target, plan))
-
-
-async def _moderate(target: str, path: Path) -> None:
-    plan = Moderation.model_validate_json(path.read_bytes())
-
-    async with _connection(target) as (management, _):
-        await management.domain(command.StageModeration(batch=plan), _NONE)
-        await management.domain(command.SealModeration(batch_id=plan.id), _NONE)
-
-        for chunk in range(
-            (len(plan.targets) + MODERATION_CHUNK_SIZE - 1) // MODERATION_CHUNK_SIZE
-        ):
-            request = command.Moderate(
-                command_id=digest(
-                    {'operation': 'moderate', 'plan': plan.id, 'chunk': chunk}
-                ),
-                batch_id=plan.id,
-                chunk_index=chunk,
-            )
-            await management.domain(request, _EVENT)
-
-    typer.echo(f'Moderation plan `{plan.id}` applied.')
-
-
-@app.command()
-def catalog(
-    output: Annotated[
-        Path, typer.Argument(help='The generated public family catalog.')
-    ],
-    releases: Annotated[
-        list[Path], typer.Argument(help='Approved public release JSON files.')
-    ],
-) -> None:
-    """Write the safe family labels served by the public voting application."""
+    """Show each active family's publication and votes, or only the named family's."""
     try:
-        _check_output(output)
-        families = public_catalog(
-            [Release.model_validate_json(path.read_bytes()) for path in releases]
+        with connect(target) as database:
+            rows = votes.status(database, family)
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
+
+    if not rows:
+        if family is not None:
+            _fail(f'Family `{family}` has no active publication in `{target}`.')
+        typer.echo(f'No family has an active publication in `{target}`.')
+
+    for row in rows:
+        latest = 'none' if row.latest_vote_at is None else _time(row.latest_vote_at)
+        typer.echo(
+            f'Family `{row.family}`: publication `{row.publication_id}` active since '
+            f'{_time(row.activated_at)}, with {row.case_count} cases and '
+            f'{row.output_count} outputs. {row.votes} counted votes from '
+            f'{row.voters} voters, {row.excluded} excluded, latest at {latest}.'
         )
-        write_atomically(output, _CATALOG.dump_json(families, indent=2).decode() + '\n')
-    except (OSError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(1) from error
-
-    typer.echo(f'Public family catalog written to `{output}`.')
 
 
-def _check_output(path: Path) -> None:
-    if path.resolve().is_relative_to(REPORTS_DIR.resolve()):
-        raise ValueError('Only `bench close` writes under reports/.')
+def _time(milliseconds: int) -> str:
+    return f'{datetime.fromtimestamp(milliseconds / 1000, UTC):%Y-%m-%d %H:%M} UTC'
+
+
+def _fail(message: str) -> NoReturn:
+    typer.echo(message, err=True)
+    raise typer.Exit(1)

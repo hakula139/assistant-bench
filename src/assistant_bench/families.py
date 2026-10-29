@@ -148,7 +148,11 @@ class VotesSettings(_Settings):
 
     scorer: Literal['votes']
     public_voting: bool = False
-    """Permit preparation of explicitly approved public voting content."""
+    """Vote on the public and synthetic cases in production.
+
+    Every other case, and every case of a family without the flag, is voted
+    locally.
+    """
 
     reference: str
     """Listed system anchoring at `ranking.ANCHOR` when ranked.
@@ -156,7 +160,7 @@ class VotesSettings(_Settings):
     The most-voted system anchors when the reference does not rank.
     """
 
-    render: Literal['text', 'html', 'diff'] = 'text'
+    render: Literal['text', 'diff'] = 'text'
     """Output presentation. Only task families yield diffs."""
 
     language: Language | None = None
@@ -331,7 +335,7 @@ def _check_source_settings(family: Family) -> None:
         if settings.render == 'diff':
             raise ValueError(
                 f'{prefix}: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"` or `"html"`.'
+                'to `"text"`.'
             )
         return
 

@@ -47,29 +47,16 @@
     "rules": {
       "preliminary_decisive_votes": 40
     },
-    "provenance": {
-      "schema_version": 1,
-      "export_id": "export-10",
-      "export_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "namespace": "synthetic",
-      "captured_at": "2026-10-21T17:00:00Z",
-      "event_cutoff": 357,
-      "receipt_cutoff": 357,
-      "family_revision": 10,
-      "analysis_sequence": 357,
-      "evaluation_id": "evaluation-1",
-      "publication_id": "publication-1",
-      "policy_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "sampling_point_snapshot_id": "points-before",
-      "weighted_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "fitted_point_snapshot_id": "points-after"
+    "cutoffs": {
+      "production": 337,
+      "local": null
     },
     "reference": "acme-large",
     "anchor": "acme-large",
     "votes": 315,
     "effective_votes": 286.0,
     "dropped_votes": 42,
-    "sessions": 10,
+    "voters": 7,
     "standings": [
       {
         "system": "acme-pro",
@@ -238,7 +225,7 @@
       },
       {
         "system": "acme-tiny",
-        "score": 346.18221202080065,
+        "score": 346.1822120208009,
         "rank": 6,
         "votes": 0,
         "effective_votes": 0.0,
@@ -614,7 +601,7 @@
           },
           {
             "system": "acme-tiny",
-            "score": 443.72408728039557,
+            "score": 443.72408728039545,
             "votes": 0,
             "effective_votes": 0.0,
             "decisive_votes": 0
@@ -664,7 +651,7 @@
           },
           {
             "system": "acme-tiny",
-            "score": 383.8555770582036,
+            "score": 383.8555770582035,
             "votes": 0,
             "effective_votes": 0.0,
             "decisive_votes": 0
@@ -675,6 +662,6 @@
     ],
     "position": 14.341163730158202,
     "length": 29.857460748704252,
-    "split_half_tau": 0.6
+    "split_half_tau": 0.39999999999999997
   }
 }

@@ -1,495 +1,439 @@
-from dataclasses import dataclass, replace
+import json
+import sqlite3
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
-from assistant_bench.arena.publication import (
-    POLICY,
-    case_key,
-    output_key,
-    prepare,
+from assistant_bench.arena import publication
+from assistant_bench.arena.d1 import Param, Result
+from assistant_bench.arena.publication import Publication, VotingTarget
+from assistant_bench.families import (
+    Case,
+    CaseSource,
+    Family,
+    Gate,
 )
-from assistant_bench.families import Case, Family, Gate, VotesSettings, load_family
 from assistant_bench.outputs import Output
-from assistant_bench_arena.releases import Release
-from assistant_bench_arena.serialization import digest
-from assistant_bench_arena.snapshots import (
-    CaseApproval,
-    OutputApproval,
-    PresentedCase,
-    PublicApproval,
-    Settlement,
+from support import (
+    ARENA_NAMES,
+    ARENA_SYSTEMS,
+    CODE_DEFECTS,
+    FIXTURES,
+    SQLiteDatabase,
+    arena_database,
+    make_case,
+    make_trial,
+    make_votes_family,
 )
-from support import make_output, write_task_family
 
 
-@dataclass(frozen=True)
-class Inputs:
-    family: Family
-    cases: tuple[Case, ...]
-    outputs: tuple[Output, ...]
-    sources: dict[str, str]
-    names: dict[str, str]
-    fingerprints: dict[str, str]
-
-    def prepare(self, approval: PublicApproval | None = None) -> Release:
-        return prepare(
-            self.family,
-            self.cases,
-            self.outputs,
-            source_digests=self.sources,
-            system_names=self.names,
-            system_fingerprints=self.fingerprints,
-            approval=self.approve() if approval is None else approval,
-        )
-
-    def approve(self) -> PublicApproval:
-        settings = self.family.settings
-        assert isinstance(settings, VotesSettings)
-
-        case = next(case for case in self.cases if case.id == 'public-case')
-        key = case_key(case, self.sources[case.id])
-        return PublicApproval(
-            family=self.family.name,
-            cases=(
-                CaseApproval(
-                    case_key=key,
-                    source='synthetic',
-                    attestation='Synthetic content owned by the benchmark.',
-                    instruction_digest=digest(case.instruction),
-                    presentation_digest=digest(
-                        PresentedCase(
-                            instruction=case.instruction,
-                            checklist=tuple(case.checklist),
-                        )
-                    ),
-                ),
-            ),
-            outputs=tuple(
-                OutputApproval(
-                    output_key=output_key(output, key),
-                    content_digest=digest(output.text),
-                    render_digest=digest(
-                        {'render': settings.render, 'content': output.text}
-                    ),
-                )
-                for output in sorted(
-                    {
-                        output_key(row, key): row
-                        for row in self.outputs
-                        if row.case == case.id and row.job == 'private-job-0'
-                    }.values(),
-                    key=lambda row: row.system,
-                )
-            ),
-        )
+PUBLICATION_FIXTURE = FIXTURES / 'arena-publication.sql'
+NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 
 
-@pytest.fixture
-def inputs() -> Inputs:
-    family = Family(
-        name='f',
-        source='cases',
-        settings=VotesSettings(
-            scorer='votes',
-            display_name='Family',
-            systems=['a', 'b'],
-            samples=2,
-            reference='a',
-            categories=['reply'],
-            defects=['facts'],
-            public_voting=True,
-        ),
-    )
-    cases = (
-        Case(
-            id='public-case',
-            category='reply',
-            source='synthetic',
-            instruction='Write an opening sentence.',
-            checklist=['Give one sentence'],
-        ),
-        Case(
-            id='private-case',
-            category='reply',
-            source='held-out',
-            instruction='private-case-marker',
-            checklist=['private-checklist-marker'],
-        ),
-    )
-    outputs = tuple(
-        make_output(
-            case=case,
-            system=system,
-            fingerprint=f'fp-{system}',
-            job=f'private-job-{sample}',
-            trial=f'private-trial-{case}-{system}-{sample}',
-            text=text,
-            gate_failures=[] if system == 'a' else [Gate.TESTS],
-            response_model='private-route-marker',
-            request_id='private-request-marker',
-            error='private-error-marker' if system == 'b' else None,
-            cost_usd=0.01,
-            latency_sec=2.0,
-            output_tokens=20,
-        )
-        for case, sample, system, text in (
-            ('public-case', 0, 'a', 'Approved output A.'),
-            ('public-case', 0, 'b', 'Approved output B.'),
-            ('public-case', 1, 'a', 'unapproved-output-marker'),
-            ('public-case', 1, 'b', 'unapproved-failed-marker'),
-            ('private-case', 0, 'a', 'private-output-marker'),
-            ('private-case', 0, 'b', 'private-failed-marker'),
-        )
-    )
-    return Inputs(
-        family,
+def prepare(
+    family: Family,
+    cases: Sequence[Case],
+    outputs: Sequence[Output],
+    target: VotingTarget = 'production',
+) -> Publication:
+    return publication.prepare(family, cases, outputs, ARENA_NAMES, target)
+
+
+def text_publication() -> Publication:
+    cases = [make_case('first'), make_case('second', category='reply')]
+    return prepare(
+        make_votes_family(),
         cases,
-        outputs,
-        {case.id: digest({'source': case.id}) for case in cases},
-        {'a': 'Public A', 'b': 'Public B'},
-        {'a': 'fp-a', 'b': 'fp-b'},
+        [
+            *(make_trial('first', system) for system in ARENA_SYSTEMS),
+            make_trial('second', 'acme-large', text='Same reply.'),
+            make_trial('second', 'acme-small', text='Same reply.'),
+            make_trial('second', 'acme-pro', [Gate.LENGTH]),
+        ],
     )
+
+
+def diff_publication() -> Publication:
+    family = make_votes_family('coding-fixture', diff=True)
+    return prepare(
+        family,
+        [make_case('fix-parser', category='bug-fix')],
+        [
+            make_trial('fix-parser', 'acme-large', text='--- a/x\n+++ b/x\n+fixed\n'),
+            make_trial('fix-parser', 'acme-small', text='--- a/x\n+++ b/x\n+also\n'),
+            make_trial(
+                'fix-parser', 'acme-pro', [Gate.TESTS], text='--- a/x\n+++ b/x\n'
+            ),
+        ],
+    )
+
+
+def rows(database: SQLiteDatabase, sql: str) -> list[tuple[Any, ...]]:
+    return database.connection.execute(sql).fetchall()
+
+
+class Interrupted(Exception):
+    pass
+
+
+class RecordingDatabase:
+    """Records each statement and delegates it, raising at the first that `fails`."""
+
+    def __init__(
+        self, database: SQLiteDatabase, fails: Callable[[str], bool] = lambda _: False
+    ):
+        self.database = database
+        self.fails = fails
+        self.statements: list[str] = []
+
+    def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+        self.statements.append(sql)
+        if self.fails(sql):
+            raise Interrupted(sql)
+        return self.database.execute(sql, params)
+
+
+class TestVotingTarget:
+    @pytest.mark.parametrize(
+        ('public_voting', 'source', 'target'),
+        [
+            (True, 'synthetic', 'production'),
+            (True, 'public', 'production'),
+            (True, 'transcript', 'local'),
+            (True, 'held-out', 'local'),
+            (False, 'synthetic', 'local'),
+            (False, 'public', 'local'),
+        ],
+    )
+    def test_votes_only_public_cases_of_public_families_in_production(
+        self, public_voting: bool, source: CaseSource, target: VotingTarget
+    ) -> None:
+        family = make_votes_family(public_voting=public_voting)
+
+        assert publication.voting_target(family, make_case('c', source)) == target
 
 
 class TestPrepare:
-    @pytest.mark.parametrize(
-        'systems', [(), ('acme-large', 'acme-small')], ids=['tests', 'votes']
-    )
-    def test_rejects_authored_families_before_preparing_the_public_inventory(
-        self, inputs: Inputs, families_dir: Path, systems: tuple[str, ...]
+    def test_partitions_the_cases_between_production_and_the_local_store(
+        self,
     ) -> None:
-        approval = inputs.approve()
-        write_task_family(families_dir, 'echo', systems=systems)
-        authored = replace(inputs, family=load_family('f'))
-
-        with pytest.raises(
-            ValueError,
-            match=r'^Public preparation supports rendered case families only\.$',
-        ):
-            authored.prepare(approval)
-
-    def test_retains_identical_duplicate_solution_facts_only_once(
-        self, inputs: Inputs
-    ) -> None:
-        original = inputs.prepare()
-        duplicated = replace(inputs, outputs=(*inputs.outputs, inputs.outputs[0]))
-
-        release = duplicated.prepare()
-
-        assert release == original
-
-    @pytest.mark.parametrize(
-        'change',
-        [{'gate_failures': [Gate.TESTS]}, {'cost_usd': 1.0}],
-        ids=['verdict', 'measurement'],
-    )
-    def test_rejects_conflicting_facts_for_one_solution_identity(
-        self, inputs: Inputs, change: dict[str, list[Gate] | float]
-    ) -> None:
-        duplicated = replace(
-            inputs,
-            outputs=(*inputs.outputs, inputs.outputs[0].model_copy(update=change)),
-        )
-
-        with pytest.raises(ValueError):
-            duplicated.prepare()
-
-    def test_preserves_release_identity_when_input_order_changes(
-        self, inputs: Inputs
-    ) -> None:
-        original = inputs.prepare()
-        reordered = replace(
-            inputs,
-            cases=tuple(reversed(inputs.cases)),
-            outputs=tuple(reversed(inputs.outputs)),
-        )
-
-        release = reordered.prepare()
-
-        assert release == original
-
-    @pytest.mark.parametrize('fingerprint', [None, 'different-configuration'])
-    def test_requires_one_known_configuration_per_system(
-        self, inputs: Inputs, fingerprint: str | None
-    ) -> None:
-        changed = replace(
-            inputs,
-            outputs=(
-                inputs.outputs[0].model_copy(update={'fingerprint': fingerprint}),
-                *inputs.outputs[1:],
-            ),
-        )
-
-        with pytest.raises(ValueError, match='fingerprint'):
-            changed.prepare()
-
-    def test_publishes_only_exactly_approved_cases_outputs_and_safe_metadata(
-        self, inputs: Inputs
-    ) -> None:
-        approval = inputs.approve()
-
-        release = inputs.prepare(approval)
-
-        settings = inputs.family.settings
-        assert isinstance(settings, VotesSettings)
-        expanded = replace(
-            inputs,
-            family=inputs.family.model_copy(
-                update={
-                    'settings': settings.model_copy(update={'systems': ['a', 'c', 'b']})
-                }
-            ),
-            outputs=(
-                *inputs.outputs,
-                make_output(
-                    case='public-case',
-                    system='c',
-                    fingerprint='fp-c',
-                    text='unapproved-system-marker',
-                ),
-            ),
-            names={**inputs.names, 'c': 'Public C'},
-            fingerprints={**inputs.fingerprints, 'c': 'fp-c'},
-        )
-        assert expanded.prepare(approval) == release
-
-        encoded = release.model_dump_json()
-        assert 'Approved output A.' in encoded
-        assert 'Approved output B.' in encoded
-        for marker in (
-            'private-case-marker',
-            'private-checklist-marker',
-            'private-output-marker',
-            'private-failed-marker',
-            'private-job-',
-            'private-trial-',
-            'private-route-marker',
-            'private-request-marker',
-            'private-error-marker',
-            'unapproved-output-marker',
-            'unapproved-failed-marker',
-        ):
-            assert marker not in encoded
-
-        assert release.publication.approval == approval
-        assert {row.key for row in release.outputs} == {
-            row.output_key for row in approval.outputs
-        }
-        assert {row.key for row in release.cases} == {
-            row.case_key for row in approval.cases
-        }
-        failed = next(row for row in release.outputs if row.system_id == 'b')
-        assert failed.metadata.errored is True
-        assert failed.verdict == 'fail'
-
-    def test_recomputes_settlement_denominators_from_the_public_subset(
-        self, inputs: Inputs
-    ) -> None:
-        approval = inputs.approve()
-        key = approval.cases[0].case_key
-        full = approval.model_copy(
-            update={
-                'outputs': tuple(
-                    OutputApproval(
-                        output_key=output_key(output, key),
-                        content_digest=digest(output.text),
-                        render_digest=digest(
-                            {'render': 'text', 'content': output.text}
-                        ),
-                    )
-                    for output in inputs.outputs
-                    if output.case == 'public-case'
-                )
-            }
-        )
-        complete = inputs.prepare(full)
-
-        public = inputs.prepare(approval)
-
-        complete_rows = [
-            Settlement.model_validate(row.value) for row in complete.numerics
+        family = make_votes_family()
+        cases = [
+            make_case('open', 'synthetic'),
+            make_case('quoted', 'public'),
+            make_case('private', 'transcript'),
+            make_case('secret', 'held-out'),
         ]
-        public_rows = [Settlement.model_validate(row.value) for row in public.numerics]
-        assert sum(row.weight for row in complete_rows) == pytest.approx(1.0)
-        assert sorted(row.weight for row in complete_rows) == [0.25] * 4
-        assert [row.weight for row in public_rows] == [1.0]
-        assert [row.score for row in public_rows] == [1.0]
-        assert public.evaluation.id != complete.evaluation.id
+        outputs = [
+            make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS
+        ]
+        by_key = {publication.case_key(case): case.id for case in cases}
 
-    @pytest.mark.parametrize(
-        'change',
-        ['instruction', 'checklist', 'source', 'output', 'render', 'missing-output'],
-    )
-    def test_rejects_content_that_changed_since_approval(
-        self, inputs: Inputs, change: str
-    ) -> None:
-        approval = inputs.approve()
-        match change:
-            case 'instruction':
-                updated = replace(
-                    inputs,
-                    cases=(
-                        inputs.cases[0].model_copy(update={'instruction': 'Changed'}),
-                        inputs.cases[1],
-                    ),
-                )
-            case 'checklist':
-                updated = replace(
-                    inputs,
-                    cases=(
-                        inputs.cases[0].model_copy(update={'checklist': ['Changed']}),
-                        inputs.cases[1],
-                    ),
-                )
-            case 'source':
-                updated = replace(
-                    inputs,
-                    sources={'public-case': 'changed', 'private-case': 'unchanged'},
-                )
-            case 'output':
-                updated = replace(
-                    inputs,
-                    outputs=(
-                        inputs.outputs[0].model_copy(update={'text': 'Changed'}),
-                        *inputs.outputs[1:],
-                    ),
-                )
-            case 'render':
-                updated = replace(
-                    inputs,
-                    family=inputs.family.model_copy(
-                        update={
-                            'settings': inputs.family.settings.model_copy(
-                                update={'render': 'html'}
-                            )
-                        }
-                    ),
-                )
-            case 'missing-output':
-                updated = replace(inputs, outputs=inputs.outputs[1:])
-            case _:
-                raise AssertionError(change)
+        production = prepare(family, cases, outputs, 'production')
+        local = prepare(family, cases, outputs, 'local')
 
-        with pytest.raises(ValueError):
-            updated.prepare(approval)
-
-    def test_keeps_display_changes_out_of_numerical_identity(
-        self, inputs: Inputs
-    ) -> None:
-        approval = inputs.approve()
-        original = inputs.prepare(approval)
-        changed = replace(
-            inputs,
-            family=inputs.family.model_copy(
-                update={
-                    'settings': inputs.family.settings.model_copy(
-                        update={'display_name': 'Renamed family'}
-                    )
-                }
-            ),
-            names={'a': 'Renamed A', 'b': 'Renamed B'},
-        )
-
-        refreshed = changed.prepare(approval)
-
-        assert refreshed.evaluation == original.evaluation
-        assert refreshed.points == original.points
-        assert refreshed.publication.id != original.publication.id
-        assert refreshed.publication.presentation.systems == changed.names
-
-    def test_requires_voting_opt_in_even_when_the_site_lists_the_family(
-        self, inputs: Inputs
-    ) -> None:
-        family = inputs.family.model_copy(
-            update={
-                'settings': inputs.family.settings.model_copy(
-                    update={'public': True, 'public_voting': False}
-                )
-            }
-        )
-
-        with pytest.raises(ValueError, match='opt in'):
-            replace(inputs, family=family).prepare(inputs.approve())
-
-    def test_cannot_approve_a_held_out_case_as_synthetic(self, inputs: Inputs) -> None:
-        approval = inputs.approve()
-        changed = replace(
-            inputs,
-            cases=(
-                inputs.cases[0].model_copy(update={'source': 'held-out'}),
-                inputs.cases[1],
-            ),
-        )
-
-        with pytest.raises(ValueError, match='source and content'):
-            changed.prepare(approval)
-
-    @pytest.mark.parametrize(
-        ('field', 'value'),
-        [
-            ('cost_usd', float('nan')),
-            ('latency_sec', float('inf')),
-            ('output_tokens', -1),
-        ],
-        ids=['nonfinite-cost', 'nonfinite-latency', 'negative-tokens'],
-    )
-    def test_rejects_invalid_numerical_metadata(
-        self, inputs: Inputs, field: str, value: float
-    ) -> None:
-        changed = replace(
-            inputs,
-            outputs=(
-                inputs.outputs[0].model_copy(update={field: value}),
-                *inputs.outputs[1:],
-            ),
-        )
-
-        with pytest.raises(ValidationError):
-            changed.prepare(inputs.approve())
-
-    @pytest.mark.parametrize(
-        ('field', 'value'),
-        [('text', None), ('error', 'TimeoutError')],
-        ids=['absent-output', 'errored-output'],
-    )
-    def test_rejects_passing_output_facts_that_cannot_be_presented(
-        self, inputs: Inputs, field: str, value: str | None
-    ) -> None:
-        changed = replace(
-            inputs,
-            outputs=(
-                inputs.outputs[0].model_copy(update={field: value}),
-                *inputs.outputs[1:],
-            ),
-        )
-
-        with pytest.raises(ValueError, match='absent or errored output cannot pass'):
-            changed.prepare()
-
-    def test_preserves_solution_identity_across_regrading(self, inputs: Inputs) -> None:
-        original = inputs.prepare()
-        changed = replace(
-            inputs,
-            outputs=(
-                inputs.outputs[0].model_copy(update={'gate_failures': [Gate.TESTS]}),
-                *inputs.outputs[1:],
-            ),
-        )
-
-        regraded = changed.prepare()
-
-        assert {row.key for row in regraded.outputs} == {
-            row.key for row in original.outputs
+        assert sorted(by_key[case.key] for case in production.cases) == [
+            'open',
+            'quoted',
+        ]
+        assert sorted(by_key[case.key] for case in local.cases) == [
+            'private',
+            'secret',
+        ]
+        assert {output.case_key for output in production.outputs} == {
+            case.key for case in production.cases
         }
-        assert regraded.evaluation.id != original.evaluation.id
 
+    def test_publishes_every_case_of_a_family_without_public_voting_locally(
+        self,
+    ) -> None:
+        family = make_votes_family(public_voting=False)
+        cases = [make_case('open'), make_case('private', 'transcript')]
+        outputs = [
+            make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS
+        ]
 
-class TestPolicy:
-    def test_keeps_the_policy_the_production_ledger_sealed(self) -> None:
-        sealed = digest(POLICY)
+        local = prepare(family, cases, outputs, 'local')
 
-        assert (
-            sealed == '50868d7f116faa7aeec5e06e04ac92fcd43a431f741d3d436276628355656a47'
+        assert len(local.cases) == 2
+        with pytest.raises(ValueError, match='sets no `public_voting`'):
+            prepare(family, cases, outputs, 'production')
+
+    def test_publishes_task_diffs_with_verdicts_from_the_tests_gate(self) -> None:
+        published = diff_publication()
+
+        outputs = {output.system: output for output in published.outputs}
+        assert published.render == 'diff'
+        assert published.defects == CODE_DEFECTS
+        assert outputs['acme-large'].verdict == 'pass'
+        assert outputs['acme-large'].content == '--- a/x\n+++ b/x\n+fixed\n'
+        assert outputs['acme-pro'].verdict == 'fail'
+        assert outputs['acme-pro'].content is None
+
+    def test_keeps_content_only_on_passing_outputs(self) -> None:
+        family = make_votes_family()
+        cases = [make_case('c')]
+
+        published = prepare(
+            family,
+            cases,
+            [
+                make_trial('c', 'acme-large'),
+                make_trial('c', 'acme-small'),
+                make_trial('c', 'acme-pro', [Gate.EMPTY], text=''),
+                make_trial('c', 'unlisted'),
+                make_trial(
+                    'c', 'acme-pro', gate_failures=None, error='Timeout', trial='c__err'
+                ),
+            ],
         )
+
+        verdicts = sorted(
+            (output.system, output.verdict, output.content is not None)
+            for output in published.outputs
+        )
+        assert verdicts == [
+            ('acme-large', 'pass', True),
+            ('acme-pro', 'fail', False),
+            ('acme-pro', 'ungraded', False),
+            ('acme-small', 'pass', True),
+        ]
+        assert published.systems == ARENA_NAMES
+
+    def test_keeps_the_keys_of_unchanged_cases_and_outputs_across_republication(
+        self,
+    ) -> None:
+        family = make_votes_family()
+        first = [make_case('first'), make_case('second')]
+        outputs = [
+            make_trial(case.id, system) for case in first for system in ARENA_SYSTEMS
+        ]
+        before = prepare(family, first, outputs)
+        edited = [first[0], make_case('second').model_copy(update={'checklist': []})]
+        rerun = make_trial('second', 'acme-pro', trial='second__acme-pro__rerun')
+
+        after = prepare(family, edited, [*outputs[:-1], rerun])
+
+        kept = publication.case_key(first[0])
+        assert kept in {case.key for case in before.cases}
+        assert kept in {case.key for case in after.cases}
+        assert publication.case_key(first[1]) not in {case.key for case in after.cases}
+        assert {output.key for output in before.outputs if output.case_key == kept} == {
+            output.key for output in after.outputs if output.case_key == kept
+        }
+        assert publication.output_key(family.name, rerun) in {
+            output.key for output in after.outputs
+        }
+        assert after.id != before.id
+
+    @pytest.mark.parametrize(
+        ('outputs', 'message'),
+        [
+            (
+                [
+                    make_trial('c', 'acme-large', fingerprint=None),
+                    make_trial('c', 'acme-small'),
+                ],
+                'outputs of `acme-large` lack a fingerprint',
+            ),
+            (
+                [
+                    make_trial('c', 'acme-large'),
+                    make_trial('c', 'acme-small', [Gate.EMPTY]),
+                ],
+                'no production case on which two systems have different passing',
+            ),
+            (
+                [
+                    make_trial('c', 'acme-large', text='Same.'),
+                    make_trial('c', 'acme-small', text='Same.'),
+                ],
+                'no production case on which two systems have different passing',
+            ),
+        ],
+        ids=['fingerprint', 'one-passing', 'identical'],
+    )
+    def test_refuses_outputs_it_cannot_publish(
+        self, outputs: list[Output], message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            prepare(make_votes_family(), [make_case('c')], outputs)
+
+    def test_refuses_cases_a_voter_could_not_tell_apart(self) -> None:
+        twin = make_case('first').model_copy(update={'id': 'twin'})
+
+        with pytest.raises(ValueError, match='Cases `first`, `twin` share'):
+            prepare(make_votes_family(), [make_case('first'), twin], [])
+
+
+class TestWrite:
+    def test_writes_the_file_and_a_listing_for_review(self, data_dir: Path) -> None:
+        published = text_publication()
+        outputs = [make_trial('second', 'acme-pro', [Gate.LENGTH])]
+
+        path = publication.write(published, outputs)
+
+        assert path == (
+            data_dir / 'publications' / 'writing-fixture' / f'{published.id}.json'
+        )
+        assert publication.read(path) == published
+        listing = path.with_suffix('.md').read_text()
+        assert 'Write about first.' in listing
+        assert '- Mentions first' in listing
+        assert (
+            '### Acme Large (`acme-large`): pass\n\n```text\nacme-large on first\n```'
+            in listing
+        )
+        assert '### Acme Pro (`acme-pro`): fail\n\nFailed `length`.' in listing
+
+
+class TestRead:
+    def test_refuses_an_edited_file_naming_both_ids(self, tmp_path: Path) -> None:
+        published = text_publication()
+        payload = json.loads(published.model_dump_json())
+        payload['outputs'][0]['content'] = 'An edited reply.'
+        path = tmp_path / 'edited.json'
+        path.write_text(json.dumps(payload))
+        derived = Publication.model_validate(payload).identity()
+
+        with pytest.raises(ValueError) as raised:
+            publication.read(path)
+
+        assert f'derives ID `{derived}`' in str(raised.value)
+        assert f'records `{published.id}`' in str(raised.value)
+
+
+class TestPublish:
+    def test_stages_and_activates_the_publication(self) -> None:
+        database = arena_database()
+        published = text_publication()
+
+        changed = publication.publish(database, published, NOW)
+
+        assert changed
+        assert rows(database, 'SELECT family, publication_id FROM active') == [
+            ('writing-fixture', published.id)
+        ]
+        assert rows(database, 'SELECT count(*) FROM cases') == [(2,)]
+        assert rows(database, 'SELECT count(*) FROM outputs') == [(6,)]
+        assert rows(
+            database, "SELECT count(*) FROM outputs WHERE verdict != 'pass'"
+        ) == rows(database, 'SELECT count(*) FROM outputs WHERE content IS NULL')
+
+    def test_changes_nothing_for_the_active_publication(self) -> None:
+        database = arena_database()
+        published = text_publication()
+        publication.publish(database, published, NOW)
+        recording = RecordingDatabase(database)
+
+        changed = publication.publish(recording, published, NOW)
+
+        assert not changed
+        assert len(recording.statements) == 1
+        assert recording.statements[0].startswith('SELECT')
+
+    def test_completes_an_interrupted_publish_when_rerun(self) -> None:
+        database = arena_database()
+        published = text_publication()
+        interrupted = RecordingDatabase(
+            database, lambda sql: sql.startswith('INSERT INTO outputs')
+        )
+        with pytest.raises(Interrupted):
+            publication.publish(interrupted, published, NOW)
+
+        changed = publication.publish(database, published, NOW)
+
+        assert changed
+        assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
+
+    def test_refuses_to_activate_incomplete_staging(self) -> None:
+        database = arena_database()
+        published = text_publication()
+        incomplete = published.model_copy(
+            update={'outputs': (*published.outputs, published.outputs[0])}
+        )
+
+        with pytest.raises(ValueError, match='not completely staged'):
+            publication.publish(database, incomplete, NOW)
+
+        assert rows(database, 'SELECT * FROM active') == []
+
+    def test_switches_the_active_publication_and_keeps_the_old_rows(self) -> None:
+        database = arena_database()
+        first = text_publication()
+        publication.publish(database, first, NOW)
+        second = prepare(
+            make_votes_family(),
+            [make_case('first')],
+            [make_trial('first', system) for system in ARENA_SYSTEMS],
+        )
+
+        publication.publish(database, second, NOW)
+
+        assert rows(database, 'SELECT publication_id FROM active') == [(second.id,)]
+        assert rows(database, 'SELECT count(*) FROM publications') == [(2,)]
+
+    def test_refuses_private_cases_before_writing(self) -> None:
+        database = arena_database()
+        family = make_votes_family(public_voting=False)
+        cases = [make_case('private', 'transcript')]
+        local = prepare(
+            family,
+            cases,
+            [make_trial('private', system) for system in ARENA_SYSTEMS],
+            'local',
+        )
+
+        with pytest.raises(ValueError, match='cannot leave this machine'):
+            publication.publish(database, local, NOW)
+
+        assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
+
+    def test_matches_the_committed_publication_fixture(
+        self, stale_fixture: Callable[[Path, str], None]
+    ) -> None:
+        database = arena_database()
+
+        for published in (text_publication(), diff_publication()):
+            publication.publish(database, published, NOW)
+
+        dumped = dump(database.connection)
+        if (
+            not PUBLICATION_FIXTURE.exists()
+            or PUBLICATION_FIXTURE.read_text() != dumped
+        ):
+            stale_fixture(PUBLICATION_FIXTURE, dumped)
+
+
+def dump(connection: sqlite3.Connection) -> str:
+    """Return the rows `publish` writes as SQL that `wrangler d1 execute` loads."""
+    lines: list[str] = []
+    for table, order in (
+        ('publications', 'id'),
+        ('cases', 'publication_id, case_key'),
+        ('outputs', 'publication_id, output_key'),
+        ('active', 'family'),
+    ):
+        cursor = connection.execute(f'SELECT * FROM {table} ORDER BY {order}')
+        columns = ', '.join(column[0] for column in cursor.description)
+        lines.extend(
+            f'INSERT INTO {table} ({columns}) VALUES ({", ".join(map(literal, row))});'
+            for row in cursor
+        )
+    return '\n'.join(lines) + '\n'
+
+
+def literal(value: object) -> str:
+    match value:
+        case None:
+            return 'NULL'
+        case int():
+            return str(value)
+        case str():
+            return "'" + value.replace("'", "''") + "'"
+        case _:
+            raise TypeError(value)

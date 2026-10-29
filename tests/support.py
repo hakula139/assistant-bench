@@ -3,17 +3,21 @@
 import asyncio
 import ipaddress
 import json
+import math
 import shutil
 import socket
+import sqlite3
 import ssl
 import textwrap
 import threading
-from collections.abc import Iterable, Iterator, Mapping
+from collections import defaultdict
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from random import Random
 from typing import Any, Literal
 from uuid import UUID
 
@@ -40,8 +44,27 @@ from harbor.models.trial.result import (
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
+from assistant_bench.arena.d1 import Param, Result, Row
+from assistant_bench.arena.publication import (
+    CaseFacts,
+    Inventory,
+    OutputFacts,
+    Publication,
+    output_key,
+)
+from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import Defect, TaskTestsSettings
+from assistant_bench.families import (
+    Case,
+    CaseSource,
+    Category,
+    Choice,
+    Defect,
+    Family,
+    Gate,
+    TaskTestsSettings,
+    VotesSettings,
+)
 from assistant_bench.generation import Generation
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
@@ -59,7 +82,6 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 EXPORT_FILE = FIXTURES / 'nixos-config.json'
 REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
-LEDGER_REPORT_FIXTURE = FIXTURES / 'report-ledger.json'
 TESTS_REPORT_FIXTURE = FIXTURES / 'report-tests.json'
 REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
 
@@ -726,6 +748,8 @@ def write_votes_family(
     systems: list[str],
     categories: dict[str, str],
     render: str = 'text',
+    *,
+    public_voting: bool = False,
 ) -> None:
     """Write a family scored by votes, with one synthetic case per category entry.
 
@@ -744,6 +768,7 @@ def write_votes_family(
             categories = {json.dumps(sorted(set(categories.values())))}
             reference = "{systems[0]}"
             render = "{render}"
+            public_voting = {json.dumps(public_voting)}
             defects = {json.dumps(list(PROSE_DEFECTS))}
             """
         )
@@ -772,3 +797,334 @@ def write_votes_family(
             }
         )
     )
+
+
+ARENA_SYSTEMS = ('acme-large', 'acme-small', 'acme-pro')
+ARENA_NAMES = {system: system.replace('-', ' ').title() for system in ARENA_SYSTEMS}
+
+
+def make_votes_family(
+    name: str = 'writing-fixture', *, public_voting: bool = True, diff: bool = False
+) -> Family:
+    """Return a votes family of `ARENA_SYSTEMS`, rendering task diffs if `diff`."""
+    return Family(
+        name=name,
+        source='tasks' if diff else 'cases',
+        settings=VotesSettings(
+            scorer='votes',
+            aspect='coding' if diff else 'writing',
+            display_name='Fixture',
+            systems=list(ARENA_SYSTEMS),
+            samples=1,
+            reference=ARENA_SYSTEMS[0],
+            public_voting=public_voting,
+            render='diff' if diff else 'text',
+            categories=['bug-fix'] if diff else ['docs', 'reply'],
+            defects=list(CODE_DEFECTS if diff else PROSE_DEFECTS),
+        ),
+    )
+
+
+def make_case(
+    case: str, source: CaseSource = 'synthetic', *, category: Category = 'docs'
+) -> Case:
+    return Case(
+        id=case,
+        category=category,
+        source=source,
+        instruction=f'Write about {case}.',
+        checklist=[f'Mentions {case}'],
+    )
+
+
+def make_trial(
+    case: str,
+    system: str,
+    gates: list[Gate] | None = None,
+    **fields: Any,
+) -> Output:
+    """Return the output of `system` on `case`, passing unless `gates` failed."""
+    return make_output(
+        **{
+            'case': case,
+            'system': system,
+            'job': 'job-1',
+            'trial': f'{case}__{system}',
+            'fingerprint': f'fp-{system}',
+            'text': f'{system} on {case}',
+            'gate_failures': [] if gates is None else gates,
+        }
+        | fields
+    )
+
+
+# ── Vote Stores ──
+
+
+MIGRATIONS_DIR = Path(__file__).parents[1] / 'web' / 'migrations'
+
+
+class SQLiteDatabase:
+    """The `d1.Database` protocol on CPython's sqlite3, in auto-commit like D1."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+        cursor = self.connection.execute(sql, list(params))
+        columns = [column[0] for column in cursor.description or ()]
+        rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
+        return Result(rows=rows, changes=max(cursor.rowcount, 0))
+
+
+def record_vote(
+    database: SQLiteDatabase,
+    published: Publication,
+    now: datetime,
+    *,
+    actor: str,
+    age: timedelta,
+    case: int = 0,
+    exclusion: str | None = None,
+) -> int:
+    """Record `actor`'s vote for the first of the case's first two outputs.
+
+    The vote is `age` old at `now`, and its ID is returned.
+    """
+    a, b = [
+        row for row in published.outputs if row.case_key == published.cases[case].key
+    ][:2]
+    database.execute(
+        'INSERT OR IGNORE INTO actors (id, created_at, ip_tag) VALUES (?, 0, ?)',
+        [actor, f'tag-{actor}'],
+    )
+    database.execute(
+        'INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, '
+        'a_output, b_output, a_system, b_system, choice, defects, elapsed_ms, '
+        'recorded_at, ip_tag, exclusion) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            f'pair-{actor}-{case}',
+            actor,
+            published.family,
+            published.id,
+            a.case_key,
+            a.key,
+            b.key,
+            a.system,
+            b.system,
+            'a',
+            '{"a": [], "b": ["facts"]}',
+            4_000,
+            int((now - age).timestamp() * 1000),
+            f'tag-{actor}',
+            exclusion,
+        ],
+    )
+    (row,) = database.execute('SELECT max(id) AS id FROM votes').rows
+    assert isinstance(row['id'], int)
+    return row['id']
+
+
+def arena_database() -> SQLiteDatabase:
+    """Return an in-memory store built from the Worker's migration files, in order."""
+    connection = sqlite3.connect(':memory:', isolation_level=None)
+    connection.execute('PRAGMA foreign_keys = ON')
+    for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+        connection.executescript(path.read_text())
+    return SQLiteDatabase(connection)
+
+
+# ── Synthetic Round ──
+
+
+ROUND_STRENGTHS = {
+    'acme-large': 0.6,
+    'acme-small': 0.2,
+    'acme-pro': 0.5,
+    'acme-flash': -0.1,
+    'acme-mini': -0.4,
+    'acme-edge': 0.3,
+    'acme-nano': -0.2,
+    'acme-tiny': -1.0,
+}
+"""Each system's Bradley-Terry strength, where the first five share the voted pool."""
+
+ROUND_NAMES = {system: system.replace('-', ' ').title() for system in ROUND_STRENGTHS}
+ROUND_CATEGORIES: tuple[Category, ...] = ('docs', 'message', 'reply')
+OWNER_SESSIONS = 4
+ROUND_FAMILY = Family(
+    name='arena',
+    source='cases',
+    settings=VotesSettings(
+        scorer='votes',
+        display_name='Arena',
+        systems=list(ROUND_STRENGTHS),
+        samples=2,
+        reference='acme-large',
+        public_voting=True,
+        categories=list(ROUND_CATEGORIES),
+        defects=list(PROSE_DEFECTS),
+    ),
+)
+
+
+def make_round(sessions: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
+    """Simulate family `arena` over `sessions` daily sessions of about 30 votes each.
+
+    Returns the production snapshot and the collected outputs. A seeded rater
+    follows Bradley-Terry with the strengths above and a small left bias, ties 15%
+    of the time and calls both bad 5%. The owner votes in the first four
+    sessions, past the actor cap, and a new visitor in each later one. About 3%
+    of the outputs fail a gate and settle their pairs without a vote, while
+    `acme-tiny` fails most cases, so it ranks through settlements alone. Each
+    session pits `acme-edge` against `acme-nano` on two cases, which leaves them
+    unranked, and drops some votes on retired outputs and two excluded ones.
+    Draws use only `Random.random`, whose sequence Python keeps stable for a seed.
+    """
+    rng = Random(20)
+
+    def below(stop: int) -> int:
+        return int(rng.random() * stop)
+
+    def shuffled[T](items: list[T]) -> list[T]:
+        return sorted(items, key=lambda _: rng.random())
+
+    everyone = list(ROUND_STRENGTHS)
+    voted, strays = everyone[:5], everyone[5:7]
+    cases: dict[str, Category] = {
+        f'case-{i:02}': ROUND_CATEGORIES[i % 3] for i in range(30)
+    }
+
+    outputs: list[Output] = []
+    facts: list[OutputFacts] = []
+    passing: defaultdict[tuple[str, str], list[OutputFacts]] = defaultdict(list)
+
+    def produce(case: str, system: str, failing: float) -> None:
+        length = 40 + below(360)
+        failed = bool(rng.random() < failing)
+        output = make_output(
+            job='job-1',
+            trial=f'{case}__{system}__{len(outputs)}',
+            case=case,
+            system=system,
+            fingerprint=f'fp-{system}',
+            gate_failures=['empty'] if failed else [],
+            cost_usd=length * 2e-5 * (1 + everyone.index(system)),
+            latency_sec=2 + 38 * rng.random(),
+            output_tokens=length * 2,
+        )
+        key = output_key('arena', output)
+        fact = OutputFacts(
+            key=key,
+            case_key=case,
+            system=system,
+            fingerprint=f'fp-{system}',
+            verdict='fail' if failed else 'pass',
+            errored=False,
+            length=length,
+            content_digest=key,
+        )
+        outputs.append(output)
+        facts.append(fact)
+        if not failed:
+            passing[case, system].append(fact)
+
+    for case in cases:
+        for system in voted:
+            for _ in range(2):
+                produce(case, system, 0.03)
+    failing = {fact.case_key for fact in facts if fact.verdict == 'fail'}
+    clean = [case for case in cases if case not in failing][:2]
+    for case in clean:
+        for system in strays:
+            for _ in range(2):
+                produce(case, system, 0.0)
+    for case in cases:
+        for _ in range(2):
+            produce(case, 'acme-tiny', 0.0 if case in clean else 0.7)
+
+    votes: list[Vote] = []
+
+    def vote(actor: str, case: str, left: str, right: str) -> None:
+        a, b = (
+            passing[case, side][below(len(passing[case, side]))]
+            for side in (left, right)
+        )
+        gap = ROUND_STRENGTHS[left] - ROUND_STRENGTHS[right] + 0.1
+        draw = rng.random()
+        choice: Choice = (
+            'tie'
+            if draw < 0.15
+            else 'both_bad'
+            if draw < 0.2
+            else 'a'
+            if rng.random() < 1 / (1 + math.exp(-gap))
+            else 'b'
+        )
+        tagged: tuple[Defect, ...] = (
+            (PROSE_DEFECTS[below(len(PROSE_DEFECTS))],) if rng.random() < 0.2 else ()
+        )
+        votes.append(
+            Vote(
+                id=len(votes) + 1,
+                actor=actor,
+                case_key=case,
+                a_output=a.key,
+                b_output=b.key,
+                a_system=left,
+                b_system=right,
+                choice=choice,
+                defects=TaggedDefects(
+                    a=tagged if choice != 'a' else (),
+                    b=tagged if choice == 'a' else (),
+                ),
+                elapsed_ms=30_000,
+            )
+        )
+
+    def retired(actor: str, case: str) -> None:
+        votes.append(
+            Vote(
+                id=len(votes) + 1,
+                actor=actor,
+                case_key=case,
+                a_output=f'retired-{len(votes)}-a',
+                b_output=f'retired-{len(votes)}-b',
+                a_system=voted[0],
+                b_system=voted[1],
+                choice='a',
+                defects=TaggedDefects(),
+                elapsed_ms=30_000,
+            )
+        )
+
+    for day in range(sessions):
+        actor = 'owner' if day < OWNER_SESSIONS else f'visitor-{day:02}'
+        for case in shuffled(list(cases)):
+            if day > 0 and rng.random() < 0.1:
+                retired(actor, case)
+                continue
+            left, right = shuffled(voted)[:2]
+            if passing[case, left] and passing[case, right]:
+                vote(actor, case, left, right)
+        for case in clean:
+            vote(actor, case, *strays)
+            vote(actor, case, *reversed(strays))
+
+    inventory = Inventory(
+        id='publication-1',
+        family='arena',
+        systems=ROUND_NAMES,
+        defects=PROSE_DEFECTS,
+        cases=tuple(CaseFacts(key=case, category=c) for case, c in cases.items()),
+        outputs=tuple(facts),
+    )
+    cut = Cut(
+        cutoff=len(votes),
+        inventory=inventory,
+        votes=tuple(votes),
+        excluded=2 * sessions,
+    )
+    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
+    return snapshot, outputs

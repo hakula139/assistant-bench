@@ -47,29 +47,16 @@
     "rules": {
       "preliminary_decisive_votes": 40
     },
-    "provenance": {
-      "schema_version": 1,
-      "export_id": "export-01",
-      "export_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "namespace": "synthetic",
-      "captured_at": "2026-10-01T17:00:00Z",
-      "event_cutoff": 35,
-      "receipt_cutoff": 35,
-      "family_revision": 1,
-      "analysis_sequence": 35,
-      "evaluation_id": "evaluation-1",
-      "publication_id": "publication-1",
-      "policy_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "sampling_point_snapshot_id": "points-before",
-      "weighted_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "fitted_point_snapshot_id": "points-after"
+    "cutoffs": {
+      "production": 33,
+      "local": null
     },
     "reference": "acme-large",
     "anchor": "acme-large",
     "votes": 33,
     "effective_votes": 33.0,
     "dropped_votes": 2,
-    "sessions": 1,
+    "voters": 1,
     "standings": [
       {
         "system": "acme-pro",
@@ -642,7 +629,7 @@
           },
           {
             "system": "acme-tiny",
-            "score": 540.0584521155647,
+            "score": 540.0584521155648,
             "votes": 0,
             "effective_votes": 0.0,
             "decisive_votes": 0
@@ -653,6 +640,6 @@
     ],
     "position": -67.25746944707905,
     "length": 54.45895211522354,
-    "split_half_tau": null
+    "split_half_tau": 0.19999999999999998
   }
 }
