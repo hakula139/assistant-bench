@@ -72,6 +72,6 @@ web/src/
 ## The Voting Worker
 
 - `web/worker/` holds the Hono app that serves `/api/*`, one module per concern beside its `*.test.ts`, and `worker/test/` holds the shared test setup. It compiles under its own `tsconfig.json` against the bindings that `wrangler types` generates from `web/wrangler.toml` into the ignored `worker-configuration.d.ts`, which `pnpm lint` and `pnpm typecheck` regenerate.
-- Requests validate through `sValidator` with the `zod/mini` schemas of `lib/arena.ts`, which the client shares, so a route and its caller cannot drift apart.
-- Every limit lives in `limits.ts`. A refusal throws `ApiError` with a fixed code from `lib/arena.ts`, and anything else surfaces as 500 `unavailable` through the one error hook.
+- Requests validate through `sValidator` with the `zod/mini` schemas of `lib/arena.ts`, which the client shares, so a route and its caller cannot drift apart. Import `zod/mini` as a namespace (`import * as z`), since the named `z` export keeps all of Zod in the Worker's bundle.
+- Every limit lives in `limits.ts`, apart from the per-minute request limit that the `ratelimits` tables of `web/wrangler.toml` set. A refusal throws `ApiError` with a fixed code from `lib/arena.ts`, and anything else surfaces as 500 `unavailable` through the one error hook.
 - Each write that must not interleave with another is one statement or one D1 batch, since D1 runs a binding's batch as a transaction.

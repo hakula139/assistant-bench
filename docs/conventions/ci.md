@@ -45,7 +45,7 @@ Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/w
 
   Because that event carries the deploy secrets, the job checks out only `main` and never runs the PR's code.
 
-Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` secret, while the account comes from `web/wrangler.toml`. A deploy keeps the Worker secrets that [Running](../guide/running.md#setting-up-a-vote-store) sets once per environment. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
+Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` secret, while the account comes from `web/wrangler.toml`. That token needs D1 Edit as well as Workers Scripts Edit, because Deploy Voting applies migrations before every deploy, and `wrangler d1 migrations apply` creates its `d1_migrations` table if missing, a write, even when no migration is pending. A deploy keeps the Worker secrets that [Running](../guide/running.md#setting-up-a-vote-store) sets once per environment. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
 
 ## Workflow Steps
 

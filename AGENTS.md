@@ -73,8 +73,8 @@ uv run pytest -m docker                               # Run the Harbor trials un
 pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
 pnpm lint                                             # Lint Markdown and the site
 pnpm spellcheck                                       # Spell check
-pnpm typecheck                                        # Type check the site
-pnpm test                                             # Test the site, with coverage: schema, charts, pages, the vote page, and accessibility
+pnpm typecheck                                        # Type check the site and the voting Worker
+pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
 nix flake check                                       # After a flake change, run the hooks in the Nix sandbox
 ```

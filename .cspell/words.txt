@@ -1,7 +1,6 @@
 acompletion
 anyio
 asciinema
-asgi
 asyncio
 Atoi
 basedpyright
@@ -87,7 +86,6 @@ pydantic
 pydocstyle
 pypi
 pyproject
-pyrightconfig
 pytest
 PYTHONDONTWRITEBYTECODE
 RDONLY
@@ -123,7 +121,6 @@ trustme
 typer
 unbilled
 undici
-undos
 unpushed
 unranked
 unrouted

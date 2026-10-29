@@ -4,7 +4,7 @@ Vote on blind pairs at [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/),
 
 ## Opening the Vote Page
 
-Follow the site's Vote link and pick a family under its aspect. The first visit verifies your browser, showing a challenge only when interaction is needed, and your first pair opens after it. All real votes go to the production D1 database. The staging deployment has its own database for validation.
+Follow the site's Vote link and pick a family under its aspect. The first visit verifies your browser, showing a challenge only when interaction is needed, and your first pair opens after it. The page remembers your browser in a cookie, so voting needs cookies allowed for the site. All real votes go to the production D1 database. The staging deployment has its own database for validation.
 
 Each pair compares two systems' different, passing outputs on one case, and you vote at most once on each comparison. A family ends with No pairs left once you have voted on every comparison it offers. Tap the vote count in the Prompt bar to see how many pairs remain.
 
