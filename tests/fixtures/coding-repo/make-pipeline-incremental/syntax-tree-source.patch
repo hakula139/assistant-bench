@@ -9,7 +9,7 @@
  from dataclasses import dataclass, field
 @@ -30,7 +31,7 @@
          # A repr keeps a TOML date apart from the string it formats as.
-         'params': repr(spec.params),
+         'params': repr(canonical(spec.params)),
          'outputs': spec.outputs,
 -        'source': hashlib.sha256(source).hexdigest(),
 +        'source': hashlib.sha256(ast.dump(ast.parse(source)).encode()).hexdigest(),

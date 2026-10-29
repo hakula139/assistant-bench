@@ -39,8 +39,10 @@ STEPS = textwrap.dedent(
         _log(context, 'report')
         table = next(path for path in context.inputs if path.suffix == '.csv')
         rows = table.read_text().splitlines()
-        if os.environ.get('FAIL_REPORT'):
-            context.outputs[0].write_text('partial')
+        failure = os.environ.get('FAIL_REPORT')
+        if failure:
+            if failure != 'early':
+                context.outputs[0].write_text('partial')
             raise RuntimeError('report failed')
         header = ''.join(
             path.read_text() for path in context.inputs if path.suffix == '.txt'

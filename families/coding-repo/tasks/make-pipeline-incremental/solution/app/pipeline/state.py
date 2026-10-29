@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, cast
 
 from .config import RECORD_FILES, StepSpec
 
@@ -28,7 +28,7 @@ def fingerprint(root: Path, spec: StepSpec, inputs: list[Path], source: bytes) -
         'run': spec.run,
         'patterns': spec.inputs,
         # A repr keeps a TOML date apart from the string it formats as.
-        'params': repr(spec.params),
+        'params': repr(canonical(spec.params)),
         'outputs': spec.outputs,
         'source': hashlib.sha256(source).hexdigest(),
         'inputs': [
@@ -37,6 +37,16 @@ def fingerprint(root: Path, spec: StepSpec, inputs: list[Path], source: bytes) -
     }
     encoded = json.dumps(document, sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical(value: Any) -> Any:
+    """Sort the keys of every table in a TOML value, since tables are unordered."""
+    if isinstance(value, dict):
+        table = cast(dict[str, Any], value)
+        return {key: canonical(table[key]) for key in sorted(table)}
+    if isinstance(value, list):
+        return [canonical(item) for item in cast(list[Any], value)]
+    return value
 
 
 @dataclass
