@@ -1,13 +1,18 @@
+import {
+  createExecutionContext,
+  createScheduledController,
+  waitOnExecutionContext,
+} from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { expect, test } from 'vitest';
 
+import worker from './index';
 import { PAIR_RETENTION_MS, TAG_RETENTION_MS } from './limits';
-import { retain } from './retention';
 import { admitted, pairOf, seedVote, WRITING } from './test/support';
 
 const FIRST = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
 
-test('clears IP tags after 60 days and pending pairs idle for 30', async () => {
+test('the daily cron clears IP tags after 60 days and pending pairs idle for 30', async () => {
   const now = Date.now();
   await seedVote(WRITING, FIRST, ['acme-large', 'acme-small'], {
     actor: 'old',
@@ -33,7 +38,14 @@ test('clears IP tags after 60 days and pending pairs idle for 30', async () => {
     .bind(now - PAIR_RETENTION_MS - 60_000, idle)
     .run();
 
-  await retain(env.DB, now);
+  const ctx = createExecutionContext();
+  // The tests run the local environment, whose bindings the merged test `env` holds.
+  worker.scheduled(
+    createScheduledController({ scheduledTime: now }),
+    env as Cloudflare.LocalEnv,
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
 
   const tags = await env.DB.prepare(
     `SELECT 'vote' AS kind, actor_id AS id, ip_tag FROM votes

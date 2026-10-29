@@ -1,4 +1,4 @@
-import { z } from 'zod/mini';
+import * as z from 'zod/mini';
 
 import {
   choiceSchema,
@@ -25,14 +25,15 @@ export const errorMessages: Record<ErrorCode, string> = {
   stale_pair: 'This pair changed. Review the current outputs and choose again.',
   nothing_to_undo: 'No vote from the last 10 minutes is left to undo.',
   rate_limited: 'Too many requests. Wait a moment, then retry.',
+  daily_limit: 'This network has reached its daily limit. Try again tomorrow.',
   unavailable: 'The voting service is unavailable. Try again.',
 };
 
 /** A fixed public error code, with the sitekey when verification is required. */
 export class ApiError extends Error {
   constructor(
-    readonly code: ErrorCode,
     readonly status: number,
+    readonly code: ErrorCode,
     readonly sitekey?: string,
   ) {
     super(errorMessages[code]);
@@ -44,6 +45,11 @@ export class NetworkError extends Error {
   constructor() {
     super(errorMessages.unavailable);
   }
+}
+
+/** What to tell the voter about a failure, with `fallback` for one the API did not describe. */
+export function errorMessage(error: unknown, fallback = errorMessages.unavailable): string {
+  return error instanceof ApiError || error instanceof NetworkError ? error.message : fallback;
 }
 
 async function request<T>(
@@ -70,7 +76,7 @@ async function request<T>(
     if (!parsed.success) {
       throw new NetworkError();
     }
-    throw new ApiError(parsed.data.error, response.status, parsed.data.sitekey);
+    throw new ApiError(response.status, parsed.data.error, parsed.data.sitekey);
   }
   const parsed = schema.safeParse(
     response.status === 204 ? undefined : await response.json().catch(() => null),

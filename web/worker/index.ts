@@ -27,7 +27,7 @@ import { ApiError, type Api, type Bindings } from './api';
 import { BODY_LIMIT_BYTES } from './limits';
 import { pairState, skip } from './pairs';
 import { retain } from './retention';
-import { freshness, record, undo } from './votes';
+import { cachedFreshness, freshness, record, undo } from './votes';
 
 /** Answers every request that fails its schema with 400 `invalid_request`. */
 function rejectInvalid(result: { success: boolean }) {
@@ -115,7 +115,10 @@ export const app = new Hono<Api>()
     return c.body(null, 204);
   })
   .get('/freshness', sValidator('query', freshnessQuery, rejectInvalid), async (c) => {
-    return c.json({ status: await freshness(c.env.DB, c.env.STORE, c.req.valid('query')) });
+    const status = await cachedFreshness(c.req.url, () =>
+      freshness(c.env.DB, c.env.STORE, c.req.valid('query')),
+    );
+    return c.json({ status });
   })
   .notFound((c) => c.json({ error: 'not_found' } satisfies ErrorView, 404))
   .onError((error, c) => {
@@ -129,7 +132,7 @@ export const app = new Hono<Api>()
           : { error: error.code };
       return c.json(body, error.status);
     }
-    // Workers Logs keep the route and the failure, never the request's address, cookie or body.
+    // With invocation logs off, this record is all Workers Logs keep: never an address or cookie.
     console.error({
       route: `${c.req.method} ${routePath(c)}`,
       message: error.message,
@@ -140,7 +143,7 @@ export const app = new Hono<Api>()
 
 export default {
   fetch: app.fetch,
-  scheduled: (_controller, env, ctx) => {
-    ctx.waitUntil(retain(env.DB, Date.now()));
+  scheduled: (controller, env, ctx) => {
+    ctx.waitUntil(retain(env.DB, controller.scheduledTime));
   },
 } satisfies ExportedHandler<Bindings>;

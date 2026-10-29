@@ -2,7 +2,7 @@ import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile';
 import { useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { admit, ApiError, NetworkError } from '@/lib/vote-flow';
+import { admit, errorMessage } from '@/lib/vote-flow';
 
 const UNAVAILABLE = 'Verification is unavailable. Try again.';
 
@@ -42,11 +42,7 @@ export function Verification({ sitekey, onReady }: { sitekey: string; onReady: (
         onSuccess={(token) => {
           setStatus('Verifying your browser...');
           admit(token).then(onReady, (reason: unknown) => {
-            fail(
-              reason instanceof ApiError || reason instanceof NetworkError
-                ? reason.message
-                : UNAVAILABLE,
-            );
+            fail(errorMessage(reason, UNAVAILABLE));
           });
         }}
         onError={() => {

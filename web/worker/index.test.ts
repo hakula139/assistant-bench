@@ -6,6 +6,7 @@ import {
   browser,
   call,
   CODING,
+  freshWindow,
   ORIGIN,
   pairOf,
   publish,
@@ -143,9 +144,10 @@ describe('requests', () => {
     expect(await response.json()).toEqual({ error: 'not_found' });
   });
 
-  test('stop a browser after 60 requests a minute', async () => {
+  test('stop a browser after 60 requests a minute', { timeout: 15_000 }, async () => {
     const from = browser('192.0.2.99');
     const statuses: number[] = [];
+    await freshWindow();
     for (let index = 0; index < 61; index++) {
       statuses.push((await call(from, 'GET', '/families')).status);
     }
@@ -153,6 +155,23 @@ describe('requests', () => {
     expect(statuses.slice(0, 60).every((status) => status === 200)).toBe(true);
     expect(statuses[60]).toBe(429);
   });
+
+  test(
+    'give each admitted browser its own budget on a shared network',
+    { timeout: 15_000 },
+    async () => {
+      await freshWindow();
+      const browsers = [await admitted('192.0.2.98'), await admitted('192.0.2.98')];
+      const statuses: number[] = [];
+      for (const from of browsers) {
+        for (let index = 0; index < 60; index++) {
+          statuses.push((await call(from, 'GET', '/families')).status);
+        }
+      }
+
+      expect(statuses.filter((status) => status !== 200)).toEqual([]);
+    },
+  );
 
   test('log an unexpected failure by route alone and answer unavailable', async () => {
     const from = await admitted('203.0.113.5');

@@ -1,5 +1,5 @@
-import type { TurnstileProps } from '@marsidev/react-turnstile';
 // @vitest-environment jsdom
+import type { TurnstileProps } from '@marsidev/react-turnstile';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
@@ -185,6 +185,14 @@ function stubApi({
   };
 }
 
+/** Answers one route with `answer` while the stub serves every other request. */
+function override(api: ReturnType<typeof stubApi>, path: string, answer: () => Promise<Response>) {
+  const fetch = api.fetch.getMockImplementation();
+  api.fetch.mockImplementation((url, init) =>
+    url.startsWith(path) ? answer() : (fetch?.(url, init) ?? Promise.reject(new Error('No stub'))),
+  );
+}
+
 const statusLine = () =>
   screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
 
@@ -243,6 +251,11 @@ describe('VoteApp', () => {
   test.each([
     ['failed', () => widget().onError?.('600010'), 'Verification is unavailable. Try again.'],
     ['expired', () => widget().onExpire?.('token'), 'Verification expired. Try again.'],
+    [
+      'could not load its script',
+      () => widget().scriptOptions?.onError?.(),
+      'Verification is unavailable. Try again.',
+    ],
   ])('offers to retry a challenge that %s', async (_, fail, message) => {
     stubApi({ admitted: false });
     history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
@@ -253,19 +266,64 @@ describe('VoteApp', () => {
     act(() => {
       fail();
     });
-    await user.click(await screen.findByRole('button', { name: 'Retry verification' }));
+    expect(await screen.findByText(message)).toBeDefined();
+    await user.click(screen.getByRole('button', { name: 'Retry verification' }));
 
     expect(turnstile.resets).toBe(1);
     expect(screen.queryByText(message)).toBeNull();
   });
 
+  test('asks for a solve only once the challenge needs one', async () => {
+    stubApi({ admitted: false });
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+
+    act(() => {
+      widget().onBeforeInteractive?.();
+    });
+
+    expect(screen.getByText('Verify you are human to continue.')).toBeDefined();
+  });
+
+  test('sends a browser that cannot run the challenge elsewhere, with nothing to retry', async () => {
+    stubApi({ admitted: false });
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+
+    act(() => {
+      widget().onUnsupported?.();
+    });
+
+    expect(
+      screen.getByText('This browser cannot complete verification. Try another browser.'),
+    ).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Retry verification' })).toBeNull();
+  });
+
+  test('says voting needs cookies when the browser is still unknown after its admission', async () => {
+    const api = stubApi({ admitted: false });
+    override(api, '/api/actors', () => Promise.resolve(new Response(null, { status: 204 })));
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+
+    act(() => {
+      widget().onSuccess?.('proof');
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Voting needs cookies. Allow cookies for this site, then reload the page.',
+    );
+    expect(screen.queryByTestId('turnstile')).toBeNull();
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toHaveLength(1);
+  });
+
   test('reports a challenge the Worker rejects without admitting the browser', async () => {
     const api = stubApi({ admitted: false });
-    const fetch = api.fetch.getMockImplementation();
-    api.fetch.mockImplementation((path, init) =>
-      path === '/api/actors'
-        ? Promise.resolve(Response.json({ error: 'challenge_failed' }, { status: 400 }))
-        : (fetch?.(path, init) ?? Promise.reject(new Error('No stub'))),
+    override(api, '/api/actors', () =>
+      Promise.resolve(Response.json({ error: 'challenge_failed' }, { status: 400 })),
     );
     history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
     render(<VoteApp />);
@@ -323,7 +381,7 @@ describe('VoteApp', () => {
   });
 
   test.each([
-    ['a choice', 'a', 'The pair you were choosing on changed, so your unsent choice was cleared.'],
+    ['a choice', 'a', 'The pair you were choosing on changed, so your choice was cleared.'],
     ['no choice', null, ''],
   ] as const)(
     'drops a draft for another pair, with %s, and says so only for an unsent choice',
@@ -341,6 +399,7 @@ describe('VoteApp', () => {
           scroll: { window: 0, a: 0, b: 0 },
         }),
       );
+      history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
 
       render(<VoteApp />);
       await screen.findByText('Output A1');
@@ -361,11 +420,15 @@ describe('VoteApp', () => {
   test('removes a draft that no longer parses', async () => {
     stubApi();
     sessionStorage.setItem('bench-vote', '{"family": 1}');
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
 
     render(<VoteApp />);
+    await screen.findByText('Output A1');
 
-    await screen.findByRole('button', { name: FAMILY.display_name });
-    expect(sessionStorage.getItem('bench-vote')).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
+      family: FAMILY.family,
+      pair: pairId(1),
+    });
   });
 
   test('skips to another pair without voting, clearing the unsent choice', async () => {
@@ -381,6 +444,32 @@ describe('VoteApp', () => {
       'false',
     );
     expect(api.casts).toEqual([]);
+  });
+
+  test('loads the current pair with a notice when a skip finds this one gone', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    api.elsewhere();
+
+    await user.keyboard('s');
+    await screen.findByText('Output A2');
+
+    expect(screen.getByRole('status').textContent).toBe(
+      'This pair changed. Review the current outputs and choose again.',
+    );
+  });
+
+  test('keeps the pair and reports a skip that fails', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    override(api, '/api/pair/skip', () => Promise.reject(new TypeError('Failed to fetch')));
+
+    await user.keyboard('s');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The voting service is unavailable. Try again.',
+    );
+    expect(screen.getByText('Output A1')).toBeDefined();
   });
 
   test('keeps the pair and says so when a skip finds no other case', async () => {
@@ -421,6 +510,61 @@ describe('VoteApp', () => {
       .map(([, init]) => requestBody(init));
     expect(sent).toEqual([sent[0], sent[0]]);
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
+  });
+
+  test('unlocks the ballot when a retried vote finds its pair gone', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    const fetch = api.fetch.getMockImplementation();
+    let lost = true;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && lost) {
+        lost = false;
+        return Promise.reject(new TypeError('The vote response was lost'));
+      }
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
+    });
+    await user.keyboard('b{Enter}');
+    await screen.findByRole('button', { name: 'Retry vote' });
+    api.elsewhere();
+
+    await user.click(screen.getByRole('button', { name: 'Retry vote' }));
+    await screen.findByText('Output A2');
+
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('status').textContent).toBe(
+      'This pair changed. Review the current outputs and choose again.',
+    );
+  });
+
+  test('forgets a sent choice even when the next pair fails to load', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('a');
+    override(api, '/api/pair', () => Promise.reject(new TypeError('Failed to fetch')));
+
+    await user.keyboard('{Enter}');
+    await screen.findByRole('heading', { name: 'Choose a family to vote on' });
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+    expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
+      choice: null,
+    });
+  });
+
+  test('tells a network at its daily cap when it can vote again', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    override(api, '/api/votes', () =>
+      Promise.resolve(Response.json({ error: 'daily_limit' }, { status: 429 })),
+    );
+
+    await user.keyboard('a{Enter}');
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This network has reached its daily limit. Try again tomorrow.',
+    );
   });
 
   test('loads the current pair with a notice when another tab has voted on this one', async () => {
@@ -523,6 +667,38 @@ describe('VoteApp', () => {
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
     expect(api.undone).toHaveLength(1);
+  });
+
+  test('opens the family list from its links, even in a tab that voted in a family', async () => {
+    const api = stubApi({ cases: 1 });
+    const user = await startVoting();
+    await user.keyboard('a{Enter}');
+    await screen.findByText('No pairs left');
+    cleanup();
+    history.replaceState(null, '', '/vote/');
+
+    render(<VoteApp />);
+
+    expect(await screen.findByRole('button', { name: FAMILY.display_name })).toBeDefined();
+    expect(api.pairRequests).toEqual([FAMILY.family, FAMILY.family]);
+  });
+
+  test('carries the Markdown view to the next pair and through a reload', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.click(screen.getByRole('button', { name: 'Markdown' }));
+    screen.getByRole('group', { name: 'Pair 1' }).focus();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    const afterVote = screen.getByRole('button', { name: 'Markdown' }).ariaPressed;
+    api.elsewhere();
+    cleanup();
+    render(<VoteApp />);
+    await screen.findByText('Output A3');
+
+    expect(afterVote).toBe('true');
+    expect(screen.getByRole('button', { name: 'Markdown' })).toHaveProperty('ariaPressed', 'true');
   });
 
   test('counts the recorded votes and links back to the family list once no pair is left', async () => {
@@ -928,12 +1104,7 @@ describe('VoteApp', () => {
       { family: 'prototype', aspect: '__proto__', display_name: 'Prototype' },
     ];
     const api = stubApi();
-    const fetch = api.fetch.getMockImplementation();
-    api.fetch.mockImplementation((path, init) =>
-      path === '/api/families'
-        ? Promise.resolve(Response.json({ families }))
-        : (fetch?.(path, init) ?? Promise.reject(new Error('No stub'))),
-    );
+    override(api, '/api/families', () => Promise.resolve(Response.json({ families })));
     const errors = vi.spyOn(console, 'error');
     const user = userEvent.setup();
     const expectedGroups: [string, string[]][] = [
@@ -994,5 +1165,19 @@ describe('VoteApp', () => {
 
     expect((await screen.findByRole('alert')).textContent).toBe(alert);
     expect(screen.getByRole('heading', { name: 'Choose a family to vote on' })).toBeDefined();
+    expect(location.search).toBe('');
+  });
+
+  test('returns from a linked family without a round to the family list', async () => {
+    stubApi();
+    history.replaceState(null, '', '/vote/?family=retired');
+
+    render(<VoteApp />);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This family has no outputs available to vote on.',
+    );
+    expect(screen.getByRole('button', { name: FAMILY.display_name })).toBeDefined();
+    expect(location.search).toBe('');
   });
 });

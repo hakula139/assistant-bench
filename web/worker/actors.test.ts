@@ -71,7 +71,7 @@ describe('POST /api/actors', () => {
     });
 
     expect(sixth.status).toBe(429);
-    expect(await sixth.json()).toEqual({ error: 'rate_limited' });
+    expect(await sixth.json()).toEqual({ error: 'daily_limit' });
     expect(elsewhere.status).toBe(204);
   });
 

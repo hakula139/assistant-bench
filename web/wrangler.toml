@@ -10,8 +10,10 @@ previews = {}
 directory = "./dist"
 not_found_handling = "404-page"
 
+# Invocation logs would keep every request's headers, including the voter's address.
 [observability.logs]
 enabled = true
+invocation_logs = false
 
 [dev]
 ip = "localhost"

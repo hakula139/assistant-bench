@@ -36,7 +36,10 @@ from assistant_bench.scoring.weighting import actor_weights
 type Store = Literal['production', 'local']
 
 UNDO_WINDOW_MS = 10 * 60_000
-"""How long a voter can undo a vote, which bounds the voting Worker's undo window."""
+"""How long a vote stays undoable.
+
+It must equal `UNDO_MS` in `web/worker/limits.ts`, so no cut holds an undoable vote.
+"""
 
 PAGE_ROWS = 1000
 

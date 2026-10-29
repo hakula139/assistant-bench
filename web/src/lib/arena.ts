@@ -1,4 +1,4 @@
-import { z } from 'zod/mini';
+import * as z from 'zod/mini';
 
 import { categories } from '@/lib/categories';
 import { defects } from '@/lib/defects';
@@ -87,6 +87,7 @@ export const errorCode = z.enum([
   'stale_pair',
   'nothing_to_undo',
   'rate_limited',
+  'daily_limit',
   'unavailable',
 ]);
 export const errorView = z.strictObject({

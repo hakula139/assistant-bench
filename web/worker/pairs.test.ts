@@ -1,7 +1,15 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test } from 'vitest';
 
-import { candidates, next, ranker, type PassingOutput } from './pairs';
+import {
+  candidates,
+  draw,
+  next,
+  ranker,
+  type Comparison,
+  type PassingOutput,
+  type Rank,
+} from './pairs';
 import {
   admitted,
   call,
@@ -69,6 +77,53 @@ describe('candidates', () => {
       },
       { caseKey: 'first', systems: ['pro', 'small'], samples: [['first/pro/0', 'first/small/0']] },
     ]);
+  });
+});
+
+describe('draw', () => {
+  const comparison = (caseKey: string, low: string, high: string): Comparison => ({
+    caseKey,
+    systems: [low, high],
+    samples: [
+      [
+        { output_key: `${caseKey}/${low}`, case_key: caseKey, system: low, content_digest: low },
+        { output_key: `${caseKey}/${high}`, case_key: caseKey, system: high, content_digest: high },
+      ],
+    ],
+  });
+
+  /** A voter's order given as fixed ranks, with every unlisted item ranked last. */
+  const fixed =
+    (ranks: Record<string, string>): Rank =>
+    (...parts) =>
+      Promise.resolve(ranks[parts.join(' ')] ?? 'f0');
+
+  test('draws the least covered system pair over the one the voter ranks first', async () => {
+    const comparisons = [
+      comparison('first', 'large', 'pro'),
+      comparison('first', 'large', 'small'),
+      comparison('first', 'pro', 'small'),
+    ];
+    const rank = fixed({ 'pair large pro': '00', 'pair large small': '10' });
+    const coverage = new Map([
+      [JSON.stringify(['large', 'pro']), 1],
+      [JSON.stringify(['pro', 'small']), 1],
+    ]);
+
+    const drawn = await draw(rank, comparisons, coverage);
+
+    expect(drawn).toEqual({ caseKey: 'first', a: 'first/large', b: 'first/small' });
+  });
+
+  test.each([
+    ['an even', '20', { a: 'first/large', b: 'first/small' }],
+    ['an odd', '21', { a: 'first/small', b: 'first/large' }],
+  ])("orders the panes by the sample rank's lowest bit, with %s rank", async (_, sample, panes) => {
+    const rank = fixed({ 'sample first/large first/small': sample });
+
+    const drawn = await draw(rank, [comparison('first', 'large', 'small')], new Map());
+
+    expect(drawn).toEqual({ caseKey: 'first', ...panes });
   });
 });
 

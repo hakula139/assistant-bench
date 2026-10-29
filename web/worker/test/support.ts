@@ -42,6 +42,17 @@ export async function call(
   return response;
 }
 
+/**
+ * Waits, when the rate limiter's current minute has less than `needed` ms left, for the next one,
+ * since its windows follow the wall clock and a rollover mid-test resets every count.
+ */
+export async function freshWindow(needed = 5000): Promise<void> {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < needed) {
+    await new Promise((resolve) => setTimeout(resolve, left));
+  }
+}
+
 /** Answers Turnstile's siteverify with `result`, and records each verification request. */
 export function stubSiteverify(result: { success: boolean; hostname?: string }) {
   const original = globalThis.fetch;
@@ -129,12 +140,13 @@ export async function publish(
           env.DB.prepare(
             `INSERT INTO outputs (publication_id, output_key, case_key, system, fingerprint,
                verdict, errored, length, content_digest, content)
-             VALUES (?, ?, ?, ?, 'fp', ?, 0, 1, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
           ).bind(
             id,
             `${caseKey}/${system}/${index}`,
             caseKey,
             system,
+            `fp-${system}`,
             content === null ? 'fail' : 'pass',
             content ?? `failed ${caseKey}/${system}/${index}`,
             content,

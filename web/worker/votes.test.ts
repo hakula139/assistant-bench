@@ -26,10 +26,10 @@ async function storedVotes() {
   return results;
 }
 
-/** Fills the IP tag's daily cap but `missing` with votes of other actors. */
-async function fillCap(missing: number, options: { exclusion?: string } = {}) {
+/** Fills the IP tag's daily cap with votes of another actor. */
+async function fillCap(options: { exclusion?: string } = {}) {
   const tag = await ipTag(env.IP_TAG_KEY, TAG_IP);
-  const statements = Array.from({ length: VOTES_PER_TAG - missing }, (_, index) =>
+  const statements = Array.from({ length: VOTES_PER_TAG }, (_, index) =>
     env.DB.prepare(
       `INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, a_output,
          b_output, a_system, b_system, choice, defects, elapsed_ms, recorded_at, ip_tag, exclusion)
@@ -156,19 +156,19 @@ describe('POST /api/votes', () => {
     ['counted votes', {}],
     ['excluded votes, which refund nothing', { exclusion: 'trash' }],
   ])("stops the network's votes at its daily cap of %s and keeps the pair", async (_, options) => {
-    await fillCap(0, options);
+    await fillCap(options);
     const from = await admitted(TAG_IP);
     const { pair } = await pairOf(from);
 
     const response = await vote(from, pair?.id ?? '');
 
     expect(response.status).toBe(429);
-    expect(await response.json()).toEqual({ error: 'rate_limited' });
+    expect(await response.json()).toEqual({ error: 'daily_limit' });
     expect(await pendingRow(pair?.id ?? '')).not.toBeNull();
   });
 
   test('counts only votes inside the window and those not undone toward the cap', async () => {
-    await fillCap(1);
+    await fillCap();
     await env.DB.prepare('UPDATE votes SET recorded_at = ? WHERE pair_id = ?')
       .bind(Date.now() - WINDOW_MS - 1, 'filler-0')
       .run();
@@ -342,6 +342,21 @@ describe('freshness', () => {
     const response = await call(from, 'GET', `/freshness?family=${WRITING}&local=0&local_votes=0`);
 
     expect(await response.json()).toEqual({ status: 'current' });
+  });
+
+  test('reuses an answer for the same parameters, in any order, for a minute', async () => {
+    await seedVote(WRITING, caseKey, systems);
+    const { ids } = await read();
+    const from = await admitted();
+    const ask = async (query: string) =>
+      (await (await call(from, 'GET', `/freshness?${query}`)).json<{ status: string }>()).status;
+    const cut = `local=${ids[0]}&local_votes=1`;
+    expect(await ask(`family=${WRITING}&${cut}`)).toBe('current');
+
+    await seedVote(WRITING, caseKey, systems);
+
+    expect(await ask(`${cut}&family=${WRITING}`)).toBe('current');
+    expect(await ask(`family=${WRITING}&local=${ids[0]}&local_votes=2`)).toBe('stale');
   });
 
   test('rejects a cutoff without its counted votes', async () => {

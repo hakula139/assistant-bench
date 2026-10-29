@@ -40,9 +40,10 @@ import {
   ApiError,
   castVote,
   emptyDraft,
+  errorMessage,
+  errorMessages,
   getPair,
   listFamilies,
-  NetworkError,
   readDraft,
   skipPair,
   undoVote,
@@ -52,8 +53,8 @@ import {
 
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
-const STALE_PAIR = 'This pair changed. Review the current outputs and choose again.';
-const DROPPED = 'The pair you were choosing on changed, so your unsent choice was cleared.';
+const DROPPED = 'The pair you were choosing on changed, so your choice was cleared.';
+const COOKIES = 'Voting needs cookies. Allow cookies for this site, then reload the page.';
 const NO_OTHER_PAIR = 'No other pair is available for these outputs.';
 
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
@@ -83,12 +84,6 @@ function keyedDefects(defects: readonly Defect[]) {
       }),
     ),
   );
-}
-
-function message(error: unknown): string {
-  return error instanceof ApiError || error instanceof NetworkError
-    ? error.message
-    : 'The voting service is unavailable. Try again.';
 }
 
 const isCode = (reason: unknown, code: ApiError['code']): reason is ApiError =>
@@ -125,12 +120,10 @@ function Screen({ title, children }: { title: string; children: ReactNode }) {
 
 function StartScreen({
   families,
-  busy,
   error,
   onStart,
 }: {
   families: FamilyView[] | null;
-  busy: boolean;
   error: ReactNode;
   onStart: (family: string) => void;
 }) {
@@ -166,7 +159,6 @@ function StartScreen({
                   <li key={family.family}>
                     <Button
                       variant="outline"
-                      disabled={busy}
                       onClick={() => {
                         onStart(family.family);
                       }}
@@ -272,7 +264,7 @@ function Brief({
 export function VoteApp() {
   // The page renders only in the browser, so its URL is readable on the first render.
   const [family, setFamily] = useState(
-    () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? readDraft()?.family,
+    () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? undefined,
   );
   const [families, setFamilies] = useState<FamilyView[] | null>(null);
   const [state, setState] = useState<PairState | null>(null);
@@ -283,10 +275,11 @@ export function VoteApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(family !== undefined);
   const pairView = useRef<HTMLDivElement>(null);
   const panes = useRef<Record<keyof TaggedDefects, HTMLDivElement | null>>({ a: null, b: null });
   const restoring = useRef<Draft['scroll'] | null>(null);
+  // A browser that keeps no cookie asks for admission again right after passing it.
+  const admitted = useRef(false);
 
   const pair = state?.pair ?? null;
   const locked = busy || sitekey !== null || failedVote !== null;
@@ -299,7 +292,6 @@ export function VoteApp() {
 
   /** Shows a pair state, restoring the tab's draft only when it belongs to the same pair. */
   const show = (name: string, next: PairState, options: { restore?: boolean } = {}) => {
-    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name })}`);
     const stored = readDraft();
     const id = next.pair?.id ?? null;
     let shown: Draft;
@@ -313,7 +305,7 @@ export function VoteApp() {
       }
       shown = {
         ...emptyDraft(name, id),
-        markdown: draft?.markdown ?? false,
+        markdown: draft?.markdown ?? stored?.markdown ?? false,
         collapsed:
           (draft?.collapsed ?? false) && state?.pair?.instruction === next.pair?.instruction,
       };
@@ -321,17 +313,31 @@ export function VoteApp() {
     writeDraft(shown);
     setDraft(shown);
     setState(next);
-    setFamily(name);
     setError(null);
   };
 
   const failed = (reason: unknown) => {
-    if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
+    if (isCode(reason, 'admission_required') && admitted.current) {
+      setError(COOKIES);
+    } else if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
       setSitekey(reason.sitekey);
       setError(null);
     } else {
-      setError(message(reason));
+      setError(errorMessage(reason));
     }
+  };
+
+  /** Returns to the family list with the reason a pair did not load, unless admission can help. */
+  const loadFailed = (reason: unknown) => {
+    if (isCode(reason, 'admission_required')) {
+      failed(reason);
+      return;
+    }
+    history.replaceState(null, '', window.location.pathname);
+    setFamily(undefined);
+    setState(null);
+    setNotice(null);
+    setError(errorMessage(reason));
   };
 
   const load = async (name: string, options: { restore?: boolean; notice?: string } = {}) => {
@@ -342,10 +348,7 @@ export function VoteApp() {
         setNotice(options.notice);
       }
     } catch (reason) {
-      if (isCode(reason, 'admission_required')) {
-        setFamily(name);
-      }
-      failed(reason);
+      loadFailed(reason);
     }
   };
 
@@ -364,17 +367,13 @@ export function VoteApp() {
         setFamilies(families);
       },
       (reason: unknown) => {
-        setError(<>Could not list families: {message(reason)}</>);
+        setError(<>Could not list families: {errorMessage(reason)}</>);
       },
     );
     if (family !== undefined) {
-      getPair(family)
-        .then((next) => {
-          show(family, next, { restore: true });
-        }, failed)
-        .finally(() => {
-          setLoading(false);
-        });
+      getPair(family).then((next) => {
+        show(family, next, { restore: true });
+      }, loadFailed);
     }
   });
 
@@ -452,6 +451,7 @@ export function VoteApp() {
     void act(async () => {
       try {
         await castVote(body);
+        update({ choice: null });
         setFailedVote(null);
         setSaved(true);
         setNotice(null);
@@ -459,7 +459,7 @@ export function VoteApp() {
       } catch (reason) {
         if (isCode(reason, 'stale_pair')) {
           setFailedVote(null);
-          await load(family, { notice: STALE_PAIR });
+          await load(family, { notice: errorMessages.stale_pair });
         } else {
           setFailedVote(body);
           failed(reason);
@@ -469,7 +469,7 @@ export function VoteApp() {
   };
 
   const choiceBody =
-    pair !== null && draft?.choice !== null && draft !== null
+    pair !== null && draft !== null && draft.choice !== null
       ? { pair: pair.id, choice: draft.choice, defects: draft.defects }
       : null;
 
@@ -489,7 +489,7 @@ export function VoteApp() {
         }
       } catch (reason) {
         if (isCode(reason, 'stale_pair')) {
-          await load(family, { notice: STALE_PAIR });
+          await load(family, { notice: errorMessages.stale_pair });
         } else {
           failed(reason);
         }
@@ -600,6 +600,7 @@ export function VoteApp() {
       <Verification
         sitekey={sitekey}
         onReady={() => {
+          admitted.current = true;
           setSitekey(null);
           if (family !== undefined) {
             void act(() => load(family, { restore: true }));
@@ -629,18 +630,11 @@ export function VoteApp() {
       )
     );
 
-  if (loading) {
-    return (
-      <Screen title="Connecting to voting">
-        <p role="status">Checking your browser...</p>
-      </Screen>
-    );
-  }
-
   if (state === null) {
-    if (family !== undefined && (sitekey !== null || error !== null)) {
+    if (family !== undefined) {
       return (
         <Screen title="Connecting to voting">
+          {sitekey === null && error === null && <p role="status">Checking your browser...</p>}
           <ErrorAlert error={error} />
           <div className="flex flex-col items-start gap-2">{recovery}</div>
         </Screen>
@@ -650,9 +644,10 @@ export function VoteApp() {
     return (
       <StartScreen
         families={families}
-        busy={busy}
         error={error}
         onStart={(name) => {
+          history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name })}`);
+          setFamily(name);
           void act(() => load(name, { restore: true }));
         }}
       />
@@ -661,7 +656,13 @@ export function VoteApp() {
 
   if (pair === null || draft === null) {
     return (
-      <div ref={pairView} tabIndex={-1} role="group" aria-label="Completed family">
+      <div
+        ref={pairView}
+        tabIndex={-1}
+        role="group"
+        aria-label="Completed family"
+        className="outline-none"
+      >
         <Screen title="No pairs left">
           <p className="text-muted-foreground">
             {formatCountOf(state.votes, 'vote')} recorded on {title}.
@@ -684,8 +685,8 @@ export function VoteApp() {
 
   const hasText = pair.render === 'text';
   const status = (
-    <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-      <span role="status" className="flex items-center gap-1 empty:sr-only">
+    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm text-muted-foreground max-sm:basis-full">
+      <span role="status" className="flex items-center gap-1 empty:sr-only max-sm:order-last">
         {saved ? (
           <>
             <Check className="size-4" aria-hidden="true" />
@@ -760,22 +761,24 @@ export function VoteApp() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <ErrorAlert error={error} />
-        {hasText && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Toggle
-              variant="outline"
-              pressed={draft.markdown}
-              onPressedChange={(markdown) => {
-                update({ markdown });
-              }}
-            >
-              Markdown
-            </Toggle>
-          </div>
-        )}
-      </div>
+      {(error !== null || hasText) && (
+        <div className="flex flex-col gap-3">
+          <ErrorAlert error={error} />
+          {hasText && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Toggle
+                variant="outline"
+                pressed={draft.markdown}
+                onPressedChange={(markdown) => {
+                  update({ markdown });
+                }}
+              >
+                Markdown
+              </Toggle>
+            </div>
+          )}
+        </div>
+      )}
 
       <div
         className={cn(

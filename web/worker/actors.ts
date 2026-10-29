@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { getSignedCookie, setSignedCookie } from 'hono/cookie';
-import { z } from 'zod/mini';
+import * as z from 'zod/mini';
 
 import { ApiError, type Api, type Bindings } from './api';
 import { ACTOR_MAX_AGE_MS, ACTORS_PER_TAG, WINDOW_MS } from './limits';
@@ -87,7 +87,7 @@ export async function admit(db: D1Database, tag: string, now: number): Promise<s
     .bind(id, now, tag, now - WINDOW_MS, ACTORS_PER_TAG)
     .run();
   if (meta.changes === 0) {
-    throw new ApiError(429, 'rate_limited');
+    throw new ApiError(429, 'daily_limit');
   }
   return id;
 }
