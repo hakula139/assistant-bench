@@ -119,6 +119,22 @@ Apply the migrations again after adding one, which skips the files already appli
 
 A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
+### Moderation
+
+Each vote records the browser that cast it, an opaque tag of its network and the time from showing the pair to the vote. `bench arena votes` summarizes a family's votes per network tag, or per browser with `--by actor`, and lists one tag's or browser's votes when given `--ip-tag` or `--actor`:
+
+```bash
+uv run bench arena votes production writing-zh
+uv run bench arena votes production writing-zh --by actor
+uv run bench arena votes production writing-zh --ip-tag <tag>
+uv run bench arena exclude production writing-zh --reason <text> --ip-tag <tag>
+uv run bench arena restore production writing-zh --vote <id> --vote <id>
+```
+
+A summary row shows the votes, the browsers behind a tag or the tags a browser used, the share of each choice, the median time per vote, the first and last vote, and how many votes are excluded. A listing shows each vote's systems, choice and time, and the reason for an exclusion. Votes whose tag has been cleared show `(cleared)` in place of a tag. Copy tags and browser IDs from these listings, since only the voting Worker can compute a tag.
+
+`exclude` and `restore` take exactly one of `--ip-tag`, `--actor` or `--vote`, which repeats, and print how many votes changed. An excluded vote keeps the reason it was first excluded for. A closed report keeps its votes until the next `bench close`, which leaves the excluded ones out and counts them in `dropped_votes`. Fast votes, minority preferences and disagreement with your own choices are reasons to look closer, and none of them alone is a reason to exclude.
+
 ## Closing a Round
 
 ```bash

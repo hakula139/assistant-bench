@@ -885,18 +885,23 @@ def record_vote(
     actor: str,
     age: timedelta,
     case: int = 0,
+    choice: Choice = 'a',
+    elapsed_ms: int = 4_000,
+    ip_tag: str | None = None,
     exclusion: str | None = None,
 ) -> int:
-    """Record `actor`'s vote for the first of the case's first two outputs.
+    """Record `actor`'s vote on the case's first two outputs from `ip_tag`.
 
-    The vote is `age` old at `now`, and its ID is returned.
+    The vote is `age` old at `now`, its tag defaults to `tag-<actor>`, and its ID
+    is returned.
     """
     a, b = [
         row for row in published.outputs if row.case_key == published.cases[case].key
     ][:2]
+    tag = ip_tag or f'tag-{actor}'
     database.execute(
         'INSERT OR IGNORE INTO actors (id, created_at, ip_tag) VALUES (?, 0, ?)',
-        [actor, f'tag-{actor}'],
+        [actor, tag],
     )
     database.execute(
         'INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, '
@@ -913,11 +918,11 @@ def record_vote(
             b.key,
             a.system,
             b.system,
-            'a',
+            choice,
             '{"a": [], "b": ["facts"]}',
-            4_000,
+            elapsed_ms,
             int((now - age).timestamp() * 1000),
-            f'tag-{actor}',
+            tag,
             exclusion,
         ],
     )

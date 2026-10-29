@@ -5,7 +5,15 @@ import pytest
 
 from assistant_bench.arena import publication, votes
 from assistant_bench.arena.publication import CaseFacts, Inventory, OutputFacts
-from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
+from assistant_bench.arena.votes import (
+    Cut,
+    Group,
+    ListedVote,
+    Selector,
+    Snapshot,
+    TaggedDefects,
+    Vote,
+)
 from assistant_bench.families import Choice
 from assistant_bench.report import Cutoffs
 from assistant_bench.scoring.ranking import Comparison
@@ -239,6 +247,303 @@ class TestStatus:
         assert row.latest_vote_at == int(
             (NOW - timedelta(minutes=1)).timestamp() * 1000
         )
+
+
+def moderated_store() -> tuple[SQLiteDatabase, dict[str, int]]:
+    """Record four votes from three browsers on two network tags, one excluded."""
+    database, published = published_store()
+    ids = {
+        'x': record_vote(
+            database,
+            published,
+            NOW,
+            actor='x',
+            age=timedelta(hours=4),
+            elapsed_ms=1_000,
+            ip_tag='shared',
+        ),
+        'y-first': record_vote(
+            database,
+            published,
+            NOW,
+            actor='y',
+            age=timedelta(hours=3),
+            choice='b',
+            elapsed_ms=3_000,
+            ip_tag='shared',
+        ),
+        'y-second': record_vote(
+            database,
+            published,
+            NOW,
+            actor='y',
+            age=timedelta(hours=2),
+            case=1,
+            choice='tie',
+            elapsed_ms=8_000,
+            ip_tag='mobile',
+            exclusion='spam',
+        ),
+        'z': record_vote(
+            database,
+            published,
+            NOW,
+            actor='z',
+            age=timedelta(hours=1),
+            elapsed_ms=6_000,
+            ip_tag='shared',
+        ),
+    }
+    return database, ids
+
+
+def at(age: timedelta) -> int:
+    return int((NOW - age).timestamp() * 1000)
+
+
+def shares(**values: float) -> dict[Choice, float]:
+    return {choice: values.get(choice, 0) for choice in votes.CHOICES}
+
+
+class TestListed:
+    @pytest.mark.parametrize(
+        ('selector', 'expected'),
+        [
+            (None, ['x', 'y-first', 'y-second', 'z']),
+            (Selector(column='ip_tag', values=('shared',)), ['x', 'y-first', 'z']),
+            (Selector(column='actor_id', values=('y',)), ['y-first', 'y-second']),
+            (Selector(column='id', values=(1, 3)), ['x', 'y-second']),
+            (Selector(column='actor_id', values=('nobody',)), []),
+        ],
+        ids=['every', 'ip-tag', 'actor', 'ids', 'no-match'],
+    )
+    def test_lists_the_selected_votes_in_id_order(
+        self, selector: Selector | None, expected: list[str]
+    ) -> None:
+        database, ids = moderated_store()
+
+        listed = votes.listed(database, FAMILY.name, selector)
+
+        assert [row.id for row in listed] == [ids[name] for name in expected]
+
+    def test_lists_each_vote_with_its_tag_timing_and_reason(self) -> None:
+        database, ids = moderated_store()
+
+        (row,) = votes.listed(
+            database, FAMILY.name, Selector(column='id', values=(ids['y-second'],))
+        )
+
+        assert row == ListedVote(
+            id=ids['y-second'],
+            actor='y',
+            ip_tag='mobile',
+            a_system='acme-large',
+            b_system='acme-small',
+            choice='tie',
+            elapsed_ms=8_000,
+            recorded_at=at(timedelta(hours=2)),
+            exclusion='spam',
+        )
+
+    def test_selects_only_votes_of_the_named_family(self) -> None:
+        database, ids = moderated_store()
+
+        listed = votes.listed(
+            database, 'writing-other', Selector(column='id', values=(ids['x'],))
+        )
+
+        assert listed == []
+
+
+class TestGroups:
+    @pytest.mark.parametrize(
+        ('by', 'expected'),
+        [
+            (
+                'ip',
+                [
+                    Group(
+                        subject='shared',
+                        votes=3,
+                        peers=3,
+                        shares=shares(a=2 / 3, b=1 / 3),
+                        median_elapsed_ms=3_000,
+                        first_at=at(timedelta(hours=4)),
+                        last_at=at(timedelta(hours=1)),
+                        excluded=0,
+                    ),
+                    Group(
+                        subject='mobile',
+                        votes=1,
+                        peers=1,
+                        shares=shares(tie=1),
+                        median_elapsed_ms=8_000,
+                        first_at=at(timedelta(hours=2)),
+                        last_at=at(timedelta(hours=2)),
+                        excluded=1,
+                    ),
+                ],
+            ),
+            (
+                'actor',
+                [
+                    Group(
+                        subject='y',
+                        votes=2,
+                        peers=2,
+                        shares=shares(b=0.5, tie=0.5),
+                        median_elapsed_ms=5_500,
+                        first_at=at(timedelta(hours=3)),
+                        last_at=at(timedelta(hours=2)),
+                        excluded=1,
+                    ),
+                    Group(
+                        subject='x',
+                        votes=1,
+                        peers=1,
+                        shares=shares(a=1),
+                        median_elapsed_ms=1_000,
+                        first_at=at(timedelta(hours=4)),
+                        last_at=at(timedelta(hours=4)),
+                        excluded=0,
+                    ),
+                    Group(
+                        subject='z',
+                        votes=1,
+                        peers=1,
+                        shares=shares(a=1),
+                        median_elapsed_ms=6_000,
+                        first_at=at(timedelta(hours=1)),
+                        last_at=at(timedelta(hours=1)),
+                        excluded=0,
+                    ),
+                ],
+            ),
+        ],
+    )
+    def test_summarizes_each_subject_most_votes_first(
+        self, by: votes.Grouping, expected: list[Group]
+    ) -> None:
+        database, _ = moderated_store()
+
+        assert votes.groups(database, FAMILY.name, by) == expected
+
+    def test_groups_votes_whose_tag_retention_cleared(self) -> None:
+        database, ids = moderated_store()
+        database.execute(
+            'UPDATE votes SET ip_tag = NULL WHERE id IN (?, ?)',
+            [ids['y-first'], ids['y-second']],
+        )
+
+        by_ip = votes.groups(database, FAMILY.name, 'ip')
+        by_actor = votes.groups(database, FAMILY.name, 'actor')
+
+        assert [(group.subject, group.votes) for group in by_ip] == [
+            ('shared', 2),
+            (None, 2),
+        ]
+        assert [(group.subject, group.peers) for group in by_actor] == [
+            ('y', 0),
+            ('x', 1),
+            ('z', 1),
+        ]
+
+
+class TestExclude:
+    @pytest.mark.parametrize(
+        ('selector', 'changed', 'excluded'),
+        [
+            (Selector(column='ip_tag', values=('shared',)), 3, ['x', 'y-first', 'z']),
+            (Selector(column='actor_id', values=('y',)), 1, ['y-first']),
+            (Selector(column='id', values=(1, 4)), 2, ['x', 'z']),
+            (Selector(column='ip_tag', values=('unknown',)), 0, []),
+        ],
+        ids=['ip-tag', 'actor', 'ids', 'no-match'],
+    )
+    def test_excludes_the_selected_votes_keeping_earlier_reasons(
+        self, selector: Selector, changed: int, excluded: list[str]
+    ) -> None:
+        database, ids = moderated_store()
+
+        result = votes.exclude(database, FAMILY.name, selector, 'bot')
+
+        assert result == changed
+        reasons = {
+            row.id: row.exclusion for row in votes.listed(database, FAMILY.name, None)
+        }
+        assert reasons == {
+            ids[name]: 'spam'
+            if name == 'y-second'
+            else 'bot'
+            if name in excluded
+            else None
+            for name in ids
+        }
+
+    def test_leaves_votes_of_another_family_alone(self) -> None:
+        database, ids = moderated_store()
+
+        result = votes.exclude(
+            database, 'writing-other', Selector(column='id', values=(ids['x'],)), 'bot'
+        )
+
+        assert result == 0
+        assert votes.listed(database, FAMILY.name, None)[0].exclusion is None
+
+    def test_refuses_a_blank_reason(self) -> None:
+        database, _ = moderated_store()
+
+        with pytest.raises(ValueError, match='Give a reason'):
+            votes.exclude(
+                database, FAMILY.name, Selector(column='actor_id', values=('x',)), ' '
+            )
+
+    def test_takes_the_votes_out_of_the_cut_and_the_counts_until_restored(
+        self,
+    ) -> None:
+        database, _ = moderated_store()
+        shared = Selector(column='ip_tag', values=('shared',))
+
+        votes.exclude(database, FAMILY.name, shared, 'bot')
+        excluded_cut = votes.read_cut(database, FAMILY.name, NOW)
+        (excluded_status,) = votes.status(database, FAMILY.name)
+        votes.restore(database, FAMILY.name, shared)
+        restored_cut = votes.read_cut(database, FAMILY.name, NOW)
+        (restored_status,) = votes.status(database, FAMILY.name)
+
+        assert excluded_cut is not None and restored_cut is not None
+        assert (excluded_cut.votes, excluded_cut.excluded) == ((), 4)
+        assert [row.actor for row in restored_cut.votes] == ['x', 'y', 'z']
+        assert restored_cut.excluded == 1
+        assert (excluded_status.votes, excluded_status.voters) == (0, 0)
+        assert (restored_status.votes, restored_status.voters) == (3, 3)
+
+
+class TestRestore:
+    @pytest.mark.parametrize(
+        ('selector', 'changed'),
+        [
+            (Selector(column='ip_tag', values=('mobile',)), 1),
+            (Selector(column='actor_id', values=('y',)), 1),
+            (Selector(column='id', values=(3,)), 1),
+            (Selector(column='actor_id', values=('x',)), 0),
+        ],
+        ids=['ip-tag', 'actor', 'ids', 'counted'],
+    )
+    def test_counts_the_selected_excluded_votes_again(
+        self, selector: Selector, changed: int
+    ) -> None:
+        database, _ = moderated_store()
+
+        result = votes.restore(database, FAMILY.name, selector)
+
+        assert result == changed
+        excluded = [
+            row.id
+            for row in votes.listed(database, FAMILY.name, None)
+            if row.exclusion is not None
+        ]
+        assert excluded == ([] if changed else [3])
 
 
 class TestSnapshotFiles:

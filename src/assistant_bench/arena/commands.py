@@ -1,5 +1,6 @@
-"""Publication and inspection of the arena's vote stores."""
+"""Publication, inspection and moderation of the arena's vote stores."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -9,17 +10,38 @@ from pydantic import TypeAdapter
 
 from assistant_bench import jobs
 from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import D1Error, Target, TargetName, connect
+from assistant_bench.arena.d1 import D1Error, Database, Target, TargetName, connect
 from assistant_bench.arena.runtime import deploy as deploy_target, load_target
 from assistant_bench.catalog import load_export, load_systems
-from assistant_bench.families import load_cases, load_family
-from assistant_bench.messages import count_of
+from assistant_bench.families import Choice, load_cases, load_family
+from assistant_bench.messages import code, count_of
 
 
 app = typer.Typer(no_args_is_help=True)
 _TARGET = TypeAdapter[TargetName](TargetName)
 
 FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
+
+CHOICE_LABELS: dict[Choice, str] = {
+    'a': 'A',
+    'b': 'B',
+    'tie': 'Tie',
+    'both_bad': 'Both bad',
+}
+CLEARED = '(cleared)'
+"""Stands for the network tag of a vote older than the tags' retention."""
+
+FamilyArgument = Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)]
+IpTag = Annotated[
+    str | None, typer.Option(help='A network tag, as `bench arena votes` lists it.')
+]
+Actor = Annotated[
+    str | None, typer.Option(help='A browser, as `bench arena votes` lists it.')
+]
+VoteIds = Annotated[
+    list[int] | None,
+    typer.Option('--vote', help='A vote ID, repeatable.', show_default=False),
+]
 
 
 @app.command()
@@ -38,9 +60,7 @@ def deploy(
 
 
 @app.command()
-def prepare(
-    family: Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)],
-) -> None:
+def prepare(family: FamilyArgument) -> None:
     """Write the family's production publication from its current outputs.
 
     The file goes to publications/<family>/ in the data directory with a Markdown
@@ -128,6 +148,184 @@ def status(
             f'{count_of(row.voters, "voter")}, {row.excluded} excluded, '
             f'latest at {latest}.'
         )
+
+
+@app.command('votes')
+def list_votes(
+    target: Target,
+    family: FamilyArgument,
+    by: Annotated[
+        votes.Grouping,
+        typer.Option(help='Summarize per network tag or per browser.'),
+    ] = 'ip',
+    ip_tag: IpTag = None,
+    actor: Actor = None,
+) -> None:
+    """Summarize the family's votes per network tag or browser, or list one's votes.
+
+    Both include excluded votes, and the list shows each one's reason.
+    """
+    selector = _selector(ip_tag=ip_tag, actor=actor)
+    try:
+        with connect(target) as database:
+            if selector is None:
+                text = _summary(database, family, by)
+            else:
+                text = _listing(database, family, selector)
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
+
+    typer.echo(text or f'No vote of `{family}` in `{target}` matches.')
+
+
+@app.command()
+def exclude(
+    target: Target,
+    family: FamilyArgument,
+    reason: Annotated[
+        str, typer.Option(help='Why the votes stop counting, kept with each vote.')
+    ],
+    ip_tag: IpTag = None,
+    actor: Actor = None,
+    vote: VoteIds = None,
+) -> None:
+    """Stop counting the votes of one network tag, one browser, or the given IDs.
+
+    A vote excluded earlier keeps its first reason. The next `bench close` leaves
+    excluded votes out of the round.
+    """
+    selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
+    try:
+        with connect(target) as database:
+            changed = votes.exclude(database, family, selector, reason)
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
+
+    typer.echo(f'Excluded {count_of(changed, "vote")} of `{family}` in `{target}`.')
+
+
+@app.command()
+def restore(
+    target: Target,
+    family: FamilyArgument,
+    ip_tag: IpTag = None,
+    actor: Actor = None,
+    vote: VoteIds = None,
+) -> None:
+    """Count the excluded votes of one network tag, one browser, or the given IDs."""
+    selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
+    try:
+        with connect(target) as database:
+            changed = votes.restore(database, family, selector)
+    except (D1Error, OSError, ValueError) as error:
+        _fail(str(error))
+
+    typer.echo(f'Restored {count_of(changed, "vote")} of `{family}` in `{target}`.')
+
+
+def _summary(database: Database, family: str, by: votes.Grouping) -> str:
+    groups = votes.groups(database, family, by)
+    return _table(
+        (
+            'IP tag' if by == 'ip' else 'Actor',
+            'Votes',
+            'Actors' if by == 'ip' else 'IP tags',
+            *CHOICE_LABELS.values(),
+            'Median time',
+            'First vote',
+            'Last vote',
+            'Excluded',
+        ),
+        [
+            (
+                group.subject or CLEARED,
+                str(group.votes),
+                str(group.peers),
+                *(f'{group.shares[choice]:.0%}' for choice in CHOICE_LABELS),
+                _seconds(group.median_elapsed_ms),
+                _time(group.first_at),
+                _time(group.last_at),
+                str(group.excluded),
+            )
+            for group in groups
+        ],
+    )
+
+
+def _listing(database: Database, family: str, selector: votes.Selector) -> str:
+    rows = votes.listed(database, family, selector)
+    return _table(
+        (
+            'Vote',
+            'Recorded',
+            'Actor',
+            'IP tag',
+            'A',
+            'B',
+            'Choice',
+            'Time',
+            'Exclusion',
+        ),
+        [
+            (
+                str(row.id),
+                _time(row.recorded_at),
+                row.actor,
+                row.ip_tag or CLEARED,
+                row.a_system,
+                row.b_system,
+                CHOICE_LABELS[row.choice],
+                _seconds(row.elapsed_ms),
+                row.exclusion or '',
+            )
+            for row in rows
+        ],
+    )
+
+
+def _selector(
+    *, ip_tag: str | None, actor: str | None, vote: list[int] | None = None
+) -> votes.Selector | None:
+    """Return the selector the options give, or None when they give none."""
+    given: dict[str, votes.Selector] = {}
+    if ip_tag is not None:
+        given['--ip-tag'] = votes.Selector(column='ip_tag', values=(ip_tag,))
+    if actor is not None:
+        given['--actor'] = votes.Selector(column='actor_id', values=(actor,))
+    if vote:
+        given['--vote'] = votes.Selector(column='id', values=tuple(vote))
+    if len(given) > 1:
+        _fail(f'Pass only one of {code(given)}.')
+
+    return next(iter(given.values()), None)
+
+
+def _required_selector(
+    *, ip_tag: str | None, actor: str | None, vote: list[int] | None
+) -> votes.Selector:
+    selector = _selector(ip_tag=ip_tag, actor=actor, vote=vote)
+    if selector is None:
+        _fail('Pass one of `--ip-tag`, `--actor` or `--vote`.')
+
+    return selector
+
+
+def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    """Align the rows under the header, or return an empty string without rows."""
+    if not rows:
+        return ''
+
+    widths = [max(map(len, column)) for column in zip(header, *rows, strict=True)]
+    return '\n'.join(
+        '  '.join(
+            cell.ljust(width) for cell, width in zip(line, widths, strict=True)
+        ).rstrip()
+        for line in (header, *rows)
+    )
+
+
+def _seconds(milliseconds: float) -> str:
+    return f'{milliseconds / 1000:.1f} s'
 
 
 def _time(milliseconds: int) -> str:

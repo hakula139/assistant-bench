@@ -23,6 +23,7 @@ from support import (
 
 
 runner = CliRunner()
+NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 CATEGORIES = {'first': 'reply', 'second': 'docs'}
 SYSTEMS = {
     name: make_system(name=name, display_name=f'Public {name.title()}')
@@ -72,6 +73,35 @@ def store(monkeypatch: pytest.MonkeyPatch) -> tuple[SQLiteDatabase, list[str]]:
 
     monkeypatch.setattr(commands, 'connect', connect)
     return database, targets
+
+
+@pytest.fixture
+def voted(prepared: Path, store: tuple[SQLiteDatabase, list[str]]) -> SQLiteDatabase:
+    """Publish the prepared file and record two votes from one network tag."""
+    database, _ = store
+    published = publication.read(prepared)
+    publication.publish(database, published, NOW - timedelta(days=1))
+    record_vote(
+        database,
+        published,
+        NOW,
+        actor='first',
+        age=timedelta(hours=2),
+        elapsed_ms=2_000,
+        ip_tag='shared',
+    )
+    record_vote(
+        database,
+        published,
+        NOW,
+        actor='second',
+        age=timedelta(hours=1),
+        choice='b',
+        elapsed_ms=4_000,
+        ip_tag='shared',
+        exclusion='spam',
+    )
+    return database
 
 
 @pytest.fixture
@@ -222,3 +252,132 @@ class TestStatus:
 
         assert result.exit_code == code
         assert result.output == message
+
+
+class TestListVotes:
+    def test_summarizes_each_network_tag(self, voted: SQLiteDatabase) -> None:
+        result = invoke('votes', 'production', 'writing-f')
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            'IP tag  Votes  Actors  A    B    Tie  Both bad  Median time  '
+            'First vote            Last vote             Excluded\n'
+            'shared  2      2       50%  50%  0%   0%        3.0 s        '
+            '2026-10-29 10:00 UTC  2026-10-29 11:00 UTC  1\n'
+        )
+
+    def test_summarizes_each_browser(self, voted: SQLiteDatabase) -> None:
+        result = invoke('votes', 'production', 'writing-f', '--by', 'actor')
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines()[1:] == [
+            'first   1      1        100%  0%    0%   0%        2.0 s        '
+            '2026-10-29 10:00 UTC  2026-10-29 10:00 UTC  0',
+            'second  1      1        0%    100%  0%   0%        4.0 s        '
+            '2026-10-29 11:00 UTC  2026-10-29 11:00 UTC  1',
+        ]
+
+    def test_lists_the_selected_browsers_votes_with_their_reasons(
+        self, voted: SQLiteDatabase
+    ) -> None:
+        result = invoke('votes', 'production', 'writing-f', '--actor', 'second')
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            'Vote  Recorded              Actor   IP tag  A      B      Choice  Time   '
+            'Exclusion\n'
+            '2     2026-10-29 11:00 UTC  second  shared  large  small  B       4.0 s  '
+            'spam\n'
+        )
+
+    @pytest.mark.parametrize(
+        'args', [(), ('--ip-tag', 'unknown')], ids=['summary', 'selector']
+    )
+    def test_says_when_no_vote_matches(
+        self, store: tuple[SQLiteDatabase, list[str]], args: tuple[str, ...]
+    ) -> None:
+        result = invoke('votes', 'production', 'writing-f', *args)
+
+        assert result.exit_code == 0
+        assert result.stdout == 'No vote of `writing-f` in `production` matches.\n'
+
+
+class TestExclude:
+    def test_excludes_the_selected_votes_and_reports_the_new_ones(
+        self, voted: SQLiteDatabase
+    ) -> None:
+        result = invoke(
+            'exclude',
+            'production',
+            'writing-f',
+            '--ip-tag',
+            'shared',
+            '--reason',
+            'bot',
+        )
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == 'Excluded 1 vote of `writing-f` in `production`.\n'
+        assert voted.execute('SELECT exclusion FROM votes ORDER BY id').rows == [
+            {'exclusion': 'bot'},
+            {'exclusion': 'spam'},
+        ]
+
+    def test_refuses_a_blank_reason(self, voted: SQLiteDatabase) -> None:
+        result = invoke(
+            'exclude', 'production', 'writing-f', '--vote', '1', '--reason', ''
+        )
+
+        assert result.exit_code == 1
+        assert result.stderr == 'Give a reason for the exclusion.\n'
+
+
+class TestRestore:
+    def test_restores_the_selected_votes_and_reports_the_count(
+        self, voted: SQLiteDatabase
+    ) -> None:
+        result = invoke(
+            'restore', 'production', 'writing-f', '--vote', '1', '--vote', '2'
+        )
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == 'Restored 1 vote of `writing-f` in `production`.\n'
+        assert voted.execute(
+            'SELECT count(*) AS excluded FROM votes WHERE exclusion IS NOT NULL'
+        ).rows == [{'excluded': 0}]
+
+
+class TestSelector:
+    @pytest.mark.parametrize(
+        ('args', 'message'),
+        [
+            (
+                ('exclude', 'production', 'writing-f', '--reason', 'bot'),
+                'Pass one of `--ip-tag`, `--actor` or `--vote`.\n',
+            ),
+            (
+                ('restore', 'production', 'writing-f'),
+                'Pass one of `--ip-tag`, `--actor` or `--vote`.\n',
+            ),
+            (
+                ('restore', 'production', 'writing-f', '--actor', 'a', '--vote', '1'),
+                'Pass only one of `--actor`, `--vote`.\n',
+            ),
+            (
+                ('votes', 'production', 'writing-f', '--ip-tag', 't', '--actor', 'a'),
+                'Pass only one of `--ip-tag`, `--actor`.\n',
+            ),
+        ],
+        ids=['exclude-none', 'restore-none', 'restore-two', 'votes-two'],
+    )
+    def test_refuses_anything_but_one_selector_before_connecting(
+        self,
+        store: tuple[SQLiteDatabase, list[str]],
+        args: tuple[str, ...],
+        message: str,
+    ) -> None:
+        result = invoke(*args)
+
+        assert result.exit_code == 1
+        assert result.stderr == message
+        assert store[1] == []
