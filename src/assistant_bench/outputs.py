@@ -40,6 +40,8 @@ class Output(BaseModel):
     """For voted tasks, the diff of the solution the tests graded."""
 
     finish_reason: str | None
+    """For a single-call reply, or the completion failure that ended an agent run."""
+
     stop_details: StopDetails | None
     """Set only when a Messages refusal ended the trial, in a reply or an agent run."""
 

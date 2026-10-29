@@ -42,9 +42,13 @@ from assistant_bench.harnesses.messages import (
     MessagesLLM,
     MessageStreamError,
 )
-from assistant_bench.harnesses.responses import ResponsesChat, ResponsesLLM
+from assistant_bench.harnesses.responses import (
+    ResponseCompletionError,
+    ResponsesChat,
+    ResponsesLLM,
+)
 from assistant_bench.harnesses.terminus import Terminus
-from assistant_bench.outputs import Output
+from assistant_bench.outputs import Output, StopDetails
 from support import (
     StubEndpoint,
     completion,
@@ -218,8 +222,12 @@ def run_and_collect(
     tmp_path: Path,
     families_dir: Path,
     data_dir: Path,
+    error: type[Exception] | None = None,
 ) -> tuple[AgentContext, Output]:
-    """Run Terminus on a one-task family, then record and collect its trial."""
+    """Run Terminus on a one-task family, then record and collect its trial.
+
+    A run expected to fail with `error` records its type as Harbor does.
+    """
     write_task_family(families_dir, 'echo', systems=(system.name,))
     family = load_family('f')
     config = jobs.job(family, [system], [])
@@ -231,7 +239,11 @@ def run_and_collect(
     )
     context = AgentContext()
 
-    asyncio.run(agent.execute(terminal_session, context))
+    if error is None:
+        asyncio.run(agent.execute(terminal_session, context))
+    else:
+        with pytest.raises(error):
+            asyncio.run(agent.execute(terminal_session, context))
     write_trial(
         data_dir / 'jobs' / family.name / 'job-1',
         'echo__1',
@@ -240,6 +252,7 @@ def run_and_collect(
         version='1.0.0',
         instruction=None,
         context=context,
+        error=error.__name__ if error else None,
         environment=config.environment,
         verifier_disabled=config.verifier.disable,
     )
@@ -570,6 +583,7 @@ class TestTerminus:
             ) == (240, 200, 80)
             assert collected.cache_write_tokens == 20
             assert collected.cost_usd is None
+            assert collected.finish_reason is None
             assert context.metadata is not None
             assert [
                 result['cache_write_tokens'] for result in context.metadata['responses']
@@ -754,36 +768,77 @@ class TestTerminus:
             assert 'input_tokens' not in recorded
             assert recorded['usage_invalid'] is True
 
-        def test_native_refusal_records_its_detail_without_quality_retries(
+        @pytest.mark.parametrize(
+            ('stop', 'details', 'tool', 'finish'),
+            [
+                (
+                    'refusal',
+                    {
+                        'type': 'refusal',
+                        'category': 'cyber',
+                        'explanation': 'Exploit development.',
+                    },
+                    False,
+                    'refusal',
+                ),
+                ('pause_turn', None, False, 'pause_turn'),
+                ('stop_sequence', None, False, 'stop_sequence'),
+                ('tool_use', None, True, 'unexpected_content'),
+            ],
+            ids=['refusal', 'pause', 'stop-sequence', 'tool'],
+        )
+        def test_native_completion_failure_names_its_cause_without_quality_retries(
             self,
             endpoint: StubEndpoint,
-            messages_agent: NativeProbe,
             terminal_session: TmuxSession,
+            tmp_path: Path,
+            families_dir: Path,
+            data_dir: Path,
+            stop: str,
+            details: dict[str, Any] | None,
+            tool: bool,
+            finish: str,
         ) -> None:
-            details = {
-                'type': 'refusal',
-                'category': 'cyber',
-                'explanation': 'Exploit development.',
-            }
-            endpoint.stream = message_stream(
-                message('Cannot answer.', stop_reason='refusal', stop_details=details)
+            payload = message('Cannot answer.', stop_reason=stop, stop_details=details)
+            if tool:
+                payload['content'].append(
+                    {
+                        'type': 'tool_use',
+                        'id': 'tool-1',
+                        'name': 'read_file',
+                        'input': {'path': 'greeting.txt'},
+                    }
+                )
+            endpoint.stream = message_stream(payload)
+            system = make_system(
+                harness='terminus-2',
+                api='anthropic-messages',
+                thinking_mode='anthropic-adaptive',
+                max_output_tokens=32768,
+                context_window=131072,
             )
-            context = AgentContext()
 
-            with pytest.raises(MessageCompletionError):
-                asyncio.run(messages_agent.execute(terminal_session, context))
+            context, collected = run_and_collect(
+                system,
+                endpoint,
+                terminal_session,
+                tmp_path,
+                families_dir,
+                data_dir,
+                MessageCompletionError,
+            )
 
             assert len(endpoint.requests) == 1
-            assert context.metadata is not None
-            assert context.metadata['stop_details'] == details
+            assert collected.error == 'MessageCompletionError'
+            assert collected.finish_reason == finish
+            assert collected.stop_details == (
+                StopDetails.model_validate(details) if details else None
+            )
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
                 context.n_output_tokens,
             ) == (130, 100, 40)
-            assert [
-                item['finish_reason'] for item in context.metadata['responses']
-            ] == ['refusal']
 
         @pytest.mark.parametrize(
             ('usage', 'tokens', 'cost'),
@@ -1554,15 +1609,16 @@ class TestTerminus:
             assert calls[1 - unknown]['output_tokens'] == 40
 
         @pytest.mark.parametrize(
-            ('status', 'reason', 'refusal', 'error'),
+            ('status', 'reason', 'refusal', 'error', 'tool', 'finish'),
             [
-                ('failed', None, None, True),
-                ('queued', None, None, False),
-                ('cancelled', None, None, False),
-                ('incomplete', 'content_filter', None, False),
-                ('incomplete', None, None, False),
-                ('completed', None, 'I cannot answer.', False),
-                ('completed', None, None, True),
+                ('failed', None, None, True, False, 'error'),
+                ('queued', None, None, False, False, 'queued'),
+                ('cancelled', None, None, False, False, 'cancelled'),
+                ('incomplete', 'content_filter', None, False, False, 'content_filter'),
+                ('incomplete', None, None, False, False, 'incomplete'),
+                ('completed', None, 'I cannot answer.', False, False, 'refusal'),
+                ('completed', None, None, True, False, 'error'),
+                ('completed', None, None, False, True, 'unexpected_content'),
             ],
             ids=[
                 'failed',
@@ -1572,17 +1628,22 @@ class TestTerminus:
                 'unknown-incomplete',
                 'refused',
                 'error-with-completed-status',
+                'function-call',
             ],
         )
         def test_rejects_unusable_native_responses_without_retrying(
             self,
             endpoint: StubEndpoint,
+            terminal_session: TmuxSession,
             tmp_path: Path,
+            families_dir: Path,
+            data_dir: Path,
             status: str,
             reason: str | None,
             refusal: str | None,
             error: bool,
-            terminal_session: TmuxSession,
+            tool: bool,
+            finish: str,
         ) -> None:
             payload = response(
                 'Partial answer.',
@@ -1592,6 +1653,17 @@ class TestTerminus:
             )
             if error:
                 payload['error'] = {'code': 'server_error', 'message': 'Unavailable.'}
+            if tool:
+                payload['output'].append(
+                    {
+                        'id': 'fc-1',
+                        'type': 'function_call',
+                        'call_id': 'call-1',
+                        'name': 'read_file',
+                        'arguments': '{"path":"greeting.txt"}',
+                        'status': 'completed',
+                    }
+                )
             Response.model_validate(payload)
             endpoint.response = payload
             system = make_system(
@@ -1600,18 +1672,21 @@ class TestTerminus:
                 max_output_tokens=32768,
                 context_window=131072,
             )
-            agent = NativeProbe(
-                logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
-                extra_env=endpoint.env,
-                **agent_kwargs(system),
-            )
-            context = AgentContext()
 
-            with pytest.raises(openai.APIError):
-                asyncio.run(agent.execute(terminal_session, context))
+            context, collected = run_and_collect(
+                system,
+                endpoint,
+                terminal_session,
+                tmp_path,
+                families_dir,
+                data_dir,
+                ResponseCompletionError,
+            )
 
             assert len(endpoint.requests) == 1
+            assert collected.error == 'ResponseCompletionError'
+            assert collected.finish_reason == finish
+            assert collected.stop_details is None
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -1880,6 +1955,8 @@ class TestTerminus:
                 'n_episodes': 1,
                 'nixos_config_rev': export.rev,
                 'harbor_version': metadata.version('harbor'),
+                'finish_reason': None,
+                'stop_details': None,
                 'responses': [],
                 'cache_write_unpriced': False,
             }
