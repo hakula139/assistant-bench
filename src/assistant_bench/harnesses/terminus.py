@@ -307,12 +307,12 @@ class Terminus(Terminus2):
     ) -> None:
         nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
-        terminal: dict[str, Any] = {}
+        failed_attempt: dict[str, Any] = {}
         try:
             await super().run(instruction, environment, context)
         except MessageCompletionError, ResponseCompletionError:
             assert isinstance(self._llm, (MessagesLLM, ResponsesLLM))
-            terminal = self._llm.attempts[-1]
+            failed_attempt = self._llm.attempts[-1]
             raise
         finally:
             await self._endpoint_client.close()
@@ -320,8 +320,8 @@ class Terminus(Terminus2):
                 **(context.metadata or {}),
                 'nixos_config_rev': nixos_config_rev,
                 'harbor_version': harbor_version,
-                'finish_reason': terminal.get('finish_reason'),
-                'stop_details': terminal.get('stop_details'),
+                'finish_reason': failed_attempt.get('finish_reason'),
+                'stop_details': failed_attempt.get('stop_details'),
             }
             if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
                 if isinstance(self._llm, MessagesLLM):

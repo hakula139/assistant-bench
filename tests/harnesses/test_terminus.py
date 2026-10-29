@@ -1619,6 +1619,7 @@ class TestTerminus:
                 ('completed', None, 'I cannot answer.', False, False, 'refusal'),
                 ('completed', None, None, True, False, 'error'),
                 ('completed', None, None, False, True, 'unexpected_content'),
+                ('cancelled', None, None, False, True, 'cancelled'),
             ],
             ids=[
                 'failed',
@@ -1629,6 +1630,7 @@ class TestTerminus:
                 'refused',
                 'error-with-completed-status',
                 'function-call',
+                'cancelled-function-call',
             ],
         )
         def test_rejects_unusable_native_responses_without_retrying(
