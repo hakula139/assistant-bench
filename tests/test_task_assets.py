@@ -49,6 +49,14 @@ class TestSharedFiles:
             [*map(Path, SHARED_FILES), Path('tests/nested/helper.py')]
         )
 
+    def test_skips_bytecode_caches(self, tmp_path: Path) -> None:
+        coding, _ = shared_tree(tmp_path)
+        cache = coding / 'shared' / 'tests' / '__pycache__' / 'verify.cpython-314.pyc'
+        cache.parent.mkdir()
+        cache.write_bytes(b'bytecode')
+
+        assert task_assets.shared_files(tmp_path) == sorted(map(Path, SHARED_FILES))
+
 
 class TestSync:
     def test_writes_each_missing_or_stale_copy_and_is_idempotent(

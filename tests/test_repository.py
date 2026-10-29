@@ -109,7 +109,7 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     jobs.check_tasks(family, tasks)
 
 
-@pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT))
+@pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT), ids=str)
 def test_coding_tasks_copy_their_shared_files(shared: Path) -> None:
     canonical = (CODING / 'shared' / shared).read_bytes()
 
