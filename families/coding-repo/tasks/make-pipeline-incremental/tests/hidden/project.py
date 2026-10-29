@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -39,8 +40,10 @@ STEPS = textwrap.dedent(
         _log(context, 'report')
         table = next(path for path in context.inputs if path.suffix == '.csv')
         rows = table.read_text().splitlines()
-        if os.environ.get('FAIL_REPORT'):
-            context.outputs[0].write_text('partial')
+        failure = os.environ.get('FAIL_REPORT')
+        if failure:
+            if failure != 'early':
+                context.outputs[0].write_text('partial')
             raise RuntimeError('report failed')
         header = ''.join(
             path.read_text() for path in context.inputs if path.suffix == '.txt'
@@ -146,12 +149,13 @@ class ProjectCase(unittest.TestCase):
         return log.read_text().split() if log.exists() else []
 
     def outputs(self, root: Path) -> dict[str, bytes]:
-        """Read every file under the output directories `build` and `site`."""
+        """Read every declared output that exists."""
+        steps = tomllib.loads((root / 'pipeline.toml').read_text())['steps']
         return {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for directory in ('build', 'site')
-            for path in sorted((root / directory).rglob('*'))
-            if path.is_file()
+            output: (root / output).read_bytes()
+            for step in steps.values()
+            for output in step['outputs']
+            if (root / output).is_file()
         }
 
     def edit(self, name: str, old: str, new: str) -> None:

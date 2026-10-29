@@ -31,7 +31,9 @@ class IncrementalBuildTest(ProjectCase):
 
         result = self.cli('build')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn('ran ', result.stdout)
+        self.assertFalse(
+            {f'ran {name}' for name in ALL} & set(result.stdout.splitlines())
+        )
         self.assert_matches_clean_build()
 
     def test_touching_files_runs_nothing(self) -> None:
@@ -81,6 +83,20 @@ class IncrementalBuildTest(ProjectCase):
 
                 self.assertEqual(self.build(), ['publish'])
                 self.assert_matches_clean_build()
+
+    def test_reordered_parameter_keys_run_nothing(self) -> None:
+        self.edit(
+            'pipeline.toml', '{ title = "Weekly" }', '{ title = "Weekly", by = 1 }'
+        )
+        self.assertEqual(self.build(), ['publish'])
+
+        self.edit(
+            'pipeline.toml',
+            '{ title = "Weekly", by = 1 }',
+            '{ by = 1, title = "Weekly" }',
+        )
+
+        self.assertEqual(self.build(), [])
 
     def test_pattern_changes_with_the_same_matches(self) -> None:
         self.edit('pipeline.toml', '["raw/*.csv"]', '["raw/*.csv", "raw/*.tsv"]')
@@ -179,15 +195,19 @@ class IncrementalBuildTest(ProjectCase):
         self.assertEqual(self.build(), ['report', 'publish'])
         self.assert_matches_clean_build()
 
-    def test_partial_outputs_of_failed_runs_are_replaced(self) -> None:
+    def test_failed_runs_rerun_after_their_inputs_revert(self) -> None:
+        """A failed run that wrote part of an output, then one that wrote none."""
         original = (self.root / 'raw/b.csv').read_text()
-        self.write('raw/b.csv', 'c; 30\n')
-        self.assertEqual(self.cli('build', env={'FAIL_REPORT': '1'}).returncode, 1)
+        for failure in ('partial', 'early'):
+            with self.subTest(failure=failure):
+                self.write('raw/b.csv', 'c; 30\n')
+                failed = self.cli('build', env={'FAIL_REPORT': failure})
+                self.assertEqual(failed.returncode, 1, failed.stderr)
 
-        self.write('raw/b.csv', original)
+                self.write('raw/b.csv', original)
 
-        self.assertEqual(self.build(), ['clean', 'report'])
-        self.assert_matches_clean_build()
+                self.assertEqual(self.build(), ['clean', 'report'])
+                self.assert_matches_clean_build()
 
     def test_targets_record_what_they_build(self) -> None:
         self.write('raw/c.csv', 'd; 4\n')

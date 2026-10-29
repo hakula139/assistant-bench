@@ -3,7 +3,7 @@
 @@ -29,4 +29,3 @@
          'patterns': spec.inputs,
 -        # A repr keeps a TOML date apart from the string it formats as.
--        'params': repr(spec.params),
+-        'params': repr(canonical(spec.params)),
 +        'params': spec.params,
          'outputs': spec.outputs,
 @@ -37,3 +36,3 @@

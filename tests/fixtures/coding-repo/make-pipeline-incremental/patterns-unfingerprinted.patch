@@ -6,5 +6,5 @@
          'run': spec.run,
 -        'patterns': spec.inputs,
          # A repr keeps a TOML date apart from the string it formats as.
-         'params': repr(spec.params),
+         'params': repr(canonical(spec.params)),
          'outputs': spec.outputs,
