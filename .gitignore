@@ -9,9 +9,7 @@ dist/
 
 # Dependencies
 .venv/
-.venv-workers/
 node_modules/
-python_modules/
 
 # Environment
 .dev.vars
@@ -36,7 +34,6 @@ result-*
 .pytest_cache/
 .ruff_cache/
 .wrangler/
-/.wrangler-render-*.toml
 __pycache__/
 
 # OS files

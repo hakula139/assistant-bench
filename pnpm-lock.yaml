@@ -29,21 +29,6 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1(prettier-plugin-astro@1.1.1(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(prettier@3.9.10))(prettier@3.9.10)
 
-  arena:
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^5.20261023.1
-        version: 5.20261023.1
-      eslint:
-        specifier: ^10.13.0
-        version: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      typescript-eslint:
-        specifier: ^8.72.0
-        version: 8.72.0(eslint@10.13.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
-
   web:
     dependencies:
       '@astrojs/react':
@@ -6605,7 +6590,8 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261023.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20261023.1': {}
+  '@cloudflare/workers-types@5.20261023.1':
+    optional: true
 
   '@cspell/cspell-bundled-dicts@10.4.0':
     dependencies:

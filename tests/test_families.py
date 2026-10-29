@@ -16,7 +16,6 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
-from assistant_bench_arena import models
 from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
 
 
@@ -98,24 +97,7 @@ def accepts(adapter: TypeAdapter[str], value: str) -> bool:
     return True
 
 
-class TestVoteTypes:
-    @pytest.mark.parametrize(
-        ('offline', 'contract'),
-        [
-            (TypeAdapter(families.FamilyName), TypeAdapter(models.FamilyName)),
-            (TypeAdapter(families.Choice), TypeAdapter(models.Choice)),
-            (TypeAdapter(families.Defect), TypeAdapter(models.Defect)),
-        ],
-        ids=['family-name', 'choice', 'defect'],
-    )
-    def test_match_the_voting_contract(
-        self, offline: TypeAdapter[str], contract: TypeAdapter[str]
-    ) -> None:
-        offline_schema = offline.json_schema()
-        contract_schema = contract.json_schema()
-
-        assert offline_schema == contract_schema
-
+class TestFamilyName:
     @pytest.mark.parametrize(
         ('name', 'valid'),
         [
@@ -139,17 +121,10 @@ class TestVoteTypes:
             'too-long',
         ],
     )
-    def test_family_names_validate_like_the_voting_contract(
-        self, name: str, valid: bool
-    ) -> None:
-        adapters = {
-            'offline': TypeAdapter(families.FamilyName),
-            'contract': TypeAdapter(models.FamilyName),
-        }
+    def test_validates_like_the_site_and_worker(self, name: str, valid: bool) -> None:
+        accepted = accepts(TypeAdapter(families.FamilyName), name)
 
-        accepted = {side: accepts(adapter, name) for side, adapter in adapters.items()}
-
-        assert accepted == {'offline': valid, 'contract': valid}
+        assert accepted == valid
 
 
 class TestLoadFamily:

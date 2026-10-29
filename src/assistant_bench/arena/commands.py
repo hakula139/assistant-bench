@@ -6,19 +6,16 @@ from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
-from pydantic import TypeAdapter
 
 from assistant_bench import jobs
 from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import D1Error, Database, Target, TargetName, connect
-from assistant_bench.arena.runtime import deploy as deploy_target, load_target
+from assistant_bench.arena.d1 import D1Error, Database, Target, connect
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.families import Choice, family_names, load_cases, load_family
 from assistant_bench.messages import code, count_of
 
 
 app = typer.Typer(no_args_is_help=True)
-_TARGET = TypeAdapter[TargetName](TargetName)
 
 
 def _known_family(name: str | None) -> str | None:
@@ -55,21 +52,6 @@ VoteIds = Annotated[
     list[int] | None,
     typer.Option('--vote', help='A vote ID, repeatable.', show_default=False),
 ]
-
-
-@app.command()
-def deploy(
-    target: Annotated[
-        str, typer.Argument(help='Configured staging or production target.')
-    ],
-) -> None:
-    """Deploy the prepared site and voting services to a configured target."""
-    try:
-        deploy_target(load_target(_TARGET.validate_python(target)))
-    except (OSError, ValueError) as error:
-        _fail(str(error))
-
-    typer.echo(f'Deployed voting services for `{target}`.')
 
 
 @app.command()
