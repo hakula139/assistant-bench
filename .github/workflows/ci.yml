@@ -94,18 +94,8 @@ jobs:
       - name: Build site
         run: nix develop -c pnpm build
 
-      - name: Install Worker tooling
-        run: nix develop -c uv sync --locked
-
       - name: Bundle the voting Worker
-        shell: bash
-        run: |
-          nix develop -c env -u _PYTHON_SYSCONFIGDATA_NAME -u _PYTHON_HOST_PLATFORM \
-            uv run pywrangler deploy --dry-run --env staging \
-            --env-file /dev/null --outdir /tmp/assistant-bench-worker
-
-      - name: Check native dependency lock
-        run: git diff --exit-code -- pylock.toml
+        run: nix develop -c pnpm --filter web exec wrangler deploy --dry-run --env production
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -131,11 +121,8 @@ jobs:
       - name: Set up Nix
         uses: ./.github/actions/setup-nix
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
-
-      - name: Install Node dependencies
-        run: nix develop .#python -c pnpm install
 
       - name: Lint
         run: nix develop .#python -c uv run ruff check
@@ -399,10 +386,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.head.outputs.current
-        shell: bash
-        run: |
-          nix develop -c pnpm install
-          nix develop -c uv sync --locked
+        run: nix develop -c pnpm install
 
       - name: Download site artifact
         if: steps.head.outputs.current
@@ -411,8 +395,14 @@ jobs:
           name: site-dist
           path: web/dist/
 
+      - name: Apply D1 migrations
+        if: steps.head.outputs.current
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: nix develop -c pnpm --filter web exec wrangler d1 migrations apply DB --env production --remote
+
       - name: Deploy to Cloudflare Workers
         if: steps.head.outputs.current
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: nix develop -c uv run bench arena deploy production
+        run: nix develop -c pnpm --filter web exec wrangler deploy --env production
