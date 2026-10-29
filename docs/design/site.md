@@ -12,7 +12,7 @@ Each board uses the shared scorer and render registries for its steps, labels, a
 
 A votes board shows one round, with its category filter kept in the URL. The category filter shows each category's label while the URL keeps its ID:
 
-- **Summary:** vote, session and effective vote counts, excluded votes, split-half agreement and length bias. Round settings show the recorded method and rules.
+- **Summary:** vote, voter and effective vote counts, excluded votes, split-half agreement and length bias. Round settings show the recorded method and rules.
 - **Leaderboard:** a sortable table with point scores on one shared axis. Preliminary systems use hollow dots, derived from that round's decisive counts and threshold. The axis begins at most 600 points below the top score and represents clipped points with arrowheads. A category selection uses its refit and labels family-wide columns. When a round's outputs have test rewards, a family-wide pass rate with its 95% interval replaces the gate-failure column. Unranked systems follow by name.
 - **Categories:** point plots share an axis starting at the lowest of their own cuts, and follow the family's declared category order. Rows follow the family board's order, followed by systems ranked only in that category.
 - **Cost and latency:** point scores against mean cost per output and p50 latency, with a labelled Pareto frontier. Each metric uses a log axis when every value is positive and a linear axis when it includes zero. A chart without priced or timed systems is omitted.

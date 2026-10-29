@@ -13,16 +13,12 @@ src/assistant_bench/
 ├── manifest.py                             # The committed manifest of every runnable system's fingerprint
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
-│   ├── commands.py                         # Publication, evidence and private administration commands
-│   ├── evidence.py                         # Replay of immutable receipt and control history
-│   ├── exports.py                          # Bounded capture and verification of registered evidence cuts
+│   ├── commands.py                         # Publication, status and deploy commands
+│   ├── d1.py                               # The D1 REST client and each target's database
 │   ├── management.py                       # Authenticated native Service client
-│   ├── preparation.py                      # Explicit solution selection and current provenance checks
-│   ├── publication.py                      # Approved numerical and presentation projections
-│   ├── publishing.py                       # Guarded release activation and sampling refresh
+│   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   ├── runtime.py                          # Named native targets and Service-only configuration
-│   ├── snapshots.py                        # Verified evidence cuts as report inputs and sampling points
-│   └── sources.py                          # Native task hash and agent-input proof
+│   └── votes.py                            # Vote cuts, the snapshots that save them, and the round they close
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
@@ -51,7 +47,7 @@ src/assistant_bench/
 
 ## Import Layers
 
-`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. Only the offline `arena` modules import its shared contracts, for release preparation and evidence analysis. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
+`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. Only the offline `arena.runtime` and `arena.management` modules import its shared contracts, to deploy and manage the native Worker. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
 
 ```text
 src/assistant_bench_arena/
@@ -93,7 +89,7 @@ Imports point downward through these layers, so a module never imports one above
 
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands` and `manifest`
-3. `arena.preparation` and `jobs`
+3. `jobs`
 4. The remaining offline `arena` modules
 5. `report`
 6. `outputs`, `harnesses`, and `scoring`
@@ -101,7 +97,7 @@ Imports point downward through these layers, so a module never imports one above
 8. `generation`, `messages`, `paths`, and `diffs`
 9. `assistant_bench_arena`
 
-`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from evidence cuts and seals into each release. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 
@@ -124,8 +120,8 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
 3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench arena prepare` proves the exact selected solution inputs and public content approvals. `publish` seals and activates the release in the canonical D1 owner. The public [arena](arena.md) records real votes there.
-5. `bench arena export` captures an immutable D1 evidence cut. `bench close <family> --snapshot <path>` fits its frozen [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes directly from its collected trial rewards with `bench close <family>`.
+4. `bench arena prepare <family>` writes a publication of the current outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes.
+5. `bench close <family>` saves a cut of the counted votes, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes from its collected trial rewards instead.
 
 `bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that collection never reads them.
 

@@ -47,14 +47,15 @@ Commands stay minimal, and settings live in config files:
 | Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
 | Repeat share, seed votes, and sampling policy                                 | `src/assistant_bench_arena/scheduler.py`                                                                              |
 | The voting runtime's origins, namespace, and D1 bindings                      | `wrangler.toml`                                                                                                       |
-| Point-fit parameters, the actor cap, and diagnostic coverage rules            | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, sealed into each release and recorded in each report   |
+| The Cloudflare account and the vote stores' D1 databases                      | `web/wrangler.toml`                                                                                                   |
+| Point-fit parameters, the actor cap, and diagnostic coverage rules            | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |
 | The model endpoint                                                            | The ignored `.env`                                                                                                    |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
 | The Cloudflare Workers deploy                                                 | `wrangler.toml` for voting and `web/wrangler.toml` for static previews                                                |
 | Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
 
-Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings and native `BENCH_ANTHROPIC_BASE_URL` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
+Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, and the D1 token file `BENCH_D1_TOKEN_FILE` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
 
 `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else.
 

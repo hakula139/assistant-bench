@@ -2,39 +2,30 @@
 
 The arena shows blind pairs of outputs from a family scored by votes and records each choice. The [module map](architecture.md#module-map) identifies its implementation boundaries.
 
-## Publication and Evidence
+## Publication and Closing
 
-`bench arena` manages immutable releases through a named native Worker profile in `wrangler.toml`. The private Service binding admits typed publication, export and moderation operations. A target must be explicitly configured before its commands can connect.
+The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API, one statement per request. `web/wrangler.toml` names the account and each target's database, and the token comes from the file that `BENCH_D1_TOKEN_FILE` in `.env` names.
 
 ```bash
-uv run bench arena prepare selection.json release.json
-uv run bench arena publish production release.json
+uv run bench arena prepare writing-zh
+uv run bench arena publish production <publication>.json
 uv run bench arena status production writing-zh
-uv run bench arena health production
-uv run bench arena export production writing-zh evidence.json
-uv run bench arena refresh production evidence.json
-uv run bench close writing-zh --snapshot evidence.json
+uv run bench close writing-zh
 ```
 
-The selection names a rendered case family and exact `outputs`, each identified by `case`, `system`, `job` and `trial`. Preparation re-collects current trials, checks the resolved family fingerprints, and proves the rendered tasks against their native Harbor locks. Every selected sample of a case must have received the same instruction and source inputs. The prepared artifact contains the frozen numerical evaluation, presentation, rendered outputs and initial sampling points.
+Each case votes in exactly one store. Production votes on the public and synthetic cases of a family that sets `public_voting`, and every other case is voted locally. `prepare` requires `public_voting`, collects the family's current outputs, keeps the listed systems' outputs on the production cases, and writes `publications/<family>/<id>.json` in the data directory with a Markdown listing beside it. The listing shows each case's instruction and checklist, each passing output's text or diff under its system name, and each failing or ungraded output's system and gates. Reviewing the listing and publishing that exact file approves it.
 
-Preparation requires the family's `public_voting` opt-in and an exact `PublicApproval`: source and license attestations for the selected cases, plus content and presentation digests for every published case and output. Synthetic classification and passing gates alone do not authorize publication. Regeneration changes the approved output identities and requires another review.
+- **Identities.** The publication ID digests the file's content without the ID, so `publish` refuses an edited file. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them.
+- **Content.** Only passing outputs carry content, since only they can form a voted pair. Every output carries its verdict, length and content digest, which settle the comparisons no one votes on.
+- **Publishing** refuses a private case before anything leaves the machine. It inserts the cases and outputs idempotently, then activates the publication for its family only once every row is staged, so an interrupted run completes on a rerun and an identical file changes nothing.
 
-Publication seals the replacement before activating it with the current family revision. A presentation refresh retains the active fitted points when its numerical evaluation is unchanged. `refresh` fits the saved evidence offline, then updates sampling points while retaining the active presentation. Concurrent control changes can refuse activation, so inspect the current status before choosing another cut. In the current schema, ordinary votes do not change the revision, so steady voting does not invalidate a staged publication.
+`bench close` for a votes family takes a cut from production, saves it as `votes/<family>/<taken-at>.json` in the data directory, and closes the round from that file. `--snapshot <path>` recloses a saved file without the store.
 
-`status` includes the deployment's aggregate network-association expiry lag in milliseconds. `health` checks the selected deployment and exits unsuccessfully when expired associations have awaited cleanup for more than five minutes.
-
-An export captures every section at registered immutable cutoffs. Its authoritative section counts detect missing pages, while its content digest detects later file changes. Captures contain numerical evidence and provenance without network associations. `bench close --snapshot` reads the saved inventory, labels and measurements without consulting the running owner or current catalog. The raw accepted count includes repeats and withdrawn or moderated receipts. The actor cap applies once to all eligible ordinary votes before any report subset or diagnostic is fitted.
-
-Generate the application's safe static family list from approved releases:
-
-```bash
-uv run bench arena catalog web/public/arena-families.json release.json
-```
-
-The catalog contains only family IDs, display labels, aspects and available defect tags. It carries no case, output or system inventory.
-
-For private administration, `bench arena investigate <target> filters.json` returns one bounded receipt page with its continuation sequence. Filters can select a family, actor, session, evaluation, time range, current status or an unexpired keyed network tag. Continue with `--after <sequence>`. `bench arena moderate <target> plan.json` stages and seals an exact reviewed exclusion or restoration plan, then applies its bounded chunks. Repeating the same plan resumes its immutable commands. Network associations remain searchable for 60 days and are excluded from permanent numerical exports.
+- **A cut** holds the largest vote ID older than the ten-minute undo window, the active publication without content, the counted votes up to that ID and the number of excluded ones. It carries no network tags.
+- **Counting.** A vote counts when both of its outputs are still in the active publication and still pass, and when their content differs. Every other vote, and every excluded one, counts in `dropped_votes`. Actors are prefixed with their store, so the actor cap and `voters` count each browser once.
+- **Settlements** come from the publication's verdicts and content digests by the rule in [Sessions and Pairs](#sessions-and-pairs).
+- **Measurements.** Latency, tokens and cost come from the collected `outputs/<family>.jsonl`, matched by output key. An output missing from the file contributes null.
+- **The report** names its evidence by each store's cutoff, without any digest of private content.
 
 ## Blinding
 
@@ -48,20 +39,18 @@ Only different outputs that passed their gates can form a human comparison. The 
 
 Gate failures and identical outputs settle comparisons without a browser vote. A failing output loses, two failing outputs count as both bad, and identical outputs tie. Every pairing of two systems' samples on a case carries weight 1 / (the product of their sample counts), so one case contributes at most one settled vote per pair of systems. Settled comparisons have no display side.
 
-The numerical evaluation freezes these output facts. A later publication changes them through a new evaluation, while a presentation-only refresh keeps the same numerical identity. Withdrawals and moderation append evidence events. An export replays the captured history and keeps inactive receipts in its accepted denominator.
+A publication freezes these output facts, and only a later publication changes them. An undone or excluded vote stays out of the fit.
 
 ## Vote Store
 
 Production D1 is the sole source of real votes, including votes cast from a MacBook. Staging uses a separate preview D1 for deployed validation.
 
-The ledger holds immutable evaluations, approved publications, sampling snapshots, receipt history and guarded control events. Typed private management commands publish and investigate these records. Database bindings belong to the native owner, while the management client has only its authenticated Service capability.
+`web/wrangler.toml` names each target's database, whose tables `web/migrations/0001_init.sql` defines. Until the voting Worker launches, the older Worker keeps serving its starter round from its own ledger databases, which `wrangler.toml` at the repository root configures. No command reads the votes cast there, and they are dropped at the launch.
 
-`src/assistant_bench_arena/schema.sql` holds the ledger's whole schema. Until other people vote on the public arena, a schema change rewrites that file and recreates the staging and production databases, dropping their votes. From then on, each schema change ships as the next numbered Wrangler D1 migration, which carries only the schema's SQL, so existing votes survive and no code moves or rewrites them.
+## Schema Changes
+
+`web/migrations/` holds the arena's schema as Wrangler D1 migration files. `wrangler d1 migrations apply` records each applied file in `d1_migrations` and skips it afterward. The operator applies them to staging and production, while the Python tests apply the same files to an in-memory store. The voting Worker has not launched yet, so `0001_init.sql` is the whole schema: a schema change edits it, and the operator recreates the staging and production databases, dropping their votes.
 
 ## Vote API
 
 Anonymous browsers qualify through abuse checks and receive bounded session authority. The native owner validates the configured origin, capability scope, command identity and current ledger state before accepting a choice. Browser and network admission quotas limit submissions, while the offline cap limits one browser actor's total ranking influence. Private management has no public HTTP route.
-
-## Render Origin
-
-HTML outputs load from a separate cookie host inside sandboxed frames. The renderer receives a narrow read capability for the current authorized output and has no database or management binding. Its content policy blocks network requests and permits only the output's contained scripts, styles and data images. Text and diff panes retain the same identity blinding.

@@ -64,7 +64,7 @@ uv run bench collect
 uv run bench collect smoke-text
 ```
 
-`bench run` collects its own trials, and closing a `tests` family re-collects its trials. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. Voted reports use frozen canonical evidence.
+`bench run` collects its own trials, and closing a `tests` family re-collects its trials. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. Voted reports read the measurements from these records.
 
 It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
 
@@ -93,18 +93,29 @@ Each record holds:
 
 ## Voting
 
-Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate releases and runtime changes. Publishing collected outputs requires exact source proof and explicit public approval, as [Arena](../design/arena.md) describes.
+Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.
+
+Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml`, and `BENCH_D1_TOKEN_FILE` in `.env` naming a file that holds a Cloudflare API token with D1 Edit:
+
+```bash
+uv run bench arena prepare writing-zh
+uv run bench arena publish staging <publication>.json
+uv run bench arena publish production <publication>.json
+uv run bench arena status production writing-zh
+```
+
+`prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases each store votes on.
 
 A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ## Closing a Round
 
 ```bash
-uv run bench arena export production writing-zh <snapshot-path>
+uv run bench close writing-zh
 uv run bench close writing-zh --snapshot <snapshot-path>
 ```
 
-For a voted family, export a registered evidence cut from production, then pass that saved export to `bench close --snapshot`. The close command fits that frozen evidence and writes `reports/<family>/<round>.json`, dated by the UTC day. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+For a voted family, `bench close` saves the production votes that can no longer be undone under `votes/<family>/` in the data directory, fits them, and writes `reports/<family>/<round>.json`, dated by the UTC day. `--snapshot` recloses a saved file without reading the store. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 
@@ -117,7 +128,9 @@ assistant-bench/
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
 ├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
 ├── outputs/<family>.jsonl                  # Collected Harbor trial records
-└── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
+├── publications/<family>/<id>.json         # Publications from `bench arena prepare`, each with its .md listing
+├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
+└── votes/<family>/<taken-at>.json          # Vote cuts that `bench close` saved
 ```
 
 Run `harbor view` on a family's job directory to browse its trials.
