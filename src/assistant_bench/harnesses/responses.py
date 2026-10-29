@@ -52,6 +52,9 @@ class ResponseResult:
         finish = (
             'error'
             if response.error is not None
+            else 'unexpected_content'
+            if response.status in ('completed', 'incomplete')
+            and any(item.type == 'function_call' for item in response.output)
             else 'refusal'
             if refusals
             else 'stop'
@@ -93,7 +96,7 @@ class ResponseResult:
                 request=request,
                 body=None,
             )
-        if any(item.type == 'function_call' for item in response.output):
+        if self.details['finish_reason'] == 'unexpected_content':
             raise ResponseCompletionError(
                 'The Responses API returned an unexpected function call.',
                 request=request,

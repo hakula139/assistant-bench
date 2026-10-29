@@ -307,22 +307,25 @@ class Terminus(Terminus2):
     ) -> None:
         nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
+        failed_attempt: dict[str, Any] = {}
         try:
             await super().run(instruction, environment, context)
+        except MessageCompletionError, ResponseCompletionError:
+            assert isinstance(self._llm, (MessagesLLM, ResponsesLLM))
+            failed_attempt = self._llm.attempts[-1]
+            raise
         finally:
             await self._endpoint_client.close()
             context.metadata = {
                 **(context.metadata or {}),
                 'nixos_config_rev': nixos_config_rev,
                 'harbor_version': harbor_version,
+                'finish_reason': failed_attempt.get('finish_reason'),
+                'stop_details': failed_attempt.get('stop_details'),
             }
             if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
                 if isinstance(self._llm, MessagesLLM):
                     context.metadata['message_attempts'] = self._llm.attempts
-                    if self._llm.attempts:
-                        context.metadata['stop_details'] = self._llm.attempts[-1][
-                            'stop_details'
-                        ]
                 elif isinstance(self._llm, ResponsesLLM):
                     context.metadata['response_attempts'] = self._llm.attempts
                 context.metadata['cache_write_unpriced'] = any(
