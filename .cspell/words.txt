@@ -45,6 +45,7 @@ geteuid
 hakula
 Halvorsen
 hanzi
+HMAC
 httpx
 idna
 intp
@@ -84,14 +85,11 @@ pvalue
 pycache
 pydantic
 pydocstyle
-pylock
-pyodide
 pypi
 pyproject
 pyrightconfig
 pytest
 PYTHONDONTWRITEBYTECODE
-pywrangler
 RDONLY
 redoc
 remoteip

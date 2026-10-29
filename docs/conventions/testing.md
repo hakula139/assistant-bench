@@ -31,9 +31,13 @@ Drop a test once another covers everything it checks.
 - The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss or the design that moves the estimates fails. The penalty barely moves those estimates, so the test of a system that wins every vote bounds its gap tightly enough that a tenfold change to the penalty in either direction fails.
 - `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten simulated days of voting and after one, which `make_round` in `support` simulates as a vote cut and the capped close path closes. `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all three. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
 
+## The Voting Worker
+
+`web/vitest.config.ts` runs two projects. The `site` project runs in Node and jsdom, and the `worker` project runs `web/worker/` in workerd through `@cloudflare/vitest-plugin`, under the `local` environment of `web/wrangler.toml` with test keys. Its setup applies `web/migrations/` and, before each test, empties the tables and loads `tests/fixtures/arena-publication.sql`, since storage persists between tests. Tests call the Worker through `exports.default.fetch` with the helpers in `worker/test/support.ts` and stub siteverify by spying on `fetch`. workerd exposes no V8 coverage, so both projects report through istanbul.
+
 ## Accessibility
 
-`site.test.ts` serves the built site's files and a vote API session from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Development](development.md#dev-shell) gives the command that installs the browser.
+`site.test.ts` serves the built site's files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Development](development.md#dev-shell) gives the command that installs the browser.
 
 ## Docker Trials
 
@@ -43,7 +47,7 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 ## Parallel Runs
 
-`pyproject.toml` runs pytest on one pytest-xdist worker per CPU, and workers steal queued tests from each other so the slow coding verifiers and native Worker tests spread evenly. Tests must not depend on the order they run in or on state another test leaves. A subprocess that listens binds port 0 and reports the port it bound, since another worker can take a port probed and then released before the subprocess binds it.
+`pyproject.toml` runs pytest on one pytest-xdist worker per CPU, and workers steal queued tests from each other so the slow coding verifiers spread evenly. Tests must not depend on the order they run in or on state another test leaves. A subprocess that listens binds port 0 and reports the port it bound, since another worker can take a port probed and then released before the subprocess binds it.
 
 Once a test spends `faulthandler_timeout` across its setup, call, and teardown with no phase failing, faulthandler dumps every thread's stack and ends the process without running teardown. pytest-xdist reports the crash as a failure of that test and starts a replacement worker, while pytest-cov lists the ended worker as failing to return coverage. Under `-n 0`, the run ends there.
 

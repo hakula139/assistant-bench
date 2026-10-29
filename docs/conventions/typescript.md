@@ -41,7 +41,7 @@ web/src/
 - `pnpm test` parses every report fixture and compares Zod's JSON Schema with the Pydantic-generated `tests/fixtures/report.schema.json`. It checks field types, nullability, constants, enums, required and allowed keys, and map keys within each results variant. Numeric bounds, formats and descriptions are not compared.
 - Add a scorer's schema variant and register its views in `components/scorers/index.ts`, its metadata and steps in `lib/method.ts`, and its icons in `components/site/Method.tsx`. Pages dispatch through the registry, and methodology links must reach the registered section. Keep render-specific steps, labels, and sections in those shared registries, keyed by scorer and render, never by family name.
 - Register a public aspect's title in `lib/aspects.ts` and its icon in `components/site/Method.tsx`. The registry determines listing order.
-- A new defect ID updates the `Defect` type in `src/assistant_bench_arena/models.py`, the `defects` list in `lib/defects.ts`, and its label in `lib/glossary.ts`. A new category ID does the same for `Category` and `categories` in `lib/categories.ts`, with its label in `categoryTerms`.
+- A new defect ID updates the `Defect` type in `src/assistant_bench/families.py`, the `defects` list in `lib/defects.ts`, and its label in `lib/glossary.ts`. A new category ID does the same for `Category` and `categories` in `lib/categories.ts`, with its label in `categoryTerms`.
 - A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
 
 ## Components
@@ -65,5 +65,13 @@ web/src/
 
 - The integration routes `/vote/` in every build. Its island fetches personalized data only at runtime.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- The voting runtime applies the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so output text cannot load a remote image.
-- HTML outputs load by URL in `<iframe sandbox="allow-scripts" referrerPolicy="no-referrer">` from the configured separate render origin. Never use `srcdoc`, which inherits the vote page's policy.
+- The voting Worker applies the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so output text cannot load a remote image.
+- `lib/vote-flow.ts` holds every call to the vote API and the tab's draft, which lives in `sessionStorage` alone, so the page writes nothing to `localStorage` and never sends a vote on load.
+- The page's only third-party content is the Turnstile widget. Its script source is in the page's Astro CSP, and its frame source in the `/vote/*` rule of `web/public/_headers`.
+
+## The Voting Worker
+
+- `web/worker/` holds the Hono app that serves `/api/*`, one module per concern beside its `*.test.ts`, and `worker/test/` holds the shared test setup. It compiles under its own `tsconfig.json` against the bindings that `wrangler types` generates from `web/wrangler.toml` into the ignored `worker-configuration.d.ts`, which `pnpm lint` and `pnpm typecheck` regenerate.
+- Requests validate through `sValidator` with the `zod/mini` schemas of `lib/arena.ts`, which the client shares, so a route and its caller cannot drift apart.
+- Every limit lives in `limits.ts`. A refusal throws `ApiError` with a fixed code from `lib/arena.ts`, and anything else surfaces as 500 `unavailable` through the one error hook.
+- Each write that must not interleave with another is one statement or one D1 batch, since D1 runs a binding's batch as a transaction.

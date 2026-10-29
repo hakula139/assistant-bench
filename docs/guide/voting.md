@@ -4,11 +4,13 @@ Vote on blind pairs at [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/),
 
 ## Opening the Vote Page
 
-Follow the site's Vote link and pick a family under its aspect. Browser verification runs automatically on the vote page and shows a challenge only when interaction is needed. Your comparison opens after verification. All real votes go to the production D1 database. The staging deployment has its own database for validation.
+Follow the site's Vote link and pick a family under its aspect. The first visit verifies your browser, showing a challenge only when interaction is needed, and your first pair opens after it. All real votes go to the production D1 database. The staging deployment has its own database for validation.
 
-A session records one active vote per eligible case and ends when none remain. Cases need passing, different outputs from two systems to be eligible. The browser keeps a session locator per family, so picking the family again or reloading resumes it while the verification cookie remains valid. Each accepted vote is recorded before the next pair is requested. Tap the vote count in the Prompt bar to see how many pairs remain.
+Each pair compares two systems' different, passing outputs on one case, and you vote at most once on each comparison. A family ends with No pairs left once you have voted on every comparison it offers. Tap the vote count in the Prompt bar to see how many pairs remain.
 
-If a connection fails, retry checks whether your vote was saved. The tab retains your choice and issue tags through a reload or verification. Resolve the pending vote before moving to another pair or family. If the pair changed, review the new outputs and choose again. Undo withdraws the exact last eligible vote acknowledged by the server.
+The server holds your current pair, so a reload or a second tab shows the same one. A reload also keeps your unsent choice, issues, Markdown toggle, collapsed prompt and scroll position, and never sends a vote. If the pair changed meanwhile, the page shows the new one and says so when it cleared an unsent choice.
+
+If a vote fails to send, Retry sends the same vote again, and the server records it once. If another tab already voted on the pair, the page shows the current pair. Skip shows another case for the same two systems, and says so when no other case is left. Undo withdraws your last vote while it is under 10 minutes old and shows its pair again, and each further Undo goes one vote further back.
 
 ## Casting a Vote
 
@@ -22,6 +24,7 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 | `1` to `5` | Toggle the first five issues on output A, in the order the Issues popover lists them |
 | `6` to `0` | Toggle the first five issues on output B                                             |
 | `Enter`    | Submit from the pair background, or activate the focused control                     |
+| `s`        | Skip to another case for the same two systems                                        |
 | `u`        | Undo the last vote and show its pair again                                           |
 
 Letter and digit shortcuts work while the voting panel has focus. Each new pair focuses the panel. Header controls and open popovers keep their own keyboard behavior.
@@ -29,11 +32,3 @@ Letter and digit shortcuts work while the voting panel has focus. Each new pair 
 An issue counts against the output you tag, whatever your verdict. Each family lists its own issues, such as wrong facts or a wrong tone on writing and off-scope changes or weak tests on code. Each output's Issues button explains and toggles them, including on phones. A family that lists none shows no Issues button.
 
 Outputs appear exactly as written. The Markdown toggle renders both text panes as Markdown, with raw HTML shown as text and images left unloaded.
-
-## HTML Outputs
-
-A family that renders HTML loads each output in a sandboxed frame from a second origin, under a policy that blocks network requests. The viewport presets of 375, 768, and 1280 px lay out both frames at that width, scaled down to fit the pane.
-
-Keys pressed inside a frame stay in the frame, so the page shows a hint while one has focus. Click outside the frames before voting by keyboard.
-
-Only approved public or synthetic content is published to the public arena. The frame's policy cannot block WebRTC, so publication review must treat executable HTML as active content.

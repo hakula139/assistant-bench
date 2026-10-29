@@ -93,7 +93,7 @@ Each record holds:
 
 ## Voting
 
-Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes. Until the voting Worker launches, the vote page still serves its starter round from the older Worker's databases, so a publication becomes votable only once that launch switches the page to the vote stores below.
+Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.
 
 Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml`, and `BENCH_D1_TOKEN_FILE` in `.env` naming a file that holds a Cloudflare API token with D1 Edit:
 
@@ -106,7 +106,7 @@ uv run bench arena status production writing-zh
 
 `prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases each store votes on.
 
-A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
+A family ends for a voter once no comparison is left, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
 ### Setting Up a Vote Store
 
@@ -117,7 +117,22 @@ pnpm --filter web exec wrangler d1 create assistant-bench-arena-staging
 pnpm --filter web exec wrangler d1 migrations apply DB --env staging --remote
 ```
 
-Apply the migrations again after adding one, which skips the files already applied. Until the voting Worker launches, a schema change edits `0001_init.sql` instead, so recreate each database, dropping its votes: delete it with `pnpm --filter web exec wrangler d1 delete <name>`, create it again, record its new ID, and apply the migrations.
+Applying them again after adding one skips the files already applied. The deploy job applies production's migrations before each deploy, so apply them to staging yourself.
+
+The voting Worker reads the three secrets that each target's `secrets.required` in `web/wrangler.toml` lists. Generate each key once per target and pipe it straight into Wrangler, so it never reaches your terminal or shell history, and take the Turnstile secret from the widget whose sitekey the target's `TURNSTILE_SITEKEY` names:
+
+```bash
+openssl rand -base64 32 | pnpm --filter web exec wrangler secret put ACTOR_KEY --env staging
+openssl rand -base64 32 | pnpm --filter web exec wrangler secret put IP_TAG_KEY --env staging
+pnpm --filter web exec wrangler secret put TURNSTILE_SECRET --env staging
+```
+
+Replacing `ACTOR_KEY` signs every browser out and reorders every voter's pairs, and replacing `IP_TAG_KEY` starts new network tags, so change them only when a key leaks. To try a branch on staging, build the site and deploy it there:
+
+```bash
+pnpm build
+pnpm --filter web exec wrangler deploy --env staging
+```
 
 ### Moderation
 

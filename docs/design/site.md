@@ -25,9 +25,11 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs and verification context from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 ledger, and staging has a separate D1 ledger for validation. Verification runs inline when required, retaining the comparison and draft while the provider checks the browser. Static previews without the API show an unavailable state.
+`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 database, and staging has a separate one for validation. A browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Static previews without the API show an unavailable state.
 
-The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text, diffs, or sandboxed HTML from the render origin. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze HTML viewports and diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
+The server keeps each browser's pending pair, and the tab keeps its draft in `sessionStorage`: the choice, issues, Markdown toggle, collapsed prompt and scroll offsets of that pair. A reload restores the draft only while the server still holds the same pair and never sends a vote. `sessionStorage` keeps two tabs' drafts apart and clears when the tab closes, so a shared device keeps no unsent choices.
+
+The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text or diffs. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 
 Nothing is preselected. Each new pair clears the previous control's focus so the next key acts as a shortcut. The page reveals no system identity, timing, or server error details beyond the API's message.
 
