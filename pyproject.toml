@@ -101,6 +101,7 @@ convention = "numpy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = [
   "--import-mode=importlib",
   "--quiet",
@@ -114,8 +115,9 @@ addopts = [
   "--cov-report=term-missing",
   "--cov-report=xml",
 ]
+faulthandler_timeout = 900
+faulthandler_exit_on_timeout = true
 strict_markers = true
-pythonpath = ["tests"]
 markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
 
 [tool.coverage.run]

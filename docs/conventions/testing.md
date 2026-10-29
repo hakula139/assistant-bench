@@ -44,6 +44,8 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 `pyproject.toml` runs pytest on one pytest-xdist worker per CPU, and workers steal queued tests from each other so the slow coding verifiers and native Worker tests spread evenly. Tests must not depend on the order they run in or on state another test leaves. A subprocess that listens binds port 0 and reports the port it bound, since another worker can take a port probed and then released before the subprocess binds it.
 
+Once a test spends `faulthandler_timeout` across its setup, call, and teardown with no phase failing, faulthandler dumps every thread's stack and ends the process without running teardown. pytest-xdist reports the crash as a failure of that test and starts a replacement worker, while pytest-cov lists the ended worker as failing to return coverage. Under `-n 0`, the run ends there.
+
 Pass `-n 0` for a targeted run, which otherwise pays every worker's startup, and set `PYTEST_XDIST_AUTO_NUM_WORKERS` to cap the workers on a shared host. `--update-fixtures` always runs in one process, since tests on other workers read the fixtures it rewrites.
 
 ## Coverage
