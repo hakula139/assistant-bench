@@ -26,7 +26,9 @@ import tempfile
 APP = pathlib.Path('/app')
 TESTS = pathlib.Path(__file__).resolve().parent
 HIDDEN = TESTS / 'hidden'
-TIMEOUT_SEC = 60
+# Every instruction states this limit per run, and both runs must finish within
+# the task's `[verifier] timeout_sec` so that a slow run still earns reward 0.
+TIMEOUT_SEC = 300
 
 # Debian's `nobody` user and `nogroup` group.
 SANDBOX_ID = 65534

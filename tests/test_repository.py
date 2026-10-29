@@ -298,7 +298,7 @@ def load_coding_verifier() -> ModuleType:
         pytest.param(
             None,
             None,
-            'The run left no record, as it exited early or ran past 60 s.',
+            'The run left no record, as it exited early or ran past 300 s.',
             id='no-record',
         ),
         pytest.param(
