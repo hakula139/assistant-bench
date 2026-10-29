@@ -5,13 +5,7 @@ description = "Leaderboards for AI models and agents, ranked through blind pairw
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
-dependencies = ["fastapi>=0.156.4", "itsdangerous>=2.2.0", "pydantic>=2.14.1"]
-
-[project.scripts]
-bench = "assistant_bench.cli:app"
-
-[dependency-groups]
-bench = [
+dependencies = [
   "anthropic>=2.3.0",
   "harbor==0.24.0",
   "httpx>=0.28.1",
@@ -19,6 +13,7 @@ bench = [
   "markdown-it-py>=4.2.0",
   "numpy>=2.5.4",
   "openai>=2.54.0",
+  "pydantic>=2.14.1",
   "python-dotenv>=1.2.4",
   "scipy>=1.18.1",
   "semver>=3.1.0",
@@ -28,6 +23,10 @@ bench = [
   "zhon>=2.1.1",
 ]
 
+[project.scripts]
+bench = "assistant_bench.cli:app"
+
+[dependency-groups]
 dev = [
   "assistant-bench-typing",
   "basedpyright>=1.40.2",
@@ -42,8 +41,6 @@ dev = [
   "trustme>=1.2.1",
   "types-jsonschema>=4.26.0.20261006",
   "types-pyOpenSSL>=24.1.0.20240722",
-  "workers-py>=1.17.9",
-  "workers-runtime-sdk>=1.9.5",
 ]
 
 [build-system]
@@ -51,7 +48,7 @@ requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/assistant_bench", "src/assistant_bench_arena"]
+packages = ["src/assistant_bench"]
 
 [tool.hatch.build.targets.sdist]
 only-include = ["src", "pyproject.toml", "README.md"]
@@ -62,8 +59,6 @@ messages-protocol = 1
 anthropic-api-version = "2023-06-01"
 
 [tool.uv]
-required-version = ">=0.13.4"
-default-groups = ["bench", "dev"]
 # Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
 python-preference = "only-managed"
 
@@ -121,7 +116,7 @@ strict_markers = true
 markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
 
 [tool.coverage.run]
-source = ["assistant_bench", "assistant_bench_arena"]
+source = ["assistant_bench"]
 
 [tool.coverage.report]
 exclude_also = ['case _:\n\s*assert_never\(']
@@ -136,7 +131,6 @@ reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true
 reportUnnecessaryTypeIgnoreComment = true
 executionEnvironments = [
-  { root = "src/assistant_bench_arena/worker", reportMissingModuleSource = false },
   { root = "families/coding-repo/tasks/add-byte-range-requests", extraPaths = [
     "families/coding-repo/tasks/add-byte-range-requests/solution/app",
   ] },

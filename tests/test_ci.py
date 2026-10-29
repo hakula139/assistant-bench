@@ -101,11 +101,6 @@ class TestSelectedTasks:
                 {'src/assistant_bench/ci.py': 'Selector'}, None, id='selector'
             ),
             pytest.param(
-                {'src/assistant_bench_arena/models.py': 'Shared model'},
-                None,
-                id='arena-model',
-            ),
-            pytest.param(
                 {'families/coding-repo/shared/tests/verify.py': 'Verifier'},
                 None,
                 id='shared-verifier',

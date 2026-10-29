@@ -48,7 +48,10 @@
       "preliminary_decisive_votes": 40
     },
     "cutoffs": {
-      "production": 33,
+      "production": {
+        "id": 33,
+        "votes": 33
+      },
       "local": null
     },
     "reference": "acme-large",

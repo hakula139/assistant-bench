@@ -24,6 +24,7 @@ from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
     AnalysisInput,
+    Cutoff,
     Cutoffs,
     HumanEvidence,
     OutputMeasurement,
@@ -35,7 +36,10 @@ from assistant_bench.scoring.weighting import actor_weights
 type Store = Literal['production', 'local']
 
 UNDO_WINDOW_MS = 10 * 60_000
-"""How long a voter can undo a vote, which bounds the voting Worker's undo window."""
+"""How long a vote stays undoable.
+
+It must equal `UNDO_MS` in `web/worker/limits.ts`, so no cut holds an undoable vote.
+"""
 
 PAGE_ROWS = 1000
 
@@ -503,10 +507,7 @@ def voting_input(
         systems=tuple(system_names(snapshot)),
         defects=cuts[0][1].inventory.defects,
         cutoffs=Cutoffs(
-            production=None
-            if snapshot.production is None
-            else snapshot.production.cutoff,
-            local=None if snapshot.local is None else snapshot.local.cutoff,
+            production=_cutoff(snapshot.production), local=_cutoff(snapshot.local)
         ),
         declared_categories=tuple(settings.categories),
         categories=tuple(
@@ -570,6 +571,10 @@ def fingerprints(snapshot: Snapshot) -> dict[str, str]:
         for _, cut in stored_cuts(snapshot)
         for output in cut.inventory.outputs
     }
+
+
+def _cutoff(cut: Cut | None) -> Cutoff | None:
+    return None if cut is None else Cutoff(id=cut.cutoff, votes=len(cut.votes))
 
 
 def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:

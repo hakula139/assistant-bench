@@ -80,7 +80,9 @@ const votesRules = z.strictObject({
   preliminary_decisive_votes: z.int().positive(),
 });
 
-const cutoff = z.int().nonnegative().nullable();
+const cutoff = z
+  .strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() })
+  .nullable();
 const cutoffs = z.strictObject({ production: cutoff, local: cutoff });
 
 const votesResults = z.strictObject({

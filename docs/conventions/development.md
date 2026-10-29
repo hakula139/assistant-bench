@@ -16,9 +16,9 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 
 Both shells export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
 
-The root Python project contains the `assistant_bench` CLI and the `assistant_bench_arena` voting contracts, ledger and native services. `uv sync` installs the default `bench` and `dev` dependency groups for repository commands. Pywrangler reads only the base project dependencies for the Worker runtime and maintains its PEP 751 `pylock.toml` beside the universal `uv.lock`. The primary `wrangler.toml` lives beside `pyproject.toml` so the native tools discover one project and its dependencies.
+The root Python project contains the `assistant_bench` CLI, and `uv sync` installs its dependencies with the `dev` group. The voting Worker is TypeScript in `web/worker/`, which `web/wrangler.toml` configures and the `web` package's Wrangler deploys.
 
-Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application.
+Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application. The `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
 
 The root `pyproject.toml` checks the host and authored task code on Python 3.14. Each task resolves imports against its complete reference package, while its starter application is checked independently. Editors use the root `.venv`.
 
@@ -38,24 +38,22 @@ The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run th
 
 Commands stay minimal, and settings live in config files:
 
-| Setting                                                                       | Lives in                                                                                                              |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
-| Systems under test                                                            | `systems.toml`                                                                                                        |
-| A family's scorer, systems, and samples                                       | `families/<family>/family.toml`                                                                                       |
-| Model completion and context allowances                                       | The shared model catalog, or a bare route's `systems.toml` table                                                      |
-| Harbor job settings, such as concurrency and retries                          | `jobs.py`, which builds each job config at run time                                                                   |
-| Repeat share, seed votes, and sampling policy                                 | `src/assistant_bench_arena/scheduler.py`                                                                              |
-| The voting runtime's origins, namespace, and D1 bindings                      | `wrangler.toml`                                                                                                       |
-| The Cloudflare account and the vote stores' D1 databases                      | `web/wrangler.toml`                                                                                                   |
-| Point-fit parameters, the actor cap, and diagnostic coverage rules            | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |
-| The model endpoint                                                            | The ignored `.env`                                                                                                    |
-| Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                      | Their own files at the repository root                                                                                |
-| The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings          | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
-| The Cloudflare Workers deploy                                                 | `wrangler.toml` for voting and `web/wrangler.toml` for static previews                                                |
-| Codecov's project and patch status targets, per flag                          | `codecov.yml`                                                                                                         |
+| Setting                                                                          | Lives in                                                                                                              |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv    | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
+| Systems under test                                                               | `systems.toml`                                                                                                        |
+| A family's scorer, systems, and samples                                          | `families/<family>/family.toml`                                                                                       |
+| Model completion and context allowances                                          | The shared model catalog, or a bare route's `systems.toml` table                                                      |
+| Harbor job settings, such as concurrency and retries                             | `jobs.py`, which builds each job config at run time                                                                   |
+| Admission, cap, and retention limits of the vote API                             | `web/worker/limits.ts`, with the per-minute request limit in `web/wrangler.toml`                                      |
+| The Cloudflare account, the voting Worker's environments, and their D1 databases | `web/wrangler.toml`                                                                                                   |
+| Point-fit parameters, the actor cap, and diagnostic coverage rules               | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |
+| The model endpoint                                                               | The ignored `.env`                                                                                                    |
+| Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                         | Their own files at the repository root                                                                                |
+| The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings             | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
+| Codecov's project and patch status targets, per flag                             | `codecov.yml`                                                                                                         |
 
-Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, and the D1 token file `BENCH_D1_TOKEN_FILE` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). Runtime origins and D1 bindings belong to the named staging and production targets in `wrangler.toml`. [Arena](../design/arena.md) defines their admission and administration boundaries.
+Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, and the D1 token file `BENCH_D1_TOKEN_FILE` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, and an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory). The voting Worker's origins and D1 bindings belong to its environments in `web/wrangler.toml`, and its keys are Worker secrets, which [Running](../guide/running.md#setting-up-a-vote-store) sets.
 
 `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else.
 
@@ -63,7 +61,7 @@ Job configs are generated per run and never committed. Harbor copies each one in
 
 ## Toolchain and Pins
 
-- The flake pins the stable Nixpkgs channel for Node.js and the hooks, and takes uv from Nixpkgs master to meet the Python Worker tooling's minimum version. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
+- The flake pins the stable Nixpkgs channel for Node.js, uv, and the hooks. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
 - On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. When such a bump moves a fingerprint, the stale `fingerprints.json` fails its test, so the PR waits until someone rewrites the manifest and applies the rule in [Systems](../design/systems.md#fingerprints).
 - `uv.lock` pins the Python dependencies, including Ruff, mypy and basedpyright, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.

@@ -5,15 +5,17 @@
   "scripts": {
     "build": "astro build",
     "dev": "astro dev",
-    "lint": "astro sync && eslint .",
+    "lint": "astro sync && wrangler types && eslint .",
     "preview": "astro preview",
     "test": "vitest run",
-    "typecheck": "astro check"
+    "typecheck": "astro check && wrangler types && tsc -p worker"
   },
   "dependencies": {
     "@astrojs/react": "^7.1.0",
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@fontsource/maple-mono": "^5.3.0",
+    "@hono/standard-validator": "^0.4.1",
+    "@marsidev/react-turnstile": "^1.6.3",
     "@observablehq/plot": "^0.6.17",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-table": "^9.3.1",
@@ -21,6 +23,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "d3-array": "^3.2.4",
+    "hono": "^4.13.14",
     "lucide-react": "^1.60.0",
     "markdown-it": "^15.0.3",
     "radix-ui": "^1.8.1",
@@ -34,6 +37,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.11",
     "@axe-core/playwright": "^4.14.0",
+    "@cloudflare/vitest-plugin": "^1.4.10",
     "@tailwindcss/typography": "^0.5.20",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
@@ -44,7 +48,7 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitest/coverage-v8": "^5.0.5",
+    "@vitest/coverage-istanbul": "^5.0.5",
     "axe-core": "^4.14.0",
     "eslint": "^10.13.0",
     "eslint-plugin-astro": "^3.2.1",
@@ -54,6 +58,7 @@
     "playwright": "^1.64.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "wrangler": "^4.155.0"
   }
 }

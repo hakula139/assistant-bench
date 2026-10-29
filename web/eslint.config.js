@@ -87,6 +87,6 @@ export default defineConfig([
     rules: sharedRules,
   },
   {
-    ignores: ['.astro/', '.wrangler/', 'dist/', 'node_modules/'],
+    ignores: ['.astro/', '.wrangler/', 'dist/', 'node_modules/', 'worker-configuration.d.ts'],
   },
 ]);

@@ -1,0 +1,11 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": ["**/*.ts", "../worker-configuration.d.ts"],
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["@cloudflare/vitest-plugin/types"],
+    "paths": {
+      "@/*": ["../src/*"]
+    }
+  }
+}

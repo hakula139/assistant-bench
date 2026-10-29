@@ -1,277 +1,164 @@
-import { z } from 'zod/mini';
+import * as z from 'zod/mini';
 
 import {
-  ApiError,
-  castVote,
   choiceSchema,
+  errorView,
+  familiesView,
   familyName,
-  identifier,
-  receiptQuery,
-  resolveVote,
-  resumeSession,
-  resumeSessionRequest,
-  startSession,
-  startSessionRequest,
+  freshnessView,
+  pairId,
+  pairState,
   taggedDefects,
-  undoVote,
-  validateRenderOrigins,
-  withdrawRequest,
-  type Choice,
-  type SessionView,
-  type TaggedDefects,
-  type VoteAcknowledgment,
+  type ErrorCode,
+  type VoteRequest,
 } from '@/lib/arena';
+import type { Cutoffs } from '@/lib/report';
 
-const STORAGE_KEY = 'bench-vote-draft';
+export const errorMessages: Record<ErrorCode, string> = {
+  invalid_request: 'The request could not be processed. Reload and try again.',
+  forbidden: 'The request could not be processed. Reload and try again.',
+  not_found: 'The voting service is unavailable. Try again.',
+  too_large: 'The request could not be processed. Reload and try again.',
+  admission_required: 'Complete verification to vote.',
+  challenge_failed: 'Verification failed. Try again.',
+  no_round: 'This family has no outputs available to vote on.',
+  stale_pair: 'This pair changed. Review the current outputs and choose again.',
+  nothing_to_undo: 'No vote from the last 10 minutes is left to undo.',
+  rate_limited: 'Too many requests. Wait a moment, then retry.',
+  daily_limit: 'This network has reached its daily limit. Try again tomorrow.',
+  unavailable: 'The voting service is unavailable. Try again.',
+};
+
+/** A fixed public error code, with the sitekey when verification is required. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: ErrorCode,
+    readonly sitekey?: string,
+  ) {
+    super(errorMessages[code]);
+  }
+}
+
+/** The request may or may not have arrived, so retrying it is the way to find out. */
+export class NetworkError extends Error {
+  constructor() {
+    super(errorMessages.unavailable);
+  }
+}
+
+/** What to tell the voter about a failure, with `fallback` for one the API did not describe. */
+export function errorMessage(error: unknown, fallback = errorMessages.unavailable): string {
+  return error instanceof ApiError || error instanceof NetworkError ? error.message : fallback;
+}
+
+async function request<T>(
+  schema: z.ZodMiniType<T>,
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
+  } catch {
+    throw new NetworkError();
+  }
+  if (!response.ok) {
+    const parsed = errorView.safeParse(await response.json().catch(() => null));
+    if (!parsed.success) {
+      throw new NetworkError();
+    }
+    throw new ApiError(response.status, parsed.data.error, parsed.data.sitekey);
+  }
+  const parsed = schema.safeParse(
+    response.status === 204 ? undefined : await response.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    throw new NetworkError();
+  }
+  return parsed.data;
+}
+
+const query = (values: Record<string, string>) => new URLSearchParams(values).toString();
+
+export const listFamilies = () => request(familiesView, 'GET', '/families');
+export const admit = (token: string) => request(z.undefined(), 'POST', '/actors', { token });
+export const getPair = (family: string) => request(pairState, 'GET', `/pair?${query({ family })}`);
+export const skipPair = (pair: string) => request(pairState, 'POST', '/pair/skip', { pair });
+export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/votes', body);
+export const undoVote = (family: string) =>
+  request(z.undefined(), 'POST', '/votes/undo', { family });
+
+/**
+ * Asks whether the family's counted votes still match what a round closed at these cutoffs read.
+ * A null cutoff marks a store the round did not read, so the query leaves it out.
+ */
+export function checkFreshness(family: string, cutoffs: Cutoffs, signal: AbortSignal) {
+  const values: Record<string, string> = { family };
+  for (const [store, cutoff] of Object.entries(cutoffs)) {
+    if (cutoff !== null) {
+      values[store] = String(cutoff.id);
+      values[`${store}_votes`] = String(cutoff.votes);
+    }
+  }
+  return request(freshnessView, 'GET', `/freshness?${query(values)}`, undefined, signal);
+}
+
+// ── Tab Draft ──
+
+const DRAFT_KEY = 'bench-vote';
+const offset = z.number().check(z.nonnegative());
 const draftSchema = z.strictObject({
   family: familyName,
-  session_id: identifier,
-  lease_id: identifier,
+  pair: z.nullable(pairId),
   choice: z.nullable(choiceSchema),
   defects: taggedDefects,
-  submitted: z.nullable(receiptQuery),
-  resolved: z.boolean(),
+  markdown: z.boolean(),
+  collapsed: z.boolean(),
+  scroll: z.strictObject({ window: offset, a: offset, b: offset }),
 });
-const operationSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('start'), request: startSessionRequest }),
-  z.strictObject({ kind: z.literal('resume'), request: resumeSessionRequest }),
-]);
-const storedSchema = z.strictObject({
-  draft: z.nullable(draftSchema),
-  operation: z.nullable(operationSchema),
-  withdrawal: z.nullable(withdrawRequest),
-});
-type Stored = z.infer<typeof storedSchema>;
+
+/** What this tab shows of one pair, kept so a reload shows it again. */
 export type Draft = z.infer<typeof draftSchema>;
-export const sessionKey = (family: string) => `bench-session:${family}`;
-const emptyDefects = (): TaggedDefects => ({ a: [], b: [] });
 
-/** Persists only non-secret command meaning and locators in this tab. */
-export class VoteFlow {
-  private stored: Stored;
+export const emptyDraft = (family: string, pair: string | null): Draft => ({
+  family,
+  pair,
+  choice: null,
+  defects: { a: [], b: [] },
+  markdown: false,
+  collapsed: false,
+  scroll: { window: 0, a: 0, b: 0 },
+});
 
-  constructor() {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    let parsed: unknown = null;
-    try {
-      parsed = raw === null ? null : JSON.parse(raw);
-    } catch {
-      sessionStorage.removeItem(STORAGE_KEY);
-    }
-    const result = storedSchema.safeParse(parsed);
-    this.stored = result.success ? result.data : { draft: null, operation: null, withdrawal: null };
+/** The tab's draft, or null after removing one that no longer parses. */
+export function readDraft(): Draft | null {
+  const raw = sessionStorage.getItem(DRAFT_KEY);
+  if (raw === null) {
+    return null;
   }
-
-  get draft(): Draft | null {
-    return this.stored.draft;
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Removed below like any other invalid draft.
   }
-
-  get family(): string | null {
-    return (
-      this.draft?.family ??
-      (this.stored.operation?.kind === 'start' ? this.stored.operation.request.family : null)
-    );
+  const result = draftSchema.safeParse(parsed);
+  if (!result.success) {
+    sessionStorage.removeItem(DRAFT_KEY);
+    return null;
   }
+  return result.data;
+}
 
-  get withdrawing(): boolean {
-    return this.stored.withdrawal !== null;
-  }
-
-  get uncertain(): boolean {
-    return (
-      this.stored.draft?.submitted !== null &&
-      this.stored.draft?.submitted !== undefined &&
-      !this.stored.draft.resolved
-    );
-  }
-
-  private save() {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.stored));
-  }
-
-  choose(session: SessionView, choice: Choice | null, defects: TaggedDefects) {
-    if (session.pair === null || this.uncertain) {
-      return;
-    }
-
-    const current = this.draft;
-    if (
-      current?.session_id === session.id &&
-      current.lease_id === session.pair.id &&
-      current.choice === choice &&
-      JSON.stringify(current.defects) === JSON.stringify(defects)
-    ) {
-      return;
-    }
-    this.stored.draft = {
-      family: session.family.name,
-      session_id: session.id,
-      lease_id: session.pair.id,
-      choice,
-      defects,
-      submitted: null,
-      resolved: false,
-    };
-    this.save();
-  }
-
-  show(session: SessionView): { session: SessionView; changed: boolean } {
-    validateRenderOrigins(session);
-    localStorage.setItem(sessionKey(session.family.name), session.id);
-
-    if (this.stored.withdrawal?.session_id === session.id) {
-      this.stored.withdrawal = null;
-      this.save();
-    }
-
-    const draft = this.draft;
-    const same = draft?.session_id === session.id && draft.lease_id === session.pair?.id;
-    const changed = draft !== null && !same;
-    if (!same) {
-      this.stored.draft =
-        session.pair === null
-          ? null
-          : {
-              family: session.family.name,
-              session_id: session.id,
-              lease_id: session.pair.id,
-              choice: null,
-              defects: emptyDefects(),
-              submitted: null,
-              resolved: false,
-            };
-      this.save();
-    }
-    return { session, changed };
-  }
-
-  async start(family: string): Promise<SessionView> {
-    const operation = this.stored.operation;
-    const request = startSessionRequest.parse(
-      operation?.kind === 'start' && operation.request.family === family
-        ? operation.request
-        : { command_id: crypto.randomUUID(), family },
-    );
-
-    this.stored.operation = { kind: 'start', request };
-    this.save();
-    const next = await startSession(request);
-    this.stored.operation = null;
-    this.save();
-    return next;
-  }
-
-  async resume(session_id: string): Promise<SessionView> {
-    const operation = this.stored.operation;
-    const request = resumeSessionRequest.parse(
-      operation?.kind === 'resume' && operation.request.session_id === session_id
-        ? operation.request
-        : { command_id: crypto.randomUUID(), session_id },
-    );
-
-    this.stored.operation = { kind: 'resume', request };
-    this.save();
-    const next = await resumeSession(request);
-    this.stored.operation = null;
-    this.save();
-    return next;
-  }
-
-  async enter(
-    family: string,
-    accepted: (receipt: VoteAcknowledgment) => void,
-  ): Promise<SessionView> {
-    const draft = this.draft;
-    if (draft !== null && draft.submitted !== null) {
-      try {
-        accepted(await resolveVote(draft.submitted));
-        this.stored.draft = null;
-        this.save();
-      } catch (reason) {
-        if (!(reason instanceof ApiError && reason.code === 'not_found')) {
-          throw reason;
-        }
-        // A resolved absence permits an explicit retry only on the original lease.
-        draft.resolved = true;
-        this.save();
-      }
-    }
-
-    let withdrawn: SessionView | null = null;
-    if (this.stored.withdrawal !== null) {
-      await undoVote(this.stored.withdrawal);
-      withdrawn = await this.resume(this.stored.withdrawal.session_id);
-      this.stored.withdrawal = null;
-      this.save();
-    }
-    const id =
-      draft?.family === family ? draft.session_id : localStorage.getItem(sessionKey(family));
-    if (id !== null) {
-      if (withdrawn?.id === id) {
-        return withdrawn;
-      }
-      try {
-        return await this.resume(id);
-      } catch (reason) {
-        if (!(reason instanceof ApiError && reason.code === 'not_found')) {
-          throw reason;
-        }
-        localStorage.removeItem(sessionKey(family));
-      }
-    }
-    return this.start(family);
-  }
-
-  async submit(
-    session: SessionView,
-    choice: Choice,
-    defects: TaggedDefects,
-  ): Promise<VoteAcknowledgment> {
-    if (session.pair === null) {
-      throw new ApiError('conflict', 409);
-    }
-    let request = this.draft?.submitted;
-    if (request !== null && request !== undefined) {
-      try {
-        return await resolveVote(request);
-      } catch (reason) {
-        if (!(reason instanceof ApiError && reason.code === 'not_found')) {
-          throw reason;
-        }
-      }
-    } else {
-      request = { command_id: crypto.randomUUID(), lease_id: session.pair.id, choice, defects };
-      this.choose(session, choice, defects);
-      if (this.stored.draft !== null) {
-        this.stored.draft.submitted = request;
-        this.stored.draft.resolved = false;
-        this.save();
-      }
-    }
-    if (request.lease_id !== session.pair.id) {
-      throw new ApiError('conflict', 409);
-    }
-    return castVote({ ...request, capability: session.pair.capability });
-  }
-
-  accepted() {
-    this.stored.draft = null;
-    this.save();
-  }
-
-  async withdraw(session: SessionView): Promise<void> {
-    if (session.undo_acknowledgment === null) {
-      return;
-    }
-    const request = this.stored.withdrawal ?? {
-      command_id: crypto.randomUUID(),
-      session_id: session.id,
-      acknowledgment: session.undo_acknowledgment,
-    };
-    this.stored.withdrawal = request;
-    this.save();
-    await undoVote(request);
-    this.stored.draft = null;
-    this.save();
-  }
+export function writeDraft(draft: Draft): void {
+  sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
 }

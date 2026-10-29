@@ -120,14 +120,20 @@ RULES = VotesRules(preliminary_decisive_votes=40)
 # ── Votes Schema ──
 
 
+class Cutoff(_Model):
+    """What closing read from one store, which freshness compares with the store."""
+
+    id: Annotated[int, Field(strict=True, ge=0)]
+    """The largest vote ID older than the undo window, or 0 when the store held none."""
+    votes: Annotated[int, Field(strict=True, ge=0)]
+    """The store's votes with IDs up to `id` that no exclusion removed."""
+
+
 class Cutoffs(_Model):
-    """Each store's largest vote ID older than the undo window at closing.
+    """Each store's cutoff at closing, null for a store closing did not read."""
 
-    0 means the store held no such vote, and null means closing did not read it.
-    """
-
-    production: Annotated[int, Field(strict=True, ge=0)] | None
-    local: Annotated[int, Field(strict=True, ge=0)] | None
+    production: Cutoff | None
+    local: Cutoff | None
 
 
 class Standing(_Model):

@@ -94,33 +94,53 @@
       "title": "CategoryStanding",
       "type": "object"
     },
+    "Cutoff": {
+      "additionalProperties": false,
+      "description": "What closing read from one store, which freshness compares with the store.",
+      "properties": {
+        "id": {
+          "description": "The largest vote ID older than the undo window, or 0 when the store held none.",
+          "minimum": 0,
+          "title": "Id",
+          "type": "integer"
+        },
+        "votes": {
+          "description": "The store's votes with IDs up to `id` that no exclusion removed.",
+          "minimum": 0,
+          "title": "Votes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "votes"
+      ],
+      "title": "Cutoff",
+      "type": "object"
+    },
     "Cutoffs": {
       "additionalProperties": false,
-      "description": "Each store's largest vote ID older than the undo window at closing.\n\n0 means the store held no such vote, and null means closing did not read it.",
+      "description": "Each store's cutoff at closing, null for a store closing did not read.",
       "properties": {
         "production": {
           "anyOf": [
             {
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/Cutoff"
             },
             {
               "type": "null"
             }
-          ],
-          "title": "Production"
+          ]
         },
         "local": {
           "anyOf": [
             {
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/Cutoff"
             },
             {
               "type": "null"
             }
-          ],
-          "title": "Local"
+          ]
         }
       },
       "required": [

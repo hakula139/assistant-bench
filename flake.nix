@@ -10,7 +10,6 @@
   # ------------------------------------------------------------------------------------------------
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/master";
 
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -32,7 +31,6 @@
   outputs =
     {
       nixpkgs,
-      nixpkgs-unstable,
       flake-utils,
       git-hooks-nix,
       nixos-config,
@@ -50,7 +48,6 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        uv = nixpkgs-unstable.legacyPackages.${system}.uv;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -70,7 +67,7 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = [ uv ] ++ nodeTools;
+          packages = [ pkgs.uv ] ++ nodeTools;
           env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
@@ -168,7 +165,7 @@
           };
         };
 
-        uvExe = pkgs.lib.getExe uv;
+        uvExe = pkgs.lib.getExe pkgs.uv;
 
         uvHooks = {
           ruff = {

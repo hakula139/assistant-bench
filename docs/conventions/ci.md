@@ -4,14 +4,14 @@
 
 CI runs on pushes to `main`, pull requests, and manual dispatch:
 
-| Job             | Checks                                                                                                                                                                            |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                                                                 |
-| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov                                         |
-| Build Site      | `pnpm build`, the native Python Worker dry-run and lock check, uploading `web/dist` as the `site-dist` artifact                                                                   |
-| Python Check    | `uv sync --locked`, `pnpm install` for native D1 tests, Ruff, mypy, basedpyright, dependency stub validation, pytest with coverage uploaded to Codecov, and the fingerprint check |
-| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below       |
-| CI Result       | Fails when any job above fails or is cancelled                                                                                                                                    |
+| Job             | Checks                                                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                                                           |
+| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov                                   |
+| Build Site      | `pnpm build`, a dry-run bundle of the production voting Worker, uploading `web/dist` as the `site-dist` artifact                                                            |
+| Python Check    | `uv sync --locked`, Ruff, mypy, basedpyright, dependency stub validation, pytest with coverage uploaded to Codecov, and the fingerprint check                               |
+| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below |
+| CI Result       | Fails when any job above fails or is cancelled                                                                                                                              |
 
 The fingerprint check runs `uv run bench fingerprints`, which enforces the rule in [Systems](../design/systems.md#fingerprints) against the fingerprints that the closed reports under `reports/` froze. It reads only the checked-out tree, so the push run on `main` catches a fingerprint change and a close that pass alone but conflict once both land.
 
@@ -29,7 +29,7 @@ Node Check installs Playwright's Chromium headless shell without `--with-deps`, 
 
 ## Deploy
 
-Production deploys the Python voting owner, its private Service facade and the separate renderer through `bench arena deploy production`. The native target registry is `wrangler.toml`. Deployment requires a configured challenge sitekey and the approved public catalog in the site artifact. The catalog, the committed `web/public/arena-families.json`, contains the public family labels and defect IDs of the round that Worker serves.
+Production applies the pending D1 migrations of `web/migrations/` and then deploys the voting Worker with the built site as its assets, both through Wrangler in `web/`. `web/wrangler.toml` configures each environment's Worker, database, rate limit and cron.
 
 Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/wrangler.toml`, with no production routes or voting bindings. Both deploy jobs consume the `site-dist` artifact, and a separate workflow removes previews:
 
@@ -45,7 +45,7 @@ Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/w
 
   Because that event carries the deploy secrets, the job checks out only `main` and never runs the PR's code.
 
-Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` secret, while the account comes from `web/wrangler.toml`. Production preserves the purpose-specific encrypted Worker secrets provisioned during setup. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
+Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` secret, while the account comes from `web/wrangler.toml`. That token needs D1 Edit as well as Workers Scripts Edit, because Deploy Voting applies migrations before every deploy, and `wrangler d1 migrations apply` creates its `d1_migrations` table if missing, a write, even when no migration is pending. A deploy keeps the Worker secrets that [Running](../guide/running.md#setting-up-a-vote-store) sets once per environment. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
 
 ## Workflow Steps
 

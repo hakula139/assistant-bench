@@ -13,11 +13,9 @@ src/assistant_bench/
 ├── manifest.py                             # The committed manifest of every runnable system's fingerprint
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
-│   ├── commands.py                         # Publication, status, moderation and deploy commands
+│   ├── commands.py                         # Publication, status and moderation commands
 │   ├── d1.py                               # The D1 REST client and each target's database
-│   ├── management.py                       # Authenticated native Service client
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
-│   ├── runtime.py                          # Named native targets and Service-only configuration
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
@@ -47,55 +45,16 @@ src/assistant_bench/
 
 ## Import Layers
 
-`src/assistant_bench_arena` owns voting contracts, the durable ledger and native runtime adapters. It never imports the offline `assistant_bench` package. Its prepared statements run through the application's single database owner. Only the offline `arena.runtime` and `arena.management` modules import its shared contracts, to deploy and manage the native Worker. Contract modules remain importable on CPython without loading the ledger services or the native `worker/` subtree. The thin `src/app.py` and `src/render.py` entrypoints export the application and renderer's native SDK classes.
-
-```text
-src/assistant_bench_arena/
-├── admission.py              # Purpose-bound signatures and network identities
-├── api_models.py             # Browser commands and safe acknowledgments
-├── investigation.py          # Private receipt queries and expiring network associations
-├── investigation_models.py   # Private receipt filters, results and sampling provenance
-├── ledger.py                 # Atomic commands and authenticated command recovery
-├── ledger_models.py          # Private evidence, control inputs, and export contracts
-├── maintenance.py            # Bounded expiry of private and unaccepted state
-├── management_domain.py      # Private management command execution with a fixed principal
-├── management_models.py      # Management requests, validation and bounded Service results
-├── models.py                 # Shared record policy and blinded browser views
-├── policy.py                 # Public admission budgets
-├── read_models.py            # Private scheduling projections
-├── reads.py                  # Bounded inventory, scheduling, and rendered content reads
-├── releases.py               # Shared release identities and persisted-fact validation
-├── runtime_models.py         # Signed browser claims and deployment profiles
-├── scheduler.py              # Balanced and adaptive pair draws
-├── schema.py                 # Current profile inspection and atomic initialization marker
-├── schema.sql                # Current schema, created with its profile in one native batch
-├── serialization.py          # Canonical JSON and content identities
-├── snapshots.py              # Numerical policy and approved presentation contracts
-├── transport.py              # Prepared statements and exact database rejection mapping
-├── voting.py                 # Authenticated pair acquisition and blinded views
-└── worker/
-    ├── api.py                # Native request, response and ASGI adapters
-    ├── authentication.py     # Cookie ownership, admission and network budgets
-    ├── bindings.py           # Native D1, limiter, challenge and body adapters
-    ├── diagnostics.py        # Content-free failure stages and exception classes
-    ├── http.py               # Browser routes and blinded response handling
-    ├── owner.py              # The shared application and database owner
-    ├── production.py         # Application HTTP and confined Service entrypoints
-    ├── rendering.py          # The isolated renderer entrypoint
-    └── settings.py           # Native bindings and validated deployment settings
-```
-
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands` and `manifest`
 3. `jobs`
-4. The remaining offline `arena` modules
+4. The remaining `arena` modules
 5. `report`
 6. `outputs`, `harnesses`, and `scoring`
 7. `families` and `catalog`
 8. `generation`, `messages`, `paths`, and `diffs`
-9. `assistant_bench_arena`
 
 `families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
@@ -120,7 +79,7 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, and runs it through the Harbor CLI with telemetry off.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
 3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench arena prepare <family>` writes a publication of the current outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes once the voting Worker launches.
+4. `bench arena prepare <family>` writes a publication of the current outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes on it.
 5. `bench close <family>` saves a cut of the counted votes, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes from its collected trial rewards instead.
 
 `bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that collection never reads them.

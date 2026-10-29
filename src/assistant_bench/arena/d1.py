@@ -132,11 +132,6 @@ class _Config(BaseModel):
     env: dict[str, _Environment] = {}
 
 
-def account_id() -> str:
-    """Return the Cloudflare account that `web/wrangler.toml` names."""
-    return _config().account_id
-
-
 @contextmanager
 def connect(target: TargetName) -> Generator[Database]:
     """Open the target's database with the token in the file `.env` names.

@@ -23,7 +23,6 @@ Conventions for Python code and tests that the tooling and the module map don't 
 ## Dependencies
 
 - The host and authored tasks share the strict policy in the root `pyproject.toml`. `uv sync` installs the checker used by CI in the root `.venv`. Fix first-party contracts behind diagnostics. Missing library typing metadata is permitted, while missing imports and unknown or incompatible API types remain errors.
-- Only `assistant_bench_arena/worker/` permits native modules supplied without Python source, such as `js`. Shared contracts and ledger code retain missing-source diagnostics.
 - Pin Harbor to an exact release, since it ships daily dev builds. Give every other dependency a lower bound at the version first locked, and let `uv.lock` pin the rest.
 - Prefer packages already in Harbor's tree, such as pydantic, httpx, Typer, and the `openai` SDK.
 

@@ -23,9 +23,8 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
 ├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
-├── src/assistant_bench_arena/              # Voting contracts, ledger, and native Worker services
 ├── systems.toml                            # Systems under test, one table each
-└── web/                                    # The results site and public vote page, a pnpm workspace package
+└── web/                                    # The results site, the vote page and its Worker, a pnpm workspace package
 ```
 
 ## Read Before You Edit
@@ -38,7 +37,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 | A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page, such as [Writing](docs/design/families/writing.md) |
 | Case sources, outputs, or the data directory        | [Data](docs/conventions/data.md)                                                                               |
 | Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                              |
-| The scheduler, the vote store, or the vote API      | [Arena](docs/design/arena.md)                                                                                  |
+| The voting Worker, the vote store, or the vote API  | [Arena](docs/design/arena.md)                                                                                  |
 | Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                        |
 | PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                           |
 | The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                                 |
@@ -74,8 +73,8 @@ uv run pytest -m docker                               # Run the Harbor trials un
 pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
 pnpm lint                                             # Lint Markdown and the site
 pnpm spellcheck                                       # Spell check
-pnpm typecheck                                        # Type check the site
-pnpm test                                             # Test the site, with coverage: schema, charts, pages, the vote page, and accessibility
+pnpm typecheck                                        # Type check the site and the voting Worker
+pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
 nix flake check                                       # After a flake change, run the hooks in the Nix sandbox
 ```

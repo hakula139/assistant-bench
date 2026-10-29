@@ -1,7 +1,6 @@
 acompletion
 anyio
 asciinema
-asgi
 asyncio
 Atoi
 basedpyright
@@ -45,6 +44,7 @@ geteuid
 hakula
 Halvorsen
 hanzi
+HMAC
 httpx
 idna
 intp
@@ -66,6 +66,7 @@ litellm
 llms
 Logit
 lucide
+marsidev
 McNemar
 mypy
 NFKC
@@ -83,14 +84,10 @@ pvalue
 pycache
 pydantic
 pydocstyle
-pylock
-pyodide
 pypi
 pyproject
-pyrightconfig
 pytest
 PYTHONDONTWRITEBYTECODE
-pywrangler
 RDONLY
 redoc
 remoteip
@@ -124,7 +121,6 @@ trustme
 typer
 unbilled
 undici
-undos
 unpushed
 unranked
 unrouted

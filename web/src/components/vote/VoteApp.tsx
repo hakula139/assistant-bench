@@ -1,6 +1,14 @@
 import { cn } from 'cn';
 import { Check, ChevronDown, CircleCheck } from 'lucide-react';
-import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
 import { bleed, pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
@@ -16,29 +24,38 @@ import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
 import { Verification } from '@/components/vote/Verification';
-import {
-  ApiError,
-  getStatus,
-  listFamilies,
-  NetworkError,
-  type Choice,
-  type FamilyView,
-  type PairView,
-  type SessionView,
-  type TaggedDefects,
-  type VoteAcknowledgment,
+import type {
+  Choice,
+  FamilyView,
+  PairState,
+  PairView,
+  TaggedDefects,
+  VoteRequest,
 } from '@/lib/arena';
 import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
 import { formatCountOf } from '@/lib/format';
 import { categoryTerm } from '@/lib/glossary';
-import { VoteFlow } from '@/lib/vote-flow';
+import {
+  ApiError,
+  castVote,
+  emptyDraft,
+  errorMessage,
+  errorMessages,
+  getPair,
+  listFamilies,
+  readDraft,
+  skipPair,
+  undoVote,
+  writeDraft,
+  type Draft,
+} from '@/lib/vote-flow';
 
 const FAMILY_PARAM = 'family';
 const SAVED_MS = 1500;
-const STALE_PAIR = 'This pair changed in another tab.';
-const GONE_FAMILY = 'This family has no outputs available to vote on.';
-const VIEWPORTS = [375, 768, 1280] as const;
+const DROPPED = 'The pair you were choosing on changed, so your choice was cleared.';
+const COOKIES = 'Voting needs cookies. Allow cookies for this site, then reload the page.';
+const NO_OTHER_PAIR = 'No other pair is available for these outputs.';
 
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
   { value: 'a', label: 'A is better', key: 'a' },
@@ -51,8 +68,6 @@ const SIDES: { side: 'A' | 'B'; key: keyof TaggedDefects }[] = [
   { side: 'A', key: 'a' },
   { side: 'B', key: 'b' },
 ];
-
-const UNTAGGED: TaggedDefects = { a: [], b: [] };
 
 const DEFECT_KEYS: Record<keyof TaggedDefects, readonly string[]> = {
   a: ['1', '2', '3', '4', '5'],
@@ -71,13 +86,8 @@ function keyedDefects(defects: readonly Defect[]) {
   );
 }
 
-const notFound = (reason: unknown) => reason instanceof ApiError && reason.status === 404;
-
-function message(error: unknown): ReactNode {
-  return error instanceof ApiError || error instanceof NetworkError
-    ? error.message
-    : 'The voting service is unavailable. Try again.';
-}
+const isCode = (reason: unknown, code: ApiError['code']): reason is ApiError =>
+  reason instanceof ApiError && reason.code === code;
 
 function ErrorAlert({ error }: { error: ReactNode }) {
   return (
@@ -108,28 +118,20 @@ function Screen({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-interface StartScreenProps {
-  busy: boolean;
+function StartScreen({
+  families,
+  error,
+  onStart,
+}: {
+  families: FamilyView[] | null;
   error: ReactNode;
-  recovery: ReactNode;
   onStart: (family: string) => void;
-}
-
-function StartScreen({ busy, error: startError, recovery, onStart }: StartScreenProps) {
+}) {
   const groupsId = useId();
-  const [families, setFamilies] = useState<FamilyView[] | null>(null);
-  const [error, setError] = useState<ReactNode>(null);
-
-  useEffect(() => {
-    listFamilies().then(setFamilies, (reason: unknown) => {
-      setError(message(reason));
-    });
-  }, []);
 
   return (
-    <Screen title="Start a voting session">
-      <ErrorAlert error={error === null ? startError : <>Could not list families: {error}</>} />
-      {recovery}
+    <Screen title="Choose a family to vote on">
+      <ErrorAlert error={error} />
       {families?.length === 0 && (
         <p className="text-muted-foreground">
           No voting families are available right now. Please check back later.
@@ -154,12 +156,11 @@ function StartScreen({ busy, error: startError, recovery, onStart }: StartScreen
               </h2>
               <ul className="flex flex-wrap gap-2">
                 {members.map((family) => (
-                  <li key={family.name}>
+                  <li key={family.family}>
                     <Button
                       variant="outline"
-                      disabled={busy}
                       onClick={() => {
-                        onStart(family.name);
+                        onStart(family.family);
                       }}
                     >
                       {family.display_name}
@@ -179,16 +180,25 @@ const checklistHint = {
   definition: 'Points for you to judge by. The model never saw them.',
 };
 
-function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; stacked: boolean }) {
+function Brief({
+  pair,
+  collapsed,
+  onCollapsedChange,
+  status,
+}: {
+  pair: PairView;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  status: ReactNode;
+}) {
   const checklistTitle = useId();
-  // Keep this component mounted across pairs so the live region announces changes.
-  const [collapsed, setCollapsed] = useState<string | null>(null);
+  const stacked = pair.render !== 'text';
 
   return (
     <Collapsible
-      open={collapsed !== pair.instruction}
-      onOpenChange={(next) => {
-        setCollapsed(next ? null : pair.instruction);
+      open={!collapsed}
+      onOpenChange={(open) => {
+        onCollapsedChange(!open);
       }}
       asChild
     >
@@ -220,7 +230,7 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
               stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
-            {pair.category !== null && <Hint term={categoryTerm(pair.category)} side="bottom" />}
+            <Hint term={categoryTerm(pair.category)} side="bottom" />
             <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
               <section
@@ -247,224 +257,277 @@ function Brief({ pair, status, stacked }: { pair: PairView; status: ReactNode; s
   );
 }
 
+/**
+ * The vote page. The server keeps the pending pair, and this tab keeps the voter's draft and view
+ * in `sessionStorage`, so a reload shows exactly what the voter saw and never sends a vote.
+ */
 export function VoteApp() {
-  const [flow] = useState(() => new VoteFlow());
-  const [session, setSession] = useState<SessionView | null>(null);
-  const [admission, setAdmission] = useState(false);
-  const [acceptedReceipt, setAcceptedReceipt] = useState<string | null>(null);
-
   // The page renders only in the browser, so its URL is readable on the first render.
-  const [resumingFamily, setResumingFamily] = useState(
-    () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? flow.family,
+  const [family, setFamily] = useState(
+    () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? undefined,
   );
-
+  const [families, setFamilies] = useState<FamilyView[] | null>(null);
+  const [state, setState] = useState<PairState | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [sitekey, setSitekey] = useState<string | null>(null);
+  const [failedVote, setFailedVote] = useState<VoteRequest | null>(null);
   const [error, setError] = useState<ReactNode>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [savedVote, setSavedVote] = useState<{ sessionId: string; at: number } | null>(null);
-  const [choice, setChoice] = useState<Choice | null>(null);
-  const [tagged, setTagged] = useState<TaggedDefects>(UNTAGGED);
-  const [asMarkdown, setAsMarkdown] = useState(false);
-  const [viewport, setViewport] = useState<number>(VIEWPORTS[2]);
-  const [frameFocused, setFrameFocused] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(true);
   const pairView = useRef<HTMLDivElement>(null);
+  const panes = useRef<Record<keyof TaggedDefects, HTMLDivElement | null>>({ a: null, b: null });
+  const restoring = useRef<Draft['scroll'] | null>(null);
+  // A browser that keeps no cookie asks for admission again right after passing it.
+  const admitted = useRef(false);
 
-  const pair = session?.pair ?? null;
-  const familyDefects = session?.family.defects ?? [];
-  const hasFrames = pair !== null && (pair.a.render === 'html' || pair.b.render === 'html');
-  const hasText = pair !== null && (pair.a.render === 'text' || pair.b.render === 'text');
-  const votingLocked = busy || admission || acceptedReceipt !== null || flow.withdrawing;
+  const pair = state?.pair ?? null;
+  const locked = busy || sitekey !== null || failedVote !== null;
+  const title = familyTitle(
+    families?.find((item) => item.family === family) ?? {
+      aspect: null,
+      display_name: family ?? '',
+    },
+  );
 
-  useEffect(() => {
-    pairView.current?.focus({ preventScroll: true });
-    window.scrollTo({ top: 0 });
-  }, [pair?.id]);
-
-  const show = (next: SessionView) => {
-    const { changed } = flow.show(next);
-    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: next.family.name })}`);
-
-    setSession(next);
-    setAcceptedReceipt(null);
-    setSavedVote((current) => (current?.sessionId === next.id ? current : null));
-    setChoice(flow.draft?.choice ?? null);
-    setTagged(flow.draft?.defects ?? UNTAGGED);
+  /** Shows a pair state, restoring the tab's draft only when it belongs to the same pair. */
+  const show = (name: string, next: PairState, options: { restore?: boolean } = {}) => {
+    const stored = readDraft();
+    const id = next.pair?.id ?? null;
+    let shown: Draft;
+    restoring.current = null;
+    if (options.restore && stored?.family === name && stored.pair === id) {
+      shown = stored;
+      restoring.current = stored.scroll;
+    } else {
+      if (options.restore && stored?.family === name && stored.choice !== null) {
+        setNotice(DROPPED);
+      }
+      shown = {
+        ...emptyDraft(name, id),
+        markdown: draft?.markdown ?? stored?.markdown ?? false,
+        collapsed:
+          (draft?.collapsed ?? false) && state?.pair?.instruction === next.pair?.instruction,
+      };
+    }
+    writeDraft(shown);
+    setDraft(shown);
+    setState(next);
     setError(null);
-    setNotice(changed ? STALE_PAIR : null);
   };
 
   const failed = (reason: unknown) => {
-    if (
-      reason instanceof ApiError &&
-      (reason.code === 'admission_required' || reason.code === 'renewal_required')
-    ) {
-      setAdmission(true);
+    if (isCode(reason, 'admission_required') && admitted.current) {
+      setError(COOKIES);
+    } else if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
+      setSitekey(reason.sitekey);
       setError(null);
+    } else {
+      setError(errorMessage(reason));
+    }
+  };
+
+  /** Returns to the family list with the reason a pair did not load, unless admission can help. */
+  const loadFailed = (reason: unknown) => {
+    if (isCode(reason, 'admission_required')) {
+      failed(reason);
       return;
     }
-    setError(message(reason));
+    history.replaceState(null, '', window.location.pathname);
+    setFamily(undefined);
+    setState(null);
+    setNotice(null);
+    setError(errorMessage(reason));
   };
 
-  const accepted = (receipt: VoteAcknowledgment) => {
-    flow.accepted();
-    setAcceptedReceipt(receipt.acknowledgment);
-    setSavedVote({ sessionId: receipt.session_id, at: Date.now() });
-    setNotice('Vote accepted.');
-    setChoice(null);
-    setTagged(UNTAGGED);
-  };
-
-  const follow = async (family: string) => {
+  const load = async (name: string, options: { restore?: boolean; notice?: string } = {}) => {
     try {
-      show(await flow.enter(family, accepted));
+      show(name, await getPair(name), options);
+      if (options.notice !== undefined) {
+        setSaved(false);
+        setNotice(options.notice);
+      }
     } catch (reason) {
-      failed(reason);
+      loadFailed(reason);
     }
   };
 
-  const run = async (action: () => Promise<SessionView>) => {
+  const act = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
-      show(await action());
-    } catch (reason) {
-      if (session !== null && notFound(reason)) {
-        await follow(session.family.name);
-      } else if (notFound(reason)) {
-        setError(GONE_FAMILY);
-      } else {
-        failed(reason);
-      }
+      await action();
     } finally {
       setBusy(false);
     }
   };
 
   const initialize = useEffectEvent(() => {
-    getStatus()
-      .then(async (status) => {
-        if (status.status !== 'ready') {
-          setAdmission(true);
-        }
-        // Receipt resolution remains available while a challenge grant is stale.
-        if (resumingFamily !== null) {
-          show(await flow.enter(resumingFamily, accepted));
-        }
-      }, failed)
-      .catch((reason: unknown) => {
-        failed(reason);
-      })
-      .finally(() => {
-        setResumingFamily(null);
-        setChecking(false);
-      });
+    listFamilies().then(
+      ({ families }) => {
+        setFamilies(families);
+      },
+      (reason: unknown) => {
+        setError(<>Could not list families: {errorMessage(reason)}</>);
+      },
+    );
+    if (family !== undefined) {
+      getPair(family).then((next) => {
+        show(family, next, { restore: true });
+      }, loadFailed);
+    }
   });
 
   useEffect(() => {
     initialize();
   }, []);
 
-  useEffect(() => {
-    if (session !== null && acceptedReceipt === null) {
-      flow.choose(session, choice, tagged);
+  useLayoutEffect(() => {
+    pairView.current?.focus({ preventScroll: true });
+    const offsets = restoring.current ?? { window: 0, a: 0, b: 0 };
+    restoring.current = null;
+    window.scrollTo({ top: offsets.window });
+    for (const { key } of SIDES) {
+      const pane = panes.current[key];
+      if (pane !== null) {
+        pane.scrollTop = offsets[key];
+      }
     }
-  }, [session, choice, tagged, flow, acceptedReceipt]);
+  }, [pair?.id]);
+
+  const update = (change: Partial<Draft>) => {
+    setDraft((current) => {
+      if (current === null) {
+        return current;
+      }
+      const next = { ...current, ...change };
+      writeDraft(next);
+      return next;
+    });
+  };
+
+  const onPageHide = useEffectEvent(() => {
+    if (draft !== null) {
+      writeDraft({
+        ...draft,
+        scroll: {
+          window: window.scrollY,
+          a: panes.current.a?.scrollTop ?? 0,
+          b: panes.current.b?.scrollTop ?? 0,
+        },
+      });
+    }
+  });
 
   useEffect(() => {
-    if (savedVote === null) {
+    const listener = () => {
+      onPageHide();
+    };
+    window.addEventListener('pagehide', listener);
+
+    return () => {
+      window.removeEventListener('pagehide', listener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!saved) {
       return;
     }
 
     const timer = setTimeout(() => {
-      setSavedVote(null);
+      setSaved(false);
     }, SAVED_MS);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [savedVote]);
+  }, [saved]);
 
-  useEffect(() => {
-    const onBlur = () => {
-      setFrameFocused(document.activeElement instanceof HTMLIFrameElement);
-    };
-    const onFocus = () => {
-      setFrameFocused(false);
-    };
-
-    window.addEventListener('blur', onBlur);
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
-
-  const submit = () => {
-    if (pair === null || choice === null || votingLocked) {
+  const submit = (body: VoteRequest | null) => {
+    if (body === null || family === undefined || busy || sitekey !== null) {
       return;
     }
 
-    if (session === null) {
+    void act(async () => {
+      try {
+        await castVote(body);
+        update({ choice: null });
+        setFailedVote(null);
+        setSaved(true);
+        setNotice(null);
+        await load(family);
+      } catch (reason) {
+        if (isCode(reason, 'stale_pair')) {
+          setFailedVote(null);
+          await load(family, { notice: errorMessages.stale_pair });
+        } else {
+          setFailedVote(body);
+          failed(reason);
+        }
+      }
+    });
+  };
+
+  const choiceBody =
+    pair !== null && draft !== null && draft.choice !== null
+      ? { pair: pair.id, choice: draft.choice, defects: draft.defects }
+      : null;
+
+  const skip = () => {
+    if (pair === null || family === undefined || locked) {
       return;
     }
-    setBusy(true);
-    void flow
-      .submit(session, choice, tagged)
-      .then(
-        async (receipt) => {
-          accepted(receipt);
-          try {
-            show(await flow.resume(receipt.session_id));
-            setAcceptedReceipt(null);
-          } catch (reason) {
-            failed(reason);
-          }
-        },
-        async (reason: unknown) => {
-          if (
-            reason instanceof ApiError &&
-            (reason.code === 'conflict' || reason.code === 'not_found')
-          ) {
-            await follow(session.family.name);
-          } else {
-            failed(reason);
-          }
-        },
-      )
-      .finally(() => {
-        setBusy(false);
-      });
+
+    void act(async () => {
+      try {
+        const next = await skipPair(pair.id);
+        if (next.pair?.id === pair.id) {
+          setNotice(NO_OTHER_PAIR);
+        } else {
+          show(family, next);
+          setNotice(null);
+        }
+      } catch (reason) {
+        if (isCode(reason, 'stale_pair')) {
+          await load(family, { notice: errorMessages.stale_pair });
+        } else {
+          failed(reason);
+        }
+      }
+    });
   };
 
   const undo = () => {
-    if (
-      session === null ||
-      session.undo_acknowledgment === null ||
-      votingLocked ||
-      flow.uncertain
-    ) {
+    if (state?.undo !== true || family === undefined || locked) {
       return;
     }
 
-    void run(async () => {
-      await flow.withdraw(session);
-      setSavedVote(null);
-      setAcceptedReceipt(null);
-      setNotice('Vote withdrawn.');
-      return flow.resume(session.id);
+    void act(async () => {
+      try {
+        await undoVote(family);
+        await load(family, { notice: 'Vote withdrawn.' });
+      } catch (reason) {
+        if (isCode(reason, 'nothing_to_undo')) {
+          await load(family, { notice: reason.message });
+        } else {
+          failed(reason);
+        }
+      }
     });
   };
 
   const toggleDefect = (side: keyof TaggedDefects, defect: Defect) => {
-    if (votingLocked || flow.uncertain) {
+    if (locked || draft === null || pair === null) {
       return;
     }
-    setTagged((current) => ({
-      ...current,
-      [side]: familyDefects.filter((item) => (item === defect) !== current[side].includes(item)),
-    }));
+    update({
+      defects: {
+        ...draft.defects,
+        [side]: pair.defects.filter(
+          (item) => (item === defect) !== draft.defects[side].includes(item),
+        ),
+      },
+    });
   };
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
@@ -480,7 +543,7 @@ export function VoteApp() {
     if (event.key === 'Enter') {
       if (target instanceof Node && target.contains(pairView.current)) {
         event.preventDefault();
-        submit();
+        submit(failedVote ?? choiceBody);
       }
       return;
     }
@@ -494,7 +557,7 @@ export function VoteApp() {
     }
 
     const key = event.key.toLowerCase();
-    if (flow.uncertain || votingLocked) {
+    if (locked) {
       return;
     }
     if (key === 'u') {
@@ -505,11 +568,16 @@ export function VoteApp() {
     if (pair === null) {
       return;
     }
+    if (key === 's') {
+      event.preventDefault();
+      skip();
+      return;
+    }
 
     const picked = CHOICES.find((item) => item.key === key);
-    const keyed = keyedDefects(familyDefects).get(event.key);
+    const keyed = keyedDefects(pair.defects).get(event.key);
     if (picked) {
-      setChoice(picked.value);
+      update({ choice: picked.value });
     } else if (keyed !== undefined) {
       toggleDefect(keyed.key, keyed.defect);
     } else {
@@ -527,98 +595,86 @@ export function VoteApp() {
     };
   }, []);
 
-  const currentFamily =
-    new URLSearchParams(window.location.search).get(FAMILY_PARAM) ??
-    session?.family.name ??
-    resumingFamily ??
-    flow.family;
-  // A session's views report an accepted vote in their own status, so only views without one do.
-  const recovery = ({ acknowledge }: { acknowledge: boolean }) =>
-    (acknowledge && acceptedReceipt !== null) || admission || error !== null ? (
-      <div className="flex flex-col items-start gap-2">
-        {acknowledge && acceptedReceipt !== null && <p role="status">Vote accepted.</p>}
-        {admission ? (
-          <Verification
-            onReady={() => {
-              setAdmission(false);
-              setError(null);
-              if (currentFamily !== null) {
-                void run(() => flow.enter(currentFamily, accepted));
-              }
-            }}
-          />
-        ) : (
-          error !== null && (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                if (currentFamily !== null) {
-                  void run(() => flow.enter(currentFamily, accepted));
-                } else {
-                  window.location.reload();
-                }
-              }}
-            >
-              Retry connection
-            </Button>
-          )
-        )}
-      </div>
-    ) : null;
-
-  if (checking) {
-    return (
-      <Screen title="Connecting to voting">
-        <p role="status">Checking your browser...</p>
-      </Screen>
+  const recovery =
+    sitekey !== null ? (
+      <Verification
+        sitekey={sitekey}
+        onReady={() => {
+          admitted.current = true;
+          setSitekey(null);
+          if (family !== undefined) {
+            void act(() => load(family, { restore: true }));
+          }
+        }}
+      />
+    ) : failedVote !== null ? (
+      <Button
+        disabled={busy}
+        onClick={() => {
+          submit(failedVote);
+        }}
+      >
+        Retry vote
+      </Button>
+    ) : (
+      error !== null &&
+      family !== undefined && (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void act(() => load(family, { restore: true }));
+          }}
+        >
+          Retry connection
+        </Button>
+      )
     );
-  }
 
-  if (session === null) {
-    if (admission) {
-      return <Screen title="Connecting to voting">{recovery({ acknowledge: true })}</Screen>;
+  if (state === null) {
+    if (family !== undefined) {
+      return (
+        <Screen title="Connecting to voting">
+          {sitekey === null && error === null && <p role="status">Checking your browser...</p>}
+          <ErrorAlert error={error} />
+          <div className="flex flex-col items-start gap-2">{recovery}</div>
+        </Screen>
+      );
     }
 
     return (
       <StartScreen
-        busy={busy || admission}
+        families={families}
         error={error}
-        recovery={recovery({ acknowledge: true })}
-        onStart={(family) => {
-          history.replaceState(null, '', `?${new URLSearchParams({ family })}`);
-          void run(() => flow.enter(family, accepted));
+        onStart={(name) => {
+          history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name })}`);
+          setFamily(name);
+          void act(() => load(name, { restore: true }));
         }}
       />
     );
   }
 
-  if (pair === null) {
+  if (pair === null || draft === null) {
     return (
-      <div ref={pairView} tabIndex={-1} role="group" aria-label="Completed session">
-        <Screen title="Session complete">
+      <div
+        ref={pairView}
+        tabIndex={-1}
+        role="group"
+        aria-label="Completed family"
+        className="outline-none"
+      >
+        <Screen title="No pairs left">
           <p className="text-muted-foreground">
-            {formatCountOf(session.votes, 'vote')} recorded on {familyTitle(session.family)}.
+            {formatCountOf(state.votes, 'vote')} recorded on {title}.
           </p>
           <Notice notice={notice} />
           <ErrorAlert error={error} />
-          {recovery({ acknowledge: false })}
+          {recovery}
           <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={votingLocked}
-              onClick={() => {
-                void run(() => flow.start(session.family.name));
-              }}
-            >
-              Start another session
-            </Button>
             <Button variant="outline" className="text-foreground" asChild>
               <a href={window.location.pathname}>Choose another family</a>
             </Button>
-            <Button
-              variant="outline"
-              onClick={undo}
-              disabled={session.undo_acknowledgment === null || votingLocked}
-            >
+            <Button variant="outline" onClick={undo} disabled={!state.undo || locked}>
               Undo last vote
             </Button>
           </div>
@@ -627,11 +683,11 @@ export function VoteApp() {
     );
   }
 
-  const pairRecovery = recovery({ acknowledge: false });
+  const hasText = pair.render === 'text';
   const status = (
-    <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-      <span role="status" className="flex items-center gap-1 empty:sr-only">
-        {savedVote?.sessionId === session.id ? (
+    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm text-muted-foreground max-sm:basis-full">
+      <span role="status" className="flex items-center gap-1 empty:sr-only max-sm:order-last">
+        {saved ? (
           <>
             <Check className="size-4" aria-hidden="true" />
             Saved
@@ -641,38 +697,16 @@ export function VoteApp() {
         )}
       </span>
       <span className="whitespace-nowrap tabular-nums">
-        {familyTitle(session.family)},{' '}
+        {title},{' '}
         <Hint
           term={{
-            term: 'This session',
-            definition: `${formatCountOf(session.remaining, 'pair')} left to vote on.`,
+            term: 'Your votes',
+            definition: `${formatCountOf(state.remaining, 'pair')} left to vote on.`,
           }}
         >
-          {formatCountOf(session.votes, 'vote')}
+          {formatCountOf(state.votes, 'vote')}
         </Hint>
       </span>
-
-      {hasFrames && (
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
-          spacing={0}
-          value={String(viewport)}
-          onValueChange={(value) => {
-            if (value !== '') {
-              setViewport(Number(value));
-            }
-          }}
-          aria-label="Viewport width"
-        >
-          {VIEWPORTS.map((width) => (
-            <ToggleGroupItem key={width} value={String(width)}>
-              {width} px
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      )}
     </div>
   );
 
@@ -681,7 +715,7 @@ export function VoteApp() {
       ref={pairView}
       tabIndex={-1}
       role="group"
-      aria-label={`Pair ${session.votes + 1}`}
+      aria-label={`Pair ${state.votes + 1}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
       <div
@@ -691,21 +725,31 @@ export function VoteApp() {
             'xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_minmax(0,1fr)] xl:gap-y-0 xl:*:row-span-2 xl:*:grid xl:*:grid-rows-subgrid',
         )}
       >
-        <Brief pair={pair} status={status} stacked={!hasText} />
+        <Brief
+          pair={pair}
+          collapsed={draft.collapsed}
+          onCollapsedChange={(collapsed) => {
+            update({ collapsed });
+          }}
+          status={status}
+        />
         {SIDES.map(({ side, key }) => (
           <OutputPane
             key={`${key}-${pair.id}`}
             side={side}
-            pane={pair[key]}
-            asMarkdown={asMarkdown}
-            viewport={viewport}
+            render={pair.render}
+            text={pair[key]}
+            asMarkdown={draft.markdown}
+            scrollRef={(element) => {
+              panes.current[key] = element;
+            }}
             controls={
-              familyDefects.length > 0 && (
+              pair.defects.length > 0 && (
                 <DefectPicker
                   side={side}
-                  defects={familyDefects}
-                  tagged={tagged[key]}
-                  disabled={votingLocked || flow.uncertain}
+                  defects={pair.defects}
+                  tagged={draft.defects[key]}
+                  disabled={locked}
                   keys={DEFECT_KEYS[key]}
                   onToggle={(defect) => {
                     toggleDefect(key, defect);
@@ -717,23 +761,24 @@ export function VoteApp() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-3">
-        {frameFocused && !admission && (
-          <p role="status" className="text-sm text-muted-foreground">
-            Keys go to the output frame while it has focus. Click outside the frame to vote by
-            keyboard.
-          </p>
-        )}
-        <ErrorAlert error={error} />
-
-        <div className="flex flex-wrap items-center gap-3">
+      {(error !== null || hasText) && (
+        <div className="flex flex-col gap-3">
+          <ErrorAlert error={error} />
           {hasText && (
-            <Toggle variant="outline" pressed={asMarkdown} onPressedChange={setAsMarkdown}>
-              Markdown
-            </Toggle>
+            <div className="flex flex-wrap items-center gap-3">
+              <Toggle
+                variant="outline"
+                pressed={draft.markdown}
+                onPressedChange={(markdown) => {
+                  update({ markdown });
+                }}
+              >
+                Markdown
+              </Toggle>
+            </div>
           )}
         </div>
-      </div>
+      )}
 
       <div
         className={cn(
@@ -741,16 +786,18 @@ export function VoteApp() {
           'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
         )}
       >
-        {pairRecovery !== null && <div className="sm:col-span-2">{pairRecovery}</div>}
+        {(sitekey !== null || failedVote !== null) && (
+          <div className="sm:col-span-2">{recovery}</div>
+        )}
         <ToggleGroup
           type="single"
           variant="choice"
           size="lg"
           spacing={2}
-          value={choice ?? ''}
-          disabled={votingLocked || flow.uncertain}
+          value={draft.choice ?? ''}
+          disabled={locked}
           onValueChange={(value) => {
-            setChoice(CHOICES.find((item) => item.value === value)?.value ?? null);
+            update({ choice: CHOICES.find((item) => item.value === value)?.value ?? null });
           }}
           aria-label="Verdict"
           className="grid w-full grid-cols-2 sm:grid-cols-4"
@@ -778,20 +825,32 @@ export function VoteApp() {
             variant="outline"
             size="lg"
             onClick={undo}
-            disabled={session.undo_acknowledgment === null || votingLocked || flow.uncertain}
+            disabled={!state.undo || locked}
             aria-keyshortcuts="U"
           >
             Undo
             <Kbd aria-hidden="true">U</Kbd>
           </Button>
           <Button
+            variant="outline"
             size="lg"
-            onClick={submit}
-            disabled={choice === null || votingLocked}
+            onClick={skip}
+            disabled={locked}
+            aria-keyshortcuts="S"
+          >
+            Skip
+            <Kbd aria-hidden="true">S</Kbd>
+          </Button>
+          <Button
+            size="lg"
+            onClick={() => {
+              submit(choiceBody);
+            }}
+            disabled={choiceBody === null || locked}
             aria-keyshortcuts="Enter"
             className="max-sm:flex-1"
           >
-            {flow.uncertain ? 'Retry vote' : 'Submit vote'}
+            Submit vote
             <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
               ↵
             </Kbd>

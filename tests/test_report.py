@@ -118,7 +118,12 @@ def make_analysis(
         reference='a',
         systems=('a', 'b', 'x', 'y', 'unrated'),
         defects=('facts',),
-        cutoffs=report.Cutoffs(production=len(ordinary) + dropped, local=None),
+        cutoffs=report.Cutoffs(
+            production=report.Cutoff(
+                id=len(ordinary) + dropped, votes=len(ordinary) + dropped
+            ),
+            local=None,
+        ),
         declared_categories=tuple(
             dict.fromkeys(category for _, category in resolved if category is not None)
         ),
@@ -945,7 +950,7 @@ class TestVotesResults:
             case 'missing-cutoffs':
                 del payload['cutoffs']
             case 'negative-cutoff':
-                payload['cutoffs']['production'] = -1
+                payload['cutoffs']['production']['votes'] = -1
             case 'actor-id':
                 payload['cutoffs']['actor_id'] = 'private-actor'
             case _:

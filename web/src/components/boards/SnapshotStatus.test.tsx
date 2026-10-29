@@ -8,7 +8,7 @@ import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 const closedAt = '2026-01-02T12:00:00Z';
 const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
 const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
-const cutoffs = { production: 337, local: null };
+const cutoffs = { production: { id: 337, votes: 330 }, local: null };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
@@ -53,16 +53,19 @@ describe('SnapshotStatus', () => {
       expect(notice.querySelector('time')?.dateTime).toBe(closedAt);
       expect(fetch).toHaveBeenCalledOnce();
       const [path, { signal, ...init } = {}] = fetch.mock.calls[0];
-      expect(path).toBe('/api/freshness?family=writing-zh&production=337');
+      expect(path).toBe('/api/freshness?family=writing-zh&production=337&production_votes=330');
       expect(init).toEqual({ method: 'GET', credentials: 'same-origin' });
       expect(signal).toBeInstanceOf(AbortSignal);
     },
   );
 
   test.each([
-    [{ production: 337, local: 12 }, 'production=337&local=12'],
-    [{ production: 0, local: null }, 'production=0'],
-  ])('sends the cutoff of every store the round read in %j', (read, query) => {
+    [
+      { production: { id: 337, votes: 330 }, local: { id: 12, votes: 12 } },
+      'production=337&production_votes=330&local=12&local_votes=12',
+    ],
+    [{ production: { id: 0, votes: 0 }, local: null }, 'production=0&production_votes=0'],
+  ])('sends the cutoff and counted votes of every store the round read in %j', (read, query) => {
     const fetch = stubFetch(Promise.withResolvers<Response>().promise);
 
     render(<SnapshotStatus family="writing-zh" closedAt={closedAt} cutoffs={read} />);

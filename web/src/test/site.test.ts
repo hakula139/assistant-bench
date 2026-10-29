@@ -11,7 +11,7 @@ import { JSDOM } from 'jsdom';
 import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
-import { makeSession, VOTE_FAMILY } from '@/test/arena';
+import { makeState, VOTE_FAMILY } from '@/test/arena';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 let directory: string;
@@ -118,10 +118,7 @@ describe('built vote document', () => {
     expect(sources).not.toContain("'unsafe-eval'");
   });
 
-  test('serves the shared shell, styles and public catalog with runtime frame policy', async () => {
-    expect(await readFile(join(directory, 'arena-families.json'))).toEqual(
-      await readFile(join(root, 'public/arena-families.json')),
-    );
+  test('serves the shared shell and styles, leaving the frame policy to the response headers', async () => {
     expect(document.title).toContain('Vote');
     expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe(
       'noindex',
@@ -140,23 +137,15 @@ describe('built vote document', () => {
     }
     expect(policy.get('style-src')).toContain("'self'");
     expect(policy.has('frame-src')).toBe(false);
-    await expect(readFile(join(directory, 'admission-shell/index.html'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    await expect(readFile(join(directory, 'admission.js'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
   });
 });
 
 describe('built pages', () => {
-  // A secure context, which the vote client's `crypto.randomUUID` requires.
   const origin = 'https://site.example';
   const vote = '/vote/index.html';
   const api = new Map<string, unknown>([
-    ['GET /api/status', { status: 'ready' }],
-    ['GET /api/families', [VOTE_FAMILY]],
-    ['POST /api/sessions', makeSession()],
+    ['GET /api/families', { families: [VOTE_FAMILY] }],
+    ['GET /api/pair', makeState()],
   ]);
   let pages: string[];
   let browser: Browser;
@@ -206,7 +195,7 @@ describe('built pages', () => {
           }
         });
 
-        await page.goto(`${origin}${path}${path === vote ? `?family=${VOTE_FAMILY.name}` : ''}`);
+        await page.goto(`${origin}${path}${path === vote ? `?family=${VOTE_FAMILY.family}` : ''}`);
         // Charts hydrate only once visible, so the viewport takes the whole page.
         await page.setViewportSize({
           width: 1280,
