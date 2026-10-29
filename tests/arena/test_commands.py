@@ -241,6 +241,7 @@ class TestStatus:
         ],
         ids=['every', 'named'],
     )
+    @pytest.mark.usefixtures('family')
     def test_says_when_no_family_is_active(
         self,
         store: tuple[SQLiteDatabase, list[str]],
@@ -293,6 +294,7 @@ class TestListVotes:
     @pytest.mark.parametrize(
         'args', [(), ('--ip-tag', 'unknown')], ids=['summary', 'selector']
     )
+    @pytest.mark.usefixtures('family')
     def test_says_when_no_vote_matches(
         self, store: tuple[SQLiteDatabase, list[str]], args: tuple[str, ...]
     ) -> None:
@@ -323,14 +325,6 @@ class TestExclude:
             {'exclusion': 'spam'},
         ]
 
-    def test_refuses_a_blank_reason(self, voted: SQLiteDatabase) -> None:
-        result = invoke(
-            'exclude', 'production', 'writing-f', '--vote', '1', '--reason', ''
-        )
-
-        assert result.exit_code == 1
-        assert result.stderr == 'Give a reason for the exclusion.\n'
-
 
 class TestRestore:
     def test_restores_the_selected_votes_and_reports_the_count(
@@ -347,7 +341,7 @@ class TestRestore:
         ).rows == [{'excluded': 0}]
 
 
-class TestSelector:
+class TestModerationRefusals:
     @pytest.mark.parametrize(
         ('args', 'message'),
         [
@@ -367,10 +361,26 @@ class TestSelector:
                 ('votes', 'production', 'writing-f', '--ip-tag', 't', '--actor', 'a'),
                 'Pass only one of `--ip-tag`, `--actor`.\n',
             ),
+            (
+                ('votes', 'production', 'writing-f', '--by', 'ip', '--actor', 'a'),
+                'Pass `--by` only to summarize, without `--ip-tag` or `--actor`.\n',
+            ),
+            (
+                ('exclude', 'production', 'writing-f', '--vote', '1', '--reason', ' '),
+                'Give a reason for the exclusion.\n',
+            ),
         ],
-        ids=['exclude-none', 'restore-none', 'restore-two', 'votes-two'],
+        ids=[
+            'exclude-none',
+            'restore-none',
+            'restore-two',
+            'votes-two',
+            'votes-by',
+            'exclude-blank-reason',
+        ],
     )
-    def test_refuses_anything_but_one_selector_before_connecting(
+    @pytest.mark.usefixtures('family')
+    def test_refuses_invalid_options_before_connecting(
         self,
         store: tuple[SQLiteDatabase, list[str]],
         args: tuple[str, ...],
@@ -380,4 +390,49 @@ class TestSelector:
 
         assert result.exit_code == 1
         assert result.stderr == message
+        assert store[1] == []
+
+    @pytest.mark.parametrize(
+        'args',
+        [
+            ('votes', 'production', 'writing-f'),
+            ('exclude', 'production', 'writing-f', '--vote', '1', '--reason', 'bot'),
+            ('restore', 'production', 'writing-f', '--vote', '1'),
+        ],
+        ids=['votes', 'exclude', 'restore'],
+    )
+    @pytest.mark.usefixtures('family')
+    def test_prints_what_d1_refused(
+        self, monkeypatch: pytest.MonkeyPatch, args: tuple[str, ...]
+    ) -> None:
+        def refuse(target: str) -> AbstractContextManager[SQLiteDatabase]:
+            raise D1Error('D1 refused the statement with HTTP 403. Forbidden.')
+
+        monkeypatch.setattr(commands, 'connect', refuse)
+
+        result = invoke(*args)
+
+        assert result.exit_code == 1
+        assert result.stderr == 'D1 refused the statement with HTTP 403. Forbidden.\n'
+
+    @pytest.mark.parametrize(
+        'args',
+        [
+            ('votes', 'production', 'writing-x'),
+            ('exclude', 'production', 'writing-x', '--vote', '1', '--reason', 'bot'),
+            ('restore', 'production', 'writing-x', '--vote', '1'),
+            ('status', 'production', 'writing-x'),
+        ],
+        ids=['votes', 'exclude', 'restore', 'status'],
+    )
+    @pytest.mark.usefixtures('family')
+    def test_refuses_an_unknown_family_with_the_choices(
+        self, store: tuple[SQLiteDatabase, list[str]], args: tuple[str, ...]
+    ) -> None:
+        result = invoke(*args)
+
+        assert result.exit_code == 2
+        assert 'No family named `writing-x`. Choose among `writing-f`.' in (
+            result.stderr
+        )
         assert store[1] == []

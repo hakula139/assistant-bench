@@ -367,6 +367,18 @@ def groups(database: Database, family: str, by: Grouping) -> list[Group]:
     )
 
 
+def check_reason(reason: str) -> None:
+    """Refuse an exclusion reason that is blank.
+
+    Raises
+    ------
+    ValueError
+        The reason is blank.
+    """
+    if not reason.strip():
+        raise ValueError('Give a reason for the exclusion.')
+
+
 def exclude(database: Database, family: str, selector: Selector, reason: str) -> int:
     """Exclude the selected votes for `reason`, returning how many changed.
 
@@ -377,9 +389,7 @@ def exclude(database: Database, family: str, selector: Selector, reason: str) ->
     ValueError
         The reason is blank.
     """
-    if not reason.strip():
-        raise ValueError('Give a reason for the exclusion.')
-
+    check_reason(reason)
     condition, param = selector.condition()
     return database.execute(
         'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '

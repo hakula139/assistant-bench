@@ -106,6 +106,8 @@ uv run bench arena status production writing-zh
 
 `prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases each store votes on.
 
+A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
+
 ### Setting Up a Vote Store
 
 `web/wrangler.toml` names each target's database, and `web/migrations/` holds its schema. Create a missing database, record the `database_id` it prints under the target's `[[env.<target>.d1_databases]]` entry, then apply the migrations:
@@ -117,11 +119,9 @@ pnpm --filter web exec wrangler d1 migrations apply DB --env staging --remote
 
 Apply the migrations again after adding one, which skips the files already applied. Until the voting Worker launches, a schema change edits `0001_init.sql` instead, so recreate each database, dropping its votes: delete it with `pnpm --filter web exec wrangler d1 delete <name>`, create it again, record its new ID, and apply the migrations.
 
-A session ends when no eligible case remains, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
-
 ### Moderation
 
-Each vote records the browser that cast it, an opaque tag of its network and the time from showing the pair to the vote. `bench arena votes` summarizes a family's votes per network tag, or per browser with `--by actor`, and lists one tag's or browser's votes when given `--ip-tag` or `--actor`:
+Each vote records the browser that cast it, an opaque tag of its network and the time from issuing the pair to recording the vote. `bench arena votes` summarizes a family's votes per network tag, or per browser with `--by actor`, and lists one tag's or browser's votes when given `--ip-tag` or `--actor`:
 
 ```bash
 uv run bench arena votes production writing-zh
@@ -133,7 +133,7 @@ uv run bench arena restore production writing-zh --vote <id> --vote <id>
 
 A summary row shows the votes, the browsers behind a tag or the tags a browser used, the share of each choice, the median time per vote, the first and last vote, and how many votes are excluded. A listing shows each vote's systems, choice and time, and the reason for an exclusion. Votes whose tag has been cleared show `(cleared)` in place of a tag. Copy tags and browser IDs from these listings, since only the voting Worker can compute a tag.
 
-`exclude` and `restore` take exactly one of `--ip-tag`, `--actor` or `--vote`, which repeats, and print how many votes changed. An excluded vote keeps the reason it was first excluded for. A closed report keeps its votes until the next `bench close`, which leaves the excluded ones out and counts them in `dropped_votes`. Fast votes, minority preferences and disagreement with your own choices are reasons to look closer, and none of them alone is a reason to exclude.
+`exclude` and `restore` take exactly one of `--ip-tag`, `--actor` or `--vote`, which repeats, and print how many votes changed. An excluded vote keeps the reason it was first excluded for. An exclusion covers only the votes already recorded, so later votes from the same tag or browser count until you exclude them too. A closed report keeps its votes until the next `bench close`, which leaves the excluded ones out and counts them in `dropped_votes`. Fast votes, minority preferences and disagreement with your own choices are reasons to look closer, and none of them alone is a reason to exclude.
 
 ## Closing a Round
 

@@ -326,6 +326,27 @@ class TestListed:
 
         assert [row.id for row in listed] == [ids[name] for name in expected]
 
+    @pytest.mark.parametrize(
+        ('selector', 'expected'),
+        [
+            (Selector(column='ip_tag', values=('shared',)), ['x', 'y-first', 'z']),
+            (Selector(column='actor_id', values=('y',)), ['y-first', 'y-second']),
+        ],
+        ids=['ip-tag', 'actor'],
+    )
+    def test_pages_through_a_selection_whose_ids_skip(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        selector: Selector,
+        expected: list[str],
+    ) -> None:
+        database, ids = moderated_store()
+        monkeypatch.setattr(votes, 'PAGE_ROWS', 2)
+
+        listed = votes.listed(database, FAMILY.name, selector)
+
+        assert [row.id for row in listed] == [ids[name] for name in expected]
+
     def test_lists_each_vote_with_its_tag_timing_and_reason(self) -> None:
         database, ids = moderated_store()
 
@@ -456,9 +477,10 @@ class TestExclude:
             (Selector(column='ip_tag', values=('shared',)), 3, ['x', 'y-first', 'z']),
             (Selector(column='actor_id', values=('y',)), 1, ['y-first']),
             (Selector(column='id', values=(1, 4)), 2, ['x', 'z']),
+            (Selector(column='id', values=(*range(1_000, 1_150), 1)), 1, ['x']),
             (Selector(column='ip_tag', values=('unknown',)), 0, []),
         ],
-        ids=['ip-tag', 'actor', 'ids', 'no-match'],
+        ids=['ip-tag', 'actor', 'ids', 'ids-past-the-parameter-limit', 'no-match'],
     )
     def test_excludes_the_selected_votes_keeping_earlier_reasons(
         self, selector: Selector, changed: int, excluded: list[str]
@@ -544,6 +566,19 @@ class TestRestore:
             if row.exclusion is not None
         ]
         assert excluded == ([] if changed else [3])
+
+    def test_leaves_votes_of_another_family_alone(self) -> None:
+        database, ids = moderated_store()
+
+        result = votes.restore(
+            database, 'writing-other', Selector(column='id', values=(ids['y-second'],))
+        )
+
+        assert result == 0
+        (row,) = votes.listed(
+            database, FAMILY.name, Selector(column='id', values=(ids['y-second'],))
+        )
+        assert row.exclusion == 'spam'
 
 
 class TestSnapshotFiles:

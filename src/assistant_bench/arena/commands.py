@@ -13,12 +13,23 @@ from assistant_bench.arena import publication, votes
 from assistant_bench.arena.d1 import D1Error, Database, Target, TargetName, connect
 from assistant_bench.arena.runtime import deploy as deploy_target, load_target
 from assistant_bench.catalog import load_export, load_systems
-from assistant_bench.families import Choice, load_cases, load_family
+from assistant_bench.families import Choice, family_names, load_cases, load_family
 from assistant_bench.messages import code, count_of
 
 
 app = typer.Typer(no_args_is_help=True)
 _TARGET = TypeAdapter[TargetName](TargetName)
+
+
+def _known_family(name: str | None) -> str | None:
+    """Return the name, refusing one with no family."""
+    known = family_names()
+    if name is not None and name not in known:
+        raise typer.BadParameter(
+            f'No family named `{name}`. Choose among {code(known)}.'
+        )
+    return name
+
 
 FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
 
@@ -31,7 +42,9 @@ CHOICE_LABELS: dict[Choice, str] = {
 CLEARED = '(cleared)'
 """Stands for the network tag of a vote older than the tags' retention."""
 
-FamilyArgument = Annotated[str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP)]
+FamilyArgument = Annotated[
+    str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP, callback=_known_family)
+]
 IpTag = Annotated[
     str | None, typer.Option(help='A network tag, as `bench arena votes` lists it.')
 ]
@@ -123,7 +136,8 @@ def publish(
 def status(
     target: Target,
     family: Annotated[
-        str | None, typer.Argument(metavar='[FAMILY]', help=FAMILY_HELP)
+        str | None,
+        typer.Argument(metavar='[FAMILY]', help=FAMILY_HELP, callback=_known_family),
     ] = None,
 ) -> None:
     """Show each active family's publication and votes, or only the named family's."""
@@ -155,9 +169,12 @@ def list_votes(
     target: Target,
     family: FamilyArgument,
     by: Annotated[
-        votes.Grouping,
-        typer.Option(help='Summarize per network tag or per browser.'),
-    ] = 'ip',
+        votes.Grouping | None,
+        typer.Option(
+            help='Summarize per network tag, the default, or per browser.',
+            show_default=False,
+        ),
+    ] = None,
     ip_tag: IpTag = None,
     actor: Actor = None,
 ) -> None:
@@ -166,10 +183,13 @@ def list_votes(
     Both include excluded votes, and the list shows each one's reason.
     """
     selector = _selector(ip_tag=ip_tag, actor=actor)
+    if selector is not None and by is not None:
+        _fail('Pass `--by` only to summarize, without `--ip-tag` or `--actor`.')
+
     try:
         with connect(target) as database:
             if selector is None:
-                text = _summary(database, family, by)
+                text = _summary(database, family, by or 'ip')
             else:
                 text = _listing(database, family, selector)
     except (D1Error, OSError, ValueError) as error:
@@ -196,6 +216,7 @@ def exclude(
     """
     selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
     try:
+        votes.check_reason(reason)
         with connect(target) as database:
             changed = votes.exclude(database, family, selector, reason)
     except (D1Error, OSError, ValueError) as error:
