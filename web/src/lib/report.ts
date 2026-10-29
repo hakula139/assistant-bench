@@ -80,35 +80,20 @@ const votesRules = z.strictObject({
   preliminary_decisive_votes: z.int().positive(),
 });
 
-const provenance = z.strictObject({
-  schema_version: z.literal(1),
-  export_id: z.string().min(1),
-  export_digest: z.string().min(1),
-  namespace: z.string().min(1),
-  captured_at: z.iso.datetime({ offset: true }),
-  event_cutoff: z.int().nonnegative(),
-  receipt_cutoff: z.int().nonnegative(),
-  family_revision: z.int().nonnegative(),
-  analysis_sequence: z.int().nonnegative(),
-  evaluation_id: z.string().min(1),
-  publication_id: z.string().min(1),
-  policy_id: z.string().min(1),
-  sampling_point_snapshot_id: z.string().min(1),
-  weighted_evidence_digest: z.string().min(1),
-  fitted_point_snapshot_id: z.string().min(1),
-});
+const cutoff = z.int().nonnegative().nullable();
+const cutoffs = z.strictObject({ production: cutoff, local: cutoff });
 
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   method: votesMethod,
   rules: votesRules,
-  provenance,
+  cutoffs,
   reference: z.string(),
   anchor: z.string(),
   votes: z.int().nonnegative(),
   effective_votes: z.number().nonnegative(),
   dropped_votes: z.int(),
-  sessions: z.int(),
+  voters: z.int(),
   standings: z.array(standing),
   unranked: z.array(z.string()),
   head_to_head: z.array(headToHead),
@@ -238,6 +223,7 @@ export const reportSchema = z
 export type PublicSystem = z.infer<typeof publicSystem>;
 export type VotesMethod = z.infer<typeof votesMethod>;
 export type VotesRules = z.infer<typeof votesRules>;
+export type Cutoffs = z.infer<typeof cutoffs>;
 export type Distribution = z.infer<typeof distribution>;
 export type Standing = z.infer<typeof standing>;
 export type HeadToHead = z.infer<typeof headToHead>;

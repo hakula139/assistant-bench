@@ -75,7 +75,6 @@ export const withdrawRequest = z.strictObject({
   session_id: identifier,
   acknowledgment: identifier,
 });
-export const freshnessRequest = z.strictObject({ export_id: identifier });
 export const freshnessView = z.strictObject({ status: z.enum(['current', 'stale', 'unknown']) });
 export const errorView = z.strictObject({
   error: z.enum([
@@ -179,8 +178,20 @@ export const resolveVote = (body: ReceiptQuery) =>
   request(voteAcknowledgment, 'POST', '/votes/resolve', receiptQuery.parse(body));
 export const undoVote = (body: z.infer<typeof withdrawRequest>) =>
   request(z.undefined(), 'POST', '/sessions/withdraw', withdrawRequest.parse(body));
-export const checkFreshness = (body: z.infer<typeof freshnessRequest>, signal: AbortSignal) =>
-  request(freshnessView, 'POST', '/freshness', freshnessRequest.parse(body), signal);
+/** Asks whether a round closed at these cutoffs still holds every counted vote of the family. */
+export function checkFreshness(
+  family: string,
+  cutoffs: Record<'production' | 'local', number | null>,
+  signal: AbortSignal,
+) {
+  const query = new URLSearchParams({ family });
+  for (const [store, cutoff] of Object.entries(cutoffs)) {
+    if (cutoff !== null) {
+      query.set(store, String(cutoff));
+    }
+  }
+  return request(freshnessView, 'GET', `/freshness?${query.toString()}`, undefined, signal);
+}
 
 /** HTML capabilities may load only from the runtime's configured, separate renderer. */
 export function validateRenderOrigins(session: SessionView): SessionView {

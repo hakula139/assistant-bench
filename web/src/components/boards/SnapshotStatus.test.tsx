@@ -5,9 +5,10 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 
-const capturedAt = '2026-01-02T12:00:00Z';
-const captured = 'Captured Jan 2, 2026, 12:00 PM UTC.';
-const unknown = 'Captured Jan 2, 2026, 12:00 PM UTC. Current voting evidence could not be checked.';
+const closedAt = '2026-01-02T12:00:00Z';
+const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
+const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
+const cutoffs = { production: 337, local: null };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
@@ -15,49 +16,62 @@ function stubFetch(response: Promise<Response>) {
   return fetch;
 }
 
+function status() {
+  return <SnapshotStatus family="writing-zh" closedAt={closedAt} cutoffs={cutoffs} />;
+}
+
 describe('SnapshotStatus', () => {
   afterEach(() => {
     cleanup();
   });
 
-  test('renders only the capture time before hydration', () => {
-    const html = renderToString(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+  test('renders only the closing time before hydration', () => {
+    const html = renderToString(status());
 
-    expect(html).toContain(`<time dateTime="${capturedAt}">`);
-    expect(html.replace(/<[^>]+>/g, '')).toBe(captured);
+    expect(html).toContain(`<time dateTime="${closedAt}">`);
+    expect(html.replace(/<[^>]+>/g, '')).toBe(closed);
   });
 
   test.each([
-    ['current', 'The ranking uses the current voting evidence.'],
-    ['stale', 'Votes, moderation or evaluation settings have changed since this capture.'],
-    ['unknown', 'Current voting evidence could not be checked.'],
+    ['current', 'The ranking uses every counted vote.'],
+    ['stale', 'Votes or moderation have changed since this round closed.'],
+    ['unknown', 'Current votes could not be checked.'],
   ] as const)(
     'checks the serving origin and then shows the %s verdict',
-    async (status, message) => {
+    async (verdict, message) => {
       const pending = Promise.withResolvers<Response>();
       const fetch = stubFetch(pending.promise);
 
-      render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+      render(status());
       const notice = screen.getByRole('status');
-      expect(notice.textContent).toBe(captured);
+      expect(notice.textContent).toBe(closed);
 
-      pending.resolve(Response.json({ status }));
+      pending.resolve(Response.json({ status: verdict }));
 
       await screen.findByText(message, { exact: false });
-      expect(notice.textContent).toBe(`${captured} ${message}`);
-      expect(notice.querySelector('time')?.dateTime).toBe(capturedAt);
+      expect(notice.textContent).toBe(`${closed} ${message}`);
+      expect(notice.querySelector('time')?.dateTime).toBe(closedAt);
       expect(fetch).toHaveBeenCalledOnce();
       const [path, { signal, ...init } = {}] = fetch.mock.calls[0];
-      expect(path).toBe('/api/freshness');
-      expect(init).toEqual({
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ export_id: 'capture' }),
-      });
+      expect(path).toBe('/api/freshness?family=writing-zh&production=337');
+      expect(init).toEqual({ method: 'GET', credentials: 'same-origin' });
       expect(signal).toBeInstanceOf(AbortSignal);
     },
   );
+
+  test('sends the cutoff of every store the round counted', () => {
+    const fetch = stubFetch(Promise.withResolvers<Response>().promise);
+
+    render(
+      <SnapshotStatus
+        family="writing-zh"
+        closedAt={closedAt}
+        cutoffs={{ production: 337, local: 12 }}
+      />,
+    );
+
+    expect(fetch.mock.calls[0][0]).toBe('/api/freshness?family=writing-zh&production=337&local=12');
+  });
 
   test.each([
     ['an unsupported status', () => Promise.resolve(Response.json({ status: 'pending' }))],
@@ -68,15 +82,15 @@ describe('SnapshotStatus', () => {
   ])('reports that %s could not be checked', async (_, response) => {
     stubFetch(response());
 
-    render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+    render(status());
 
     expect((await screen.findByText(/could not be checked/)).textContent).toBe(unknown);
   });
 
-  test('cancels its check when the captured round is removed', () => {
+  test('cancels its check when the closed round is removed', () => {
     const pending = Promise.withResolvers<Response>();
     const fetch = stubFetch(pending.promise);
-    const { unmount } = render(<SnapshotStatus exportId="capture" capturedAt={capturedAt} />);
+    const { unmount } = render(status());
     const signal = fetch.mock.calls[0][1]?.signal;
     expect(signal?.aborted).toBe(false);
 

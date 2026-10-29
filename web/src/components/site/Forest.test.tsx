@@ -53,11 +53,14 @@ describe('Forest', () => {
     );
   });
 
-  test('labels the genuine near-tied ledger scores at their displayed precision', async () => {
-    const report = reportSchema.parse(await readFixture('report-ledger'));
+  test('labels near-tied scores at their displayed precision', async () => {
+    const report = reportSchema.parse(await readFixture());
     if (report.results.scorer !== 'votes') {
       throw new Error('the fixture is a votes report');
     }
+    report.results.standings.forEach((standing, index) => {
+      standing.score = 1000 + index / 100;
+    });
     const rows = roundRows(
       () => '/',
       report.results,
@@ -67,7 +70,7 @@ describe('Forest', () => {
 
     const { container } = render(
       <Forest
-        caption="Ledger scores"
+        caption="Near-tied scores"
         domain={forestDomain(report.results.standings)}
         rows={rows}
       />,
@@ -77,8 +80,8 @@ describe('Forest', () => {
       (label) => label.textContent,
     );
     expect(new Set(labels).size).toBe(labels.length);
-    expect(container.querySelector('tbody')?.textContent).toContain('Large');
-    expect(container.querySelector('tbody')?.textContent).toContain('Small');
+    expect(container.querySelector('tbody')?.textContent).toContain('Acme Large');
+    expect(container.querySelector('tbody')?.textContent).toContain('Acme Small');
   });
 
   test.each<[[number, number], string, string[]]>([

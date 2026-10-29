@@ -37,7 +37,6 @@ const contracts = [
   ['vote', arena.voteRequest, { ...receipt, capability: 'pair-capability' }],
   ['acknowledgment', arena.voteAcknowledgment, { acknowledgment: 'ack-1', session_id: 's1' }],
   ['withdrawal', arena.withdrawRequest, { ...command, session_id: 's1', acknowledgment: 'ack-1' }],
-  ['freshness query', arena.freshnessRequest, { export_id: 'capture-1' }],
   ['freshness response', arena.freshnessView, { status: 'current' }],
   ['safe error', arena.errorView, { error: 'unavailable' }],
 ] as const;
@@ -73,7 +72,6 @@ describe('arena contracts', () => {
       voteRequest: arena.voteRequest,
       voteAcknowledgment: arena.voteAcknowledgment,
       withdrawRequest: arena.withdrawRequest,
-      freshnessRequest: arena.freshnessRequest,
       freshnessView: arena.freshnessView,
       errorView: arena.errorView,
       taggedDefects: arena.taggedDefects,

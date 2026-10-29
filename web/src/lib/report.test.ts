@@ -70,7 +70,7 @@ describe('reportSchema', () => {
     expect(reportSchema.safeParse({ ...payload, [field]: value }).success).toBe(false);
   });
 
-  test.each(['report', 'report-early', 'report-ledger'] as const)(
+  test.each(['report', 'report-early'] as const)(
     'parses the %s votes round the pydantic models write',
     async (name) => {
       const payload = await readFixture(name);
@@ -97,10 +97,10 @@ describe('reportSchema', () => {
   );
 
   test.each([
-    ['missing provenance', ['provenance'], undefined],
-    ['unrecorded provenance', ['provenance'], { status: 'unrecorded' }],
-    ['negative cutoff', ['provenance', 'receipt_cutoff'], -1],
-    ['private actor', ['provenance', 'actor_id'], 'private-actor'],
+    ['missing cutoffs', ['cutoffs'], undefined],
+    ['negative cutoff', ['cutoffs', 'production'], -1],
+    ['fractional cutoff', ['cutoffs', 'local'], 1.5],
+    ['unknown store', ['cutoffs', 'staging'], 1],
     ['nonpositive cap', ['method', 'actor_cap'], 0],
     ['boolean cap', ['method', 'actor_cap'], true],
     ['retired method name', ['method', 'name'], 'bradley-terry'],
@@ -222,37 +222,28 @@ describe('reportSchema', () => {
     expect(shape).toEqual(schemaShape(committed));
   });
 
-  test('preserves genuine capped ledger weights and provenance on the wire', async () => {
-    const parsed = reportSchema.parse(await readFixture('report-ledger'));
+  test('preserves capped voter weights on the wire', async () => {
+    const parsed = reportSchema.parse(await readFixture());
 
     if (parsed.results.scorer !== 'votes') {
-      throw new Error('Expected genuine votes fixture');
+      throw new Error('Expected a votes fixture');
     }
     const results = parsed.results;
     expect(results.method.actor_cap).toBe(100);
-    expect(results.votes).toBe(150);
-    expect(results.dropped_votes).toBe(1);
-    expect(results.effective_votes).toBeCloseTo(120);
-    const large = results.head_to_head.find((row) => row.system === 'large');
-    if (large === undefined) {
-      throw new Error('Expected the large system comparison');
+    expect(results.votes).toBe(315);
+    expect(results.dropped_votes).toBe(42);
+    expect(results.effective_votes).toBeCloseTo(286);
+    const flash = results.head_to_head.find(
+      (row) => row.system === 'acme-flash' && row.opponent === 'acme-large',
+    );
+    if (flash === undefined) {
+      throw new Error('Expected the Acme Flash comparison');
     }
-    expect(large.win_rate).toBeCloseTo(7 / 12);
-    expect(large.win_rate).not.toBeCloseTo(
-      (large.wins + (large.ties + large.both_bad) / 2) / large.votes,
+    expect(flash.win_rate).toBeCloseTo(0.3471, 4);
+    expect(flash.win_rate).not.toBeCloseTo(
+      (flash.wins + (flash.ties + flash.both_bad) / 2) / flash.votes,
     );
   });
-
-  test.each(['report', 'report-early'] as const)(
-    'preserves omitted provenance in the historical %s wire object',
-    async (name) => {
-      const payload = await readFixture(name);
-
-      const parsed = reportSchema.parse(payload);
-
-      expect(parsed).toEqual(payload);
-    },
-  );
 
   test('rejects a field the pydantic models do not write', async () => {
     const report = await readFixture();
