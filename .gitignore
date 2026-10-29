@@ -5,6 +5,7 @@ coverage/
 coverage.xml
 dist/
 *.egg-info/
+/web/worker-configuration.d.ts
 
 # Dependencies
 .venv/

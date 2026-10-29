@@ -13,12 +13,111 @@ not_found_handling = "404-page"
 [observability.logs]
 enabled = true
 
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "assistant-bench-arena-staging"
-database_id = "8d14567d-8565-4ea0-b1b4-32af18b96188"
+[dev]
+ip = "localhost"
+port = 8790
+
+# ── Production ──
+
+[env.production]
+name = "assistant-bench"
+main = "worker/index.ts"
+preview_urls = false
+routes = [{ pattern = "bench.hakula.xyz", custom_domain = true }]
+
+[env.production.assets]
+directory = "./dist"
+not_found_handling = "404-page"
+run_worker_first = ["/api/*"]
+
+[env.production.vars]
+APP_ORIGIN = "https://bench.hakula.xyz"
+STORE = "production"
+# cspell:ignore 0x4AAAAAAFlKZW7ZlfptMhwH
+TURNSTILE_HOSTNAME = "bench.hakula.xyz"
+TURNSTILE_SITEKEY = "0x4AAAAAAFlKZW7ZlfptMhwH"
+
+[env.production.secrets]
+required = ["ACTOR_KEY", "IP_TAG_KEY", "TURNSTILE_SECRET"]
+
+[env.production.triggers]
+crons = ["0 3 * * *"]
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "assistant-bench-arena-production"
 database_id = "069f7ef2-7c84-4865-b654-a7cd507b5624"
+
+[[env.production.ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "66211931584339"
+simple = { limit = 60, period = 60 }
+
+# ── Staging ──
+
+[env.staging]
+name = "assistant-bench-staging"
+main = "worker/index.ts"
+preview_urls = false
+routes = [{ pattern = "bench-staging.hakula.xyz", custom_domain = true }]
+
+[env.staging.assets]
+directory = "./dist"
+not_found_handling = "404-page"
+run_worker_first = ["/api/*"]
+
+[env.staging.vars]
+APP_ORIGIN = "https://bench-staging.hakula.xyz"
+STORE = "staging"
+# cspell:ignore 0x4AAAAAAFk4uKFs7GuqFW55
+TURNSTILE_HOSTNAME = "bench-staging.hakula.xyz"
+TURNSTILE_SITEKEY = "0x4AAAAAAFk4uKFs7GuqFW55"
+
+[env.staging.secrets]
+required = ["ACTOR_KEY", "IP_TAG_KEY", "TURNSTILE_SECRET"]
+
+[env.staging.triggers]
+crons = ["0 3 * * *"]
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-arena-staging"
+database_id = "8d14567d-8565-4ea0-b1b4-32af18b96188"
+
+[[env.staging.ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "91272530491927"
+simple = { limit = 60, period = 60 }
+
+# ── Local ──
+
+[env.local]
+name = "assistant-bench-local"
+main = "worker/index.ts"
+preview_urls = false
+
+[env.local.assets]
+directory = "./dist"
+not_found_handling = "404-page"
+run_worker_first = ["/api/*"]
+
+# Cloudflare's always-passing Turnstile test pair, whose siteverify answer names `example.com`.
+[env.local.vars]
+APP_ORIGIN = "http://localhost:8790"
+STORE = "local"
+TURNSTILE_HOSTNAME = "example.com"
+TURNSTILE_SITEKEY = "1x00000000000000000000AA"
+TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
+
+[env.local.secrets]
+required = ["ACTOR_KEY", "IP_TAG_KEY"]
+
+[[env.local.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-arena-local"
+database_id = "local"
+
+[[env.local.ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "1"
+simple = { limit = 60, period = 60 }

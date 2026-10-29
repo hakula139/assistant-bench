@@ -66,6 +66,7 @@ litellm
 llms
 Logit
 lucide
+marsidev
 McNemar
 mypy
 NFKC
