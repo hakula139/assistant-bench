@@ -1,66 +1,20 @@
 import { cn } from 'cn';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Markdown, PlainText } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
-import type { Pane } from '@/lib/arena';
+import type { PairView } from '@/lib/arena';
 
 interface OutputPaneProps {
   side: 'A' | 'B';
-  pane: Pane;
+  render: PairView['render'];
+  text: string;
   /** Renders text outputs as Markdown, with raw HTML disabled. */
   asMarkdown: boolean;
-  /** The width an HTML output lays out at, scaled down to fit the pane, in CSS pixels. */
-  viewport: number;
   controls: ReactNode;
-}
-
-function FramedOutput({
-  url,
-  viewport,
-  side,
-}: {
-  url: string;
-  viewport: number;
-  side: OutputPaneProps['side'];
-}) {
-  const container = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-
-  useEffect(() => {
-    const element = container.current;
-    if (!element) {
-      return;
-    }
-
-    const observer = new ResizeObserver(([entry]) => {
-      setScale(Math.min(1, entry.contentRect.width / viewport));
-    });
-    observer.observe(element);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [viewport]);
-
-  return (
-    <div ref={container} className="h-full overflow-hidden">
-      <iframe
-        src={url}
-        title={`Output ${side}`}
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        className="block origin-top-left border-0 bg-white"
-        style={{
-          width: viewport,
-          marginInline: scale === 1 ? 'auto' : 0,
-          height: `${100 / scale}%`,
-          transform: `scale(${scale})`,
-        }}
-      />
-    </div>
-  );
+  /** Receives the pane's scroll container, whose offset a reload restores. */
+  scrollRef?: (element: HTMLDivElement | null) => void;
 }
 
 type DiffLine = 'file' | 'hunk' | 'added' | 'removed' | 'context';
@@ -122,13 +76,20 @@ function Diff({ text }: { text: string }) {
   );
 }
 
-export function OutputPane({ side, pane, asMarkdown, viewport, controls }: OutputPaneProps) {
+export function OutputPane({
+  side,
+  render,
+  text,
+  asMarkdown,
+  controls,
+  scrollRef,
+}: OutputPaneProps) {
   return (
     <Card
       size="sm"
       role="region"
       aria-label={`Output ${side}`}
-      className={cn(panel, 'text-base md:min-h-0', pane.render === 'html' && 'max-md:h-[60dvh]')}
+      className={cn(panel, 'text-base md:min-h-0')}
     >
       <div className={cn(band, 'border-b')}>
         <CardTitle role="heading" aria-level={2}>
@@ -136,21 +97,17 @@ export function OutputPane({ side, pane, asMarkdown, viewport, controls }: Outpu
         </CardTitle>
         <div className="ml-auto min-h-7">{controls}</div>
       </div>
-      {pane.render === 'html' ? (
-        <CardContent className="min-h-0 flex-1 p-0">
-          <FramedOutput url={pane.url} viewport={viewport} side={side} />
-        </CardContent>
-      ) : pane.render === 'diff' ? (
-        <CardContent className={cn(scroll, 'px-0')}>
-          <Diff text={pane.text} />
+      {render === 'diff' ? (
+        <CardContent ref={scrollRef} className={cn(scroll, 'px-0')}>
+          <Diff text={text} />
         </CardContent>
       ) : asMarkdown ? (
-        <CardContent className={scroll}>
-          <Markdown text={pane.text} />
+        <CardContent ref={scrollRef} className={scroll}>
+          <Markdown text={text} />
         </CardContent>
       ) : (
-        <CardContent className={cn(scroll, 'leading-relaxed whitespace-pre-wrap')}>
-          <PlainText text={pane.text} />
+        <CardContent ref={scrollRef} className={cn(scroll, 'leading-relaxed whitespace-pre-wrap')}>
+          <PlainText text={text} />
         </CardContent>
       )}
     </Card>

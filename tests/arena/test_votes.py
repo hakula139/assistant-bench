@@ -15,7 +15,7 @@ from assistant_bench.arena.votes import (
     Vote,
 )
 from assistant_bench.families import Choice
-from assistant_bench.report import Cutoffs
+from assistant_bench.report import Cutoff, Cutoffs
 from assistant_bench.scoring.ranking import Comparison
 from support import (
     ARENA_NAMES,
@@ -611,7 +611,7 @@ class TestVotingInput:
 
         assert [row.receipt for row in analysis.ordinary] == ['production:1']
         assert analysis.dropped == 5
-        assert analysis.cutoffs == Cutoffs(production=4, local=None)
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4), local=None)
 
     def test_drops_a_vote_on_a_case_whose_text_changed(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
@@ -626,7 +626,7 @@ class TestVotingInput:
 
         analysis = votes.voting_input(snapshot((a, b)), FAMILY, [])
 
-        assert analysis.cutoffs == Cutoffs(production=0, local=None)
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0), local=None)
 
     def test_anchors_on_the_reference_the_publication_froze(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
@@ -657,7 +657,9 @@ class TestVotingInput:
             ('production:1', 'production:actor'),
             ('local:1', 'local:actor'),
         ]
-        assert analysis.cutoffs == Cutoffs(production=1, local=1)
+        assert analysis.cutoffs == Cutoffs(
+            production=Cutoff(id=1, votes=1), local=Cutoff(id=1, votes=1)
+        )
 
     def test_settles_the_pairings_verdicts_and_identical_content_decide(
         self,

@@ -1,182 +1,186 @@
+import type { TurnstileProps } from '@marsidev/react-turnstile';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { forwardRef, useImperativeHandle } from 'react';
+import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from 'vitest';
 
 import { VoteApp } from '@/components/vote/VoteApp';
 import {
-  receiptQuery,
-  resumeSessionRequest,
-  startSessionRequest,
+  admissionRequest,
+  skipRequest,
+  undoRequest,
   voteRequest,
-  withdrawRequest,
   type FamilyView,
-  type SessionView,
+  type PairState,
+  type VoteRequest,
 } from '@/lib/arena';
-import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
 import { defectTerms } from '@/lib/glossary';
-import { VoteFlow } from '@/lib/vote-flow';
-import { COMMAND_ID, VOTE_FAMILY as FAMILY, makeSession, requestBody } from '@/test/arena';
-import { ADMISSION, stubChallenge } from '@/test/verification';
+import { VOTE_FAMILY as FAMILY, pairId, requestBody, WRITING_DEFECTS } from '@/test/arena';
 
-const PRIVATE_FAMILIES: FamilyView[] = [
-  { name: 'private-review', aspect: 'private-research', display_name: 'Review', defects: [] },
-  { name: 'private-unlisted', aspect: 'unlisted', display_name: 'Unlisted review', defects: [] },
-  {
-    name: 'private-spaced',
-    aspect: 'private research',
-    display_name: 'Spaced review',
-    defects: [],
-  },
-  { name: 'smoke-text', aspect: null, display_name: 'Smoke', defects: [] },
-];
+const SITEKEY = 'test-sitekey';
 
-type Cast = ReturnType<typeof voteRequest.parse>;
+const turnstile = vi.hoisted(() => ({
+  props: null as TurnstileProps | null,
+  resets: 0,
+}));
+
+vi.mock('@marsidev/react-turnstile', () => ({
+  Turnstile: forwardRef((props: TurnstileProps, ref) => {
+    turnstile.props = props;
+    useImperativeHandle(ref, () => ({
+      reset: () => {
+        turnstile.resets += 1;
+      },
+    }));
+    return <div data-testid="turnstile" />;
+  }),
+}));
+
+function widget() {
+  if (turnstile.props === null) {
+    throw new Error('Expected the Turnstile widget');
+  }
+  return turnstile.props;
+}
 
 interface StubOptions {
   cases?: number;
   prior?: number;
+  admitted?: boolean;
   brief?: { instruction: string; checklist: string[] };
-  render?: 'text' | 'html' | 'diff';
+  render?: 'text' | 'diff';
   defects?: Defect[];
-  category?: Category | null;
+  /** Answers a skip with the same pair, as for a system pair with one case. */
+  alone?: boolean;
 }
 
+/** A vote API that keeps one pending pair per actor, as the Worker does. */
 function stubApi({
   cases = 40,
   prior = 0,
+  admitted = true,
   brief,
   render = 'text',
-  defects = FAMILY.defects,
-  category = 'message',
+  defects = WRITING_DEFECTS,
+  alone = false,
 }: StubOptions = {}) {
-  const family = { ...FAMILY, defects };
-  const starts: { family: string }[] = [];
-  const resumes: string[] = [];
-  const casts: Cast[] = [];
-  const active = Array.from({ length: prior }, (_, index) => `prior:${index}`);
-  const withdrawn = new Set<string>();
-  let undos = 0;
+  const casts: VoteRequest[] = [];
+  const undone: VoteRequest[] = [];
+  const tokens: string[] = [];
+  const pairRequests: string[] = [];
+  // Votes recorded in the last 10 minutes, latest last, which undo walks back through.
+  const undoable: VoteRequest[] = [];
   let served = 0;
   let open: string | null = null;
 
-  const votes = () => active.length;
-
-  const pairOf = (id: string) => ({
-    id,
-    capability: `capability:${id}`,
-    instruction: `Instruction ${id}`,
-    checklist: [],
-    category,
-    ...brief,
-    ...(render === 'html'
-      ? {
-          a: { render, url: `https://render.example/render/${id}-a` },
-          b: { render, url: `https://render.example/render/${id}-b` },
-        }
-      : {
-          a: { render, text: `Output A${id.slice(1)}` },
-          b: { render, text: `Output B${id.slice(1)}` },
-        }),
-  });
-
-  const view = (): SessionView => {
-    const count = votes();
-    if (count >= cases) {
+  const votes = () => prior + casts.length - undone.length;
+  const pairOf = (id: string) => {
+    const index = Number(id.slice(-12));
+    return {
+      id,
+      instruction: `Instruction ${index}`,
+      checklist: [],
+      category: 'message' as const,
+      ...brief,
+      render,
+      a: `Output A${index}`,
+      b: `Output B${index}`,
+      defects,
+    };
+  };
+  const view = (): PairState => {
+    if (votes() >= cases) {
       open = null;
     } else {
-      open ??= `t${++served}`;
+      open ??= pairId(++served);
     }
     return {
-      id: 's1',
-      family,
-      votes: count,
-      remaining: cases - count,
-      undo_acknowledgment: active.at(-1) ?? null,
       pair: open === null ? null : pairOf(open),
+      votes: votes(),
+      remaining: cases - votes(),
+      undo: undoable.length > 0,
     };
   };
 
-  const draw = (): SessionView => {
-    open = `t${++served}`;
-    return view();
-  };
-
   const respond = (value: unknown, status = 200) =>
-    Promise.resolve(new Response(status === 204 ? null : JSON.stringify(value), { status }));
+    Promise.resolve(
+      status === 204 ? new Response(null, { status }) : Response.json(value, { status }),
+    );
+  const refuse = (error: string, status: number) =>
+    respond(error === 'admission_required' ? { error, sitekey: SITEKEY } : { error }, status);
 
-  vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-    if (path === '/api/status') {
-      return respond({ status: 'ready' });
+  const fetch = vi.fn((path: string, init?: RequestInit) => {
+    const url = new URL(path, 'https://site.example');
+    const route = `${init?.method ?? 'GET'} ${url.pathname}`;
+    if (route === 'GET /api/families') {
+      return respond({ families: [FAMILY] });
     }
-    if (path === '/api/families') {
-      return respond([family]);
+    if (route === 'POST /api/actors') {
+      tokens.push(admissionRequest.parse(requestBody(init)).token);
+      admitted = true;
+      return respond(null, 204);
     }
-    if (path === '/api/sessions') {
-      const { family } = startSessionRequest.parse(requestBody(init));
-      starts.push({ family });
-      return family === FAMILY.name ? respond(draw(), 201) : respond({ error: 'not_found' }, 404);
+    if (!admitted) {
+      return refuse('admission_required', 401);
     }
-    if (path === '/api/sessions/resume') {
-      const { session_id } = resumeSessionRequest.parse(requestBody(init));
-      resumes.push(session_id);
-      return session_id === 's1' ? respond(view()) : respond({ error: 'not_found' }, 404);
+    if (route === 'GET /api/pair') {
+      const family = url.searchParams.get('family') ?? '';
+      pairRequests.push(family);
+      return family === FAMILY.family ? respond(view()) : refuse('no_round', 404);
     }
-    if (path === '/api/sessions/withdraw') {
-      const request = withdrawRequest.parse(requestBody(init));
-      if (withdrawn.has(request.command_id)) {
-        return respond(null, 204);
+    if (route === 'POST /api/pair/skip') {
+      const { pair } = skipRequest.parse(requestBody(init));
+      if (pair !== open) {
+        return refuse('stale_pair', 409);
       }
-      if (request.acknowledgment !== active.at(-1)) {
-        return respond({ error: 'conflict' }, 409);
+      if (!alone) {
+        open = pairId(++served);
       }
-      withdrawn.add(request.command_id);
-      active.pop();
-      undos += 1;
+      return respond(view());
+    }
+    if (route === 'POST /api/votes') {
+      const request = voteRequest.parse(requestBody(init));
+      if (request.pair !== open) {
+        return refuse('stale_pair', 409);
+      }
+      casts.push(request);
+      undoable.push(request);
       open = null;
       return respond(null, 204);
     }
-    if (path === '/api/votes') {
-      const request = voteRequest.parse(requestBody(init));
-      if (request.lease_id !== open) {
-        return respond({ error: 'not_found' }, 404);
+    if (route === 'POST /api/votes/undo') {
+      undoRequest.parse(requestBody(init));
+      const last = undoable.pop();
+      if (last === undefined) {
+        return refuse('nothing_to_undo', 409);
       }
-      casts.push(request);
-      const acknowledgment = `ack:${casts.length}`;
-      active.push(acknowledgment);
-      open = null;
-      return respond({ acknowledgment, session_id: 's1' });
+      undone.push(last);
+      open = last.pair;
+      return respond(null, 204);
     }
-    if (path === '/api/votes/resolve') {
-      const request = receiptQuery.parse(requestBody(init));
-      const index = casts.findIndex((cast) => cast.command_id === request.command_id);
-      return index < 0
-        ? respond({ error: 'not_found' }, 404)
-        : respond({ acknowledgment: `ack:${index + 1}`, session_id: 's1' });
-    }
-    throw new Error(`Unexpected API path: ${path}`);
+    throw new Error(`Unexpected API route: ${route}`);
   });
+  vi.stubGlobal('fetch', fetch);
+
   return {
-    starts,
-    resumes,
+    fetch,
     casts,
-    undos: () => undos,
-    // Votes the open pair in another tab, which retires it for this one.
+    undone,
+    tokens,
+    pairRequests,
+    /** Votes the pending pair from another tab, which leaves this tab's copy stale. */
     elsewhere: () => {
       if (open === null) {
-        throw new Error('Expected a pending lease');
+        throw new Error('Expected a pending pair');
       }
-      casts.push({
-        command_id: COMMAND_ID,
-        lease_id: open,
-        capability: `capability:${open}`,
-        choice: 'tie',
-        defects: { a: [], b: [] },
-      });
-      active.push(`ack:${casts.length}`);
+      casts.push({ pair: open, choice: 'tie', defects: { a: [], b: [] } });
       open = null;
-      draw();
+    },
+    /** Lets the undo window pass for every vote so far. */
+    expire: () => {
+      undoable.length = 0;
     },
   };
 }
@@ -184,7 +188,9 @@ function stubApi({
 const statusLine = () =>
   screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
 
-async function startSession(page = <VoteApp />) {
+const pane = (side: 'A' | 'B') => screen.getByRole('region', { name: `Output ${side}` });
+
+async function startVoting(page = <VoteApp />) {
   const user = userEvent.setup();
   render(page);
   await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
@@ -193,13 +199,15 @@ async function startSession(page = <VoteApp />) {
 }
 
 describe('VoteApp', () => {
+  let scrollTo: MockInstance<typeof window.scrollTo>;
+
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
-    delete window.turnstile;
-    document.head.innerHTML = '<meta name="bench-render-origin" content="https://render.example">';
+    turnstile.props = null;
+    turnstile.resets = 0;
     history.replaceState(null, '', '/vote/');
-    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -207,288 +215,290 @@ describe('VoteApp', () => {
     cleanup();
   });
 
-  test.each([null, FAMILY.name])(
-    'verifies a fresh browser inline and continues family %s',
+  test.each([null, FAMILY.family])(
+    'verifies a fresh browser through Turnstile and continues family %s',
     async (family) => {
-      const api = stubApi();
-      const original = globalThis.fetch;
-      const provider = stubChallenge();
-      let admitted = false;
-      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-        if (path === '/api/status') {
-          return Promise.resolve(Response.json({ status: 'admission_required' }));
-        }
-        if (path === '/api/admission') {
-          if (init?.method === 'GET') {
-            return Promise.resolve(Response.json(ADMISSION));
-          }
-          admitted = true;
-          return Promise.resolve(Response.json({ status: 'ready' }));
-        }
-        return !admitted && path === '/api/sessions'
-          ? Promise.resolve(Response.json({ error: 'admission_required' }, { status: 401 }))
-          : original(path, init);
-      });
+      const api = stubApi({ admitted: false });
       history.replaceState(null, '', `/vote/${family === null ? '' : `?family=${family}`}`);
       const user = userEvent.setup();
 
       render(<VoteApp />);
-      await vi.waitFor(() => {
-        provider.options();
-      });
-
-      expect(api.starts).toEqual([]);
-      expect(screen.queryByRole('link', { name: /verification/i })).toBeNull();
-      act(() => {
-        provider.options().callback('fresh-proof');
-      });
       if (family === null) {
         await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
       }
+      await screen.findByTestId('turnstile');
+      expect(widget().siteKey).toBe(SITEKEY);
+      act(() => {
+        widget().onSuccess?.('fresh-proof');
+      });
       await screen.findByText('Output A1');
 
-      expect(location.pathname).toBe('/vote/');
-      expect(api.starts).toEqual([{ family: FAMILY.name }]);
+      expect(api.tokens).toEqual(['fresh-proof']);
+      expect(location.search).toBe(`?family=${FAMILY.family}`);
       expect(api.casts).toEqual([]);
       expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
     },
   );
 
-  test.each([true, false])(
-    'resolves an uncertain vote accepted=%s before inline renewal without resubmission',
-    async (accepted) => {
-      const api = stubApi();
-      const user = await startSession();
-      const original = globalThis.fetch;
-      const provider = stubChallenge();
-      let admitted = true;
-      let lost = true;
-      const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-        if (path === '/api/admission') {
-          if (init?.method === 'GET') {
-            return Response.json({ ...ADMISSION, action: 'bench_renew' });
-          }
-          admitted = true;
-          return Response.json({ status: 'ready' });
-        }
-        if (path === '/api/sessions/resume' && !admitted) {
-          return Response.json({ error: 'renewal_required' }, { status: 403 });
-        }
-        if (path === '/api/votes' && lost) {
-          lost = false;
-          admitted = false;
-          if (accepted) {
-            await original(path, init);
-          }
-          throw new TypeError('The vote response was lost');
-        }
-        return original(path, init);
-      });
-      vi.stubGlobal('fetch', fetch);
-      const pane = screen.getByRole('region', { name: 'Output A' });
+  test.each([
+    ['failed', () => widget().onError?.('600010'), 'Verification is unavailable. Try again.'],
+    ['expired', () => widget().onExpire?.('token'), 'Verification expired. Try again.'],
+  ])('offers to retry a challenge that %s', async (_, fail, message) => {
+    stubApi({ admitted: false });
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    const user = userEvent.setup();
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
 
-      await user.keyboard('b1{Enter}');
-      await user.click(await screen.findByRole('button', { name: 'Retry connection' }));
-      await vi.waitFor(() => {
-        provider.options();
-      });
-
-      expect(screen.getByRole('region', { name: 'Output A' })).toBe(pane);
-      expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
-      await user.keyboard('a2u{Enter}');
-      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
-      if (accepted) {
-        expect(screen.getByText('Saved')).toBeDefined();
-      } else {
-        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
-          'ariaChecked',
-          'true',
-        );
-        expect(within(pane).getByRole('button', { name: 'Issues 1' })).toBeDefined();
-      }
-
-      act(() => {
-        provider.options().callback('renew-proof');
-      });
-      await vi.waitFor(() => {
-        expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
-          'disabled',
-          false,
-        );
-      });
-      expect(fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
-      if (!accepted) {
-        const originalVote = requestBody(fetch.mock.calls[0][1]);
-        await user.click(screen.getByRole('button', { name: /Submit vote/ }));
-        const retried = fetch.mock.calls.filter(([path]) => path === '/api/votes').at(-1);
-        expect(requestBody(retried?.[1])).toEqual(originalVote);
-      }
-      await screen.findByText('Output A2');
-
-      expect(api.starts).toEqual([{ family: FAMILY.name }]);
-      expect(api.casts.map(({ choice, defects }) => ({ choice, defects }))).toEqual([
-        { choice: 'b', defects: { a: ['scope'], b: [] } },
-      ]);
-    },
-  );
-
-  test('keeps acceptance visible once, as Saved, when acquiring the next pair fails', async () => {
-    const api = stubApi({ prior: 1 });
-    const user = await startSession();
-    const original = globalThis.fetch;
-    let available = false;
-    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-      return path === '/api/sessions/resume' && !available
-        ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
-        : original(path, init);
+    act(() => {
+      fail();
     });
+    await user.click(await screen.findByRole('button', { name: 'Retry verification' }));
 
-    await user.keyboard('a{Enter}');
-    await screen.findByRole('button', { name: 'Retry connection' });
-
-    expect(screen.getByText('Saved')).toBeDefined();
-    expect(screen.queryByText('Vote accepted.')).toBeNull();
-    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
-    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
-    await user.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(api.undos()).toBe(0);
-    expect(screen.queryByRole('textbox')).toBeNull();
-
-    available = true;
-    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
-    await screen.findByText('Output A2');
-
-    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
-    expect(statusLine()).toBe('Writing · Chinese, 2 votes');
+    expect(turnstile.resets).toBe(1);
+    expect(screen.queryByText(message)).toBeNull();
   });
 
-  test('locks voting while an accepted withdrawal awaits session recovery', async () => {
-    const api = stubApi({ prior: 1 });
-    const user = await startSession();
-    const original = globalThis.fetch;
-    let available = false;
-    vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-      return path === '/api/sessions/resume' && !available
-        ? Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))
-        : original(path, init);
+  test('reports a challenge the Worker rejects without admitting the browser', async () => {
+    const api = stubApi({ admitted: false });
+    const fetch = api.fetch.getMockImplementation();
+    api.fetch.mockImplementation((path, init) =>
+      path === '/api/actors'
+        ? Promise.resolve(Response.json({ error: 'challenge_failed' }, { status: 400 }))
+        : (fetch?.(path, init) ?? Promise.reject(new Error('No stub'))),
+    );
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+
+    act(() => {
+      widget().onSuccess?.('rejected-proof');
     });
 
-    await user.click(screen.getByRole('button', { name: 'Undo' }));
-    await screen.findByRole('alert');
-
-    expect(api.undos()).toBe(1);
-    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
-    await user.keyboard('a{Enter}');
-    expect(api.casts).toEqual([]);
-
-    available = true;
-    await user.click(screen.getByRole('button', { name: 'Retry connection' }));
-    await screen.findByText('Output A2');
-
-    expect(api.undos()).toBe(1);
-    expect(api.casts).toEqual([]);
-    expect(statusLine()).toBe('Writing · Chinese, 0 votes');
+    expect(await screen.findByText('Verification failed. Try again.')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Retry verification' })).toBeDefined();
+    expect(screen.queryByText('Output A1')).toBeNull();
   });
 
-  test.each(['connection', 'verification'] as const)(
-    'keeps the prior family acknowledgment separate through %s recovery',
-    async (recovery) => {
-      const prior = makeSession();
-      const flow = new VoteFlow();
-      flow.show(prior);
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Connection lost')));
-      await expect(flow.submit(prior, 'a', { a: [], b: [] })).rejects.toThrow();
-      const family = { ...FAMILY, name: 'other', display_name: 'Other' };
-      const other = makeSession({ id: 's2', family });
-      const starts: unknown[] = [];
-      const provider = stubChallenge();
-      let available = false;
-      vi.stubGlobal('fetch', (path: string, init?: RequestInit) => {
-        if (path === '/api/status') {
-          return Promise.resolve(
-            Response.json({ status: recovery === 'verification' ? 'renewal_required' : 'ready' }),
-          );
-        }
-        if (path === '/api/admission') {
-          if (init?.method === 'GET') {
-            return Promise.resolve(Response.json({ ...ADMISSION, action: 'bench_renew' }));
-          }
-          available = true;
-          return Promise.resolve(Response.json({ status: 'ready' }));
-        }
-        if (path === '/api/families') {
-          return Promise.resolve(Response.json([FAMILY, family]));
-        }
-        if (path === '/api/votes/resolve') {
-          return Promise.resolve(Response.json({ acknowledgment: 'ack-1', session_id: 's1' }));
-        }
-        starts.push(requestBody(init));
-        return Promise.resolve(
-          available
-            ? Response.json(other)
-            : Response.json({ error: 'unavailable' }, { status: 503 }),
-        );
-      });
-      history.replaceState(null, '', '/vote/?family=other');
-      const user = userEvent.setup();
+  test('loads the pair on mount without posting or touching localStorage', async () => {
+    const api = stubApi();
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+
+    render(<VoteApp />);
+    await screen.findByText('Output A1');
+
+    expect(api.fetch.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'GET']);
+    expect(localStorage.length).toBe(0);
+  });
+
+  test('shows the choice, issues, Markdown, collapsed prompt and scroll again after a reload', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('b1');
+    await user.click(screen.getByRole('button', { name: 'Markdown' }));
+    await user.click(screen.getByRole('button', { name: 'Prompt' }));
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    const scroller = pane('B').lastElementChild;
+    if (scroller === null) {
+      throw new Error('Expected the scroll container of output B');
+    }
+    scroller.scrollTop = 40;
+    window.dispatchEvent(new Event('pagehide'));
+    cleanup();
+    scrollTo.mockClear();
+
+    render(<VoteApp />);
+    await screen.findByText('Output A1');
+
+    expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(within(pane('A')).getByRole('button', { name: 'Issues 1' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Markdown' })).toHaveProperty('ariaPressed', 'true');
+    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'false');
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 120 });
+    expect(pane('B').lastElementChild?.scrollTop).toBe(40);
+    expect(api.casts).toEqual([]);
+  });
+
+  test.each([
+    ['a choice', 'a', 'The pair you were choosing on changed, so your unsent choice was cleared.'],
+    ['no choice', null, ''],
+  ] as const)(
+    'drops a draft for another pair, with %s, and says so only for an unsent choice',
+    async (_, choice, notice) => {
+      stubApi();
+      sessionStorage.setItem(
+        'bench-vote',
+        JSON.stringify({
+          family: FAMILY.family,
+          pair: pairId(99),
+          choice,
+          defects: { a: ['facts'], b: [] },
+          markdown: false,
+          collapsed: false,
+          scroll: { window: 0, a: 0, b: 0 },
+        }),
+      );
 
       render(<VoteApp />);
-      await screen.findByText('Vote accepted.');
-      if (recovery === 'verification') {
-        await vi.waitFor(() => {
-          provider.options();
-        });
-        act(() => {
-          provider.options().callback('renew-proof');
-        });
-      } else {
-        available = true;
-        await user.click(screen.getByRole('button', { name: 'Retry connection' }));
-      }
-      await screen.findByRole('button', { name: '0 votes' });
+      await screen.findByText('Output A1');
 
-      expect(starts[1]).toEqual(starts[0]);
-      expect(statusLine()).toBe('Writing · Other, 0 votes');
-      expect(screen.getByRole('button', { name: 'Undo' })).toHaveProperty('disabled', true);
-      expect(screen.queryByText('Saved')).toBeNull();
-      expect(screen.queryByText('Vote accepted.')).toBeNull();
+      expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+        'ariaChecked',
+        'false',
+      );
+      expect(within(pane('A')).getByRole('button', { name: 'Issues' })).toBeDefined();
+      expect(screen.getByRole('status').textContent).toBe(notice);
+      expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
+        pair: pairId(1),
+        choice: null,
+      });
     },
   );
 
-  test('explains an empty public family list without owner commands', async () => {
-    vi.stubGlobal('fetch', (path: string) =>
-      Promise.resolve(Response.json(path === '/api/status' ? { status: 'ready' } : [])),
+  test('removes a draft that no longer parses', async () => {
+    stubApi();
+    sessionStorage.setItem('bench-vote', '{"family": 1}');
+
+    render(<VoteApp />);
+
+    await screen.findByRole('button', { name: FAMILY.display_name });
+    expect(sessionStorage.getItem('bench-vote')).toBeNull();
+  });
+
+  test('skips to another pair without voting, clearing the unsent choice', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('a');
+
+    await user.keyboard('s');
+    await screen.findByText('Output A2');
+
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'false',
     );
+    expect(api.casts).toEqual([]);
+  });
+
+  test('keeps the pair and says so when a skip finds no other case', async () => {
+    stubApi({ alone: true });
+    const user = await startVoting();
+
+    await user.click(screen.getByRole('button', { name: /Skip/ }));
+
+    expect(await screen.findByText('No other pair is available for these outputs.')).toBeDefined();
+    expect(screen.getByText('Output A1')).toBeDefined();
+  });
+
+  test('resends the identical vote on Retry after a lost response, locking the ballot meanwhile', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    const fetch = api.fetch.getMockImplementation();
+    let lost = true;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && lost) {
+        lost = false;
+        return Promise.reject(new TypeError('The vote response was lost'));
+      }
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
+    });
+    await user.keyboard('b1{Enter}');
+    await screen.findByRole('button', { name: 'Retry vote' });
+
+    await user.keyboard('a2s');
+    expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Retry vote' }));
+    await screen.findByText('Output A2');
+
+    const sent = api.fetch.mock.calls
+      .filter(([path]) => path === '/api/votes')
+      .map(([, init]) => requestBody(init));
+    expect(sent).toEqual([sent[0], sent[0]]);
+    expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
+  });
+
+  test('loads the current pair with a notice when another tab has voted on this one', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    api.elsewhere();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts.map((cast) => cast.choice)).toEqual(['tie']);
+    expect(screen.getByRole('status').textContent).toBe(
+      'This pair changed. Review the current outputs and choose again.',
+    );
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+  });
+
+  test('offers Undo while the server allows it, restoring the same pair', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+
+    await user.click(screen.getByRole('button', { name: /Undo/ }));
+    await screen.findByText('Output A1');
+
+    expect(screen.getByRole('status').textContent).toBe('Vote withdrawn.');
+    expect(api.undone.map((vote) => vote.pair)).toEqual([pairId(1)]);
+    expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
+  });
+
+  test('explains an undo the server refuses once the window has passed', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    api.expire();
+
+    await user.keyboard('u');
+
+    expect(
+      await screen.findByText('No vote from the last 10 minutes is left to undo.'),
+    ).toBeDefined();
+    expect(screen.getByText('Output A2')).toBeDefined();
+    expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
+  });
+
+  test('explains an empty family list', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(Response.json({ families: [] })));
 
     render(<VoteApp />);
 
     await screen.findByText(/No .* (?:available|vote on)/);
     expect(document.body.textContent).not.toContain('uv run');
-    expect(screen.getByRole('heading', { name: 'Start a voting session' })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Choose a family to vote on' })).toBeDefined();
   });
 
   test('submits on Enter after a click on Undo instead of undoing again', async () => {
     const api = stubApi();
-    const user = await startSession();
+    const user = await startVoting();
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
     await user.keyboard('t{Enter}');
     await screen.findByText('Output A3');
 
-    await user.click(screen.getByRole('button', { name: 'Undo' }));
-    await screen.findByText('Output A4');
+    await user.click(screen.getByRole('button', { name: /Undo/ }));
+    await screen.findByText('Output A2');
     await user.keyboard('b{Enter}');
-    await screen.findByText('Output A5');
+    await screen.findByText('Output A4');
 
-    expect(api.undos()).toBe(1);
+    expect(api.undone).toHaveLength(1);
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a', 'tie', 'b']);
   });
 
   test("submits on Enter from the layout's main, which the skip link and margin clicks focus", async () => {
     const api = stubApi();
-    const user = await startSession(
+    const user = await startVoting(
       <main tabIndex={-1}>
         <VoteApp />
       </main>,
@@ -502,26 +512,27 @@ describe('VoteApp', () => {
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
   });
 
-  test('takes a shortcut typed in upper case, and undoes from the completed session', async () => {
+  test('takes a shortcut typed in upper case, and undoes from the completed family', async () => {
     const api = stubApi({ cases: 1 });
-    const user = await startSession();
+    const user = await startVoting();
 
     await user.keyboard('{Shift>}A{/Shift}{Enter}');
-    await screen.findByText('Session complete');
+    await screen.findByText('No pairs left');
     await user.keyboard('u');
-    await screen.findByText('Output A2');
+    await screen.findByText('Output A1');
 
     expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
-    expect(api.undos()).toBe(1);
+    expect(api.undone).toHaveLength(1);
   });
 
-  test('links back to the family list from the completed session', async () => {
+  test('counts the recorded votes and links back to the family list once no pair is left', async () => {
     stubApi({ cases: 1 });
-    const user = await startSession();
+    const user = await startVoting();
 
     await user.keyboard('a{Enter}');
-    await screen.findByText('Session complete');
+    await screen.findByText('No pairs left');
 
+    expect(screen.getByText('1 vote recorded on Writing · Chinese.')).toBeDefined();
     expect(screen.getByRole('link', { name: 'Choose another family' }).getAttribute('href')).toBe(
       '/vote/',
     );
@@ -529,10 +540,9 @@ describe('VoteApp', () => {
 
   test('submits the verdict picked and the vote sent by pointer', async () => {
     const api = stubApi();
-    const user = await startSession();
+    const user = await startVoting();
 
-    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Browser verification' })).toBeNull();
+    expect(screen.queryByTestId('turnstile')).toBeNull();
 
     await user.click(screen.getByRole('radio', { name: 'B is better' }));
     await user.click(screen.getByRole('button', { name: /Submit vote/ }));
@@ -543,10 +553,9 @@ describe('VoteApp', () => {
 
   test('leaves Enter and Space on an issue checkbox to the checkbox', async () => {
     const api = stubApi();
-    const user = await startSession();
+    const user = await startVoting();
     await user.keyboard('a');
-    const outputA = screen.getByRole('region', { name: 'Output A' });
-    await user.click(within(outputA).getByRole('button', { name: 'Issues' }));
+    await user.click(within(pane('A')).getByRole('button', { name: 'Issues' }));
     const checkbox = await screen.findByRole('checkbox', { name: 'Too long' });
     await user.click(checkbox);
 
@@ -566,13 +575,11 @@ describe('VoteApp', () => {
     'activates the focused %s control on Enter without casting the selected verdict',
     async (name) => {
       const api = stubApi();
-      const user = await startSession();
+      const user = await startVoting();
       await user.keyboard('a');
       const control =
         name === 'Issues'
-          ? within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
-              name,
-            })
+          ? within(pane('A')).getByRole('button', { name })
           : screen.getByRole('button', { name });
       control.focus();
 
@@ -596,11 +603,13 @@ describe('VoteApp', () => {
     ['handled', {}],
     ['modified', { ctrlKey: true }],
   ])('ignores %s shortcut events in the comparison', async (scenario, options) => {
-    const api = stubApi({ prior: 1 });
-    await startSession();
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('t{Enter}');
+    await screen.findByText('Output A2');
     const pair = screen.getByRole('group', { name: /^Pair / });
 
-    for (const key of ['a', '1', 'n', 'u']) {
+    for (const key of ['a', '1', 's', 'u']) {
       const event = new KeyboardEvent('keydown', {
         key,
         bubbles: true,
@@ -617,99 +626,63 @@ describe('VoteApp', () => {
       'ariaChecked',
       'false',
     );
-    expect(
-      within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
-        name: 'Issues',
-      }),
-    ).toBeDefined();
-    expect(document.activeElement).toBe(pair);
-    expect(api.undos()).toBe(0);
-    expect(api.casts).toEqual([]);
+    expect(within(pane('A')).getByRole('button', { name: 'Issues' })).toBeDefined();
+    expect(screen.getByText('Output A2')).toBeDefined();
+    expect(api.undone).toEqual([]);
+    expect(api.casts).toHaveLength(1);
   });
 
   test('keeps the submitted ballot unchanged while its request is pending', async () => {
-    const api = stubApi({ prior: 1 });
-    const user = await startSession();
-    const fetch = globalThis.fetch;
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('t{Enter}');
+    await screen.findByText('Output A2');
+    const fetch = api.fetch.getMockImplementation();
     const pending = Promise.withResolvers<undefined>();
-    vi.stubGlobal('fetch', async (path: string, init?: RequestInit) => {
+    api.fetch.mockImplementation(async (path, init) => {
       if (path === '/api/votes') {
         await pending.promise;
       }
-      return fetch(path, init);
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
     });
     await user.keyboard('a');
 
     await user.click(screen.getByRole('button', { name: /Submit vote/ }));
     const pair = screen.getByRole('group', { name: /^Pair / });
     pair.focus();
-    await user.keyboard('b1nu{Enter}');
+    await user.keyboard('b1su{Enter}');
 
     expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
       'ariaChecked',
       'true',
     );
     expect(document.activeElement).toBe(pair);
-    expect(api.undos()).toBe(0);
+    expect(api.undone).toEqual([]);
 
     pending.resolve(undefined);
-    await screen.findByText('Output A2');
+    await screen.findByText('Output A3');
 
-    expect(api.casts).toMatchObject([{ lease_id: 't1', choice: 'a', defects: { a: [], b: [] } }]);
+    expect(api.casts.at(-1)).toEqual({ pair: pairId(2), choice: 'a', defects: { a: [], b: [] } });
   });
 
-  test('lays out page outputs at the viewport width picked', async () => {
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe() {}
-        disconnect() {}
-      },
-    );
-    stubApi({ render: 'html' });
-    const user = userEvent.setup();
-    render(<VoteApp />);
-    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
-    const frame = await screen.findByTitle('Output A');
-    expect(frame.style.width).toBe('1280px');
-
-    await user.click(screen.getByRole('radio', { name: '375 px' }));
-
-    expect(screen.getByTitle('Output A').style.width).toBe('375px');
-    expect(screen.getByTitle('Output B').style.width).toBe('375px');
-  });
-
-  test('starts the family it shows by short name, and names it in full in the session', async () => {
-    const api = stubApi({ cases: 1 });
-    const user = await startSession();
-    expect(statusLine()).toBe('Writing · Chinese, 0 votes');
-
-    await user.keyboard('a{Enter}');
-    await screen.findByText('1 vote recorded on Writing · Chinese.');
-    await user.click(screen.getByRole('button', { name: 'Start another session' }));
-
-    await vi.waitFor(() => {
-      expect(api.starts).toEqual([{ family: FAMILY.name }, { family: FAMILY.name }]);
-    });
-  });
-
-  test('counts the votes so far, with the pairs left behind the count', async () => {
-    stubApi();
-    const user = await startSession();
+  test('names the family in full, and counts the votes with the pairs left behind the count', async () => {
+    stubApi({ prior: 2 });
+    const user = await startVoting();
+    expect(statusLine()).toBe('Writing · Chinese, 2 votes');
 
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
-    await user.click(screen.getByRole('button', { name: '1 vote' }));
+    await user.click(screen.getByRole('button', { name: '3 votes' }));
 
-    expect(statusLine()).toBe('Writing · Chinese, 1 vote');
-    expect(screen.getByRole('dialog', { name: 'This session' }).textContent).toContain(
-      '39 pairs left to vote on.',
+    expect(statusLine()).toBe('Writing · Chinese, 3 votes');
+    expect(screen.getByRole('dialog', { name: 'Your votes' }).textContent).toContain(
+      '37 pairs left to vote on.',
     );
   });
 
   test('shows that each vote saved, then clears the notice', async () => {
     stubApi();
-    const user = await startSession();
+    const user = await startVoting();
     await user.keyboard('a');
 
     vi.useFakeTimers();
@@ -725,76 +698,6 @@ describe('VoteApp', () => {
     expect(screen.getByRole('status').textContent).toBe('');
   });
 
-  test('clears the saved notice when a vote is undone', async () => {
-    stubApi();
-    const user = await startSession();
-
-    await user.keyboard('a{Enter}');
-    await screen.findByText('Output A2');
-    expect(screen.getByRole('status').textContent).toBe('Saved');
-
-    await user.keyboard('u');
-    await screen.findByText('Output A3');
-
-    expect(screen.getByRole('status').textContent).toBe('');
-  });
-
-  test('follows the session when another tab has voted on the open pair', async () => {
-    const api = stubApi();
-    const user = await startSession();
-    api.elsewhere();
-
-    await user.keyboard('a{Enter}');
-    await screen.findByText('Output A2');
-
-    expect(api.resumes).toEqual(['s1']);
-    expect(api.casts.map((cast) => cast.choice)).toEqual(['tie']);
-    expect(screen.getByRole('status').textContent).toBe('This pair changed in another tab.');
-  });
-
-  test('reports an unavailable family safely and removes its retired session locator', async () => {
-    history.replaceState(null, '', '/vote/?family=unknown');
-    localStorage.setItem('bench-session:unknown', 'retired');
-    const api = stubApi();
-
-    render(<VoteApp />);
-
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'That item is no longer available.',
-    );
-    expect(localStorage.getItem('bench-session:unknown')).toBeNull();
-    expect(api.starts).toEqual([{ family: 'unknown' }]);
-  });
-
-  test("resumes the family's session from an earlier visit, and again on a reload", async () => {
-    localStorage.setItem(`bench-session:${FAMILY.name}`, 's1');
-    const api = stubApi({ prior: 3 });
-    const user = await startSession();
-    const resumed = statusLine();
-    await user.keyboard('a{Enter}');
-    await screen.findByText('Output A2');
-    cleanup();
-
-    render(<VoteApp />);
-    await screen.findByText('Output A2');
-
-    expect(resumed).toBe('Writing · Chinese, 3 votes');
-    expect(statusLine()).toBe('Writing · Chinese, 4 votes');
-    expect(api.resumes).toEqual(['s1', 's1', 's1']);
-    expect(api.starts).toEqual([]);
-  });
-
-  test('starts a session when the arena no longer has the stored one', async () => {
-    localStorage.setItem(`bench-session:${FAMILY.name}`, 'retired');
-    const api = stubApi();
-
-    await startSession();
-
-    expect(api.resumes).toEqual(['retired']);
-    expect(api.starts).toEqual([{ family: FAMILY.name }]);
-    expect(localStorage.getItem(`bench-session:${FAMILY.name}`)).toBe('s1');
-  });
-
   test.each([
     { next: 'a new prompt', brief: undefined, expanded: 'true' },
     {
@@ -806,7 +709,7 @@ describe('VoteApp', () => {
     'shows $next expanded: $expanded after the prompt is collapsed',
     async ({ brief, expanded }) => {
       stubApi({ brief });
-      const user = await startSession();
+      const user = await startVoting();
 
       await user.click(screen.getByRole('button', { name: 'Prompt' }));
       expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty(
@@ -833,7 +736,7 @@ describe('VoteApp', () => {
       },
     });
 
-    await startSession();
+    await startVoting();
 
     const checklist = screen.getByRole('region', { name: 'What to check' });
     const facts = screen
@@ -846,41 +749,29 @@ describe('VoteApp', () => {
     expect(point.querySelector('code')?.textContent).toBe('make test');
   });
 
-  test.each([
-    ['message', 'Message'],
-    [null, null],
-  ] as const)('shows the pair category %j as the label %j', async (category, label) => {
-    stubApi({ category });
+  test('labels the pair category above the instruction, outside the prompt band', async () => {
+    stubApi();
 
-    await startSession();
+    await startVoting();
 
-    expect(screen.queryByRole('button', { name: 'Message' }) !== null).toBe(label !== null);
+    const trigger = screen.getByRole('button', { name: 'Message' });
+    const band = screen.getByRole('button', { name: 'Prompt' }).parentElement;
+    expect(band?.contains(trigger)).toBe(false);
+    expect(trigger.nextElementSibling?.contains(screen.getByText('Instruction 1'))).toBe(true);
     expect(screen.queryByText('message')).toBeNull();
-
-    const trigger = screen.queryByRole('button', { name: 'Message' });
-    if (label === null) {
-      expect(trigger).toBeNull();
-    } else {
-      const band = screen.getByRole('button', { name: 'Prompt' }).parentElement;
-      const instruction = screen.getByText('Instruction t1');
-
-      expect(band?.contains(trigger)).toBe(false);
-      expect(trigger?.nextElementSibling?.contains(instruction)).toBe(true);
-    }
   });
 
   test('opens the next pair at the top of the page in fresh output panes', async () => {
     stubApi();
-    const user = await startSession();
-    const scrollTo = vi.spyOn(window, 'scrollTo');
+    const user = await startVoting();
     scrollTo.mockClear();
-    const firstPane = screen.getByRole('region', { name: 'Output A' });
+    const firstPane = pane('A');
 
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
-    expect(screen.getByRole('region', { name: 'Output A' })).not.toBe(firstPane);
+    expect(pane('A')).not.toBe(firstPane);
   });
 
   test.each([
@@ -890,12 +781,10 @@ describe('VoteApp', () => {
     'orders and submits all seven output %s issues with digit keys on the first five',
     async (side, digits, keys) => {
       const api = stubApi();
-      const user = await startSession();
+      const user = await startVoting();
 
       await user.keyboard(digits);
-      const pane = screen.getByRole('region', { name: `Output ${side}` });
-
-      await user.click(within(pane).getByRole('button', { name: 'Issues 5' }));
+      await user.click(within(pane(side)).getByRole('button', { name: 'Issues 5' }));
       const popup = screen.getByRole('dialog', { name: `Issues in output ${side}` });
       const boxes = within(popup).getAllByRole('checkbox');
 
@@ -925,7 +814,7 @@ describe('VoteApp', () => {
         boxes.map(
           (box) => document.getElementById(box.getAttribute('aria-describedby') ?? '')?.textContent,
         ),
-      ).toEqual(FAMILY.defects.map((defect) => defectTerms[defect].definition));
+      ).toEqual(WRITING_DEFECTS.map((defect) => defectTerms[defect].definition));
 
       within(popup).getByRole('checkbox', { name: 'Formulaic' }).focus();
       await user.keyboard(' {Tab} ');
@@ -933,7 +822,7 @@ describe('VoteApp', () => {
       expect(within(popup).getByRole('checkbox', { name: 'Formulaic' }).ariaChecked).toBe('true');
       expect(within(popup).getByRole('checkbox', { name: 'Too long' }).ariaChecked).toBe('true');
       await user.keyboard('{Escape}');
-      expect(within(pane).getByRole('button', { name: 'Issues 7' })).toBeDefined();
+      expect(within(pane(side)).getByRole('button', { name: 'Issues 7' })).toBeDefined();
       screen.getByRole('group', { name: 'Pair 1' }).focus();
 
       await user.keyboard('a{Enter}');
@@ -942,10 +831,7 @@ describe('VoteApp', () => {
       await screen.findByText('Output A3');
 
       expect(api.casts.map((cast) => cast.defects)).toEqual([
-        {
-          a: side === 'A' ? FAMILY.defects : [],
-          b: side === 'B' ? FAMILY.defects : [],
-        },
+        { a: side === 'A' ? WRITING_DEFECTS : [], b: side === 'B' ? WRITING_DEFECTS : [] },
         { a: [], b: [] },
       ]);
     },
@@ -953,13 +839,12 @@ describe('VoteApp', () => {
 
   test("keys the family's own issues and lists only those in each Issues popover", async () => {
     const api = stubApi({ defects: ['scope', 'testing'] });
-    const user = await startSession();
+    const user = await startVoting();
 
     await user.keyboard('2');
     await user.keyboard('3');
     await user.keyboard('6');
-    const outputB = screen.getByRole('region', { name: 'Output B' });
-    await user.click(within(outputB).getByRole('button', { name: 'Issues 1' }));
+    await user.click(within(pane('B')).getByRole('button', { name: 'Issues 1' }));
     const popover = screen.getByRole('dialog', { name: 'Issues in output B' });
     const boxes = within(popover).getAllByRole('checkbox');
     expect(
@@ -982,7 +867,7 @@ describe('VoteApp', () => {
 
   test('hides the Issues buttons and their keys for a family that lists no issues', async () => {
     const api = stubApi({ defects: [] });
-    const user = await startSession();
+    const user = await startVoting();
 
     await user.keyboard('1a{Enter}');
     await screen.findByText('Output A2');
@@ -997,14 +882,14 @@ describe('VoteApp', () => {
   ] as const)('%s the Markdown toggle beside %s outputs', async (_, render, toggle) => {
     stubApi({ render });
 
-    await startSession();
+    await startVoting();
 
     expect(screen.queryByRole('button', { name: 'Markdown' }) !== null).toBe(toggle);
   });
 
   test('leaves keys on focused header controls to those controls', async () => {
-    const api = stubApi({ prior: 1 });
-    const user = await startSession(
+    const api = stubApi();
+    const user = await startVoting(
       <>
         <a href="#methodology">Methodology</a>
         <button type="button">Theme</button>
@@ -1014,61 +899,41 @@ describe('VoteApp', () => {
 
     await user.keyboard('a');
     screen.getByRole('link', { name: 'Methodology' }).focus();
-    await user.keyboard('b1nu{Enter}');
+    await user.keyboard('b1su{Enter}');
     screen.getByRole('button', { name: 'Theme' }).focus();
-    await user.keyboard('b1nu{Enter}');
+    await user.keyboard('b1su{Enter}');
 
     expect(api.casts).toEqual([]);
-    expect(api.undos()).toBe(0);
+    expect(api.undone).toEqual([]);
     expect(screen.getByText('Output A1')).toBeDefined();
     expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
       'ariaChecked',
       'true',
     );
-    expect(
-      within(screen.getByRole('region', { name: 'Output A' })).getByRole('button', {
-        name: 'Issues',
-      }),
-    ).toBeDefined();
+    expect(within(pane('A')).getByRole('button', { name: 'Issues' })).toBeDefined();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Theme' }));
   });
 
-  test.each(PRIVATE_FAMILIES)('groups aspects and starts $display_name', async (privateFamily) => {
+  test('groups families by aspect, and starts the one picked', async () => {
     const families: FamilyView[] = [
-      ...PRIVATE_FAMILIES,
-      { name: 'coding-repo', aspect: 'coding', display_name: 'Repository', defects: [] },
+      { family: 'private-review', aspect: 'private-research', display_name: 'Review' },
+      { family: 'private-unlisted', aspect: 'unlisted', display_name: 'Unlisted review' },
+      { family: 'private-spaced', aspect: 'private research', display_name: 'Spaced review' },
+      { family: 'smoke-text', aspect: null, display_name: 'Smoke' },
+      { family: 'coding-repo', aspect: 'coding', display_name: 'Repository' },
       FAMILY,
-      { name: 'private-draft', aspect: 'writing-lab', display_name: 'Draft', defects: [] },
-      { name: 'writing-en', aspect: 'writing', display_name: 'English', defects: [] },
-      { name: 'private-edit', aspect: 'private-research', display_name: 'Edit', defects: [] },
-      { name: 'prototype', aspect: '__proto__', display_name: 'Prototype', defects: [] },
+      { family: 'private-draft', aspect: 'writing-lab', display_name: 'Draft' },
+      { family: 'writing-en', aspect: 'writing', display_name: 'English' },
+      { family: 'private-edit', aspect: 'private-research', display_name: 'Edit' },
+      { family: 'prototype', aspect: '__proto__', display_name: 'Prototype' },
     ];
-    const session: SessionView = {
-      id: 'private-session',
-      family: privateFamily,
-      votes: 0,
-      remaining: 1,
-      undo_acknowledgment: null,
-      pair: {
-        id: 'private-pair',
-        capability: 'private-pair-capability',
-        instruction: 'Compare these private answers.',
-        checklist: [],
-        category: 'message',
-        a: { render: 'text', text: 'Private answer A' },
-        b: { render: 'text', text: 'Private answer B' },
-      },
-    };
-    const fetch = vi.fn((path: string, init?: RequestInit) => {
-      if (path === '/api/status') {
-        return Promise.resolve(Response.json({ status: 'ready' }));
-      }
-      if (path === '/api/sessions') {
-        startSessionRequest.parse(requestBody(init));
-      }
-      return Promise.resolve(Response.json(path === '/api/families' ? families : session));
-    });
-    vi.stubGlobal('fetch', fetch);
+    const api = stubApi();
+    const fetch = api.fetch.getMockImplementation();
+    api.fetch.mockImplementation((path, init) =>
+      path === '/api/families'
+        ? Promise.resolve(Response.json({ families }))
+        : (fetch?.(path, init) ?? Promise.reject(new Error('No stub'))),
+    );
     const errors = vi.spyOn(console, 'error');
     const user = userEvent.setup();
     const expectedGroups: [string, string[]][] = [
@@ -1095,33 +960,17 @@ describe('VoteApp', () => {
     ).toEqual(expectedGroups);
     expect(groups).toEqual(expectedGroups.map(([name]) => screen.getByRole('region', { name })));
 
-    await user.click(screen.getByRole('button', { name: privateFamily.display_name }));
-    await screen.findByRole('radio', { name: 'A is better' });
+    await user.click(screen.getByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
 
-    expect(screen.getByRole('region', { name: 'Output A' }).textContent).toContain(
-      'Private answer A',
-    );
-    const start = fetch.mock.calls.find(([path]) => path === '/api/sessions');
-    expect(startSessionRequest.parse(requestBody(start?.[1]))).toMatchObject({
-      family: privateFamily.name,
-    });
-    const title =
-      privateFamily.aspect === null
-        ? privateFamily.display_name
-        : `${privateFamily.aspect} · ${privateFamily.display_name}`;
-    expect(statusLine()).toBe(`${title}, 0 votes`);
+    expect(api.pairRequests).toEqual([FAMILY.family]);
     expect(errors).not.toHaveBeenCalled();
   });
 
   test.each([
     [
-      'the server refuses it',
-      () => Promise.resolve(new Response(JSON.stringify({ error: 'conflict' }), { status: 409 })),
-      'This pair changed. Review the current outputs and choose again.',
-    ],
-    [
-      'the family is gone',
-      () => Promise.resolve(new Response(JSON.stringify({ error: 'not_found' }), { status: 404 })),
+      'the family has no round',
+      () => Promise.resolve(Response.json({ error: 'no_round' }, { status: 404 })),
       'This family has no outputs available to vote on.',
     ],
     [
@@ -1130,26 +979,20 @@ describe('VoteApp', () => {
       'The voting service is unavailable. Try again.',
     ],
     [
-      'the response body cannot be read',
-      async () => {
-        const response = new Response(JSON.stringify({ id: 's1' }));
-        await response.text();
-        return response;
-      },
+      'the response is not a pair state',
+      () => Promise.resolve(Response.json({ pair: 'private' })),
       'The voting service is unavailable. Try again.',
     ],
-  ])('shows on the start screen why a session did not start when %s', async (_, start, alert) => {
-    vi.stubGlobal('fetch', (path: string) => {
-      if (path === '/api/status') {
-        return Promise.resolve(Response.json({ status: 'ready' }));
-      }
-      return path === '/api/families' ? Promise.resolve(Response.json([FAMILY])) : start();
-    });
+  ])('shows on the start screen why voting did not start when %s', async (_, start, alert) => {
+    vi.stubGlobal('fetch', (path: string) =>
+      path === '/api/families' ? Promise.resolve(Response.json({ families: [FAMILY] })) : start(),
+    );
     const user = userEvent.setup();
     render(<VoteApp />);
 
     await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
 
     expect((await screen.findByRole('alert')).textContent).toBe(alert);
+    expect(screen.getByRole('heading', { name: 'Choose a family to vote on' })).toBeDefined();
   });
 });

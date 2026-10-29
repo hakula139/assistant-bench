@@ -1473,7 +1473,9 @@ class TestClose:
         (path,) = (tmp_path / 'reports' / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
-        assert closed.results.cutoffs == report.Cutoffs(production=last, local=None)
+        assert closed.results.cutoffs == report.Cutoffs(
+            production=report.Cutoff(id=last, votes=3), local=None
+        )
         assert (closed.results.votes, closed.results.voters) == (3, 3)
         assert closed.systems['large'] == report.PublicSystem(
             display_name='Public Large', fingerprint='fp-large'

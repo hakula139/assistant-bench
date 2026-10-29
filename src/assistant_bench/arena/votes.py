@@ -24,6 +24,7 @@ from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
     AnalysisInput,
+    Cutoff,
     Cutoffs,
     HumanEvidence,
     OutputMeasurement,
@@ -503,10 +504,7 @@ def voting_input(
         systems=tuple(system_names(snapshot)),
         defects=cuts[0][1].inventory.defects,
         cutoffs=Cutoffs(
-            production=None
-            if snapshot.production is None
-            else snapshot.production.cutoff,
-            local=None if snapshot.local is None else snapshot.local.cutoff,
+            production=_cutoff(snapshot.production), local=_cutoff(snapshot.local)
         ),
         declared_categories=tuple(settings.categories),
         categories=tuple(
@@ -570,6 +568,10 @@ def fingerprints(snapshot: Snapshot) -> dict[str, str]:
         for _, cut in stored_cuts(snapshot)
         for output in cut.inventory.outputs
     }
+
+
+def _cutoff(cut: Cut | None) -> Cutoff | None:
+    return None if cut is None else Cutoff(id=cut.cutoff, votes=len(cut.votes))
 
 
 def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:

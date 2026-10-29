@@ -98,8 +98,10 @@ describe('reportSchema', () => {
 
   test.each([
     ['missing cutoffs', ['cutoffs'], undefined],
-    ['negative cutoff', ['cutoffs', 'production'], -1],
-    ['fractional cutoff', ['cutoffs', 'local'], 1.5],
+    ['bare cutoff ID', ['cutoffs', 'production'], 337],
+    ['negative cutoff', ['cutoffs', 'production', 'id'], -1],
+    ['fractional counted votes', ['cutoffs', 'production', 'votes'], 1.5],
+    ['missing counted votes', ['cutoffs', 'production', 'votes'], undefined],
     ['unknown store', ['cutoffs', 'staging'], 1],
     ['nonpositive cap', ['method', 'actor_cap'], 0],
     ['boolean cap', ['method', 'actor_cap'], true],

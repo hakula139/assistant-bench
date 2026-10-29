@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import { note } from '@/components/site/PageParts';
-import { checkFreshness, type Freshness } from '@/lib/arena';
+import type { Freshness } from '@/lib/arena';
 import type { Cutoffs } from '@/lib/report';
+import { checkFreshness } from '@/lib/vote-flow';
 
 const closedTime = new Intl.DateTimeFormat('en', {
   dateStyle: 'medium',
@@ -25,11 +26,10 @@ interface SnapshotStatusProps {
 /** A voted round's closing time, followed by the vote API's freshness verdict once it answers. */
 export function SnapshotStatus({ family, closedAt, cutoffs }: SnapshotStatusProps) {
   const [status, setStatus] = useState<Freshness | null>(null);
-  const { production, local } = cutoffs;
 
   useEffect(() => {
     const controller = new AbortController();
-    void checkFreshness(family, { production, local }, controller.signal)
+    void checkFreshness(family, cutoffs, controller.signal)
       .then(
         (view) => view.status,
         (): Freshness => 'unknown',
@@ -43,7 +43,7 @@ export function SnapshotStatus({ family, closedAt, cutoffs }: SnapshotStatusProp
     return () => {
       controller.abort();
     };
-  }, [family, production, local]);
+  }, [family, cutoffs]);
 
   return (
     <p className={note} role="status">
