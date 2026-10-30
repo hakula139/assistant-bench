@@ -61,6 +61,9 @@ TESTS_USAGE = {
     'acme-small': (0.01, 8.0),
 }
 
+USAGELESS = {'input_tokens': None, 'output_tokens': None, 'cost_usd': None}
+"""The measurements of an output whose usage went unreported."""
+
 
 def make_evidence(
     index: int,
@@ -106,9 +109,10 @@ def make_analysis(
             errored=False,
             verdict='pass',
             reward=None,
+            input_tokens=10,
+            output_tokens=20,
             cost_usd=0.01,
             latency_sec=2.0,
-            output_tokens=20,
         )
         for row in comparisons
         for system in (row.left, row.right)
@@ -364,6 +368,8 @@ class TestReport:
             (('unranked',), ['unknown-unranked']),
             (('categories', 0, 'unranked'), ['unknown-category-system']),
             (('standings', 0, 'system'), ''),
+            (('standings', 0, 'cost_gap'), 'unpriced'),
+            (('standings', 0, 'mean_cost_usd'), None),
         ],
         ids=[
             'duplicate-fingerprint',
@@ -379,6 +385,8 @@ class TestReport:
             'unranked',
             'category-unranked',
             'empty-id',
+            'cost-gap-beside-cost',
+            'unknown-cost-without-gap',
         ],
     )
     def test_rejects_inconsistent_result_contracts(
@@ -448,6 +456,8 @@ class TestReport:
             (('decision', 'tied'), ['acme-mini', 'acme-mini']),
             (('categories', 0, 'standings', 0, 'system'), 'acme-new'),
             (('categories', 1, 'category'), 'bug-fix'),
+            (('standings', 0, 'cost_gap'), 'unreported'),
+            (('standings', 0, 'mean_cost_usd'), None),
         ],
         ids=[
             'no-standings',
@@ -459,6 +469,8 @@ class TestReport:
             'repeated-tie',
             'category-system',
             'repeated-category',
+            'cost-gap-beside-cost',
+            'unknown-cost-without-gap',
         ],
     )
     def test_rejects_inconsistent_tests_results(
@@ -663,6 +675,36 @@ class TestClose:
         assert closed.systems['large'].display_name == 'Public large'
         assert 'fingerprint' not in standing.model_dump()
 
+    def test_leaves_the_mean_cost_unknown_when_a_finished_trial_lacks_usage(
+        self,
+    ) -> None:
+        trials: list[dict[str, Any]] = [
+            {'trial': '1', 'input_tokens': 10, 'output_tokens': 20, 'cost_usd': 0.01},
+            {'trial': '2', **USAGELESS},
+            {'trial': '3', 'error': 'TimeoutError', 'cost_usd': 1.0},
+        ]
+        write_outputs(
+            'smoke',
+            [
+                make_output(
+                    **{'case': 'echo', 'system': 'large', 'reward': 1.0} | trial
+                )
+                for trial in trials
+            ],
+        )
+
+        closed = report.close(
+            load_family('smoke'),
+            AT,
+            samples=1,
+            system_names={'large': 'Public large'},
+            frozen_fingerprints={},
+        )
+
+        assert closed.results.scorer == 'tests'
+        (standing,) = closed.results.standings
+        assert (standing.mean_cost_usd, standing.cost_gap) == (None, 'unreported')
+
     def test_bounds_task_means_by_their_exact_interval_over_tasks(
         self, families_dir: Path
     ) -> None:
@@ -770,9 +812,10 @@ class TestVotesResults:
                 errored=index == 1 and system == 'a',
                 verdict='fail' if index == 1 else 'pass',
                 reward=None,
+                input_tokens=10,
+                output_tokens=100 if index == 1 else 20,
                 cost_usd=100.0 if index == 1 else 0.01,
                 latency_sec=100.0 if index == 1 else 2.0,
-                output_tokens=100 if index == 1 else 20,
             )
             for index in range(2)
             for system in ('a', 'b')
@@ -801,6 +844,55 @@ class TestVotesResults:
         assert standings['b'].mean_cost_usd == pytest.approx(50.005)
         assert standings['a'].pass_rate is None
 
+    @pytest.mark.parametrize(
+        ('changes', 'unknown'),
+        [
+            (
+                {'case-0': {'cost_usd': None}},
+                {'mean_cost_usd': None, 'cost_gap': 'unpriced'},
+            ),
+            (
+                {'case-0': USAGELESS},
+                {
+                    'mean_cost_usd': None,
+                    'cost_gap': 'unreported',
+                    'output_tokens': None,
+                },
+            ),
+            (
+                {'case-0': USAGELESS, 'case-1': {'cost_usd': None}},
+                {'mean_cost_usd': None, 'cost_gap': 'unpriced', 'output_tokens': None},
+            ),
+            (
+                {'case-0': {'latency_sec': None}},
+                {'p50_latency_sec': None, 'latency_sec': None},
+            ),
+        ],
+        ids=['unpriced', 'unreported-usage', 'unpriced-beside-unreported', 'untimed'],
+    )
+    def test_leaves_an_aggregate_unknown_when_a_finished_output_lacks_its_value(
+        self, changes: dict[str, dict[str, Any]], unknown: dict[str, object]
+    ) -> None:
+        analysis = make_analysis((make_evidence(0), make_evidence(1)))
+        outputs = tuple(
+            replace(output, **changes.get(output.case, {}))
+            if output.system == 'a'
+            else output
+            for output in analysis.outputs
+        )
+
+        results = report.votes_results(replace(analysis, outputs=outputs))
+
+        standing = next(row for row in results.standings if row.system == 'a')
+        known: dict[str, object] = {
+            'mean_cost_usd': pytest.approx(0.01),
+            'cost_gap': None,
+            'p50_latency_sec': 2.0,
+            'output_tokens': report.Distribution(p10=20.0, p50=20.0, p90=20.0),
+            'latency_sec': report.Distribution(p10=2.0, p50=2.0, p90=2.0),
+        }
+        assert {field: getattr(standing, field) for field in known} == known | unknown
+
     def test_rates_test_passes_per_task_for_systems_with_rewards(self) -> None:
         analysis = make_analysis((make_evidence(0), make_evidence(1)))
         trials = [
@@ -822,9 +914,10 @@ class TestVotesResults:
                 if reward >= 1
                 else 'fail',
                 reward=reward,
+                input_tokens=None,
+                output_tokens=None,
                 cost_usd=None,
                 latency_sec=None,
-                output_tokens=None,
             )
             for case, system, errored, reward in trials
         )

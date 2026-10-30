@@ -80,6 +80,17 @@ class Distribution(_Model):
 
 type Share = Annotated[float, Field(ge=0, le=1)]
 
+type CostGap = Literal['unpriced', 'unreported']
+
+
+def _check_cost_gap(
+    mean_cost_usd: float | None, cost_gap: CostGap | None, finished: int
+) -> None:
+    if (cost_gap is None) != (mean_cost_usd is not None or finished == 0):
+        raise ValueError(
+            'A cost gap is present exactly when finished outputs lack a mean cost.'
+        )
+
 
 class PassRate(_Model):
     """A mean of per-task shares with its 95% Clopper-Pearson interval over tasks."""
@@ -158,12 +169,22 @@ class Standing(_Model):
     """The tests pass rate over tasks, null when the system's outputs lack rewards."""
 
     mean_cost_usd: float | None
+    """Null unless every finished output's cost is known, like the other aggregates."""
+    cost_gap: CostGap | None
+    """Why finished outputs lack a mean cost: `unpriced` when an output with known
+    usage has no cost, and `unreported` when only outputs without usage do."""
+
     p50_latency_sec: float | None
     output_tokens: Distribution | None
     latency_sec: Distribution | None
 
     defects: dict[Defect, int]
     """Raw tagged-vote counts in the family's defect order."""
+
+    @model_validator(mode='after')
+    def validate_cost_gap(self) -> Standing:
+        _check_cost_gap(self.mean_cost_usd, self.cost_gap, self.outputs)
+        return self
 
 
 class HeadToHead(_Model):
@@ -253,7 +274,17 @@ class TestsStanding(_Model):
     """Share of tasks whose `samples` trials all passed, null for one sample."""
 
     mean_cost_usd: float | None
+    """Null unless every finished trial's cost is known, like the median latency."""
+    cost_gap: CostGap | None
+    """Why finished trials lack a mean cost: `unpriced` when a trial with known
+    usage has no cost, and `unreported` when only trials without usage do."""
+
     p50_latency_sec: float | None
+
+    @model_validator(mode='after')
+    def validate_cost_gap(self) -> TestsStanding:
+        _check_cost_gap(self.mean_cost_usd, self.cost_gap, self.trials - self.errored)
+        return self
 
 
 class TestsCategoryStanding(_Model):
@@ -542,9 +573,10 @@ class OutputMeasurement:
     reward: float | None
     """The task tests' reward, absent for rendered cases and untested trials."""
 
+    input_tokens: int | None
+    output_tokens: int | None
     cost_usd: float | None
     latency_sec: float | None
-    output_tokens: int | None
 
 
 @dataclass(frozen=True)
@@ -686,6 +718,7 @@ def _standing(
             else None
         ),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
+        cost_gap=_cost_gap(finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
         latency_sec=_distribution(output.latency_sec for output in finished),
@@ -923,6 +956,7 @@ def _tests_standing(
             else None
         ),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
+        cost_gap=_cost_gap(finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
     )
 
@@ -988,20 +1022,44 @@ def _share(flags: Iterable[bool]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def _known(values: Iterable[float | None]) -> list[float] | None:
+    """Return the values only when every one is known.
+
+    Missing values are not a random sample, as long agent runs lose usage more
+    often, so an aggregate over the known ones would be biased.
+    """
+    collected = list(values)
+    if not collected or None in collected:
+        return None
+    return [value for value in collected if value is not None]
+
+
 def _mean(values: Iterable[float | None]) -> float | None:
-    known = [value for value in values if value is not None]
+    known = _known(values)
     return statistics.fmean(known) if known else None
 
 
 def _median(values: Iterable[float | None]) -> float | None:
-    known = [value for value in values if value is not None]
+    known = _known(values)
     return statistics.median(known) if known else None
 
 
 def _distribution(values: Iterable[float | None]) -> Distribution | None:
-    known = [value for value in values if value is not None]
+    known = _known(values)
     if not known:
         return None
 
     p10, p50, p90 = np.percentile(known, [10, 50, 90])
     return Distribution(p10=float(p10), p50=float(p50), p90=float(p90))
+
+
+def _cost_gap(finished: Sequence[Output | OutputMeasurement]) -> CostGap | None:
+    unknown = [output for output in finished if output.cost_usd is None]
+    if not unknown:
+        return None
+    if any(
+        output.input_tokens is not None and output.output_tokens is not None
+        for output in unknown
+    ):
+        return 'unpriced'
+    return 'unreported'
