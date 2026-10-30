@@ -21,6 +21,8 @@ const share = z.number().min(0).max(1);
 
 const passRate = z.strictObject({ rate: share, lower: share, upper: share });
 
+const costGap = z.enum(['unpriced', 'unreported']);
+
 // ── Votes Results ──
 
 const standing = z.strictObject({
@@ -35,6 +37,7 @@ const standing = z.strictObject({
   gate_failure_rate: z.number().nullable(),
   pass_rate: passRate.nullable(),
   mean_cost_usd: z.number().nullable(),
+  cost_gap: costGap.nullable(),
   p50_latency_sec: z.number().nullable(),
   output_tokens: distribution.nullable(),
   latency_sec: distribution.nullable(),
@@ -115,6 +118,7 @@ const testsStanding = z.strictObject({
   pass_rate: passRate,
   pass_hat_k: share.nullable(),
   mean_cost_usd: z.number().nullable(),
+  cost_gap: costGap.nullable(),
   p50_latency_sec: z.number().nullable(),
 });
 
@@ -160,6 +164,16 @@ export const reportSchema = z
     };
 
     membership(results.standings, results.scorer === 'votes' ? results.unranked : []);
+
+    const finished = (row: Standing | TestsStanding) =>
+      'outputs' in row ? row.outputs : row.trials - row.errored;
+    if (
+      results.standings.some(
+        (row) => (row.cost_gap === null) !== (row.mean_cost_usd !== null || finished(row) === 0),
+      )
+    ) {
+      reject('A cost gap is present exactly when finished outputs lack a mean cost');
+    }
 
     if (results.scorer === 'votes') {
       referenced.add(results.reference);
@@ -233,6 +247,7 @@ export type CategoryStanding = z.infer<typeof categoryStanding>;
 export type CategoryBoard = z.infer<typeof categoryBoard>;
 export type VotesResults = z.infer<typeof votesResults>;
 export type PassRate = z.infer<typeof passRate>;
+export type CostGap = z.infer<typeof costGap>;
 export type TestsStanding = z.infer<typeof testsStanding>;
 export type TestsResults = z.infer<typeof testsResults>;
 export type Report = z.infer<typeof reportSchema>;

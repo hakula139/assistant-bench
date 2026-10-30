@@ -634,7 +634,8 @@ def _measurement(row: OutputFacts, output: Output | None) -> OutputMeasurement:
         errored=row.errored,
         verdict=row.verdict,
         reward=None if output is None else output.reward,
+        input_tokens=None if output is None else output.input_tokens,
+        output_tokens=None if output is None else output.output_tokens,
         cost_usd=None if output is None else output.cost_usd,
         latency_sec=None if output is None else output.latency_sec,
-        output_tokens=None if output is None else output.output_tokens,
     )

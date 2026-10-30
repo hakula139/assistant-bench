@@ -134,6 +134,8 @@ describe('reportSchema', () => {
     ['a repeated tie', ['decision', 'tied'], ['acme-mini', 'acme-mini']],
     ['an unknown category system', ['categories', 0, 'standings', 0, 'system'], 'acme-new'],
     ['a repeated category', ['categories', 1, 'category'], 'bug-fix'],
+    ['a cost gap beside a mean cost', ['standings', 0, 'cost_gap'], 'unreported'],
+    ['an unknown mean cost without a gap', ['standings', 0, 'mean_cost_usd'], null],
   ] satisfies [string, (string | number)[], unknown][])(
     'rejects tests results with %s',
     async (_, path, value) => {
@@ -159,6 +161,8 @@ describe('reportSchema', () => {
     ['unknown unranked system', ['unranked'], ['unknown']],
     ['unknown category system', ['categories', 0, 'unranked'], ['unknown']],
     ['empty system id', ['standings', 0, 'system'], ''],
+    ['cost gap beside a mean cost', ['standings', 0, 'cost_gap'], 'unpriced'],
+    ['unknown mean cost without a gap', ['standings', 0, 'mean_cost_usd'], null],
   ] satisfies [string, (string | number)[], unknown][])(
     'rejects inconsistent %s',
     async (_, path, value) => {

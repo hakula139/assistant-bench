@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
@@ -686,6 +686,89 @@ def _inputs(
         )
         for system in resolved
     }
+
+
+@dataclass(frozen=True)
+class UsageGap:
+    """A priced system's outputs with unknown usage, for budget tracking only."""
+
+    system: str
+    outputs: int
+    unreported: int
+    """Responses without valid usage."""
+    reported_cost_usd: float
+    """Lower bound over all collected outputs of the system, using reported usage.
+    This diagnostic never enters records or reports."""
+
+
+def usage_gaps(
+    family: Family, outputs: Sequence[Output], systems: Mapping[str, System]
+) -> list[UsageGap]:
+    """Count each priced system's responses that left its outputs' usage unknown.
+
+    Reads the trials of the outputs, which `collect` has just written.
+    """
+    unknown: defaultdict[str, list[Output]] = defaultdict(list)
+    for output in outputs:
+        system = systems.get(output.system)
+        if (
+            system is not None
+            and system.price is not None
+            and (output.input_tokens is None or output.output_tokens is None)
+        ):
+            unknown[output.system].append(output)
+
+    gaps: list[UsageGap] = []
+    for name, missing in sorted(unknown.items()):
+        responses = [
+            response for output in missing for response in _responses(family, output)
+        ]
+        valid = [response for response in responses if 'input_tokens' in response]
+        gaps.append(
+            UsageGap(
+                system=name,
+                outputs=len(missing),
+                unreported=len(responses) - len(valid),
+                reported_cost_usd=sum(
+                    output.cost_usd or 0 for output in outputs if output.system == name
+                )
+                + sum(
+                    _cost(
+                        systems[name],
+                        AgentContext(
+                            n_input_tokens=response['input_tokens'],
+                            n_cache_tokens=response['cache_tokens'],
+                            n_output_tokens=response['output_tokens'],
+                            metadata=response,
+                        ),
+                    )
+                    or 0
+                    for response in valid
+                ),
+            )
+        )
+
+    return gaps
+
+
+def _responses(family: Family, output: Output) -> list[dict[str, Any]]:
+    """Return the usage details of each response the output's agent received.
+
+    A terminal agent keeps one entry per response, while a single-call agent's
+    metadata is its one response's details once a response arrived. Messages
+    writes metadata even before its first `message_start`.
+    """
+    result_file = (
+        data_dir() / 'jobs' / family.name / output.job / output.trial / 'result.json'
+    )
+    result = TrialResult.model_validate_json(result_file.read_text())
+    metadata = (result.agent_result and result.agent_result.metadata) or {}
+    if 'responses' in metadata:
+        responses: list[dict[str, Any]] = metadata['responses']
+        return responses
+    if 'native_usage' in metadata and metadata['response_model'] is None:
+        return []
+    return [metadata] if 'usage_invalid' in metadata else []
 
 
 def read_trials(

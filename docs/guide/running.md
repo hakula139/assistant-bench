@@ -91,6 +91,8 @@ Each record holds:
 | `latency_sec`                                                                              | The end-to-end latency, or a terminal agent's execution time                                                                                                                                      |
 | `response_model`, `request_id`                                                             | The model that answered a single-call reply, and the endpoint's request ID                                                                                                                        |
 
+`bench collect` names priced systems with unknown usage and prints a lower bound on the cost of all their collected outputs, using reported usage at catalog prices. That partial cost stays out of records and reports, and excludes attempts collection did not select. A terminal agent's trajectory `final_metrics` also counts only responses with valid usage.
+
 ## Voting
 
 Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.

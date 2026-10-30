@@ -94,6 +94,13 @@
       "title": "CategoryStanding",
       "type": "object"
     },
+    "CostGap": {
+      "enum": [
+        "unpriced",
+        "unreported"
+      ],
+      "type": "string"
+    },
     "Cutoff": {
       "additionalProperties": false,
       "description": "What closing read from one store, which freshness compares with the store.",
@@ -408,7 +415,19 @@
               "type": "null"
             }
           ],
+          "description": "Null unless every finished output's cost is known, like the other aggregates.",
           "title": "Mean Cost Usd"
+        },
+        "cost_gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostGap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why finished outputs lack a mean cost: `unpriced` when an output with known\nusage has no cost, and `unreported` when only outputs without usage do."
         },
         "p50_latency_sec": {
           "anyOf": [
@@ -465,6 +484,7 @@
         "gate_failure_rate",
         "pass_rate",
         "mean_cost_usd",
+        "cost_gap",
         "p50_latency_sec",
         "output_tokens",
         "latency_sec",
@@ -632,7 +652,19 @@
               "type": "null"
             }
           ],
+          "description": "Null unless every finished trial's cost is known, like the median latency.",
           "title": "Mean Cost Usd"
+        },
+        "cost_gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostGap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why finished trials lack a mean cost: `unpriced` when a trial with known\nusage has no cost, and `unreported` when only trials without usage do."
         },
         "p50_latency_sec": {
           "anyOf": [
@@ -654,6 +686,7 @@
         "pass_rate",
         "pass_hat_k",
         "mean_cost_usd",
+        "cost_gap",
         "p50_latency_sec"
       ],
       "title": "TestsStanding",

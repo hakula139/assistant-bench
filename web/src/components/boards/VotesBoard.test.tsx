@@ -355,15 +355,24 @@ describe('VotesBoard', () => {
     'shows display names wherever the %s board names a system',
     async (category) => {
       const round = await load();
-      round.results.standings[0].mean_cost_usd = null;
+      Object.assign(round.results.standings[0], { mean_cost_usd: null, cost_gap: 'unpriced' });
       search.set('category', category);
 
       const html = render(round);
 
-      expect(text(html)).toContain(`leaving out the unpriced ${FIXTURE_NAMES['acme-pro']}`);
+      expect(text(html)).toContain(`leaving out ${FIXTURE_NAMES['acme-pro']} (unpriced)`);
       expect(shownSlugs(html)).toEqual([]);
     },
   );
+
+  test('names unreported usage when the cost scatter leaves out a system', async () => {
+    const round = await load();
+    Object.assign(round.results.standings[0], { mean_cost_usd: null, cost_gap: 'unreported' });
+
+    const html = render(round);
+
+    expect(text(html)).toContain(', leaving out Acme Pro (usage unreported) Median latency');
+  });
 
   test('counts the single voter of an early round', async () => {
     const html = render(await load('report-early'));
