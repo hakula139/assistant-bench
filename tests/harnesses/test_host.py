@@ -131,9 +131,7 @@ class TestHostEnvironment:
             }
         )
 
-        # Harbor names a job after the second it starts, so the two jobs get names
-        # of their own. The first runs in-process for coverage, and the rerun goes
-        # through the Harbor CLI, which `bench run` uses.
+        # Give the jobs distinct names despite Harbor's one-second default resolution.
         first = jobs.job(family, [system], jobs.render_tasks(family, cases))
         asyncio.run(run_in_process(first.model_copy(update={'job_name': 'job-1'})))
         rerun = jobs.job(family, [system], jobs.render_tasks(family, cases))

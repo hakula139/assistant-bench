@@ -52,7 +52,6 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
   );
 }
 
-/** Right-aligns a column of numbers in tabular figures. */
 const numericCell = 'text-right tabular-nums';
 
 function TableHead({

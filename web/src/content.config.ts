@@ -18,7 +18,6 @@ export const systemConfigSchema = z.object({
   display_name: z.string().optional(),
 });
 
-/** The field of a nixos-config catalog model the site reads. */
 export const catalogModelSchema = z.object({ name: z.string() });
 
 const families = defineCollection({

@@ -100,7 +100,6 @@ interface RenderView {
 
 const range = "Each system's median and 10th to 90th percentile range";
 
-/** A case family's run, which yields text. */
 const caseRun: RuledStep = {
   step: 'text',
   title: 'Run',
@@ -224,7 +223,6 @@ export function boardGuide(config: FamilyConfig): BoardGuide {
   return { summary, inputs, section: config.scorer, ...guide };
 }
 
-/** What a voted family's board calls its outputs and their figures. */
 export function boardLabels({ render }: Pick<VotesConfig, 'render'>): BoardLabels {
   return renders[render].labels;
 }

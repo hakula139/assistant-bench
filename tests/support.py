@@ -146,13 +146,10 @@ def write_task_family(
     samples: int = 1,
     categories: Mapping[str, str] | None = None,
 ) -> None:
-    """Write a task family, copying the echo task per ID at version 1.0.0.
+    """Write echo-task copies at version 1.0.0, replacing any case source.
 
-    A family that lists systems is scored by votes, tagged with `defects`, and
-    runs them as terminus-2, and one without is scored by tests. `categories`
-    maps every task ID to its category, and the family allows only `smoke`
-    without it. A `cases.toml` already written for the same name is removed,
-    since a family has one source.
+    With `systems`, use votes with `defects` and terminus-2, otherwise tests.
+    `categories` maps every task ID to a category and defaults to `smoke`.
     """
     if categories is None:
         categories = dict.fromkeys(task_ids, 'smoke')
@@ -975,17 +972,10 @@ ROUND_FAMILY = Family(
 
 
 def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
-    """Simulate family `arena` over `days` days of about 30 votes each.
+    """Return a seeded arena snapshot and collected outputs.
 
-    Returns the production snapshot and the collected outputs. A seeded rater
-    follows Bradley-Terry with the strengths above and a small left bias, ties 15%
-    of the time and calls both bad 5%. The owner votes on the first four
-    days, past the actor cap, and a new visitor on each later one. About 3%
-    of the outputs fail a gate and settle their pairs without a vote, while
-    `acme-tiny` fails most cases, so it ranks through settlements alone. Each
-    day pits `acme-edge` against `acme-nano` on two cases, which leaves them
-    unranked, and drops some votes on retired outputs and two excluded ones.
-    Draws use only `Random.random`, whose sequence Python keeps stable for a seed.
+    Covers ties, failed gates, actor caps, exclusions, settlements and unranked systems.
+    Use only `Random.random` to keep seeded draws stable across Python versions.
     """
     rng = Random(20)
 

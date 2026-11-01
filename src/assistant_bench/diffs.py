@@ -11,7 +11,6 @@ from pathlib import Path
 
 CONTEXT_LINES = 3
 NO_NEWLINE = '\\ No newline at end of file\n'
-# Git's modes for a symlink, an executable file, and any other file.
 SYMLINK_MODE = '120000'
 EXECUTABLE_MODE = '100755'
 FILE_MODE = '100644'

@@ -150,7 +150,7 @@ async def request_messages(
     effort: str | None,
     artifact: Path,
 ) -> None:
-    """Accumulate typed events and retain private snapshots on every exit path."""
+    """Persist any received message snapshot when streaming ends or fails."""
     started = time.monotonic()
     stopped = False
     try:

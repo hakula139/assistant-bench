@@ -35,8 +35,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_cmdline_main(config: pytest.Config) -> None:
-    # A fixture one test rewrites is read by tests on other workers, so rewrite in one
-    # process. This runs before pytest-xdist's own hook turns `-n` into workers.
+    # Disable xdist before startup so fixture rewrites cannot race with readers.
     if config.getoption('update_fixtures'):
         config.option.numprocesses = 0
 

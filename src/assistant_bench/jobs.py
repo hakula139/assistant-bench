@@ -55,14 +55,14 @@ from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
 
-# Collection matches each trial's version exactly, while Harbor reuses a trial whose
-# patch differs, so this base stays fixed.
+# Keep the base version fixed: collection matches rendered task versions exactly,
+# while Harbor reuses trials across patch versions.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 3600.0
 WORKSPACE = '/app'
 
 N_CONCURRENT_TRIALS = 8
-# Caps task trials, each of which can hold an agent and a verifier container.
+# A task trial can hold both an agent and a verifier container.
 N_CONCURRENT_CONTAINERS = 4
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.

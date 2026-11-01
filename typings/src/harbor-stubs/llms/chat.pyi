@@ -1,4 +1,4 @@
-"""Native conversation methods extended by the Responses item carrier."""
+"""Harbor conversation methods consumed by the native SDK adapters."""
 
 from pathlib import Path
 from typing import Any
