@@ -47,6 +47,7 @@ from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
 from support import (
     finish_job,
+    make_output,
     make_system,
     response,
     write_case_family,
@@ -2045,6 +2046,134 @@ class TestCollect:
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"
         )
+
+
+class TestUsageGaps:
+    @pytest.fixture(autouse=True)
+    def current_sources(self, families_dir: Path) -> None:
+        write_case_family(families_dir, ['acme-large'], name='f')
+
+    @pytest.mark.parametrize(
+        ('metadata', 'unreported', 'lower_bound'),
+        [
+            pytest.param(
+                {
+                    'responses': [
+                        {
+                            'input_tokens': 1_000,
+                            'cache_tokens': 600,
+                            'cache_write_tokens': 100,
+                            'output_tokens': 500,
+                        },
+                        {},
+                        {'usage_invalid': True},
+                    ]
+                },
+                2,
+                0.00597,
+                id='terminal-responses',
+            ),
+            pytest.param({'usage_invalid': True}, 1, 0, id='single-response'),
+            pytest.param({}, 0, 0, id='no-response'),
+            pytest.param(
+                {
+                    'native_usage': None,
+                    'response_model': None,
+                    'response_id': None,
+                    'request_id': 'req-1',
+                    'response_status': 'incomplete',
+                    'usage_invalid': False,
+                },
+                0,
+                0,
+                id='no-native-message',
+            ),
+            pytest.param(
+                {
+                    'native_usage': None,
+                    'response_model': 'large-2026',
+                    'response_id': None,
+                    'response_status': 'completed',
+                    'usage_invalid': False,
+                },
+                1,
+                0,
+                id='native-message-without-usage-or-id',
+            ),
+            pytest.param(
+                {
+                    'responses': [
+                        {
+                            'input_tokens': 1_000,
+                            'cache_tokens': 0,
+                            'cache_write_tokens': 100,
+                            'cache_write_unpriced': True,
+                            'output_tokens': 500,
+                        },
+                        {},
+                    ]
+                },
+                1,
+                0,
+                id='unpriced-cache-write',
+            ),
+        ],
+    )
+    def test_includes_known_outputs_and_reported_responses_without_changing_records(
+        self,
+        data_dir: Path,
+        metadata: dict[str, Any],
+        unreported: int,
+        lower_bound: float,
+    ) -> None:
+        job_dir = data_dir / 'jobs' / 'f' / 'job-1'
+        system = make_system()
+        record_trial(
+            job_dir,
+            'a__1',
+            current_agent(),
+            task='f/a',
+            context=AgentContext(metadata=metadata),
+        )
+        record_trial(
+            job_dir,
+            'b__1',
+            current_agent(),
+            task='f/b',
+            context=AgentContext(
+                n_input_tokens=1_000,
+                n_cache_tokens=600,
+                n_output_tokens=500,
+                metadata={'cache_write_tokens': 100},
+            ),
+        )
+        outputs = jobs.collect(VOTES, {system.name: system})
+        records = (data_dir / 'outputs' / 'f.jsonl').read_bytes()
+
+        gaps = jobs.usage_gaps(VOTES, outputs, {system.name: system})
+
+        (gap,) = gaps
+        assert (gap.system, gap.outputs, gap.unreported) == (system.name, 1, unreported)
+        assert gap.reported_cost_usd == pytest.approx(lower_bound + 0.00597)
+        assert outputs[0].cost_usd is None
+        assert outputs[0].input_tokens is None
+        assert outputs[1].cost_usd == pytest.approx(0.00597)
+        assert (data_dir / 'outputs' / 'f.jsonl').read_bytes() == records
+
+    def test_skips_known_usage_and_systems_without_a_catalog_price(self) -> None:
+        outputs = [
+            make_output(system='known', input_tokens=10, output_tokens=20),
+            make_output(system='unpriced'),
+            make_output(system='removed'),
+        ]
+        systems = {
+            'known': make_system(name='known'),
+            'unpriced': make_system(name='unpriced', price=None),
+        }
+
+        gaps = jobs.usage_gaps(VOTES, outputs, systems)
+
+        assert gaps == []
 
 
 class TestReadTrials:

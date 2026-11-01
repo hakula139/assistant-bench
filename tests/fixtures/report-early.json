@@ -73,6 +73,7 @@
         "gate_failure_rate": 0.0,
         "pass_rate": null,
         "mean_cost_usd": 0.012477,
+        "cost_gap": null,
         "p50_latency_sec": 18.177959948645857,
         "output_tokens": {
           "p10": 143.6,
@@ -106,6 +107,7 @@
         "gate_failure_rate": 0.016666666666666666,
         "pass_rate": null,
         "mean_cost_usd": 0.009195333333333333,
+        "cost_gap": null,
         "p50_latency_sec": 23.43129221058306,
         "output_tokens": {
           "p10": 145.0,
@@ -139,6 +141,7 @@
         "gate_failure_rate": 0.05,
         "pass_rate": null,
         "mean_cost_usd": 0.019370666666666668,
+        "cost_gap": null,
         "p50_latency_sec": 19.409331074239436,
         "output_tokens": {
           "p10": 190.20000000000002,
@@ -172,6 +175,7 @@
         "gate_failure_rate": 0.05,
         "pass_rate": null,
         "mean_cost_usd": 0.004385333333333334,
+        "cost_gap": null,
         "p50_latency_sec": 17.56367775849482,
         "output_tokens": {
           "p10": 163.8,
@@ -205,6 +209,7 @@
         "gate_failure_rate": 0.05,
         "pass_rate": null,
         "mean_cost_usd": 0.022150000000000003,
+        "cost_gap": null,
         "p50_latency_sec": 17.9591343179422,
         "output_tokens": {
           "p10": 151.6,
@@ -238,6 +243,7 @@
         "gate_failure_rate": 0.6833333333333333,
         "pass_rate": null,
         "mean_cost_usd": 0.03716266666666667,
+        "cost_gap": null,
         "p50_latency_sec": 25.386516450722205,
         "output_tokens": {
           "p10": 205.4,

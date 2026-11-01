@@ -569,6 +569,14 @@ def _collect(family: Family) -> None:
     for error, count in errors.most_common():
         typer.echo(f'  {error}: {count}')
 
+    for gap in jobs.usage_gaps(family, outputs, systems):
+        typer.echo(
+            f'System `{gap.system}` has unknown usage. Outputs affected: '
+            f'{gap.outputs}. Responses without valid usage: {gap.unreported}. '
+            f'Collected outputs cost at least ${gap.reported_cost_usd:.2f} '
+            '(reported usage only).'
+        )
+
     gated = [output for output in outputs if output.gate_failures]
     if gated:
         typer.echo(f'{len(gated)} failed a gate.')

@@ -38,6 +38,8 @@ Lengths count each Han character and each other whitespace-separated run as one 
 
 ## Test Pass Rates
 
+Cost, token and latency aggregates cover error-free outputs and remain unknown unless every output in that group reports the metric, as [Reports](reports.md#results) describes.
+
 `scoring/pass_rates.py` holds the statistics that `report.py` applies to a tests family's trials. The target is a system's pass rate on new tasks like the family's, so the task is the sampling unit and repeated trials of one task are clustered within it.
 
 A trial passes when its tests reach a reward of 1, which they can after an agent error such as a timeout, since Harbor still runs the verifier. A trial whose tests never ran fails. A round closes only once every system has `samples` trials of every current task, so all systems are compared over the same tasks and trial counts. A system's pass rate is the mean over tasks of each task's share of passing trials, and categories apply the same rule to their own tasks.
