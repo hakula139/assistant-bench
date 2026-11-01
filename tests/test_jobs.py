@@ -2,7 +2,6 @@ import asyncio
 import shutil
 import subprocess
 import sys
-import textwrap
 import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,6 +45,7 @@ from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
 from support import (
+    FIXTURES,
     finish_job,
     make_output,
     make_system,
@@ -959,17 +959,9 @@ class TestRunJob:
     ) -> Path:
         """Install a recording Harbor CLI beside the fake interpreter."""
         harbor = directory / 'harbor'
-        harbor.write_text(
-            textwrap.dedent(
-                f"""\
-                #!/bin/sh
-                printf '%s\\n' "$@" > "$0.args"
-                cp "$3" "$0.json"
-                exit {exit_code}
-                """
-            )
-        )
+        shutil.copyfile(FIXTURES / 'recording-harbor.sh', harbor)
         harbor.chmod(0o755)
+        monkeypatch.setenv('STUB_HARBOR_EXIT_CODE', str(exit_code))
         monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
         return harbor
 
