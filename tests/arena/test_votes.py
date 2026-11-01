@@ -21,7 +21,6 @@ from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
     SQLiteDatabase,
-    arena_database,
     make_case,
     make_trial,
     make_votes_family,
@@ -33,7 +32,10 @@ NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 FAMILY = make_votes_family()
 
 
-def published_store() -> tuple[SQLiteDatabase, publication.Publication]:
+@pytest.fixture
+def published_store(
+    arena_store: SQLiteDatabase,
+) -> tuple[SQLiteDatabase, publication.Publication]:
     cases = [make_case('first'), make_case('second')]
     published = publication.prepare(
         FAMILY,
@@ -42,9 +44,8 @@ def published_store() -> tuple[SQLiteDatabase, publication.Publication]:
         ARENA_NAMES,
         'production',
     )
-    database = arena_database()
-    publication.publish(database, published, NOW - timedelta(days=1))
-    return database, published
+    publication.publish(arena_store, published, NOW - timedelta(days=1))
+    return arena_store, published
 
 
 def fact(
@@ -127,8 +128,10 @@ def snapshot(
 
 
 class TestReadCut:
-    def test_cuts_below_the_votes_an_undo_can_still_change(self) -> None:
-        database, published = published_store()
+    def test_cuts_below_the_votes_an_undo_can_still_change(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        database, published = published_store
         first = record_vote(
             database, published, NOW, actor='first', age=timedelta(hours=1)
         )
@@ -145,10 +148,12 @@ class TestReadCut:
         assert cut.votes[0].defects == TaggedDefects(b=('facts',))
 
     def test_reads_every_counted_vote_across_pages(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        published_store: tuple[SQLiteDatabase, publication.Publication],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(votes, 'PAGE_ROWS', 2)
-        database, published = published_store()
+        database, published = published_store
         recorded = [
             record_vote(
                 database, published, NOW, actor=f'actor-{index}', age=timedelta(hours=1)
@@ -161,8 +166,10 @@ class TestReadCut:
         assert cut is not None
         assert [row.id for row in cut.votes] == recorded
 
-    def test_counts_excluded_votes_apart_from_the_counted_ones(self) -> None:
-        database, published = published_store()
+    def test_counts_excluded_votes_apart_from_the_counted_ones(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        database, published = published_store
         record_vote(database, published, NOW, actor='kept', age=timedelta(hours=1))
         record_vote(
             database,
@@ -179,8 +186,10 @@ class TestReadCut:
         assert [row.actor for row in cut.votes] == ['kept']
         assert cut.excluded == 1
 
-    def test_reads_the_inventory_without_content_or_ip_tags(self) -> None:
-        database, published = published_store()
+    def test_reads_the_inventory_without_content_or_ip_tags(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        database, published = published_store
         record_vote(database, published, NOW, actor='voter', age=timedelta(hours=1))
 
         cut = votes.read_cut(database, FAMILY.name, NOW)
@@ -205,8 +214,10 @@ class TestReadCut:
         assert 'tag-voter' not in serialized
         assert 'on first' not in serialized
 
-    def test_cuts_nothing_while_every_vote_can_be_undone(self) -> None:
-        database, published = published_store()
+    def test_cuts_nothing_while_every_vote_can_be_undone(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        database, published = published_store
         record_vote(database, published, NOW, actor='recent', age=timedelta(minutes=1))
 
         cut = votes.read_cut(database, FAMILY.name, NOW)
@@ -214,13 +225,17 @@ class TestReadCut:
         assert cut is not None
         assert (cut.cutoff, cut.votes, cut.excluded) == (0, (), 0)
 
-    def test_returns_none_for_a_family_without_an_active_publication(self) -> None:
-        assert votes.read_cut(arena_database(), FAMILY.name, NOW) is None
+    def test_returns_none_for_a_family_without_an_active_publication(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        assert votes.read_cut(arena_store, FAMILY.name, NOW) is None
 
 
 class TestStatus:
-    def test_summarizes_each_active_family_or_the_named_one(self) -> None:
-        database, published = published_store()
+    def test_summarizes_each_active_family_or_the_named_one(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        database, published = published_store
         record_vote(database, published, NOW, actor='first', age=timedelta(hours=2))
         record_vote(
             database, published, NOW, actor='first', age=timedelta(hours=1), case=1
@@ -249,9 +264,12 @@ class TestStatus:
         )
 
 
-def moderated_store() -> tuple[SQLiteDatabase, dict[str, int]]:
+@pytest.fixture
+def moderated_store(
+    published_store: tuple[SQLiteDatabase, publication.Publication],
+) -> tuple[SQLiteDatabase, dict[str, int]]:
     """Record four votes from three browsers on two network tags, one excluded."""
-    database, published = published_store()
+    database, published = published_store
     ids = {
         'x': record_vote(
             database,
@@ -318,9 +336,12 @@ class TestListed:
         ids=['every', 'ip-tag', 'actor', 'ids', 'no-match'],
     )
     def test_lists_the_selected_votes_in_id_order(
-        self, selector: Selector | None, expected: list[str]
+        self,
+        moderated_store: tuple[SQLiteDatabase, dict[str, int]],
+        selector: Selector | None,
+        expected: list[str],
     ) -> None:
-        database, ids = moderated_store()
+        database, ids = moderated_store
 
         listed = votes.listed(database, FAMILY.name, selector)
 
@@ -336,19 +357,22 @@ class TestListed:
     )
     def test_pages_through_a_selection_whose_ids_skip(
         self,
+        moderated_store: tuple[SQLiteDatabase, dict[str, int]],
         monkeypatch: pytest.MonkeyPatch,
         selector: Selector,
         expected: list[str],
     ) -> None:
-        database, ids = moderated_store()
+        database, ids = moderated_store
         monkeypatch.setattr(votes, 'PAGE_ROWS', 2)
 
         listed = votes.listed(database, FAMILY.name, selector)
 
         assert [row.id for row in listed] == [ids[name] for name in expected]
 
-    def test_lists_each_vote_with_its_tag_timing_and_reason(self) -> None:
-        database, ids = moderated_store()
+    def test_lists_each_vote_with_its_tag_timing_and_reason(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, ids = moderated_store
 
         (row,) = votes.listed(
             database, FAMILY.name, Selector(column='id', values=(ids['y-second'],))
@@ -366,8 +390,10 @@ class TestListed:
             exclusion='spam',
         )
 
-    def test_selects_only_votes_of_the_named_family(self) -> None:
-        database, ids = moderated_store()
+    def test_selects_only_votes_of_the_named_family(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, ids = moderated_store
 
         listed = votes.listed(
             database, 'writing-other', Selector(column='id', values=(ids['x'],))
@@ -443,14 +469,19 @@ class TestGroups:
         ],
     )
     def test_summarizes_each_subject_most_votes_first(
-        self, by: votes.Grouping, expected: list[Group]
+        self,
+        moderated_store: tuple[SQLiteDatabase, dict[str, int]],
+        by: votes.Grouping,
+        expected: list[Group],
     ) -> None:
-        database, _ = moderated_store()
+        database, _ = moderated_store
 
         assert votes.groups(database, FAMILY.name, by) == expected
 
-    def test_groups_votes_whose_tag_retention_cleared(self) -> None:
-        database, ids = moderated_store()
+    def test_groups_votes_whose_tag_retention_cleared(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, ids = moderated_store
         database.execute(
             'UPDATE votes SET ip_tag = NULL WHERE id IN (?, ?)',
             [ids['y-first'], ids['y-second']],
@@ -483,9 +514,13 @@ class TestExclude:
         ids=['ip-tag', 'actor', 'ids', 'ids-past-the-parameter-limit', 'no-match'],
     )
     def test_excludes_the_selected_votes_keeping_earlier_reasons(
-        self, selector: Selector, changed: int, excluded: list[str]
+        self,
+        moderated_store: tuple[SQLiteDatabase, dict[str, int]],
+        selector: Selector,
+        changed: int,
+        excluded: list[str],
     ) -> None:
-        database, ids = moderated_store()
+        database, ids = moderated_store
 
         result = votes.exclude(database, FAMILY.name, selector, 'bot')
 
@@ -502,8 +537,10 @@ class TestExclude:
             for name in ids
         }
 
-    def test_leaves_votes_of_another_family_alone(self) -> None:
-        database, ids = moderated_store()
+    def test_leaves_votes_of_another_family_alone(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, ids = moderated_store
 
         result = votes.exclude(
             database, 'writing-other', Selector(column='id', values=(ids['x'],)), 'bot'
@@ -512,8 +549,10 @@ class TestExclude:
         assert result == 0
         assert votes.listed(database, FAMILY.name, None)[0].exclusion is None
 
-    def test_refuses_a_blank_reason(self) -> None:
-        database, _ = moderated_store()
+    def test_refuses_a_blank_reason(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, _ = moderated_store
 
         with pytest.raises(ValueError, match='Give a reason'):
             votes.exclude(
@@ -521,9 +560,9 @@ class TestExclude:
             )
 
     def test_takes_the_votes_out_of_the_cut_and_the_counts_until_restored(
-        self,
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
     ) -> None:
-        database, _ = moderated_store()
+        database, _ = moderated_store
         shared = Selector(column='ip_tag', values=('shared',))
 
         votes.exclude(database, FAMILY.name, shared, 'bot')
@@ -553,9 +592,12 @@ class TestRestore:
         ids=['ip-tag', 'actor', 'ids', 'counted'],
     )
     def test_counts_the_selected_excluded_votes_again(
-        self, selector: Selector, changed: int
+        self,
+        moderated_store: tuple[SQLiteDatabase, dict[str, int]],
+        selector: Selector,
+        changed: int,
     ) -> None:
-        database, _ = moderated_store()
+        database, _ = moderated_store
 
         result = votes.restore(database, FAMILY.name, selector)
 
@@ -567,8 +609,10 @@ class TestRestore:
         ]
         assert excluded == ([] if changed else [3])
 
-    def test_leaves_votes_of_another_family_alone(self) -> None:
-        database, ids = moderated_store()
+    def test_leaves_votes_of_another_family_alone(
+        self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
+    ) -> None:
+        database, ids = moderated_store
 
         result = votes.restore(
             database, 'writing-other', Selector(column='id', values=(ids['y-second'],))

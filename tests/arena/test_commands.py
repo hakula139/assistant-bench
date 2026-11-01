@@ -14,7 +14,6 @@ from assistant_bench.families import Family, load_cases, load_family
 from assistant_bench.outputs import Output
 from support import (
     SQLiteDatabase,
-    arena_database,
     make_system,
     passing_outputs,
     record_vote,
@@ -62,17 +61,18 @@ def prepared(family: Family) -> Path:
 
 
 @pytest.fixture
-def store(monkeypatch: pytest.MonkeyPatch) -> tuple[SQLiteDatabase, list[str]]:
+def store(
+    arena_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
+) -> tuple[SQLiteDatabase, list[str]]:
     """Serve one in-memory store for every target, recording the targets."""
-    database = arena_database()
     targets: list[str] = []
 
     def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
         targets.append(target)
-        return nullcontext(database)
+        return nullcontext(arena_store)
 
     monkeypatch.setattr(commands, 'connect', connect)
-    return database, targets
+    return arena_store, targets
 
 
 @pytest.fixture

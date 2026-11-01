@@ -12,8 +12,8 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -924,17 +924,19 @@ def record_vote(
     return row['id']
 
 
-def arena_database() -> SQLiteDatabase:
-    """Return an in-memory store built from the Worker's migration files, in order.
+@contextmanager
+def arena_database() -> Generator[SQLiteDatabase]:
+    """Yield an in-memory store built from the Worker's migration files, in order.
 
     The store binds at most 100 parameters per statement, as D1 does.
+    Its connection closes when the context exits.
     """
-    connection = sqlite3.connect(':memory:', isolation_level=None)
-    connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 100)
-    connection.execute('PRAGMA foreign_keys = ON')
-    for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-        connection.executescript(path.read_text())
-    return SQLiteDatabase(connection)
+    with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 100)
+        connection.execute('PRAGMA foreign_keys = ON')
+        for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+            connection.executescript(path.read_text())
+        yield SQLiteDatabase(connection)
 
 
 # ── Synthetic Round ──

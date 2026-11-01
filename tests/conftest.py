@@ -16,7 +16,13 @@ from assistant_bench.arena.d1 import TOKEN_FILE_VAR
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
-from support import EXPORT_FILE, StubEndpoint, serve_stub
+from support import (
+    EXPORT_FILE,
+    SQLiteDatabase,
+    StubEndpoint,
+    arena_database,
+    serve_stub,
+)
 
 
 # Set as `bench` sets it, before a test module imports LiteLLM.
@@ -165,6 +171,12 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch.delenv(name.lower(), raising=False)
     monkeypatch.setenv('NO_PROXY', '*')
     return path
+
+
+@pytest.fixture
+def arena_store() -> Iterator[SQLiteDatabase]:
+    with arena_database() as database:
+        yield database
 
 
 @pytest.fixture
