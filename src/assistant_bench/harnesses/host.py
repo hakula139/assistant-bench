@@ -10,9 +10,9 @@ from harbor.environments.capabilities import EnvironmentCapabilities
 class HostEnvironment(BaseEnvironment):
     """An environment that holds nothing, for agents that work from the host alone.
 
-    The trial's host directories are its only files, so it reports them as mounted
-    and Harbor copies no logs or artifacts. It runs no command and moves no file,
-    so an agent that acts in its environment fails on its first call.
+    Its jobs enable mounts for the trial's host output paths, so Harbor copies no
+    logs or artifacts. It runs no command and moves no file, so an agent that acts
+    in its environment fails on its first call.
     """
 
     @staticmethod

@@ -282,7 +282,9 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
 
 def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
     if all(HARNESSES[system.harness].single_call for system in systems):
-        return trial_config.EnvironmentConfig(import_path=HOST_ENVIRONMENT)
+        return trial_config.EnvironmentConfig(
+            import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
+        )
     return trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER)
 
 
