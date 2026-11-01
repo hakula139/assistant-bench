@@ -122,7 +122,7 @@
           (pnpm.override { nodejs-slim = nodejs-slim_26; })
         ];
 
-        # Node and Ruff use local dependencies unavailable in the Nix sandbox, so CI checks them.
+        # CI runs Node and Ruff with local dependencies absent from the check's store source.
         nodeHook =
           name: cmd:
           pkgs.lib.getExe (
@@ -194,14 +194,9 @@
           hooks = hooks // nodeHooks // uvHooks;
         };
 
-        # lychee needs CA roots offline, while the dev shell must preserve the host's CA settings.
         preCommitCheck = git-hooks-nix.lib.${system}.run {
+          inherit hooks;
           src = ./.;
-          hooks = hooks // {
-            lychee = hooks.lychee // {
-              extraPackages = [ pkgs.cacert ];
-            };
-          };
         };
 
         cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";

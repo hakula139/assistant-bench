@@ -1,5 +1,5 @@
 name: Set up Nix
-description: Install Nix with a sandbox that a build cannot fall back from
+description: Install Nix
 
 runs:
   using: composite
@@ -7,7 +7,5 @@ runs:
     - name: Install Nix
       uses: cachix/install-nix-action@v31
       with:
-        # Nix otherwise disables sandboxing when the kernel cannot support it.
         extra_nix_config: |
-          sandbox = true
-          sandbox-fallback = false
+          sandbox = false
