@@ -7,8 +7,7 @@ runs:
     - name: Install Nix
       uses: cachix/install-nix-action@v31
       with:
-        # `sandbox-fallback = false` fails a build that cannot get a sandbox, which Nix would
-        # otherwise run without one.
+        # Nix otherwise disables sandboxing when the kernel cannot support it.
         extra_nix_config: |
           sandbox = true
           sandbox-fallback = false

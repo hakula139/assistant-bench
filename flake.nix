@@ -104,8 +104,7 @@
           deadnix.enable = true;
           statix.enable = true;
 
-          # `shfmt` reads `.editorconfig` only when the entry passes no formatting flag. Any flag
-          # reverts it to tabs and ignores the `binary_next_line` and `switch_case_indent` keys.
+          # Formatting flags disable shfmt's EditorConfig settings.
           shfmt = {
             enable = true;
             settings = {
@@ -123,8 +122,7 @@
           (pnpm.override { nodejs-slim = nodejs-slim_26; })
         ];
 
-        # These hooks run the tools pinned in node_modules and uv.lock, which the Nix sandbox lacks.
-        # The flake check leaves them to CI's Node Check and Python Check jobs.
+        # Node and Ruff use local dependencies unavailable in the Nix sandbox, so CI checks them.
         nodeHook =
           name: cmd:
           pkgs.lib.getExe (
@@ -196,9 +194,8 @@
           hooks = hooks // nodeHooks // uvHooks;
         };
 
-        # lychee builds its HTTP client even offline and fails without CA roots, which the Nix
-        # sandbox lacks until cacert's setup hook exports SSL_CERT_FILE. The dev shell keeps the
-        # host's CA settings, so only the check gets cacert.
+        # lychee needs CA roots even offline. Add cacert only in the sandbox
+        # so the dev shell keeps the host's CA settings.
         preCommitCheck = git-hooks-nix.lib.${system}.run {
           src = ./.;
           hooks = hooks // {
@@ -224,15 +221,10 @@
 
           packages = pythonEnvironment.packages ++ preCommit.enabledPackages ++ [ preCommit.config.package ];
 
-          # Other repositories enter this shell for its tools, and the flake's source is a store
-          # copy that can't name its checkout, so hooks install only where the repository's
-          # top-level flake.nix matches this file.
-          #
-          # git-hooks.nix's main-checkout-relative hooks path breaks linked worktrees
-          # (cachix/git-hooks.nix#688). Serialize installation and clear it to use the shared hooks.
-          #
-          # The hooks' Python packages also fill PYTHONPATH, which would shadow the project's
-          # virtualenv, so unset it.
+          # Match flake.nix to keep hooks in this project, since Nix evaluates a store copy.
+          # Concurrent installs race on hooksPath, whose relative value also breaks linked worktrees
+          # (cachix/git-hooks.nix#688).
+          # Hook packages set PYTHONPATH, which would shadow the project's virtualenv.
           shellHook = ''
             unset PYTHONPATH
             if toplevel=$(${git} rev-parse --show-toplevel 2>/dev/null) \

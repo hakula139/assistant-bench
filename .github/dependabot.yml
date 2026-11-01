@@ -1,6 +1,5 @@
-# Renovate opens version updates, so `open-pull-requests-limit: 0` leaves Dependabot only security
-# updates. Each entry sets its commit type, which Dependabot would otherwise infer from recent
-# commits, and its label, which drops the ecosystem label Dependabot adds by default.
+# Renovate handles version updates. A zero PR limit keeps Dependabot on security updates.
+# Explicit prefixes and labels avoid inferred commit types and default ecosystem labels.
 version: 2
 updates:
   - package-ecosystem: uv
