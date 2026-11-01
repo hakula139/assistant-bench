@@ -5,6 +5,7 @@ from typing import Any
 
 from harbor.llms.base import BaseLLM, LLMResponse
 from harbor.models.metric import UsageInfo
+from harbor.models.model_api_format import ModelApiFormat
 from litellm import Message
 from pydantic import BaseModel
 
@@ -20,6 +21,8 @@ class LiteLLM(BaseLLM):
         reasoning_effort: str | None = ...,
         model_info: dict[str, Any] | None = ...,
         use_responses_api: bool = ...,
+        model_api_format: ModelApiFormat | str | None = ...,
+        skip_model_parsing: bool = ...,
         **kwargs: Any,
     ) -> None: ...
     def get_model_context_limit(self) -> int: ...
