@@ -84,6 +84,7 @@ pvalue
 pycache
 pydantic
 pydocstyle
+pyenv
 pypi
 pyproject
 pytest
