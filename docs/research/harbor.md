@@ -1,11 +1,11 @@
 # Harbor
 
-[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins release 0.24.0, which these findings were checked against, and drives it through job configs built from Harbor's own pydantic models.
+[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins release 0.25.0 and drives it through job configs built from Harbor's own pydantic models.
 
 ## What the Bench Uses
 
 - **Job configs:** `JobConfig` with one `AgentConfig` per system, `n_attempts` for samples, `RetryConfig(max_retries=1)` because Harbor defaults to no retries, and a `concurrency_group` with `n_concurrent` per route.
-- **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Its `AgentContext` takes token counts and free-form `metadata`.
+- **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Terminus validates its file-backed endpoint through `check_model_credentials`. Its `AgentContext` takes token counts and free-form `metadata`.
 - **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and leaves `api_base` unset.
 - **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, beside its `nop` agent, which does nothing, for `bench check`. A task's separate verifier receives its `/app` artifact, and `network_mode = "no-network"` applies to the agent and verifier phases, which `resolve_trial_network_plan` resolves from the task's baseline and phase overrides.
 - **Environments:** a `BaseEnvironment` subclass, `HostEnvironment`, which `EnvironmentConfig.import_path` loads for single-call jobs. It reports `mounted` so Harbor copies no logs or artifacts, and its `start` and `stop` do nothing. Other jobs use Harbor's Docker environment.

@@ -12,9 +12,11 @@ import httpx
 import openai
 import pytest
 from anthropic import AsyncAnthropic
+from harbor.agents.factory import AgentFactory
 from harbor.agents.terminus_2.terminus_2 import Terminus2
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
+from harbor.job import Job
 from harbor.llms.base import (
     ContextLengthExceededError,
     LLMResponse,
@@ -22,8 +24,10 @@ from harbor.llms.base import (
 )
 from harbor.llms.chat import Chat
 from harbor.models.agent.context import AgentContext
+from harbor.models.job.config import JobConfig
 from harbor.models.task import config as task_config
 from harbor.models.trajectories import SubagentTrajectoryRef
+from harbor.models.trial import config as trial_config
 from harbor.models.trial.paths import TrialPaths
 from litellm.exceptions import ServiceUnavailableError
 from openai.types.chat import ChatCompletion
@@ -33,8 +37,12 @@ from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import load_family
 from assistant_bench.generation import load_generation
-from assistant_bench.harnesses import agent_kwargs
-from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
+from assistant_bench.harnesses import HARNESSES, agent_kwargs
+from assistant_bench.harnesses.endpoint import (
+    CA_FILE_VAR,
+    KEY_FILE_VAR,
+    LOCAL_ADDRESS_VAR,
+)
 from assistant_bench.harnesses.host import HostEnvironment
 from assistant_bench.harnesses.messages import (
     MessageCompletionError,
@@ -351,13 +359,83 @@ class TestTerminus:
                     OPTIONS | {'reasoning_effort': 'turbo'}, endpoint.env
                 )
 
+    class TestCheckModelCredentials:
+        @pytest.mark.parametrize(
+            'api',
+            ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
+        )
+        def test_accepts_file_backed_credentials_without_provider_key_variables(
+            self,
+            endpoint: StubEndpoint,
+            monkeypatch: pytest.MonkeyPatch,
+            api: Api,
+        ) -> None:
+            monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+            monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+            system = make_system(
+                harness='terminus-2',
+                api=api,
+                thinking_mode='anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
+            )
+            config = trial_config.AgentConfig(
+                import_path=HARNESSES['terminus-2'].import_path,
+                model_name=f'openai/{system.route}',
+                kwargs=agent_kwargs(system),
+                env=endpoint.env,
+            )
+
+            AgentFactory.run_preflight(config)
+
+            assert endpoint.requests == []
+
         def test_checks_the_endpoint_variables(
             self, monkeypatch: pytest.MonkeyPatch
         ) -> None:
             monkeypatch.delenv(EXPORT_VAR)
+            config = trial_config.AgentConfig(
+                import_path=HARNESSES['terminus-2'].import_path,
+                model_name='openai/acme/large',
+                kwargs=OPTIONS,
+            )
 
             with pytest.raises(ValueError, match='^Set `BENCH_API_BASE_URL`'):
-                Terminus.preflight(OPTIONS, {})
+                AgentFactory.run_preflight(config)
+
+        @pytest.mark.parametrize(
+            ('key_file', 'message'),
+            [
+                ('', '^Set `BENCH_API_KEY_FILE`'),
+                ('missing-key', 'BENCH_API_KEY_FILE'),
+            ],
+            ids=['unset-key-file', 'missing-key-file'],
+        )
+        @pytest.mark.parametrize('in_process', [False, True], ids=['factory', 'job'])
+        def test_rejects_an_invalid_agent_key_file_despite_valid_host_settings(
+            self,
+            endpoint: StubEndpoint,
+            monkeypatch: pytest.MonkeyPatch,
+            key_file: str,
+            message: str,
+            in_process: bool,
+        ) -> None:
+            for name, value in endpoint.env.items():
+                monkeypatch.setenv(name, value)
+            config = trial_config.AgentConfig(
+                import_path=HARNESSES['terminus-2'].import_path,
+                model_name='openai/acme/large',
+                kwargs=OPTIONS,
+                env={KEY_FILE_VAR: key_file},
+            )
+
+            with pytest.raises(ValueError, match=message):
+                if in_process:
+                    asyncio.run(Job.create(JobConfig(agents=[config])))
+                else:
+                    AgentFactory.run_preflight(config)
+
+            assert endpoint.requests == []
 
     class TestSummarize:
         @pytest.mark.parametrize('empty', [False, True], ids=['text', 'thinking-only'])

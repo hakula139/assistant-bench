@@ -415,10 +415,11 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
         )
     if config.verifier.environment is None and not config.steps:
         plan = resolve_trial_network_plan(
-            config,
-            trial_config.AgentConfig(),
-            trial_config.EnvironmentConfig(),
-            None,
+            task_cfg=config,
+            trial_agent_cfg=trial_config.AgentConfig(),
+            trial_env_cfg=trial_config.EnvironmentConfig(),
+            trial_verifier_cfg=trial_config.VerifierConfig(),
+            step_cfg=None,
             verifier_mode=resolve_task_verifier_mode(config),
         )
         for phase, policy in (
