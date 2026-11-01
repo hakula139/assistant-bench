@@ -974,9 +974,8 @@ ROUND_FAMILY = Family(
 def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
     """Return a seeded arena snapshot and collected outputs.
 
-    Covers ties, gate failures, actor-capped and excluded votes, settlements,
-    and unranked systems. Draws use only `Random.random` to keep seeded
-    sequences stable across Python versions.
+    Covers ties, failed gates, actor caps, exclusions, settlements and unranked systems.
+    Use only `Random.random` to keep seeded draws stable across Python versions.
     """
     rng = Random(20)
 

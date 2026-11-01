@@ -11,8 +11,8 @@ CONFIDENCE = 0.95
 def clopper_pearson(rate: float, tasks: int) -> tuple[float, float]:
     """Return the Clopper-Pearson interval for a mean of `tasks` shares in [0, 1].
 
-    `rate * tasks` serves as the pass count, fractional when tasks average
-    several trials. No share's variance exceeds the binomial variance at its mean.
+    The pass count `rate * tasks` can be fractional with repeated trials.
+    No share's variance exceeds the binomial variance at its mean.
     """
     alpha = 1 - CONFIDENCE
     passes = rate * tasks

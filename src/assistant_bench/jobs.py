@@ -55,8 +55,8 @@ from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
 
 
-# Collection matches rendered task versions exactly, while Harbor reuses trials
-# across patch versions, so the rendered base version stays fixed.
+# Keep the base version fixed: collection matches rendered task versions exactly,
+# while Harbor reuses trials across patch versions.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 3600.0
 WORKSPACE = '/app'
