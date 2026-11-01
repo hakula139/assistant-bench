@@ -33,7 +33,7 @@ Production applies the pending D1 migrations of `web/migrations/` and then deplo
 
 Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/wrangler.toml`, with no production routes or voting bindings. Both deploy jobs consume the `site-dist` artifact, and a separate workflow removes previews:
 
-- **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys to `bench.hakula.xyz` in the `production` environment, which only `main` may deploy to. The `production` concurrency group retains up to 100 pending deploys without cancelling a running deploy. Each queued deploy skips a commit that `main` has moved past, so older checks finishing later preserve the current head's queued deployment.
+- **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys in the `production` environment, which only `main` may deploy to. The `production` concurrency group retains up to 100 pending deploys without cancelling a running deploy. Each queued deploy skips a commit that `main` has moved past, so older checks finishing later preserve the current head's queued deployment.
 
 - **Deploy Preview:** runs `wrangler preview` in the `preview` environment as soon as Build Site passes on each PR, without waiting for the other checks, creating a Worker Preview named `pr-<number>` under the static preview Worker, and comments its URLs on the PR.
 

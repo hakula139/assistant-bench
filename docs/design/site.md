@@ -35,7 +35,7 @@ Nothing is preselected. Each new pair clears the previous control's focus so the
 
 ## Design Direction
 
-The site is named HAKULA†BENCH, after the owner's blog HAKULA†CHANNEL, with the dagger as part of the name. The wordmark and favicon retain decorative capped-line artwork. Votes ranking plots show point estimates without intervals.
+The wordmark and favicon use decorative capped-line artwork. Votes ranking plots show point estimates without intervals.
 
 The remaining design uses ink text, one ultramarine accent, tabular numbers, and no card grid or hero number. IBM Plex Sans sets text, Sarasa Gothic SC or Source Han Sans SC supplies Chinese where installed, and Maple Mono sets code. Charts use one series hue and one emphasis hue for the hovered or current system.
 

@@ -276,7 +276,7 @@ describe('family page', () => {
 
     const html = await render(FamilyPage, { family: loaded, boards: [] });
 
-    expect(html).toContain(`<title>${loaded.title} | HAKULA†BENCH</title>`);
+    expect(html).toContain(`<title>${loaded.title} | assistant-bench</title>`);
     expect(text(html)).toContain(`${loaded.title} Run `);
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
@@ -461,7 +461,9 @@ describe('system page', () => {
 
     const html = await render(SystemPage, { family: arena, system: 'acme-pro', boards: [] });
 
-    expect(html).toContain('<title>Current Pro on Writing · Arena Writing | HAKULA†BENCH</title>');
+    expect(html).toContain(
+      '<title>Current Pro on Writing · Arena Writing | assistant-bench</title>',
+    );
     expect(html).toContain('Historical Pro');
     expect(islandHints(html, 'RoundsTable')).toContain('2026-10-07');
     expect(shownSlugs(html, SLUGS)).toEqual([]);
@@ -508,7 +510,7 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(html).toContain('<title>Acme Pro on Writing · Arena Writing | HAKULA†BENCH</title>');
+    expect(html).toContain('<title>Acme Pro on Writing · Arena Writing | assistant-bench</title>');
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
@@ -1032,17 +1034,17 @@ describe('round pages', () => {
       ];
     });
     expect(notes).toEqual([
-      ['/writing/arena/', 'Writing · Arena Writing | HAKULA†BENCH', null, null, null],
+      ['/writing/arena/', 'Writing · Arena Writing | assistant-bench', null, null, null],
       [
         '/writing/arena/rounds/2026-10-07/',
-        'Writing · Arena Writing, round 2026-10-07 | HAKULA†BENCH',
+        'Writing · Arena Writing, round 2026-10-07 | assistant-bench',
         'This is an earlier round. The latest is 2026-10-21.',
         'The latest is 2026-10-21.',
         '/writing/arena/',
       ],
       [
         '/writing/arena/rounds/2026-10-21/',
-        'Writing · Arena Writing, round 2026-10-21 | HAKULA†BENCH',
+        'Writing · Arena Writing, round 2026-10-21 | assistant-bench',
         null,
         null,
         null,

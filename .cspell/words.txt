@@ -133,7 +133,6 @@ urandom
 usize
 venv
 virtualenv
-WakaTime
 wenyan
 wght
 workerd

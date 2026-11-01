@@ -95,7 +95,7 @@ Each record holds:
 
 ## Voting
 
-Open [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/) and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.
+Follow the site's Vote link and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.
 
 Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml`, and `BENCH_D1_TOKEN_FILE` in `.env` naming a file that holds a Cloudflare API token with D1 Edit:
 

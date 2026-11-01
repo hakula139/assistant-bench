@@ -1,5 +1,4 @@
-/** The site's name, after the owner's blog, HAKULA†CHANNEL. The dagger is part of the name. */
-export const SITE_NAME = 'HAKULA†BENCH';
+export const SITE_NAME = 'assistant-bench';
 export const SITE_DESCRIPTION =
   'Leaderboards for AI models and agents, ranked through blind pairwise voting or automated tests.';
 
