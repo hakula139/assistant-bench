@@ -2,7 +2,7 @@
 name = "assistant-bench-typing"
 version = "0.1.0"
 description = "Dependency type contracts used by assistant-bench"
-requires-python = ">=3.14"
+requires-python = ">=3.14,<3.15"
 
 [build-system]
 requires = ["hatchling>=1.32.4"]

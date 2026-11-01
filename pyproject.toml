@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Leaderboards for AI models and agents, ranked through blind pairwise voting or automated tests."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = [
   "anthropic>=2.3.0",
   "harbor==0.25.0",
@@ -72,7 +72,6 @@ url = "https://pypi.org/simple"
 default = true
 
 [tool.ruff]
-target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.format]
@@ -125,7 +124,6 @@ exclude_also = ['case _:\n\s*assert_never\(']
 include = ["src", "tests", "typings", "families/coding-repo"]
 extraPaths = ["src", "tests"]
 exclude = ["**/node_modules", "**/__pycache__"]
-pythonVersion = "3.14"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportIgnoreCommentWithoutRule = true

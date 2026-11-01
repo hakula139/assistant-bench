@@ -3,6 +3,12 @@
   "extends": ["github>hakula139/nixos-config//.github/renovate-preset"],
   "packageRules": [
     {
+      "description": "The released LiteLLM dependency supports Python below 3.15",
+      "matchManagers": ["pyenv"],
+      "matchPackageNames": ["python"],
+      "allowedVersions": "/^3\\.14(?:\\.|$)/"
+    },
+    {
       "description": "A task image is part of the task's content, which needs a version bump Renovate cannot make",
       "matchFileNames": [
         "families/*/tasks/**",
