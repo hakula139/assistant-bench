@@ -48,7 +48,7 @@ describe('POST /api/actors', () => {
 
   test.each([
     ['a failed challenge', { success: false, hostname: env.TURNSTILE_HOSTNAME }],
-    ['another hostname', { success: true, hostname: 'bench.hakula.xyz' }],
+    ['another hostname', { success: true, hostname: 'other.example.com' }],
   ])('refuses %s', async (_, result) => {
     stubSiteverify(result);
 

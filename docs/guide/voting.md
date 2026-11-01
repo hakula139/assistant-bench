@@ -1,6 +1,6 @@
 # Voting
 
-Vote on blind pairs at [bench.hakula.xyz/vote/](https://bench.hakula.xyz/vote/), using the same service on a Mac, phone, or another device.
+Vote on blind pairs using the same site on a Mac, phone, or another device.
 
 ## Opening the Vote Page
 
