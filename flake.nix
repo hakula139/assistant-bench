@@ -228,11 +228,8 @@
           # copy that can't name its checkout, so hooks install only where the repository's
           # top-level flake.nix matches this file.
           #
-          # git-hooks.nix stores a hooks path relative to the main checkout, which linked
-          # worktrees can't resolve (cachix/git-hooks.nix#688), so
-          # unset it to fall back to the shared hooks directory. The lock keeps a concurrent load
-          # from setting it while `pre-commit install` runs, since pre-commit refuses to install
-          # with the path set.
+          # git-hooks.nix's main-checkout-relative hooks path breaks linked worktrees
+          # (cachix/git-hooks.nix#688). Serialize installation and clear it to use the shared hooks.
           #
           # The hooks' Python packages also fill PYTHONPATH, which would shadow the project's
           # virtualenv, so unset it.
