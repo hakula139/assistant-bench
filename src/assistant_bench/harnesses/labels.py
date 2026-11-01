@@ -1,9 +1,9 @@
 """The trial labels every system harness's kwargs carry."""
 
-from harbor.agents.options import AgentOptions
+from pydantic import BaseModel
 
 
-class Labels(AgentOptions):
+class Labels(BaseModel):
     """The kwargs that label a trial for collection."""
 
     system: str

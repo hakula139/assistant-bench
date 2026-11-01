@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any, assert_never, override
 
 from harbor.agents.base import BaseAgent
+from harbor.agents.options import AgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai import AsyncOpenAI
@@ -23,7 +24,7 @@ from assistant_bench.harnesses.usage import measured_usage, usage_payload
 OUTPUT_FILE = 'output.txt'
 
 
-class GenerateOptions(Labels, ApiOptions):
+class GenerateOptions(AgentOptions, Labels, ApiOptions):
     effort: str | None = None
     system_prompt: str | None = None
     max_output_tokens: int
