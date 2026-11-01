@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Self, override
 
 from anthropic import AsyncAnthropic
+from harbor.agents.agent_auth_resolution import ResolvedModelConnection
 from harbor.agents.terminus_2.terminus_2 import Terminus2, Terminus2Options
 from harbor.agents.terminus_2.tmux_session import TmuxSession
 from harbor.environments.base import BaseEnvironment
@@ -45,7 +46,7 @@ _RESPONSE_METADATA = TypeAdapter(
 )
 
 
-class TerminusOptions(Labels, ApiOptions, Terminus2Options):
+class TerminusOptions(Terminus2Options, Labels, ApiOptions):
     pass
 
 
@@ -143,13 +144,15 @@ class Terminus(Terminus2):
 
     @classmethod
     @override
-    def preflight(
+    def check_model_credentials(
         cls,
-        kwargs: dict[str, Any] | None = None,
-        env: Mapping[str, str] | None = None,
+        connection: ResolvedModelConnection,
+        *,
+        kwargs: dict[str, Any],
+        env: Mapping[str, str],
+        explicit_env: Mapping[str, str] | None = None,
     ) -> None:
-        super().preflight(kwargs, env)
-        preflight(env, (kwargs or {}).get('api', 'openai-chat-completions'))
+        preflight(env, kwargs.get('api', 'openai-chat-completions'))
 
     @override
     def _init_llm(

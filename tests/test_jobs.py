@@ -508,7 +508,7 @@ class TestJob:
         assert job.retry.max_retries == 1
         assert job.verifier.disable
         assert job.environment == trial_config.EnvironmentConfig(
-            import_path=HOST_ENVIRONMENT
+            import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
         )
         assert job.jobs_dir == data_dir / 'jobs' / 'f'
         assert [t.path for t in job.tasks] == [task]
@@ -811,9 +811,12 @@ class TestCheckTasks:
         with pytest.raises(ValueError) as error:
             jobs.check_tasks(family, tasks)
 
-        assert str(error.value).startswith(
+        assert str(error.value) == (
             'Family `f` has tasks to fix:\n`tasks/echo/task.toml`: '
-            '`environment.cpus`: Input should be a valid integer'
+            '`environment.cpus.int`: Input should be a valid integer, '
+            'unable to parse string as an integer.\n'
+            '`tasks/echo/task.toml`: `environment.cpus.float`: Input should be '
+            'a valid number, unable to parse string as a number.'
         )
 
 

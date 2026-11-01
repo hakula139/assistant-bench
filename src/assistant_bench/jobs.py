@@ -282,7 +282,9 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
 
 def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
     if all(HARNESSES[system.harness].single_call for system in systems):
-        return trial_config.EnvironmentConfig(import_path=HOST_ENVIRONMENT)
+        return trial_config.EnvironmentConfig(
+            import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
+        )
     return trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER)
 
 
@@ -415,10 +417,11 @@ def _task_problems(config: task_config.TaskConfig, location: str) -> list[str]:
         )
     if config.verifier.environment is None and not config.steps:
         plan = resolve_trial_network_plan(
-            config,
-            trial_config.AgentConfig(),
-            trial_config.EnvironmentConfig(),
-            None,
+            task_cfg=config,
+            trial_agent_cfg=trial_config.AgentConfig(),
+            trial_env_cfg=trial_config.EnvironmentConfig(),
+            trial_verifier_cfg=trial_config.VerifierConfig(),
+            step_cfg=None,
             verifier_mode=resolve_task_verifier_mode(config),
         )
         for phase, policy in (

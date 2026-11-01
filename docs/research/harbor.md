@@ -1,21 +1,21 @@
 # Harbor
 
-[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins release 0.24.0, which these findings were checked against, and drives it through job configs built from Harbor's own pydantic models.
+[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins release 0.25.0 and drives it through job configs built from Harbor's own pydantic models.
 
 ## What the Bench Uses
 
 - **Job configs:** `JobConfig` with one `AgentConfig` per system, `n_attempts` for samples, `RetryConfig(max_retries=1)` because Harbor defaults to no retries, and a `concurrency_group` with `n_concurrent` per route.
-- **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Its `AgentContext` takes token counts and free-form `metadata`.
-- **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and leaves `api_base` unset.
+- **Agents:** a `BaseAgent` subclass with an `options_model`, which Harbor validates against the agent's `kwargs` in `preflight` before any trial starts. Terminus validates its file-backed endpoint through `check_model_credentials`. Its `AgentContext` takes token counts and free-form `metadata`.
+- **Terminal agents:** Harbor's `Terminus2` runs on the host, sends the model a JSON protocol, and executes its replies in a tmux session inside the container. LiteLLM uses a passed OpenAI client as is, so the bench injects its own client and passes the endpoint's base URL as `api_base`.
 - **Verification:** `VerifierConfig(disable=True)` for case families, and Harbor's `oracle` agent, which runs each task's `solution/solve.sh`, beside its `nop` agent, which does nothing, for `bench check`. A task's separate verifier receives its `/app` artifact, and `network_mode = "no-network"` applies to the agent and verifier phases, which `resolve_trial_network_plan` resolves from the task's baseline and phase overrides.
-- **Environments:** a `BaseEnvironment` subclass, `HostEnvironment`, which `EnvironmentConfig.import_path` loads for single-call jobs. It reports `mounted` so Harbor copies no logs or artifacts, and its `start` and `stop` do nothing. Other jobs use Harbor's Docker environment.
+- **Environments:** a `BaseEnvironment` subclass, `HostEnvironment`, which `EnvironmentConfig.import_path` loads for single-call jobs. It reports `mounted`, and the job enables `auto_mounting` so Harbor uses the host output paths without copying logs or artifacts. Its `start` and `stop` do nothing. Other jobs use Harbor's Docker environment.
 - **Reruns:** `SourceJobConfig(action='diff')`, which reuses finished trials from earlier jobs.
 
 ## Quirks of the Pinned Release
 
 - A task without tests loads only while the verifier is disabled.
 - Harbor runs task scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so every image needs bash, and Alpine fails with exit code 127.
-- A trial in an environment that reports `mounted` reads its agent logs and the conventional `/logs/artifacts` directory in place, while other artifact entries are still downloaded, and Harbor logs and ignores a failed log or artifact transfer.
+- A trial reads logs and artifacts in place when an enabled bind mount maps their environment path to the expected host path. Other entries are downloaded, and Harbor logs and ignores a failed log or artifact transfer.
 - A task without an `environment/` directory loads through `TaskConfig(path=...)`, since only the commands that scan directories for tasks, such as dataset loading and `harbor analyze`, check for it, and only Docker's own definition check needs an image or a Dockerfile.
 - A diff source reuses a trial only when the task declares a semantic version and every other input is equal. Those inputs include the whole agent config and the job-wide `JobConfig.environment`, which every trial's lock records, so changing a system's concurrency limit or its `system` kwarg, which a table rename does, reruns its trials, and changing the environment reruns every trial of the job whatever the task versions say. Because a per-run value in `kwargs` would rerun every trial, `Generate` and `Terminus` read the nixos-config rev at run time and record it in `metadata`.
 - Each trial's `lock.json` records its task's digest, the `sha256:` of `Packager.compute_content_hash` over the task's files. A source and target task with the same version but different digests abort the whole job. A patch-level version bump reuses the earlier trials, a minor bump regrades them, and a major bump reruns them. A version that differs only in its pre-release or build metadata reruns, which Harbor's own comment calls outside its supported change levels.
