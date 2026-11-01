@@ -37,7 +37,6 @@ from assistant_bench.outputs import Output, write_outputs
 from support import (
     REPORT_FIXTURE,
     SQLiteDatabase,
-    arena_database,
     finish_job,
     make_output,
     make_system,
@@ -1485,7 +1484,11 @@ class TestCollect:
 class TestClose:
     @pytest.fixture
     def store(
-        self, families_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        arena_store: SQLiteDatabase,
+        families_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> Store:
         """Publish family `f` to a store that serves every target."""
         write_votes_family(
@@ -1503,7 +1506,7 @@ class TestClose:
             {'large': 'Public Large', 'small': 'Public Small'},
             'production',
         )
-        store = Store(arena_database(), published, [])
+        store = Store(arena_store, published, [])
         publication.publish(store.database, published, datetime.now(UTC))
 
         def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:

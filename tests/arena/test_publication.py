@@ -23,7 +23,6 @@ from support import (
     CODE_DEFECTS,
     FIXTURES,
     SQLiteDatabase,
-    arena_database,
     make_case,
     make_trial,
     make_votes_family,
@@ -322,8 +321,10 @@ class TestRead:
 
 
 class TestPublish:
-    def test_stages_and_activates_the_publication(self) -> None:
-        database = arena_database()
+    def test_stages_and_activates_the_publication(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         published = text_publication()
 
         changed = publication.publish(database, published, NOW)
@@ -338,14 +339,16 @@ class TestPublish:
             database, "SELECT count(*) FROM outputs WHERE verdict != 'pass'"
         ) == rows(database, 'SELECT count(*) FROM outputs WHERE content IS NULL')
 
-    def test_splits_inserts_within_the_parameter_limit(self) -> None:
+    def test_splits_inserts_within_the_parameter_limit(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
         cases = [make_case(f'case-{index}') for index in range(25)]
         published = prepare(
             make_votes_family(),
             cases,
             [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
         )
-        recording = RecordingDatabase(arena_database())
+        recording = RecordingDatabase(arena_store)
 
         publication.publish(recording, published, NOW)
 
@@ -354,8 +357,10 @@ class TestPublish:
         assert inserts.count('outputs') == 8
         assert rows(recording.database, 'SELECT count(*) FROM outputs') == [(75,)]
 
-    def test_changes_nothing_for_the_active_publication(self) -> None:
-        database = arena_database()
+    def test_changes_nothing_for_the_active_publication(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         published = text_publication()
         publication.publish(database, published, NOW)
         recording = RecordingDatabase(database)
@@ -366,8 +371,10 @@ class TestPublish:
         assert len(recording.statements) == 1
         assert recording.statements[0].startswith('SELECT')
 
-    def test_completes_an_interrupted_publish_when_rerun(self) -> None:
-        database = arena_database()
+    def test_completes_an_interrupted_publish_when_rerun(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         published = text_publication()
         interrupted = RecordingDatabase(
             database, lambda sql: sql.startswith('INSERT INTO outputs')
@@ -380,8 +387,10 @@ class TestPublish:
         assert changed
         assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
 
-    def test_refuses_to_activate_incomplete_staging(self) -> None:
-        database = arena_database()
+    def test_refuses_to_activate_incomplete_staging(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         published = text_publication()
         incomplete = published.model_copy(
             update={'outputs': (*published.outputs, published.outputs[0])}
@@ -392,8 +401,10 @@ class TestPublish:
 
         assert rows(database, 'SELECT * FROM active') == []
 
-    def test_switches_the_active_publication_and_keeps_the_old_rows(self) -> None:
-        database = arena_database()
+    def test_switches_the_active_publication_and_keeps_the_old_rows(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         first = text_publication()
         publication.publish(database, first, NOW)
         second = prepare(
@@ -407,8 +418,10 @@ class TestPublish:
         assert rows(database, 'SELECT publication_id FROM active') == [(second.id,)]
         assert rows(database, 'SELECT count(*) FROM publications') == [(2,)]
 
-    def test_refuses_private_cases_before_writing(self) -> None:
-        database = arena_database()
+    def test_refuses_private_cases_before_writing(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        database = arena_store
         family = make_votes_family(public_voting=False)
         cases = [make_case('private', 'transcript')]
         local = prepare(
@@ -424,9 +437,11 @@ class TestPublish:
         assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
 
     def test_matches_the_committed_publication_fixture(
-        self, stale_fixture: Callable[[Path, str], None]
+        self,
+        arena_store: SQLiteDatabase,
+        stale_fixture: Callable[[Path, str], None],
     ) -> None:
-        database = arena_database()
+        database = arena_store
 
         for published in (text_publication(), diff_publication()):
             publication.publish(database, published, NOW)
