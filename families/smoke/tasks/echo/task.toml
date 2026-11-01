@@ -3,7 +3,7 @@ schema_version = "1.4"
 [task]
 name = "smoke/echo"
 description = "Write a fixed word to a file, which the oracle solution does and the test checks"
-version = "1.0.0"
+version = "2.0.0"
 
 [metadata]
 category = "smoke"
