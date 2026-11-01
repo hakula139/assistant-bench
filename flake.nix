@@ -194,9 +194,11 @@
           hooks = hooks // nodeHooks // uvHooks;
         };
 
+        # Linux lychee needs CA roots in builds, even offline.
         preCommitCheck = git-hooks-nix.lib.${system}.run {
-          inherit hooks;
           src = ./.;
+          imports = [ { inherit hooks; } ];
+          hooks.lychee.extraPackages = [ pkgs.cacert ];
         };
 
         cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
