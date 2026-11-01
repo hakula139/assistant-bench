@@ -194,8 +194,7 @@
           hooks = hooks // nodeHooks // uvHooks;
         };
 
-        # lychee needs CA roots even offline. Add cacert only in the sandbox
-        # so the dev shell keeps the host's CA settings.
+        # lychee needs CA roots offline, while the dev shell must preserve the host's CA settings.
         preCommitCheck = git-hooks-nix.lib.${system}.run {
           src = ./.;
           hooks = hooks // {
