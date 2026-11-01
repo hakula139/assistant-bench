@@ -4,7 +4,10 @@
   "packageRules": [
     {
       "description": "A task image is part of the task's content, which needs a version bump Renovate cannot make",
-      "matchFileNames": ["families/*/tasks/**"],
+      "matchFileNames": [
+        "families/*/tasks/**",
+        "families/coding-repo/shared/environment/Dockerfile"
+      ],
       "enabled": false
     },
     {

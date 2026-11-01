@@ -1,4 +1,4 @@
-FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+FROM debian:trixie-20261020-slim
 
 # terminus-2 drives its shell through tmux.
 RUN apt-get update \

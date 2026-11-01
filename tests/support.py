@@ -10,6 +10,7 @@ import sqlite3
 import ssl
 import textwrap
 import threading
+import tomllib
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
@@ -145,7 +146,7 @@ def write_task_family(
     samples: int = 1,
     categories: Mapping[str, str] | None = None,
 ) -> None:
-    """Write a task family, copying the echo task per ID.
+    """Write a task family, copying the echo task per ID at version 1.0.0.
 
     A family that lists systems is scored by votes, tagged with `defects`, and
     runs them as terminus-2, and one without is scored by tests. `categories`
@@ -185,19 +186,14 @@ def write_task_family(
         target = directory / 'tasks' / task_id
         shutil.copytree(FAMILIES_DIR / 'smoke' / 'tasks' / 'echo', target)
         config = target / 'task.toml'
-        config.write_text(
-            config.read_text()
-            .replace('smoke/echo', f'{name}/{task_id}')
-            .replace('category = "smoke"', f'category = "{categories[task_id]}"')
-        )
+        content = tomllib.loads(config.read_text())
+        content['task']['name'] = f'{name}/{task_id}'
+        content['task']['version'] = '1.0.0'
+        content['metadata']['category'] = categories[task_id]
         if systems:
-            config.write_text(
-                config.read_text().replace(
-                    '[metadata]',
-                    f'[metadata]\nauthor = "{systems[0]}"\n'
-                    f'author_vendor = "{author_vendor}"',
-                )
-            )
+            content['metadata']['author'] = systems[0]
+            content['metadata']['author_vendor'] = author_vendor
+        config.write_text(tomli_w.dumps(content))
 
 
 # ── Systems and Trials ──

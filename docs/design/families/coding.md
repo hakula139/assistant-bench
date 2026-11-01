@@ -39,7 +39,7 @@ A task's `[metadata] author` preserves the public label of the system whose mode
 
 Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
-- **Image:** `python:3.14-slim` pinned by its multi-arch index digest, with `git` and `tmux`, a fixed time zone, locale, and commit dates, and the repository from `environment/app/` committed at `/app` as one `chore: import project` commit.
+- **Image:** `python:3.14.10-slim-trixie`, with `git` and `tmux`, a fixed time zone, locale, and commit dates, and the repository from `environment/app/` committed at `/app` as one `chore: import project` commit.
 
 - **Sandbox:** no network for the agent or the verifier, two CPUs, and 2,048 MB of memory per container. The verifier runs in its own container, which receives only `/app`, so the agent cannot reach the interpreter or `/tests`, and a tests-only fix regrades every recorded trial without a model call.
 
