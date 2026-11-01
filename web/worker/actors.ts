@@ -30,7 +30,7 @@ export function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** An IPv4 address as given, or an IPv6 address as its /64 prefix, since one host holds a /64. */
+/** Keep IPv4 addresses and reduce IPv6 addresses to their /64 network. */
 export function network(address: string): string {
   const halves = address.toLowerCase().split('::');
   if (halves.length === 1 && !address.includes(':')) {

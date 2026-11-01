@@ -372,13 +372,7 @@ def groups(database: Database, family: str, by: Grouping) -> list[Group]:
 
 
 def check_reason(reason: str) -> None:
-    """Refuse an exclusion reason that is blank.
-
-    Raises
-    ------
-    ValueError
-        The reason is blank.
-    """
+    """Raise ValueError for a blank exclusion reason."""
     if not reason.strip():
         raise ValueError('Give a reason for the exclusion.')
 

@@ -24,13 +24,11 @@ export function tickCount(
 /** Text options that ring a label in the page color, so that lines drawn before it do not cross it. */
 export const HALO = { stroke: 'var(--background)', strokeWidth: 4 };
 
-/** Gridlines across one axis at `ticks`, a count or the values. */
 export function grid(axis: 'x' | 'y', ticks: number | number[]): Plot.Markish {
   const options = { ticks, stroke: 'var(--chart-grid)', strokeOpacity: 1 };
   return axis === 'x' ? Plot.gridX(options) : Plot.gridY(options);
 }
 
-/** The rule at a reference value, such as the anchor score or an even win rate. */
 export function referenceRule(value: number): Plot.Markish {
   return Plot.ruleX([value], { stroke: 'var(--chart-reference)' });
 }

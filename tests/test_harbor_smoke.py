@@ -26,11 +26,7 @@ pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
 
 
 def solution_commands(task: Path) -> str:
-    """Return a task's solution as the keystrokes terminus-2 sends to its terminal.
-
-    Reading the task's own solution makes the reply write wherever the task's
-    verifier reads, so the trial follows the task when its output path changes.
-    """
+    """Return the task's solution as newline-terminated terminal input."""
     lines = (task / 'solution' / 'solve.sh').read_text().splitlines()
     return (
         '\n'.join(

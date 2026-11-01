@@ -107,7 +107,6 @@ class Gate(StrEnum):
     """A check whose failure makes a voted output an automatic loss in its pairs."""
 
     EMPTY = 'empty'
-    """The output is blank."""
     TRUNCATED = 'truncated'
     """The endpoint reported a finish reason other than `stop`, or none."""
     LENGTH = 'length'
@@ -117,7 +116,7 @@ class Gate(StrEnum):
     SCRIPT = 'script'
     """The output holds Traditional-only characters that the instruction lacks."""
     TESTS = 'tests'
-    """The task's hidden tests failed."""
+    """The task's verifier did not pass."""
 
 
 class Gates(BaseModel):

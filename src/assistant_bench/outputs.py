@@ -70,11 +70,7 @@ class Output(BaseModel):
 
 
 def tests_pass(reward: float | None) -> bool:
-    """Whether a task's tests passed, which needs a reward of 1.
-
-    An errored agent can still pass, as on a timeout, since Harbor runs the
-    verifier, while a trial whose tests never ran has no reward and fails.
-    """
+    """Return whether the verifier awarded at least 1, including errored trials."""
     return reward is not None and reward >= 1
 
 

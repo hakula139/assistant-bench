@@ -957,10 +957,7 @@ class TestRunJob:
     def stub_harbor(
         directory: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int
     ) -> Path:
-        """Put a `harbor` beside the interpreter that records its call and exits.
-
-        It writes its arguments and the config it receives beside itself.
-        """
+        """Install a recording Harbor CLI beside the fake interpreter."""
         harbor = directory / 'harbor'
         harbor.write_text(
             textwrap.dedent(
