@@ -32,13 +32,13 @@ class ResponseResult:
 
     @property
     def usage(self) -> MeasuredUsage | None:
-        return measured_usage('openai-responses', getattr(self.response, 'usage', None))
+        return measured_usage('openai-responses', self.response.usage)
 
     @property
     def details(self) -> dict[str, Any]:
         response = self.response
         usage = self.usage
-        reported = usage_payload(getattr(response, 'usage', None))
+        reported = usage_payload(response.usage)
         refusals = [
             content.refusal
             for item in response.output

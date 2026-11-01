@@ -150,7 +150,7 @@ class Generate(BaseAgent):
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
-        reported = usage_payload(getattr(completion, 'usage', None))
+        reported = usage_payload(completion.usage)
         usage = measured_usage('openai-chat-completions', reported)
         if usage is not None:
             context.n_input_tokens = usage.input_tokens
