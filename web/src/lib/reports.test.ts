@@ -81,6 +81,7 @@ describe('publicFamilies', () => {
             pass_rate: { rate: 0.5, lower: 0.15, upper: 0.85 },
             pass_hat_k: null,
             mean_cost_usd: null,
+            cost_gap: 'unreported',
             p50_latency_sec: null,
           },
         ],

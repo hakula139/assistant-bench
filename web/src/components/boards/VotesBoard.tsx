@@ -51,6 +51,7 @@ import { isPreliminary } from '@/lib/ranking';
 import type {
   CategoryBoard,
   CategoryStanding,
+  CostGap,
   Standing,
   VotesResults,
   VotesRules,
@@ -189,6 +190,11 @@ function CategoryCell({
   );
 }
 
+const costGapText: Record<CostGap, string> = {
+  unpriced: 'unpriced',
+  unreported: 'usage unreported',
+};
+
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
 export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const [category, setCategory] = useSearchParam('category', null);
@@ -227,9 +233,9 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
     [rows],
   );
 
-  const unpriced = measured
-    .filter((row) => row.standing.mean_cost_usd === null)
-    .map((row) => row.name);
+  const costGaps = measured.flatMap(({ name, standing }) =>
+    standing.cost_gap === null ? [] : [`${name} (${costGapText[standing.cost_gap]})`],
+  );
 
   const costFrontier = new Set(paretoFrontier(costPoints).map((point) => point.system));
   const latencyFrontier = new Set(paretoFrontier(latencyPoints).map((point) => point.system));
@@ -347,7 +353,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
                   Mean cost per {labels.unit}
-                  {unpriced.length > 0 && `, leaving out the unpriced ${unpriced.join(', ')}`}
+                  {costGaps.length > 0 && `, leaving out ${costGaps.join(', ')}`}
                   {activeCategory !== null && ', over all categories'}
                 </figcaption>
                 <ParetoScatter

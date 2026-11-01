@@ -973,7 +973,11 @@ class TestRun:
                 task='smoke-text/en-greeting',
                 output='Hi.',
                 instruction=None,
-                context=AgentContext(metadata={'finish_reason': 'stop'}),
+                context=AgentContext(
+                    n_input_tokens=10,
+                    n_output_tokens=2,
+                    metadata={'finish_reason': 'stop'},
+                ),
                 environment=job.environment,
                 verifier_disabled=job.verifier.disable,
             )
@@ -1191,6 +1195,65 @@ class TestRun:
 
 
 class TestCollect:
+    def test_reports_unknown_usage_and_its_cost_lower_bound(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cases = write_case_family(families_dir, ['large'], name='f')
+        cases.write_text(
+            textwrap.dedent(
+                """\
+                [[cases]]
+                id = "c"
+                category = "message"
+                source = "synthetic"
+                instruction = "Hi."
+                """
+            )
+        )
+        system = make_system(name='large')
+        monkeypatch.setattr(cli, '_load_systems', lambda: {'large': system})
+        config = jobs.job(load_family('f'), [system], [])
+        write_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'c__1',
+            config.agents[0],
+            task='f/c',
+            output='Hi.',
+            context=AgentContext(
+                metadata={
+                    'responses': [
+                        {
+                            'input_tokens': 1_000_000,
+                            'cache_tokens': 0,
+                            'cache_write_tokens': 0,
+                            'output_tokens': 100_000,
+                        },
+                        {},
+                    ]
+                }
+            ),
+            environment=config.environment,
+            verifier_disabled=config.verifier.disable,
+        )
+
+        result = invoke('collect', 'f')
+        assert result.exit_code == 0, result.output
+
+        assert (
+            'System `large` has unknown usage. Outputs affected: 1. Responses '
+            'without valid usage: 1. Collected outputs cost at least $3.00 '
+            '(reported usage only).\n'
+        ) in result.output
+        (output,) = [
+            Output.model_validate_json(line)
+            for line in (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
+        ]
+        assert output.cost_usd is None
+        assert output.input_tokens is None
+
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1245,6 +1308,8 @@ class TestCollect:
             make_output(
                 case=case,
                 system=system,
+                input_tokens=10,
+                output_tokens=20,
                 reward=float(case.startswith('own') == (system == 'large')),
             )
             for case in ('own-a', 'own-b', 'other-a', 'other-b')
@@ -1282,7 +1347,15 @@ class TestCollect:
         )
 
         def collect(family: Family, systems: dict[str, System]) -> list[Output]:
-            return [make_output(case='one', system='large', reward=reward)]
+            return [
+                make_output(
+                    case='one',
+                    system='large',
+                    reward=reward,
+                    input_tokens=10,
+                    output_tokens=20,
+                )
+            ]
 
         monkeypatch.setattr(jobs, 'collect', collect)
 
