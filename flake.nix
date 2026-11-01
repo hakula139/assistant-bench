@@ -221,8 +221,8 @@
           packages = pythonEnvironment.packages ++ preCommit.enabledPackages ++ [ preCommit.config.package ];
 
           # Match flake.nix to keep hooks in this project, since Nix evaluates a store copy.
-          # Concurrent installs race on hooksPath, whose relative value also breaks linked worktrees
-          # (cachix/git-hooks.nix#688).
+          # Concurrent hook installs race on hooksPath.
+          # Relative hooksPath values break linked worktrees (cachix/git-hooks.nix#688).
           # Hook packages set PYTHONPATH, which would shadow the project's virtualenv.
           shellHook = ''
             unset PYTHONPATH
