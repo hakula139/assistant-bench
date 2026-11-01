@@ -76,7 +76,7 @@ pnpm spellcheck                                       # Spell check
 pnpm typecheck                                        # Type check the site and the voting Worker
 pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
-nix flake check                                       # After a flake change, run the hooks in the Nix sandbox
+nix flake check                                       # After a flake change, run the Nix checks
 ```
 
 [CI](docs/conventions/ci.md#checks) lists which job runs each check.

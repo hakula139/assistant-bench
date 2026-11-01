@@ -237,9 +237,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # A preview that arrives during Preview Cleanup must wait, since cancelling the cleanup would
-    # leave the previous Preview and its deployments behind. The workflow group already cancels
-    # a superseded run on each push.
+    # Serialize previews with cleanup so cancellation cannot leave old deployments behind.
     concurrency:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
