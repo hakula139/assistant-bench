@@ -73,7 +73,7 @@ checklist = ["One sentence"]
 - `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes. The instruction follows the repository's Markdown rules like any other Markdown file, with chat logs, transcripts, and other material whose lines Markdown would join or garble in a fenced code block.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 
-Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems, and the owner reviews the cases before any generation.
+Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems.
 
 ## Tasks
 
