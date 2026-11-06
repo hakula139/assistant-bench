@@ -3,17 +3,15 @@ import os
 import shutil
 import struct
 import subprocess
-import sys
-import tempfile
 import unittest
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
-from tinykv import Store
+import sandbox
 
 
-ROOT = Path(__file__).resolve().parents[1]
 CRASH_STATUS = 86
 PROBE = (b'probe-after-recovery', b'still here')
 SEGMENT_BYTES = 96
@@ -49,57 +47,71 @@ def states(ops: Ops, initial: State | None = None) -> list[State]:
     return history
 
 
-def entries(store: Store) -> State:
-    return entries_of(store.items())
-
-
 def entries_of(items: list[tuple[bytes, bytes]]) -> State:
     return {key.hex(): value.hex() for key, value in items}
 
 
-def driver(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, '-m', 'tests.crashsim', *args],
-        cwd=ROOT,
-        capture_output=True,
+def run_ops(
+    directory: Path, ops: Ops, crash_at: int | None = None, tear: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Apply `ops` to the store in `directory` in a `crashsim` scenario."""
+    process = sandbox.spawn(
+        sandbox.host('crashsim', 'run'),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=30,
-        check=False,
-        env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'},
+    )
+    args = {
+        'directory': str(directory),
+        'segment_bytes': SEGMENT_BYTES,
+        'ops': ops,
+        'crash_at': crash_at,
+        'tear': tear,
+    }
+    stdout, stderr = process.communicate(json.dumps(args) + '\n', timeout=30)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def recover(directory: Path) -> dict[str, Any]:
+    """Open the store, put a probe entry, and reopen it, in a scenario."""
+    return sandbox.observe(
+        'crash_recovery',
+        'recover',
+        directory=str(directory),
+        segment_bytes=SEGMENT_BYTES,
+        probe=[part.hex() for part in PROBE],
     )
 
 
-def run_ops(directory: Path, ops: Ops, *crash: str) -> subprocess.CompletedProcess[str]:
-    return driver('run', str(directory), str(SEGMENT_BYTES), json.dumps(ops), *crash)
+def copy_store(source: Path, target: Path) -> None:
+    shutil.copytree(source, target)
+    sandbox.share(target, writable=True)
 
 
 class CrashRecoveryTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = sandbox.scratch()
 
-    def run_ops(self, directory: Path, ops: Ops, *crash: str) -> list[str]:
-        return self.check_run(run_ops(directory, ops, *crash), *crash)
+    def run_ops(
+        self, directory: Path, ops: Ops, crash_at: int | None = None, tear: bool = False
+    ) -> list[str]:
+        return self.check_run(
+            run_ops(directory, ops, crash_at, tear), crashed=crash_at is not None
+        )
 
     def check_run(
-        self, result: subprocess.CompletedProcess[str], *crash: str
+        self, result: subprocess.CompletedProcess[str], *, crashed: bool
     ) -> list[str]:
-        expected = CRASH_STATUS if crash else 0
+        expected = CRASH_STATUS if crashed else 0
         self.assertEqual(result.returncode, expected, result.stderr)
         return result.stdout.splitlines()
 
-    def recover(self, directory: Path, label: str) -> tuple[State, State]:
-        """Open the store, put a probe entry, and reopen it, in this process.
-
-        Return the entries after each open.
-        """
-        try:
-            with Store.open(directory, segment_bytes=SEGMENT_BYTES) as store:
-                recovered = entries(store)
-                store.put(*PROBE)
-            with Store.open(directory, segment_bytes=SEGMENT_BYTES) as store:
-                return recovered, entries(store)
-        except Exception as error:
-            self.fail(f'{label}: recovery failed with {error!r}')
+    def recovered(self, seen: dict[str, Any], label: str) -> tuple[State, State]:
+        """Return the entries after each open that `recover` observed."""
+        if seen['error'] is not None:
+            self.fail(f'{label}: recovery failed with {seen["error"]}')
+        return seen['recovered'], seen['probed']
 
     def check_every_crash(
         self, setup: Ops, ops: Ops, damage: Callable[[Path], None] | None = None
@@ -115,40 +127,39 @@ class CrashRecoveryTest(unittest.TestCase):
         expected = states(ops, states(setup)[-1])
 
         counted = self.root / 'counted'
-        shutil.copytree(base, counted)
+        copy_store(base, counted)
         mutations = [
             line.removeprefix('mutation ')
             for line in self.run_ops(counted, ops)
             if line.startswith('mutation ')
         ]
-        self.assertEqual(self.recover(counted, 'no crash')[0], expected[-1])
+        self.assertEqual(self.recovered(recover(counted), 'no crash')[0], expected[-1])
         self.assertTrue(mutations)
 
-        crashes: list[tuple[int, str, tuple[str, ...]]] = [
-            (number, kind, ('tear',) if tear else ())
+        crashes: list[tuple[int, str, bool]] = [
+            (number, kind, tear)
             for number, kind in enumerate(mutations, 1)
             for tear in ((False, True) if kind == 'write' else (False,))
         ]
 
         def crash(
-            entry: tuple[int, str, tuple[str, ...]],
-        ) -> subprocess.CompletedProcess[str]:
+            entry: tuple[int, str, bool],
+        ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
             number, _, tear = entry
-            case = self.root / f'case-{number}-{bool(tear)}'
-            shutil.copytree(base, case)
-            return run_ops(case, ops, str(number), *tear)
+            case = self.root / f'case-{number}-{tear}'
+            copy_store(base, case)
+            return run_ops(case, ops, number, tear), recover(case)
 
         with ThreadPoolExecutor(os.process_cpu_count()) as pool:
             results = list(pool.map(crash, crashes))
 
-        for (number, kind, tear), result in zip(crashes, results, strict=True):
+        for (number, kind, tear), (result, seen) in zip(crashes, results, strict=True):
             label = f'crash at mutation {number} ({kind}{", torn" if tear else ""})'
             with self.subTest(label):
-                case = self.root / f'case-{number}-{bool(tear)}'
-                lines = self.check_run(result, str(number), *tear)
+                lines = self.check_run(result, crashed=True)
                 finished = sum(line.startswith('done ') for line in lines)
 
-                recovered, probed = self.recover(case, label)
+                recovered, probed = self.recovered(seen, label)
 
                 allowed = expected[finished : finished + 2]
                 self.assertIn(recovered, allowed, label)
@@ -216,7 +227,3 @@ class CrashRecoveryTest(unittest.TestCase):
             with self.subTest(operation=index):
                 self.assertTrue(writes, window)
                 self.assertIn('sync file', window[writes[-1] + 1 :], window)
-
-
-if __name__ == '__main__':
-    unittest.main()
