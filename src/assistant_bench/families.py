@@ -240,7 +240,7 @@ class _TaskSection(BaseModel):
 class _TaskManifest(BaseModel):
     """The slice of a task's `task.toml` that a case reads.
 
-    Harbor's other keys are ignored, since `jobs.check_tasks` validates them.
+    Harbor's other keys are ignored, since `tasks.check_tasks` validates them.
     """
 
     model_config = ConfigDict(extra='ignore', frozen=True)
@@ -534,19 +534,12 @@ def task_location(family: Family, task: Path) -> str:
 
 
 def tasks_dir(family: Family) -> Path:
-    """Return the directory that `jobs.render_tasks` installs the family's tasks in."""
+    """Return the directory that `tasks.render_tasks` installs the family's tasks in."""
     return data_dir() / 'tasks' / family.name
 
 
 def case_task(family: Family, case_id: str) -> Path:
-    """Return a case's Harbor task directory.
-
-    A case family's task is installed under the data directory, while a task
-    family's task is its own directory, committed or local.
-    """
-    if family.source == 'cases':
-        return tasks_dir(family) / case_id
-
+    """Return a task family's own directory for a task, committed or local."""
     (committed, _), (local, _) = _task_roots(family)
     if (committed / case_id).is_dir():
         return committed / case_id

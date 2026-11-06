@@ -12,7 +12,7 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -63,10 +63,11 @@ from assistant_bench.families import (
     Defect,
     Family,
     Gate,
-    TaskTestsSettings,
     VotesSettings,
+    load_family,
 )
 from assistant_bench.generation import Generation
+from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -74,9 +75,10 @@ from assistant_bench.harnesses.endpoint import (
     KEY_FILE_VAR,
 )
 from assistant_bench.harnesses.generate import OUTPUT_FILE
-from assistant_bench.jobs import render_task_config
+from assistant_bench.jobs import runnable_systems
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.tasks import render_task_config
 
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -107,33 +109,81 @@ CODE_DEFECTS: tuple[Defect, ...] = (
     'clarity',
 )
 
-TASK_SETTINGS = TaskTestsSettings(
-    scorer='tests',
-    display_name='Family',
-    samples=1,
-    harness='terminus-2',
+
+VOTES = Family(
+    name='f',
+    source='cases',
+    settings=VotesSettings(
+        scorer='votes',
+        display_name='Family F',
+        systems=['acme-large'],
+        samples=2,
+        reference='acme-large',
+        categories=['reply'],
+    ),
 )
 
 
-def write_case_family(families_dir: Path, systems: list[str], name: str = 'f') -> Path:
-    """Write a case family in the `message` category, returning its empty cases file."""
+def write_votes_family(
+    families_dir: Path,
+    systems: list[str],
+    categories: Mapping[str, str] | None = None,
+    *,
+    name: str = 'f',
+    samples: int = 1,
+    render: str = 'text',
+    public_voting: bool = False,
+) -> Path:
+    """Write a case family scored by votes and return its cases file.
+
+    `categories` maps each synthetic case to its category, and without cases the
+    family allows only `message`. Each case's task is installed as `bench run`
+    renders it.
+    """
+    categories = categories or {}
     directory = families_dir / name
     directory.mkdir(parents=True)
     (directory / 'family.toml').write_text(
         textwrap.dedent(
             f"""\
             scorer = "votes"
+            aspect = "writing"
             display_name = "Family {name}"
             systems = {json.dumps(systems)}
-            samples = 1
-            categories = ["message"]
+            samples = {samples}
+            categories = {json.dumps(sorted(set(categories.values())) or ['message'])}
             reference = "{systems[0]}"
+            render = "{render}"
+            public_voting = {json.dumps(public_voting)}
+            defects = {json.dumps(list(PROSE_DEFECTS))}
             """
         )
     )
-    cases = directory / 'cases.toml'
-    cases.write_text('cases = []\n')
-    return cases
+    cases: list[dict[str, Any]] = [
+        {
+            'id': case,
+            'category': category,
+            'source': 'synthetic',
+            'instruction': f'Write about {case}.',
+            'checklist': ['Stays on topic'],
+        }
+        for case, category in categories.items()
+    ]
+    for case in cases:
+        install_task(f'{name}/{case["id"]}', case['instruction'])
+    path = directory / 'cases.toml'
+    path.write_text(tomli_w.dumps({'cases': cases}))
+    return path
+
+
+def install_task(task: str, instruction: str) -> None:
+    """Install the task `render_tasks` writes for an instruction under its name."""
+    task_dir = data_dir() / 'tasks' / task
+    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / 'instruction.md').write_text(instruction)
+    (task_dir / 'task.toml').write_text(
+        render_task_config(task, instruction).model_dump_toml()
+    )
 
 
 def write_task_family(
@@ -194,6 +244,32 @@ def write_task_family(
         config.write_text(tomli_w.dumps(content))
 
 
+def voted_tasks(families_dir: Path, *task_ids: str) -> Family:
+    """Write task family `f`, scored by votes, that runs `acme-large` as terminus-2."""
+    write_task_family(families_dir, *task_ids, systems=('acme-large',))
+    return load_family('f')
+
+
+def with_settings(family: Family, **settings: Any) -> Family:
+    return family.model_copy(
+        update={'settings': family.settings.model_copy(update=settings)}
+    )
+
+
+def break_setting(task: Path, path: tuple[str, ...], value: Any) -> None:
+    """Set or remove one setting in a task's `task.toml`."""
+    config_path = task / 'task.toml'
+    config = tomllib.loads(config_path.read_text())
+    target = config
+    for key in path[:-1]:
+        target = target[key]
+    if value is None:
+        target.pop(path[-1], None)
+    else:
+        target[path[-1]] = value
+    config_path.write_text(tomli_w.dumps(config))
+
+
 # ── Systems and Trials ──
 
 
@@ -232,6 +308,22 @@ def make_system(**overrides: Any) -> System:
     return System(**(fields | overrides))
 
 
+MANIFEST_FILE = 'fingerprints.json'
+
+
+def current_fingerprints(systems: dict[str, System]) -> dict[str, str]:
+    """Map `<family>/<system>` to the fingerprint of each runnable system."""
+    return {
+        f'{family}/{system.name}': fingerprint(system)
+        for family, members in runnable_systems(systems).items()
+        for system in members
+    }
+
+
+def render_manifest(fingerprints: Mapping[str, str]) -> str:
+    return f'{json.dumps(fingerprints, indent=2, sort_keys=True)}\n'
+
+
 def make_output(**fields: Any) -> Output:
     empty = dict.fromkeys(Output.model_fields)
     return Output.model_validate(
@@ -265,12 +357,7 @@ def write_trial(
     trial a regrade derives from. Returns the trial's ID.
     """
     if instruction is not None:
-        task_dir = data_dir() / 'tasks' / task
-        task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / 'instruction.md').write_text(instruction)
-        (task_dir / 'task.toml').write_text(
-            render_task_config(task, instruction).model_dump_toml()
-        )
+        install_task(task, instruction)
     if version is None:
         version = _installed_version(task)
     trial_dir = job_dir / name
@@ -322,10 +409,7 @@ def write_trial(
         environment=environment or EnvironmentConfig(),
         verifier=VerifierLock(disable=verifier_disabled),
     )
-    (trial_dir / 'result.json').write_text(result.model_dump_json())
-    (trial_dir / 'lock.json').write_text(lock.model_dump_json())
-    (job_dir / 'config.json').touch()
-    (job_dir / 'result.json').touch()
+    _record_trial(job_dir, result, lock)
     return result.id
 
 
@@ -349,7 +433,6 @@ def finish_job(job: JobConfig) -> Path:
     for trial, lock in zip(plan.trial_configs, plan.trial_locks, strict=True):
         assert trial.task.path is not None
         trial_dir = job_dir / trial.trial_name
-        trial_dir.mkdir(parents=True)
         result = TrialResult(
             task_name=local_task_name(trial.task.path),
             trial_name=trial.trial_name,
@@ -363,11 +446,31 @@ def finish_job(job: JobConfig) -> Path:
             else VerifierResult(rewards={'reward': 1.0}),
             finished_at=datetime(2026, 10, 21, tzinfo=UTC),
         )
-        (trial_dir / 'result.json').write_text(result.model_dump_json())
-        (trial_dir / 'lock.json').write_text(lock.model_dump_json())
+        _record_trial(job_dir, result, lock)
     (job_dir / 'config.json').write_text(job.model_dump_json())
-    (job_dir / 'result.json').write_text('{}')
     return job_dir
+
+
+def finish_generation(job: JobConfig, text: str) -> None:
+    """Write one finished generation with Harbor's planned config and lock."""
+    job_dir = finish_job(job)
+    (result_file,) = job_dir.glob('*/result.json')
+    result = TrialResult.model_validate_json(result_file.read_text())
+    result.agent_result = AgentContext(metadata={'finish_reason': 'stop'})
+    result_file.write_text(result.model_dump_json())
+    agent_dir = result_file.parent / 'agent'
+    agent_dir.mkdir()
+    (agent_dir / OUTPUT_FILE).write_text(text)
+
+
+def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
+    """Write a trial's result and lock, and the files that mark its job directory."""
+    trial_dir = job_dir / result.trial_name
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    (trial_dir / 'result.json').write_text(result.model_dump_json())
+    (trial_dir / 'lock.json').write_text(lock.model_dump_json())
+    (job_dir / 'config.json').touch()
+    (job_dir / 'result.json').touch()
 
 
 # ── Stub Endpoint ──
@@ -709,93 +812,6 @@ def serve_stub(
 
 
 AT = datetime(2026, 10, 21, 9, tzinfo=UTC)
-
-
-def passing_outputs(
-    cases: Iterable[str],
-    systems: Iterable[str],
-    text: str = '{system} answers {case}',
-    **fields: Any,
-) -> dict[tuple[str, str], Output]:
-    """Return one output per case and system that passes every gate.
-
-    Each text formats `text` with the case and the system.
-    """
-    listed = list(systems)
-    return {
-        (case, system): make_output(
-            **{
-                'trial': f'{case}__{system}',
-                'job': 'job-1',
-                'case': case,
-                'system': system,
-                'fingerprint': f'fp-{system}',
-                'text': text.format(case=case, system=system),
-                'finish_reason': 'stop',
-                'gate_failures': [],
-            }
-            | fields
-        )
-        for case in cases
-        for system in listed
-    }
-
-
-def write_votes_family(
-    families_dir: Path,
-    name: str,
-    systems: list[str],
-    categories: dict[str, str],
-    render: str = 'text',
-    *,
-    public_voting: bool = False,
-) -> None:
-    """Write a family scored by votes, with one synthetic case per category entry.
-
-    Each case's task holds its instruction, as `bench run` would have rendered it.
-    """
-    directory = families_dir / name
-    directory.mkdir(parents=True)
-    (directory / 'family.toml').write_text(
-        textwrap.dedent(
-            f"""\
-            scorer = "votes"
-            aspect = "writing"
-            display_name = "Family {name}"
-            systems = {json.dumps(systems)}
-            samples = 2
-            categories = {json.dumps(sorted(set(categories.values())))}
-            reference = "{systems[0]}"
-            render = "{render}"
-            public_voting = {json.dumps(public_voting)}
-            defects = {json.dumps(list(PROSE_DEFECTS))}
-            """
-        )
-    )
-    for case in categories:
-        instruction = f'Write about {case}.'
-        task = data_dir() / 'tasks' / name / case
-        task.mkdir(parents=True, exist_ok=True)
-        (task / 'instruction.md').write_text(instruction)
-        (task / 'task.toml').write_text(
-            render_task_config(f'{name}/{case}', instruction).model_dump_toml()
-        )
-    (directory / 'cases.toml').write_text(
-        tomli_w.dumps(
-            {
-                'cases': [
-                    {
-                        'id': case,
-                        'category': category,
-                        'source': 'synthetic',
-                        'instruction': f'Write about {case}.',
-                        'checklist': ['Stays on topic'],
-                    }
-                    for case, category in categories.items()
-                ]
-            }
-        )
-    )
 
 
 ARENA_SYSTEMS = ('acme-large', 'acme-small', 'acme-pro')

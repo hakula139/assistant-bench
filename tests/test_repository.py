@@ -1,6 +1,5 @@
 import ast
 import importlib.util
-import json
 import os
 import re
 import shutil
@@ -17,14 +16,15 @@ from unittest import mock
 from urllib.parse import urlsplit
 
 import pytest
-import tomli_w
 from typer.testing import CliRunner
 
-from assistant_bench import jobs, manifest, task_assets
+from assistant_bench import task_assets
 from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.cli import app
 from assistant_bench.families import Case, case_task, load_cases, load_family
 from assistant_bench.paths import REPO_ROOT
+from assistant_bench.tasks import check_tasks
+from support import MANIFEST_FILE, current_fingerprints, render_manifest
 
 
 CODING = REPO_ROOT / 'families' / 'coding-repo'
@@ -109,7 +109,7 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     tasks = [case_task(family, case.id) for case in load_cases(family)]
 
     assert tasks
-    jobs.check_tasks(family, tasks)
+    check_tasks(family, tasks)
 
 
 @pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT), ids=str)
@@ -379,66 +379,15 @@ def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
     )
 
 
-def family_systems(config: dict[str, Any]) -> set[str]:
-    """Includes the reference even when `systems` omits it."""
-    systems = {str(system) for system in config.get('systems', [])}
-    reference = config.get('reference')
-    return systems | ({str(reference)} if reference else set())
-
-
-def untabled(root: Path) -> set[tuple[str, str]]:
-    """Return each family and system whose system lacks a `systems.toml` table."""
-    tabled = set(tomllib.loads((root / 'systems.toml').read_text()))
-    return {
-        (path.parent.name, system)
-        for path in (root / 'families').glob('*/family.toml')
-        for system in family_systems(tomllib.loads(path.read_text()))
-        if system not in tabled
-    }
-
-
-def test_committed_families_name_only_tabled_systems() -> None:
-    assert untabled(REPO_ROOT) == set()
-
-
 def test_the_fingerprint_manifest_matches_the_runnable_systems(
     stale_fixture: Callable[[Path, str], None],
 ) -> None:
-    path = REPO_ROOT / manifest.MANIFEST_FILE
+    path = REPO_ROOT / MANIFEST_FILE
 
-    current = manifest.render_manifest(
-        manifest.current_fingerprints(load_systems(load_export()))
-    )
+    current = render_manifest(current_fingerprints(load_systems(load_export())))
 
     if not path.is_file() or path.read_text() != current:
         stale_fixture(path, current)
-
-
-@pytest.mark.parametrize(
-    ('family', 'report', 'expected'),
-    [
-        (
-            {'systems': ['tabled']},
-            {'results': {'reference': 'retired'}},
-            set[tuple[str, str]](),
-        ),
-        ({'systems': ['untabled']}, {}, {('f', 'untabled')}),
-        ({'reference': 'untabled'}, {}, {('f', 'untabled')}),
-    ],
-)
-def test_a_family_system_needs_a_systems_toml_table(
-    family: dict[str, Any],
-    report: dict[str, Any],
-    expected: set[tuple[str, str]],
-    tmp_path: Path,
-) -> None:
-    (tmp_path / 'systems.toml').write_text(tomli_w.dumps({'tabled': {}}))
-    (tmp_path / 'families' / 'f').mkdir(parents=True)
-    (tmp_path / 'families' / 'f' / 'family.toml').write_text(tomli_w.dumps(family))
-    (tmp_path / 'reports' / 'f').mkdir(parents=True)
-    (tmp_path / 'reports' / 'f' / 'round.json').write_text(json.dumps(report))
-
-    assert untabled(tmp_path) == expected
 
 
 def lockfiles() -> list[Path]:

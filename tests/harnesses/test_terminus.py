@@ -33,7 +33,7 @@ from litellm.exceptions import BadRequestError, ServiceUnavailableError
 from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
-from assistant_bench import jobs
+from assistant_bench import collection, jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import load_family
 from assistant_bench.generation import load_generation
@@ -230,7 +230,7 @@ def run_and_collect(
         environment=config.environment,
         verifier_disabled=config.verifier.disable,
     )
-    (collected,) = jobs.collect(family, {system.name: system})
+    (collected,) = collection.collect(family, {system.name: system}).outputs
     return context, collected
 
 
@@ -946,7 +946,7 @@ class TestTerminus:
                 environment=config.environment,
                 verifier_disabled=config.verifier.disable,
             )
-            (collected,) = jobs.collect(family, {system.name: system})
+            (collected,) = collection.collect(family, {system.name: system}).outputs
 
             assert (
                 context.n_input_tokens,
@@ -1259,8 +1259,8 @@ class TestTerminus:
                 environment=config.environment,
                 verifier_disabled=config.verifier.disable,
             )
-            reread = jobs.read_trials(family, job_dir, {system.name: system})
-            collected = jobs.collect(family, {system.name: system})
+            reread = collection.read_trials(family, job_dir)
+            collected = collection.collect(family, {system.name: system}).outputs
 
             path = (
                 '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
@@ -1288,10 +1288,11 @@ class TestTerminus:
                     output.cached_tokens,
                     output.output_tokens,
                 ) == tokens
-                if cost is None:
-                    assert output.cost_usd is None
-                else:
-                    assert output.cost_usd == pytest.approx(cost)
+            assert recorded.cost_usd is None
+            if cost is None:
+                assert current.cost_usd is None
+            else:
+                assert current.cost_usd == pytest.approx(cost)
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,

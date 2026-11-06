@@ -1,14 +1,16 @@
 """Harbor trials under Docker, which the Harbor Smoke job runs."""
 
 from collections import Counter
+from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 import pytest
 from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 
-from assistant_bench import jobs
+from assistant_bench import collection, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
 from support import (
@@ -38,13 +40,43 @@ def solution_commands(task: Path) -> str:
     )
 
 
+def reply_text(completion: dict[str, Any]) -> str:
+    content: str = completion['choices'][0]['message']['content']
+    return content
+
+
+def serve_chat_turns(endpoint: StubEndpoint, commands: str) -> dict[str, Any]:
+    """Answer every request with the terminal commands, returning that reply."""
+    endpoint.response = terminus_completion(commands)
+    return endpoint.response
+
+
+def serve_responses_turns(endpoint: StubEndpoint, commands: str) -> dict[str, Any]:
+    """Queue the commands, then a final answer, returning the first reply."""
+    endpoint.responses = [
+        reasoned_response(reply_text(terminus_completion(commands)), 'resp-tool'),
+        reasoned_response(
+            reply_text(terminus_completion()), 'resp-final', 'final_answer'
+        ),
+    ]
+    return endpoint.responses[0]
+
+
+def serve_messages_turns(endpoint: StubEndpoint, commands: str) -> dict[str, Any]:
+    """Stream the commands, then a final answer, returning the first message."""
+    first = message(reply_text(terminus_completion(commands)), message_id='tool')
+    final = message(reply_text(terminus_completion()), message_id='final')
+    endpoint.streams = [message_stream(first), message_stream(final)]
+    return first
+
+
 def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None:
     family = load_family('smoke')
     tasks = [case_task(family, case.id) for case in load_cases(family)]
 
     job_dir = jobs.run_job(jobs.check_job(family, tasks))
 
-    outputs = jobs.read_trials(family, job_dir, {})
+    outputs = collection.read_trials(family, job_dir)
     assert Counter(
         (output.system, output.error, output.reward) for output in outputs
     ) == Counter(
@@ -56,7 +88,30 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None
 
 
 @pytest.mark.parametrize(
-    'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+    ('api', 'effort', 'thinking_mode', 'serve_turns'),
+    [
+        pytest.param(
+            'openai-chat-completions',
+            'medium',
+            None,
+            serve_chat_turns,
+            id='openai-chat-completions',
+        ),
+        pytest.param(
+            'openai-responses',
+            'max',
+            None,
+            serve_responses_turns,
+            id='openai-responses',
+        ),
+        pytest.param(
+            'anthropic-messages',
+            'high',
+            'anthropic-adaptive',
+            serve_messages_turns,
+            id='anthropic-messages',
+        ),
+    ],
 )
 def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
@@ -64,45 +119,20 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     families_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
     api: str,
+    effort: str,
+    thinking_mode: str | None,
+    serve_turns: Callable[[StubEndpoint, str], dict[str, Any]],
 ) -> None:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
-    command = terminus_completion(solution_commands(task))
-    tool_response = reasoned_response(
-        command['choices'][0]['message']['content'], 'resp-tool'
-    )
-    native_tool = message(
-        command['choices'][0]['message']['content'], message_id='tool'
-    )
-    if api == 'openai-responses':
-        final = terminus_completion()
-        endpoint.responses = [
-            tool_response,
-            reasoned_response(
-                final['choices'][0]['message']['content'], 'resp-final', 'final_answer'
-            ),
-        ]
-    elif api == 'anthropic-messages':
-        final = terminus_completion()
-        endpoint.streams = [
-            message_stream(native_tool),
-            message_stream(
-                message(final['choices'][0]['message']['content'], message_id='final')
-            ),
-        ]
-    else:
-        endpoint.response = command
+    first = serve_turns(endpoint, solution_commands(task))
     system = make_system(
         api=api,
-        effort='max'
-        if api == 'openai-responses'
-        else 'high'
-        if api == 'anthropic-messages'
-        else 'medium',
-        thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
+        effort=effort,
+        thinking_mode=thinking_mode,
         max_output_tokens=32768,
         context_window=131072,
     )
@@ -113,7 +143,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     jobs.run_job(jobs.job(family, systems, [task]))
 
     assert len(endpoint.requests) == requests > 0
-    (output,) = jobs.collect(family, {system.name: system})
+    (output,) = collection.collect(family, {system.name: system}).outputs
     assert output.model_dump(
         include={'case', 'system', 'error', 'reward', 'gate_failures', 'text'}
     ) == {
@@ -171,12 +201,12 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
             assert request.body['max_completion_tokens'] == 32768
     if api == 'openai-responses':
         assert len(endpoint.requests) == 2
-        assert endpoint.requests[1].body['input'][1:3] == tool_response['output']
+        assert endpoint.requests[1].body['input'][1:3] == first['output']
     elif api == 'anthropic-messages':
         assert len(endpoint.requests) == 2
         assert endpoint.requests[1].body['messages'][1] == {
             'role': 'assistant',
-            'content': native_tool['content'],
+            'content': first['content'],
         }
         assert output.cache_write_tokens == turns * 10
     key = endpoint.key_file.read_text().strip().encode()
@@ -195,5 +225,5 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     jobs.run_job(jobs.job(family, systems, [task]))
 
     assert len(endpoint.requests) == requests
-    (regraded,) = jobs.collect(family, {system.name: system})
+    (regraded,) = collection.collect(family, {system.name: system}).outputs
     assert regraded == output
