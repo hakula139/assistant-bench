@@ -37,7 +37,11 @@ beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'bench-site-'));
   prefixed = await mkdtemp(join(tmpdir(), 'bench-site-'));
   await build(directory);
-  await build(prefixed, { CI_PAGES_URL: `${origin}${base}`, CI_PROJECT_URL: repository });
+  // GitLab's `CI_PAGES_URL` carries no trailing slash.
+  await build(prefixed, {
+    CI_PAGES_URL: `${origin}${base.slice(0, -1)}`,
+    CI_PROJECT_URL: repository,
+  });
   browser = await chromium.launch();
 }, 180_000);
 
@@ -253,7 +257,7 @@ describe('built pages', () => {
 });
 
 describe('Pages deployment', () => {
-  test('serves navigation, assets, and hydrated islands below its base while keeping the API at the origin root', async () => {
+  test('serves pages and assets below its base without the vote page', async () => {
     const context = await browser.newContext();
     const fetched = new Set<string>();
     const missing: string[] = [];
@@ -262,10 +266,6 @@ describe('Pages deployment', () => {
     await context.route(`${origin}/**`, async (route) => {
       const { pathname } = new URL(route.request().url());
       fetched.add(pathname);
-      if (pathname === '/api/families') {
-        await route.fulfill({ status: 404, contentType: 'text/html', body: 'Not found' });
-        return;
-      }
       if (!pathname.startsWith(base)) {
         missing.push(pathname);
         await route.fulfill({ status: 404 });
@@ -299,9 +299,8 @@ describe('Pages deployment', () => {
       expect(await navigation.getByRole('link', { name: 'Methodology' }).getAttribute('href')).toBe(
         `${base}methodology/`,
       );
-      expect(await navigation.getByRole('link', { name: 'Vote' }).getAttribute('href')).toBe(
-        `${base}vote/`,
-      );
+      expect(await navigation.getByRole('link', { name: 'Vote' }).count()).toBe(0);
+      expect(await stat(join(prefixed, 'vote')).catch(() => null)).toBeNull();
       expect(await page.locator('link[rel="icon"]').getAttribute('href')).toBe(
         `${base}favicon.svg`,
       );
@@ -326,20 +325,6 @@ describe('Pages deployment', () => {
         await page.locator(`a[href^="${repository}/-/blob/main/docs/design/"]`).count(),
       ).toBeGreaterThan(0);
 
-      await page
-        .getByRole('navigation', { name: 'Main' })
-        .getByRole('link', { name: 'Vote' })
-        .click();
-      await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
-      await page
-        .getByRole('alert')
-        .filter({ hasText: 'The voting service is unavailable.' })
-        .waitFor();
-      await page.waitForLoadState('networkidle');
-
-      expect(new URL(page.url()).pathname).toBe(`${base}vote/`);
-      expect(fetched.has('/api/families')).toBe(true);
-      expect([...fetched].filter((path) => path.includes('/api/'))).toEqual(['/api/families']);
       expect(
         [...fetched].some((path) => path.startsWith(`${base}_astro/`) && path.endsWith('.css')),
       ).toBe(true);
