@@ -16,5 +16,6 @@ reference = "gemini-3.8-flash-high"
 render = "diff"
 samples = 1
 harness = "terminus-2"
+budget_usd = 51
 categories = ["bug-fix", "feature", "refactor"]
 defects = ["scope", "conventions", "complexity", "testing", "clarity"]

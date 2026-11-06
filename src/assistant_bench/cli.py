@@ -41,6 +41,14 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, read_outputs, tests_pass
+from assistant_bench.spend import (
+    Projection,
+    Spend,
+    budget_problems,
+    project,
+    summarize,
+    update_ledger,
+)
 from assistant_bench.tasks import (
     author_vendors,
     changed_tasks,
@@ -167,29 +175,50 @@ def run(
     """Generate the missing trials of every family, or the named ones, and collect them.
 
     A run without a family sends every family that lists systems. Each trial sends
-    paid requests to the endpoint configured in .env.
+    paid requests to the endpoint configured in .env. Before any trial starts, the
+    run prints each family's projected cost and refuses a family it would take
+    past its `budget_usd`.
     """
     export, systems = _catalog()
-    prepared: list[tuple[Family, list[System], list[Path]]] = []
-    for family, selected in _run_targets(families, names, systems):
-        if not selected:
-            raise InputError(
-                f'Family `{family.name}` lists no systems. Add them to `systems` in '
-                f'`families/{family.name}/family.toml`.'
-            )
-        _refuse_drift(family, selected)
-        tasks = (
-            _render_tasks(family)
-            if family.source == 'cases'
-            else _task_dirs(family, export)
-        )
-        prepared.append((family, selected, tasks))
+    prepared = _prepare(families, names, export, systems)
+    problems: list[str] = []
+    for family, selected, job in prepared:
+        spent, projections = _projection(family, selected, job, systems)
+        _echo_projection(family, spent, projections)
+        problems += budget_problems(family, spent, projections)
+    if problems:
+        raise InputError('\n'.join(problems))
 
-    for family, selected, tasks in prepared:
+    for family, _, job in prepared:
         try:
-            _run(jobs.job(family, selected, tasks))
+            _run(job)
         finally:
             _collect(family, systems, export)
+
+
+@app.command()
+def spend(
+    families: FamilyArguments = None,
+    names: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--system',
+            help='Limit the projection to this system, as `bench run` does.',
+        ),
+    ] = None,
+) -> None:
+    """Print the spend ledger, and the projection of `bench run` with these arguments.
+
+    Nothing runs, and no request reaches the endpoint.
+    """
+    export, systems = _catalog()
+    for family, selected, job in _prepare(families, names, export, systems):
+        spent, projections = _projection(family, selected, job, systems)
+        for entry in spent:
+            typer.echo(_spend_line(entry))
+        _echo_projection(family, spent, projections)
+        for problem in budget_problems(family, spent, projections):
+            typer.echo(problem)
 
 
 @app.command()
@@ -418,6 +447,30 @@ def _families_with_jobs() -> list[str]:
     return [name for name in family_names() if jobs.has_jobs(load_family(name))]
 
 
+def _prepare(
+    families: list[str] | None,
+    names: list[str] | None,
+    export: NixosConfigExport,
+    systems: Mapping[str, System],
+) -> list[tuple[Family, list[System], JobConfig]]:
+    """Return each family to run with its systems and its job."""
+    prepared: list[tuple[Family, list[System], JobConfig]] = []
+    for family, selected in _run_targets(families, names, systems):
+        if not selected:
+            raise InputError(
+                f'Family `{family.name}` lists no systems. Add them to `systems` in '
+                f'`families/{family.name}/family.toml`.'
+            )
+        _refuse_drift(family, selected)
+        tasks = (
+            _render_tasks(family)
+            if family.source == 'cases'
+            else _task_dirs(family, export)
+        )
+        prepared.append((family, selected, jobs.job(family, selected, tasks)))
+    return prepared
+
+
 def _run_targets(
     families: list[str] | None,
     names: list[str] | None,
@@ -533,13 +586,8 @@ def _collect(
     for error, count in errors.most_common():
         typer.echo(f'  Error `{error}`: {count_of(count, "output")}.')
 
-    for gap in collected.usage_gaps:
-        typer.echo(
-            f'System `{gap.system}` has unknown usage. Outputs affected: '
-            f'{gap.outputs}. Responses without valid usage: {gap.unreported}. '
-            f'Collected outputs cost at least ${gap.reported_cost_usd:.2f} '
-            '(reported usage only).'
-        )
+    for entry in collected.spend:
+        typer.echo(_spend_line(entry))
 
     gated = [output for output in outputs if output.gate_failures]
     if gated:
@@ -569,6 +617,79 @@ def _collect(
     )
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
+
+
+def _spend_line(entry: Spend) -> str:
+    attempts = (
+        f'{count_of(entry.trials, "trial")} and {count_of(entry.responses, "response")}'
+    )
+    if not entry.priced:
+        line = (
+            f'System `{entry.system}` is unpriced: {attempts} used '
+            f'{entry.tokens.input:,.0f} input and {entry.tokens.output:,.0f} output '
+            'tokens'
+        )
+        if entry.unknown:
+            line += (
+                f', besides {count_of(entry.unknown, "response")} without valid usage'
+            )
+        return f'{line}.'
+
+    line = f'System `{entry.system}`: {attempts} cost ${entry.known_usd:.2f}'
+    if entry.unknown:
+        imputed = (
+            f'${entry.imputed_usd:.2f} imputed'
+            if entry.imputed_usd is not None
+            else 'an unknown cost'
+        )
+        line += (
+            f', plus {imputed} for {count_of(entry.unknown, "response")} without a '
+            f'known cost, at most ${entry.ceiling_usd or 0:.2f}'
+        )
+    return f'{line}.'
+
+
+def _projection(
+    family: Family,
+    selected: list[System],
+    job: JobConfig,
+    systems: Mapping[str, System],
+) -> tuple[list[Spend], list[Projection]]:
+    spent = summarize(update_ledger(family), systems)
+    return spent, project(jobs.pending_trials(job), spent, selected)
+
+
+def _echo_projection(
+    family: Family, spent: list[Spend], projections: list[Projection]
+) -> None:
+    for projection in projections:
+        if not projection.pending:
+            continue
+        name = f'System `{projection.system}`'
+        trials = count_of(projection.pending, 'pending trial')
+        if projection.per_trial_usd is not None:
+            source = 'its own' if projection.basis == 'own' else "another system's"
+            typer.echo(
+                f'{name}: {trials} at ${projection.per_trial_usd:.2f} each from '
+                f'{source} usage, ${projection.usd:.2f} in all.'
+            )
+        elif not projection.priced and projection.tokens is not None:
+            typer.echo(
+                f'{name} is unpriced: {trials} of about '
+                f'{projection.tokens.input:,.0f} input and '
+                f'{projection.tokens.output:,.0f} output tokens.'
+            )
+        else:
+            typer.echo(f'{name}: {trials} with no usage to estimate a cost from.')
+
+    total = sum(entry.spent_usd for entry in spent) + sum(
+        projection.usd or 0 for projection in projections
+    )
+    budget = family.settings.budget_usd
+    typer.echo(
+        f'Family `{family.name}`: ${total:.2f} spent and projected'
+        + (f', against a budget of ${budget:.2f}.' if budget is not None else '.')
+    )
 
 
 def _author_rates(

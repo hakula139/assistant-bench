@@ -1,6 +1,7 @@
 """Harbor's terminus-2 agent, sending its model calls to the bench endpoint."""
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
 from typing import Any, ClassVar, Self, assert_never, override
@@ -35,7 +36,7 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponsesLLM
-from assistant_bench.harnesses.usage import MeasuredUsage, measure
+from assistant_bench.harnesses.usage import MeasuredUsage, append_attempt, measure
 
 
 _RESPONSE = TypeAdapter(dict[str, Any])
@@ -269,6 +270,8 @@ class Terminus(Terminus2):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        assert isinstance(self.options, TerminusOptions)
+        started_at = datetime.now(UTC)
         nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
         llm = self._llm
@@ -312,3 +315,4 @@ class Terminus(Terminus2):
                 context.n_cache_tokens = None
                 context.n_output_tokens = None
             context.cost_usd = None
+            append_attempt(self.logs_dir, self.options, started_at, context.metadata)

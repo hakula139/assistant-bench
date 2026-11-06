@@ -1,14 +1,22 @@
 """Harbor job configs for a family's systems, and their runs."""
 
+import asyncio
 import subprocess
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
-from harbor.job_diff import SourceTrial, load_source_trials
+from harbor.job_diff import (
+    DiffAction,
+    SourceTrial,
+    compare_job_trials,
+    load_source_trials,
+    resolve_diff_sources,
+)
+from harbor.job_plan import JobPlan
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.trial import config as trial_config
@@ -186,7 +194,7 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     sources = [config for config, _ in family_sources(family)]
     tasks_source = family.source == 'tasks'
     return _job(
-        _jobs_dir(family),
+        jobs_dir(family),
         agents,
         tasks,
         sources,
@@ -252,10 +260,10 @@ def has_jobs(family: Family) -> bool:
 
 
 def _family_jobs(family: Family) -> list[Path]:
-    return sorted(result.parent for result in _jobs_dir(family).glob('*/result.json'))
+    return sorted(result.parent for result in jobs_dir(family).glob('*/result.json'))
 
 
-def _jobs_dir(family: Family) -> Path:
+def jobs_dir(family: Family) -> Path:
     return data_dir() / 'jobs' / family.name
 
 
@@ -310,6 +318,28 @@ def _job(
         agents=agents,
         tasks=[trial_config.TaskConfig(path=path) for path in tasks],
         source_jobs=sources,
+    )
+
+
+def pending_trials(config: JobConfig) -> Counter[str]:
+    """Count each system's trials that the job would run its agent for.
+
+    Harbor's own diff classifies the trials, so a reused or regraded trial, which
+    sends no model request, counts nothing.
+    """
+    if not config.tasks:
+        return Counter()
+    plan = asyncio.run(JobPlan.from_config(config.model_copy(deep=True)))
+    _, sources = (
+        asyncio.run(resolve_diff_sources(config.source_jobs, jobs_dir=config.jobs_dir))
+        if config.is_diff
+        else ([], [])
+    )
+    diff = compare_job_trials(plan, sources)
+    return Counter(
+        trial.agent.kwargs['system']
+        for trial, action in zip(plan.trial_configs, diff.trials, strict=True)
+        if action.action == DiffAction.RERUN
     )
 
 

@@ -17,6 +17,7 @@ src/assistant_bench/
 ├── collection.py                           # Collection of a family's trials into output records
 ├── arguments.py                            # The family arguments and name refusals the commands share
 ├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
+├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
@@ -53,7 +54,7 @@ Imports point downward through these layers, so a module never imports one above
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands`
 3. `collection` and `arguments`
-4. `tasks`
+4. `tasks` and `spend`
 5. `jobs`
 6. The remaining `arena` modules
 7. `report`
@@ -81,7 +82,7 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 
 ## Data Flow
 
-1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, and runs it through the Harbor CLI.
+1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, projects its cost from the family's spend ledger against `budget_usd`, and runs it through the Harbor CLI. Each agent attempt appends its token counts to the job's `attempts.jsonl`, which collection adds to the ledger.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
 3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
 4. `bench arena prepare <family>` writes a publication of the current outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes on it.

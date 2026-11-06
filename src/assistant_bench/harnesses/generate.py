@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, assert_never, override
 
 from harbor.agents.base import BaseAgent
@@ -18,7 +19,7 @@ from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
-from assistant_bench.harnesses.usage import MeasuredUsage, measure
+from assistant_bench.harnesses.usage import MeasuredUsage, append_attempt, measure
 
 
 OUTPUT_FILE = 'output.txt'
@@ -70,6 +71,16 @@ class Generate(BaseAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        assert isinstance(self.options, GenerateOptions)
+        started_at = datetime.now(UTC)
+        try:
+            await self._generate(instruction, context)
+        finally:
+            append_attempt(
+                self.logs_dir, self.options, started_at, context.metadata or {}
+            )
+
+    async def _generate(self, instruction: str, context: AgentContext) -> None:
         assert isinstance(self.options, GenerateOptions)
         nixos_config_rev = load_export(self._get_env).rev
         endpoint = Endpoint.read(self._get_env, self.options.api)

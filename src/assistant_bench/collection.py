@@ -1,7 +1,6 @@
 """Collection of a family's trials into output records."""
 
 from collections import defaultdict
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
@@ -35,6 +34,7 @@ from assistant_bench.jobs import (
 )
 from assistant_bench.outputs import Output, tests_pass, write_outputs
 from assistant_bench.scoring.gates import failed_gates
+from assistant_bench.spend import Spend, summarize, update_ledger
 from assistant_bench.tasks import WORKSPACE, current_versions
 
 
@@ -74,46 +74,17 @@ class _Candidate:
     def graded(self) -> bool:
         return _reward(self.trial.result) is not None
 
-    @property
-    def responses(self) -> list[dict[str, Any]]:
-        """Return the usage details of each response the solution's agent received.
-
-        A terminal agent keeps one entry per call, while a single-call agent's
-        metadata is its one response's details once a response arrived.
-        """
-        context = self.origin.result.agent_result
-        metadata = (context and context.metadata) or {}
-        if 'calls' in metadata:
-            calls: list[dict[str, Any]] = metadata['calls']
-            return calls
-        if 'usage_invalid' in metadata and metadata['response_model'] is not None:
-            return [metadata]
-        return []
-
-
-@dataclass(frozen=True)
-class UsageGap:
-    """A priced system's outputs with unknown usage, for budget tracking only."""
-
-    system: str
-    outputs: int
-    unreported: int
-    """Responses without valid usage."""
-    reported_cost_usd: float
-    """Lower bound over all collected outputs of the system, using reported usage.
-    This diagnostic never enters records or reports."""
-
 
 @dataclass(frozen=True)
 class Collection:
     """The outputs a collection wrote, and the usage gaps of their systems."""
 
     outputs: list[Output]
-    usage_gaps: list[UsageGap]
+    spend: list[Spend]
 
 
 def collect(family: Family, systems: dict[str, System]) -> Collection:
-    """Read the family's trials into `outputs/<family>.jsonl`.
+    """Read the family's trials into `outputs/<family>.jsonl`, and its spend.
 
     A case family requires the current source and render contract. A task family
     keeps only trials of its current tasks at a version Harbor would reuse, so a
@@ -128,6 +99,9 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor
     can regrade one trial twice, so each solution keeps only its first output.
+
+    The spend summarizes the family's ledger once `update_ledger` has added the
+    attempts of its jobs.
 
     Raises
     ------
@@ -175,74 +149,22 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
             candidate
         )
 
-    collected = [
+    outputs = sorted(
         (
-            candidate,
             _output(
                 family,
                 candidate,
                 systems.get(candidate.system),
                 cases[candidate.case].instruction,
-            ),
-        )
-        for group in groups.values()
-        for candidate in group[: family.settings.samples]
-    ]
-    outputs = sorted(
-        (output for _, output in collected),
+            )
+            for group in groups.values()
+            for candidate in group[: family.settings.samples]
+        ),
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )
 
     write_outputs(family.name, outputs)
-    return Collection(outputs, _usage_gaps(collected, systems))
-
-
-def _usage_gaps(
-    collected: list[tuple[_Candidate, Output]], systems: Mapping[str, System]
-) -> list[UsageGap]:
-    """Count each priced system's responses that left its outputs' usage unknown."""
-    by_system: defaultdict[str, list[tuple[_Candidate, Output]]] = defaultdict(list)
-    for candidate, output in collected:
-        by_system[output.system].append((candidate, output))
-
-    gaps: list[UsageGap] = []
-    for name, pairs in sorted(by_system.items()):
-        system = systems.get(name)
-        missing = [
-            candidate
-            for candidate, output in pairs
-            if output.input_tokens is None or output.output_tokens is None
-        ]
-        if system is None or system.price is None or not missing:
-            continue
-
-        responses = [
-            response for candidate in missing for response in candidate.responses
-        ]
-        valid = [response for response in responses if 'input_tokens' in response]
-        gaps.append(
-            UsageGap(
-                system=name,
-                outputs=len(missing),
-                unreported=len(responses) - len(valid),
-                reported_cost_usd=sum(output.cost_usd or 0 for _, output in pairs)
-                + sum(
-                    _cost(
-                        system,
-                        AgentContext(
-                            n_input_tokens=response['input_tokens'],
-                            n_cache_tokens=response['cache_tokens'],
-                            n_output_tokens=response['output_tokens'],
-                            metadata=response,
-                        ),
-                    )
-                    or 0
-                    for response in valid
-                ),
-            )
-        )
-
-    return gaps
+    return Collection(outputs, summarize(update_ledger(family), systems))
 
 
 def read_trials(family: Family, job_dir: Path) -> list[Output]:

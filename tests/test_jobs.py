@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 
@@ -21,11 +22,13 @@ from assistant_bench.catalog import System
 from assistant_bench.families import (
     Family,
     case_task,
+    load_cases,
     load_family,
 )
 from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
+from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
     START,
@@ -396,6 +399,26 @@ class TestCheckJob:
         )
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
+
+
+class TestPendingTrials:
+    def test_counts_the_trials_harbor_would_rerun(self) -> None:
+        family = load_family('smoke-text')
+        large = make_system()
+        small = make_system(name='small', route='acme/small')
+        tasks = render_tasks(family, load_cases(family)[:2])
+        finish_job(
+            jobs.job(family, [large], tasks[:1]).model_copy(update={'job_name': 'old'})
+        )
+
+        pending = jobs.pending_trials(jobs.job(family, [large, small], tasks))
+
+        assert pending == Counter({'acme-large': 1, 'small': 2})
+
+    def test_counts_nothing_without_tasks(self) -> None:
+        pending = jobs.pending_trials(jobs.job(VOTES, [make_system()], []))
+
+        assert pending == Counter()
 
 
 class TestHasJobs:

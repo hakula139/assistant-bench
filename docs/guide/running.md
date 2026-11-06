@@ -95,7 +95,22 @@ Each record holds:
 | `latency_sec`                                                                              | The end-to-end latency, or a terminal agent's execution time                                                                                                                                                                                                                                                         |
 | `response_model`, `request_id`                                                             | The model that answered a single-call reply, and the endpoint's request ID                                                                                                                                                                                                                                           |
 
-`bench collect` names priced systems with unknown usage and prints a lower bound on the cost of all their collected outputs, using reported usage at catalog prices. That partial cost stays out of records and reports, and excludes attempts collection did not select. A terminal agent's trajectory `final_metrics` also counts only responses with valid usage.
+The summary ends with each system's spend from the family's [ledger](#spend-and-budgets).
+
+## Spend and Budgets
+
+```bash
+uv run bench spend
+uv run bench spend coding-repo --system <name>
+```
+
+Every agent attempt, including one that Harbor retries or that a later deletion removes, appends its responses' token counts to its job's `attempts.jsonl`. Collection adds each new attempt to the family's ledger, `spend/<family>.jsonl`, which outlives the jobs. An attempt killed before it could finish, such as by the host sleeping, leaves no record, so the ledger is then a lower bound.
+
+The ledger is priced at current catalog prices. A response without valid usage, or whose cache write has no declared price, has no known cost, so each system's spend line adds those responses at the system's mean known cost per response and gives their ceiling at a full context window and completion allowance each. An unpriced system reports its tokens alone.
+
+Before Harbor starts, `bench run` prints each system's pending trials, the trials that Harbor's diff would rerun, with their projected cost. A system with usage of its own in the ledger uses its mean tokens per trial, retries included, and any other system borrows the family's costliest tokens per trial at its own prices. When the family sets `budget_usd`, a run whose ledger spend plus projection exceeds it refuses before any job starts, as does a priced system with pending trials and no usage to estimate from. Unpriced systems count no dollars. `bench spend` takes the same arguments as `bench run` and prints the ledger and the projection without running anything.
+
+A terminal agent's trajectory `final_metrics` counts only responses with valid usage.
 
 ## Voting
 
@@ -174,9 +189,10 @@ assistant-bench/
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
-├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json and one directory per trial
+├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json, attempts.jsonl, and one directory per trial
 ├── outputs/<family>.jsonl                  # Collected Harbor trial records
 ├── publications/<family>/<id>.json         # Publications from `bench arena prepare`, each with its .md listing
+├── spend/<family>.jsonl                    # The family's ledger of agent attempts
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 └── votes/<family>/<taken-at>.json          # Vote cuts that `bench close` saved
 ```

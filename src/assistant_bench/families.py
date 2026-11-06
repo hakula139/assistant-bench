@@ -92,6 +92,9 @@ class _Settings(BaseModel):
     harness: str | None = None
     """Agent for every listed task-family system. Cases always use `generate`."""
 
+    budget_usd: float | None = Field(default=None, gt=0)
+    """Spend in USD that the family's ledger and a run's projection may reach."""
+
     categories: Unique[Category] = []
     """Allowed case category IDs, in board order. The site labels them."""
 

@@ -1,9 +1,22 @@
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from assistant_bench.catalog import Api
-from assistant_bench.harnesses.usage import measured_usage
+from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.usage import (
+    ATTEMPTS_FILE,
+    Attempt,
+    MeasuredUsage,
+    append_attempt,
+    measure,
+    measured_usage,
+)
+
+
+START = datetime(2026, 10, 21, tzinfo=UTC)
 
 
 class TestMeasuredUsage:
@@ -119,3 +132,57 @@ class TestMeasuredUsage:
             measured.harbor.cache_tokens,
             measured.harbor.completion_tokens,
         ) == (130, 100, 40)
+
+
+VALID = {'prompt_tokens': 120, 'completion_tokens': 40}
+
+
+class TestAppendAttempt:
+    @pytest.mark.parametrize(
+        ('metadata', 'expected'),
+        [
+            pytest.param({'response_model': None}, [], id='no-response'),
+            pytest.param(
+                {
+                    **measure('openai-chat-completions', None)[1],
+                    'response_model': 'large',
+                },
+                [None],
+                id='response-without-usage',
+            ),
+            pytest.param(
+                {
+                    **measure('openai-chat-completions', VALID)[1],
+                    'response_model': 'large',
+                },
+                [MeasuredUsage(120, 0, 0, 40, None)],
+                id='response',
+            ),
+            pytest.param(
+                {
+                    'calls': [
+                        measure('openai-chat-completions', VALID)[1],
+                        measure('openai-chat-completions', [])[1],
+                    ]
+                },
+                [MeasuredUsage(120, 0, 0, 40, None), None],
+                id='terminal-calls',
+            ),
+        ],
+    )
+    def test_records_each_response_in_the_job_directory(
+        self,
+        logs_dir: Path,
+        metadata: dict[str, Any],
+        expected: list[MeasuredUsage | None],
+    ) -> None:
+        labels = Labels(system='acme-large', fingerprint='0' * 12)
+
+        append_attempt(logs_dir, labels, START, metadata)
+        append_attempt(logs_dir, labels, START, metadata)
+
+        lines = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
+        attempts = [Attempt.model_validate_json(line) for line in lines]
+        assert [(item.trial, item.responses) for item in attempts] == [
+            ('trial', expected)
+        ] * 2
