@@ -26,6 +26,10 @@ A local `bench run` refuses the same mismatch before Harbor starts, even when th
 
 Closed reports freeze each public label and output fingerprint in `Report.systems`, including unranked entrants. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity. Display-name changes affect only later reports. [Reports](reports.md#frozen-identity) defines these checks.
 
+### Model Swaps
+
+A fingerprint cannot see an endpoint that serves another model under an unchanged route, so collection checks each pool against its own evidence, as [Running](../guide/running.md#model-swaps) describes. It compares the models the responses report and, where every sample of a case sends one request, the input tokens of that request, which a one-token jitter separates from another tokenizer. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.
+
 ## Harnesses
 
 `System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route as the model name.

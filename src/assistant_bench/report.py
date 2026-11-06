@@ -34,6 +34,7 @@ from assistant_bench.outputs import (
     Output,
     Verdict,
     read_outputs,
+    refuse_pool_conflicts,
     system_fingerprints,
     tests_pass,
 )
@@ -456,6 +457,7 @@ def close_tests(
 
     samples = family.settings.samples
     _require_every_trial(outputs, categories, samples)
+    refuse_pool_conflicts(family, outputs)
     results = _tests_results(outputs, categories, family.settings.categories, samples)
     return _report(
         family.name, closed_at, results, system_fingerprints(outputs), system_names

@@ -1530,6 +1530,37 @@ class TestCollect:
             'response without a known cost, imputed from its own usage.\n'
         ) in result.output
 
+    def test_names_a_system_whose_outputs_report_several_models(
+        self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
+        system = make_system(name='large')
+        resolved['large'] = system
+        config = jobs.job(load_family('f'), [system], [])
+        for job, case, model in (
+            ('job-1', 'c1', 'large-2026'),
+            ('job-2', 'c2', 'other-2026'),
+        ):
+            write_trial(
+                data_dir / 'jobs' / 'f' / job,
+                f'{case}__1',
+                config.agents[0],
+                task=f'f/{case}',
+                output='Hi.',
+                instruction=None,
+                context=AgentContext(metadata={'response_model': model}),
+                environment=config.environment,
+                verifier_disabled=config.verifier.disable,
+            )
+
+        result = invoke('collect', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert (
+            'System `large` reported several models: `large-2026` from job `job-1`, '
+            '`other-2026` from job `job-2`.\n'
+        ) in result.stdout
+
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

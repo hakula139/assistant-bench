@@ -330,7 +330,9 @@ def render_manifest(fingerprints: Mapping[str, str]) -> str:
 def make_output(**fields: Any) -> Output:
     empty = dict.fromkeys(Output.model_fields)
     return Output.model_validate(
-        empty | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's'} | fields
+        empty
+        | {'trial': 't', 'job': 'j', 'case': 'c', 'system': 's', 'response_models': ()}
+        | fields
     )
 
 

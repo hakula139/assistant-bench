@@ -1593,7 +1593,7 @@ class TestTerminus:
             assert tuple(
                 first[key] for key in ('input_tokens', 'cache_tokens', 'output_tokens')
             ) == (120, 100, 40)
-            assert second == {'responded': True}
+            assert second == {'responded': True, 'response_model': 'large-2026'}
 
         @pytest.mark.parametrize(
             ('api', 'usage'),

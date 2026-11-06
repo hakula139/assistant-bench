@@ -7,8 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from assistant_bench.families import Gate
-from assistant_bench.messages import InputError
+from assistant_bench.families import Family, Gate
+from assistant_bench.messages import InputError, count_of
 from assistant_bench.paths import data_dir, write_atomically
 
 
@@ -66,7 +66,9 @@ class Output(BaseModel):
     cost_usd: float | None
     latency_sec: float | None
 
-    response_model: str | None
+    response_models: tuple[str, ...]
+    """The distinct models the trial's responses reported, sorted."""
+
     request_id: str | None
     nixos_config_rev: str | None
     harness_version: str | None
@@ -99,6 +101,83 @@ def system_fingerprints(outputs: Iterable[Output]) -> dict[str, str | None]:
             )
 
     return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
+
+
+def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
+    """Return a sentence for each sign that a system's outputs pool several models.
+
+    A system and fingerprint pools several models when its outputs report more
+    than one model or, in a case family, where every sample of a case sends one
+    request, when two outputs of a case differ by more than `max(2, 2%)` in input
+    tokens. Outputs that lack the value are skipped.
+    """
+    pools: defaultdict[tuple[str, str], list[Output]] = defaultdict(list)
+    for output in outputs:
+        pools[output.system, output.fingerprint or ''].append(output)
+
+    conflicts: list[str] = []
+    for (system, _), pool in sorted(pools.items()):
+        first_jobs: dict[str, str] = {}
+        for output in sorted(pool, key=lambda output: output.job):
+            for model in output.response_models:
+                first_jobs.setdefault(model, output.job)
+        if len(first_jobs) > 1:
+            models = ', '.join(
+                f'`{model}` from job `{job}`'
+                for model, job in sorted(first_jobs.items())
+            )
+            conflicts.append(f'System `{system}` reported several models: {models}.')
+
+        if family.source == 'cases' and (spreads := _token_spreads(pool)):
+            case, low, high = spreads[0]
+            others = (
+                f', one of {count_of(len(spreads), "case")} whose counts differ'
+                if len(spreads) > 1
+                else ''
+            )
+            conflicts.append(
+                f'System `{system}` sent case `{case}` with {low:,} and {high:,} '
+                f'input tokens{others}.'
+            )
+
+    return conflicts
+
+
+def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
+    """Refuse a family whose outputs pool several models.
+
+    Raises
+    ------
+    InputError
+        `pool_conflicts` names a conflict.
+    """
+    conflicts = pool_conflicts(family, outputs)
+    if conflicts:
+        raise InputError(
+            '\n'.join(
+                [
+                    f'Family `{family.name}` pools outputs of several models:',
+                    *conflicts,
+                    "Delete the minority job's trials of each system under "
+                    f'`jobs/{family.name}/` in the data directory and rerun them, '
+                    'or give the system a new name once its route is fixed, as '
+                    '`docs/guide/running.md#model-swaps` describes.',
+                ]
+            )
+        )
+
+
+def _token_spreads(pool: Iterable[Output]) -> list[tuple[str, int, int]]:
+    """Return each case whose input tokens differ beyond the tolerance, with both."""
+    counts: defaultdict[str, list[int]] = defaultdict(list)
+    for output in pool:
+        if output.input_tokens is not None:
+            counts[output.case].append(output.input_tokens)
+    return [
+        (case, min(values), max(values))
+        for case, values in sorted(counts.items())
+        if max(values) - min(values) > max(2, 0.02 * min(values))
+    ]
 
 
 def read_outputs(family: str) -> list[Output]:

@@ -279,8 +279,22 @@ class TestPrepare:
                 ],
                 'no production case on which two systems have different passing',
             ),
+            (
+                [
+                    make_trial('c', 'acme-large', response_models=('large-2026',)),
+                    make_trial(
+                        'c',
+                        'acme-large',
+                        job='job-2',
+                        trial='c__2',
+                        response_models=('other-2026',),
+                    ),
+                    make_trial('c', 'acme-small'),
+                ],
+                'System `acme-large` reported several models',
+            ),
         ],
-        ids=['fingerprint', 'one-passing', 'identical'],
+        ids=['fingerprint', 'one-passing', 'identical', 'several-models'],
     )
     def test_refuses_outputs_it_cannot_publish(
         self, outputs: list[Output], message: str

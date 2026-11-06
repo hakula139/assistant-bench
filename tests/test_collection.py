@@ -342,7 +342,7 @@ class TestCollect:
             'reasoning_tokens': 100,
             'cost_usd': pytest.approx((400 * 2.0 + 600 * 0.2 + 500 * 10.0) / 1e6),
             'latency_sec': 1.5,
-            'response_model': 'large-2026',
+            'response_models': ('large-2026',),
             'request_id': 'req-1',
         }
         written = (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
@@ -1033,6 +1033,27 @@ class TestCollect:
         (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
 
         assert output.latency_sec == latency
+
+    def test_lists_each_model_a_terminal_agents_calls_reported(
+        self, data_dir: Path
+    ) -> None:
+        calls = [
+            {'response_model': 'other-2026'},
+            {'response_model': 'large-2026'},
+            {'response_model': None},
+            {'response_model': 'other-2026'},
+        ]
+        record_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'a__1',
+            current_agent(),
+            task='f/a',
+            context=AgentContext(metadata={'calls': calls}),
+        )
+
+        (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
+
+        assert output.response_models == ('large-2026', 'other-2026')
 
     def test_names_an_unknown_harness(self, families_dir: Path) -> None:
         family = with_settings(voted_tasks(families_dir), harness='claude-code')

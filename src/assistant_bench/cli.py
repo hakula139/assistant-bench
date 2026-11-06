@@ -45,7 +45,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
-from assistant_bench.outputs import Output, read_outputs, tests_pass
+from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
 from assistant_bench.spend import (
     Basis,
     Projection,
@@ -598,6 +598,9 @@ def _collect(
     solved = {output.case for output in outputs if tests_pass(output.reward)}
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
+
+    for conflict in pool_conflicts(family, outputs):
+        typer.echo(conflict)
 
     if family.source == 'tasks' and family.settings.systems:
         _author_rates(family, outputs, _family_systems(family, systems), export)
