@@ -162,21 +162,20 @@ class Terminus(Terminus2):
     ) -> BaseLLM:
         assert isinstance(self.options, TerminusOptions)
         assert model_info is not None
-        settings = NativeSettings(
-            model_name=model_name,
-            context_limit=model_info['max_input_tokens'],
-            output_limit=model_info['max_output_tokens'],
-            effort=reasoning_effort,
-            logs_dir=self.logs_dir,
-        )
         endpoint = Endpoint.read(self._get_env, self.options.api)
         match self.options.api:
             case 'anthropic-messages':
                 self._endpoint_client = endpoint.messages_client()
-                return MessagesLLM(self._endpoint_client, settings)
+                return MessagesLLM(
+                    self._endpoint_client,
+                    self._native_settings(model_name, reasoning_effort, model_info),
+                )
             case 'openai-responses':
                 self._endpoint_client = endpoint.client()
-                return ResponsesLLM(self._endpoint_client, settings)
+                return ResponsesLLM(
+                    self._endpoint_client,
+                    self._native_settings(model_name, reasoning_effort, model_info),
+                )
             case 'openai-chat-completions':
                 self._endpoint_client = endpoint.client()
                 constructor_kwargs: dict[str, Any] = {
@@ -196,12 +195,23 @@ class Terminus(Terminus2):
                     session_id=session_id,
                     max_thinking_tokens=max_thinking_tokens,
                     reasoning_effort=reasoning_effort,
-                    context_limit=settings.context_limit,
-                    output_limit=settings.output_limit,
+                    context_limit=model_info['max_input_tokens'],
+                    output_limit=model_info['max_output_tokens'],
                     **constructor_kwargs,
                 )
             case _:
                 assert_never(self.options.api)
+
+    def _native_settings(
+        self, model_name: str, effort: str | None, model_info: dict[str, Any]
+    ) -> NativeSettings:
+        return NativeSettings(
+            model_name=model_name,
+            context_limit=model_info['max_input_tokens'],
+            output_limit=model_info['max_output_tokens'],
+            effort=effort,
+            logs_dir=self.logs_dir,
+        )
 
     _query_llm = Terminus2._query_llm.retry_with(
         retry=Terminus2._query_llm.retry.retry

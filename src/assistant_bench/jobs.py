@@ -69,7 +69,7 @@ N_CONCURRENT_CONTAINERS = 4
 ROUTE_CONCURRENCY = 4
 CHECK_ATTEMPTS = 3
 # LiteLLM loads a .env above its own install unless its mode is PRODUCTION, and
-# bench loads the working directory's .env itself. Its import downloads the model
+# bench loads the working directory's .env itself. Importing LiteLLM downloads its
 # cost map unless told to read the bundled copy.
 HARBOR_ENV = {
     'HARBOR_TELEMETRY': 'off',
