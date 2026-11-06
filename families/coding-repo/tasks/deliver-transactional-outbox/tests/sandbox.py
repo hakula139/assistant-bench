@@ -16,20 +16,24 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
-from typing import Any
+from typing import IO, Any
 
 
 APP = pathlib.Path('/app')
 TESTS = pathlib.Path(__file__).resolve().parent
 OBSERVATION_LIMIT = 1 << 20
 """The most bytes of JSON one scenario may return."""
+LOG_TAIL = 4000
+"""The most bytes of a process's output that a failure reports."""
 
 # Debian's `nobody` user and `nogroup` group.
 SANDBOX_ID = 65534
 SANDBOXED = os.geteuid() == 0
 
 _root: pathlib.Path | None = None
+_deadline = 0.0
 _spawned: list[subprocess.Popen[Any]] = []
 
 
@@ -69,10 +73,14 @@ def share(path: pathlib.Path, *, writable: bool) -> None:
             entry.chmod((entry.stat().st_mode | readable) & 0o755)
 
 
-def enter() -> None:
-    """Copy the workspace read-only for the hidden run's scenarios."""
-    global _root
+def enter(timeout_sec: float) -> None:
+    """Copy the workspace read-only for the hidden run's scenarios.
+
+    Every scenario must return within `timeout_sec` of this call.
+    """
+    global _root, _deadline
     _root = copy_workspace().parent
+    _deadline = time.monotonic() + timeout_sec
 
 
 def workspace() -> pathlib.Path:
@@ -157,14 +165,21 @@ def observe(module: str, function: str, /, **args: Any) -> Any:
             stderr=subprocess.STDOUT,
             pass_fds=[record.fileno()],
         )
-        with contextlib.suppress(BrokenPipeError):
-            process.communicate(json.dumps(args).encode() + b'\n')
+        remaining = max(0.0, _deadline - time.monotonic())
+        try:
+            process.communicate(json.dumps(args).encode() + b'\n', remaining)
+        except BrokenPipeError:
+            pass
+        except subprocess.TimeoutExpired:
+            stop(process)
+            raise AssertionError(
+                f"`{module}.{function}` ran past the run's deadline.\n{tail(log)}"
+            ) from None
         stop(process)
 
         record.seek(0)
         data = record.read(OBSERVATION_LIMIT + 1)
-        log.seek(0)
-        out = log.read().decode(errors='replace')[-4000:]
+        out = tail(log)
 
     scenario = f'`{module}.{function}`'
     if len(data) > OBSERVATION_LIMIT:
@@ -173,6 +188,12 @@ def observe(module: str, function: str, /, **args: Any) -> Any:
         return json.loads(data)
     except ValueError:
         raise AssertionError(f'{scenario} returned no observation.\n{out}') from None
+
+
+def tail(log: IO[bytes]) -> str:
+    """Return the last `LOG_TAIL` bytes of `log` as text."""
+    log.seek(max(0, log.seek(0, os.SEEK_END) - LOG_TAIL))
+    return log.read().decode(errors='replace')
 
 
 def stop(process: subprocess.Popen[Any]) -> None:

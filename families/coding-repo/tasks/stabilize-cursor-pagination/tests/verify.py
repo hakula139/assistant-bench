@@ -87,8 +87,7 @@ def run_workspace_tests() -> tuple[Record | None, str]:
             process.wait(TIMEOUT_SEC)
         sandbox.kill_sandbox()
 
-        log.seek(0)
-        out = log.read().decode(errors='replace')
+        out = sandbox.tail(log)
         record.seek(0)
         try:
             data = json.loads(record.read())
@@ -122,7 +121,7 @@ def time_out(number: int, frame: types.FrameType | None) -> None:
 
 def check_hidden_tests() -> None:
     """Run every hidden test, which must pass with none skipped."""
-    sandbox.enter()
+    sandbox.enter(TIMEOUT_SEC)
     signal.signal(signal.SIGALRM, time_out)
     signal.alarm(TIMEOUT_SEC)
     suite = unittest.TestLoader().discover(

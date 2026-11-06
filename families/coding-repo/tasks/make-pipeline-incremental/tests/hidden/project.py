@@ -5,7 +5,7 @@ import textwrap
 import unittest
 from typing import Any
 
-from sandbox import observe, scratch
+import sandbox
 
 
 STEPS = textwrap.dedent(
@@ -115,7 +115,7 @@ class Completed:
 
 class ProjectCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = str(scratch() / 'project')
+        self.root = str(sandbox.scratch() / 'project')
         self.write_project()
 
     def write_project(self) -> None:
@@ -124,11 +124,11 @@ class ProjectCase(unittest.TestCase):
 
     def project(self, function: str, /, **args: Any) -> Any:
         """Edit or build this test's project through `scenarios.project`."""
-        return observe('project', function, root=self.root, **args)
+        return sandbox.observe('project', function, root=self.root, **args)
 
     def api(self, function: str, /, **args: Any) -> Any:
         """Build this test's project through `scenarios.api`."""
-        return observe('api', function, root=self.root, **args)
+        return sandbox.observe('api', function, root=self.root, **args)
 
     def write(self, name: str, content: str) -> None:
         self.project('write', files={name: content})

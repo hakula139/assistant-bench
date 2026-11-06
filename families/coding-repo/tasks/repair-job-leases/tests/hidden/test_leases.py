@@ -1,7 +1,7 @@
 import unittest
 from typing import Any
 
-from sandbox import observe
+import sandbox
 
 
 STARTER_SCHEMA = """
@@ -36,7 +36,7 @@ class LeaseTest(unittest.TestCase):
         return lease
 
     def test_expired_leases_are_claimed_again(self) -> None:
-        seen = observe('leases', 'expired_leases_are_claimed_again')
+        seen = sandbox.observe('leases', 'expired_leases_are_claimed_again')
 
         first = self.claimed(seen['first'], 'w1')
         self.assertIsNone(seen['early'])
@@ -48,7 +48,7 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(job['last_error'], 'lease expired')
 
     def test_superseded_leases_change_nothing(self) -> None:
-        seen = observe('leases', 'superseded_leases_change_nothing')
+        seen = sandbox.observe('leases', 'superseded_leases_change_nothing')
 
         self.assertEqual(seen['lost'], [True, True, True])
         before = seen['before']
@@ -59,7 +59,7 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(seen['after']['result'], 'from w2')
 
     def test_expired_leases_cannot_be_used(self) -> None:
-        seen = observe('leases', 'expired_leases_cannot_be_used')
+        seen = sandbox.observe('leases', 'expired_leases_cannot_be_used')
 
         self.assertEqual(seen['lost'], [True, True, True])
         job = seen['job']
@@ -69,7 +69,7 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(self.claimed(seen['next'], 'w2')['job_id'], seen['job_id'])
 
     def test_claims_take_the_earliest_run_at_then_the_lowest_id(self) -> None:
-        seen = observe('leases', 'claim_order')
+        seen = sandbox.observe('leases', 'claim_order')
 
         order = [self.claimed(lease, 'w1')['job_id'] for lease in seen['order']]
         self.assertEqual(order, [seen['earlier'], seen['later'], seen['tied']])
@@ -113,7 +113,7 @@ class LeaseTest(unittest.TestCase):
             for job_id, row in enumerate(rows, 1)
         ]
 
-        seen = observe(
+        seen = sandbox.observe(
             'leases', 'open_current_format', schema=STARTER_SCHEMA, rows=rows
         )
 
@@ -142,13 +142,13 @@ class LeaseTest(unittest.TestCase):
         )
 
     def test_heartbeats_keep_the_lease(self) -> None:
-        seen = observe('leases', 'heartbeats_keep_the_lease')
+        seen = sandbox.observe('leases', 'heartbeats_keep_the_lease')
 
         self.assertIsNone(seen['other'])
         self.assertEqual(seen['job']['status'], 'done')
 
     def test_jobs_whose_leases_keep_expiring_are_dead_lettered(self) -> None:
-        seen = observe('leases', 'leases_keep_expiring')
+        seen = sandbox.observe('leases', 'leases_keep_expiring')
 
         attempts = [
             self.claimed(lease, f'w{attempt}')['attempt']
@@ -165,7 +165,7 @@ class LeaseTest(unittest.TestCase):
     def test_failures_back_off_on_the_queue_clock(self) -> None:
         delays = [2, 4, 5]
 
-        seen = observe('leases', 'failures_back_off', delays=delays)
+        seen = sandbox.observe('leases', 'failures_back_off', delays=delays)
 
         for delay, retry in zip(delays, seen['retries'], strict=True):
             with self.subTest(delay=delay):
@@ -177,7 +177,7 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(seen['attempts'], 4)
 
     def test_dedupe_keys_are_freed_by_finished_jobs(self) -> None:
-        seen = observe('leases', 'dedupe_keys_are_freed')
+        seen = sandbox.observe('leases', 'dedupe_keys_are_freed')
 
         self.assertEqual(seen['while_running'], seen['first'])
         self.assertEqual(len({seen['first'], seen['second'], seen['third']}), 3)
@@ -185,7 +185,7 @@ class LeaseTest(unittest.TestCase):
         self.assertEqual(seen['again'], seen['third'])
 
     def test_workers_drop_jobs_they_outlived(self) -> None:
-        seen = observe('leases', 'workers_drop_outlived_jobs')
+        seen = sandbox.observe('leases', 'workers_drop_outlived_jobs')
 
         self.assertIs(seen['ran'], True)
         self.assertNotEqual(seen['job']['status'], 'done')
@@ -195,7 +195,7 @@ class LeaseTest(unittest.TestCase):
     def test_cli_workers_run_every_job(self) -> None:
         numbers = [0, 1, 2]
 
-        seen = observe('leases', 'cli_workers_run_every_job', numbers=numbers)
+        seen = sandbox.observe('leases', 'cli_workers_run_every_job', numbers=numbers)
 
         self.assertEqual(seen['ran'], 3)
         self.assertEqual(seen['results'], [n * n for n in numbers])

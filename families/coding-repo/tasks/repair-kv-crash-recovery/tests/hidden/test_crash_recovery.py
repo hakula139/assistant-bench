@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import struct
 import subprocess
 import unittest
@@ -85,8 +84,7 @@ def recover(directory: Path) -> dict[str, Any]:
 
 
 def copy_store(source: Path, target: Path) -> None:
-    shutil.copytree(source, target)
-    sandbox.share(target, writable=True)
+    sandbox.observe('files', 'copy', source=str(source), target=str(target))
 
 
 class CrashRecoveryTest(unittest.TestCase):
@@ -202,11 +200,9 @@ class CrashRecoveryTest(unittest.TestCase):
 
     def test_crashes_while_recovering_a_torn_tail(self) -> None:
         def tear(directory: Path) -> None:
-            active = max(
-                directory.glob('wal-*.log'), key=lambda path: int(path.stem[4:])
+            sandbox.observe(
+                'files', 'append', directory=str(directory), data=TORN_FRAME.hex()
             )
-            with active.open('ab') as file:
-                file.write(TORN_FRAME)
 
         setup = [put('alpha', 'one'), put('beta', 'two')]
 

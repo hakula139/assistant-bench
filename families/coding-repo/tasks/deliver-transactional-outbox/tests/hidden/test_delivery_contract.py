@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from sandbox import observe
+import sandbox
 
 
 OUTBOX_MISSING = 'The durable outbox table must exist before adding its trigger.'
@@ -13,7 +13,7 @@ class TestOrderDelivery(unittest.TestCase):
     def test_identical_placement_is_idempotent_and_conflicts_preserve_work(
         self,
     ) -> None:
-        seen = observe('delivery', 'identical_placement')
+        seen = sandbox.observe('delivery', 'identical_placement')
 
         self.assertIs(seen['conflicted'], True, 'ConflictError not raised')
         order = seen['order']
@@ -31,7 +31,7 @@ class TestOrderDelivery(unittest.TestCase):
         )
 
     def test_order_and_notification_rollback_together_on_insert_failure(self) -> None:
-        seen = observe('delivery', 'rollback_on_insert_failure')
+        seen = sandbox.observe('delivery', 'rollback_on_insert_failure')
 
         self.assertIs(seen['outbox'], True, OUTBOX_MISSING)
         self.assertIs(seen['rejected'], True, 'DatabaseError not raised')
@@ -43,7 +43,7 @@ class TestOrderDelivery(unittest.TestCase):
     def test_delivery_limit_counts_attempts_and_failures_do_not_stop_later_records(
         self,
     ) -> None:
-        seen = observe('delivery', 'delivery_limit')
+        seen = sandbox.observe('delivery', 'delivery_limit')
 
         stored = seen['stored']
         self.assertEqual(tuple(seen['first']), (2, 1, 1))
@@ -63,7 +63,7 @@ class TestOrderDelivery(unittest.TestCase):
         )
 
     def test_receiver_acceptance_before_database_failure_is_safe_to_retry(self) -> None:
-        seen = observe('delivery', 'acceptance_before_database_failure')
+        seen = sandbox.observe('delivery', 'acceptance_before_database_failure')
 
         self.assertIs(seen['outbox'], True, OUTBOX_MISSING)
         stored = seen['stored']
@@ -82,7 +82,9 @@ class TestOrderDelivery(unittest.TestCase):
         amounts = [0, -1, True, 2**63]
         limits = [0, -1, True]
 
-        seen = observe('delivery', 'invalid_inputs', amounts=amounts, limits=limits)
+        seen = sandbox.observe(
+            'delivery', 'invalid_inputs', amounts=amounts, limits=limits
+        )
 
         for amount, rejected in zip(amounts, seen['amounts'], strict=True):
             with self.subTest(amount=amount):
@@ -111,7 +113,7 @@ class TestOrderDelivery(unittest.TestCase):
             ['dispatch', '--db', '{db}', '--receiver', '{receiver}'],
         ]
 
-        seen = observe('delivery', 'cli_pipeline', commands=commands)
+        seen = sandbox.observe('delivery', 'cli_pipeline', commands=commands)
 
         for args, result in zip(commands, seen['runs'], strict=True):
             with self.subTest(command=args[0]):

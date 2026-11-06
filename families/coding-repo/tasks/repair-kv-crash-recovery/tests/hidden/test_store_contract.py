@@ -18,11 +18,6 @@ def segment(sequence: int, *frames: bytes) -> bytes:
     return b'TKVL' + struct.pack('>I', sequence) + b''.join(frames)
 
 
-def segments(directory: Path) -> list[Path]:
-    """Return the store's segments in sequence order."""
-    return sorted(directory.glob('wal-*.log'), key=lambda path: int(path.stem[4:]))
-
-
 def pairs(*items: tuple[bytes, bytes]) -> list[list[str]]:
     """Return `items` as the store scenarios report them."""
     return [[key.hex(), value.hex()] for key, value in items]
@@ -43,6 +38,12 @@ class StoreContractTest(unittest.TestCase):
             **args,
         )
 
+    def append(self, data: bytes) -> None:
+        """Append `data` to the active segment of the test's store."""
+        sandbox.observe(
+            'files', 'append', directory=str(self.directory), data=data.hex()
+        )
+
     def test_api_keeps_its_behavior(self) -> None:
         seen = self.observe('api_keeps_its_behavior')
 
@@ -61,20 +62,22 @@ class StoreContractTest(unittest.TestCase):
     def test_replays_many_segments_in_sequence_order(self) -> None:
         self.observe('fill_segments')
 
-        self.assertGreater(len(segments(self.directory)), 11)
+        count = sandbox.observe('files', 'segment_count', directory=str(self.directory))
+        self.assertGreater(count, 11)
         seen = self.observe('replay_segments')
         self.assertEqual(seen['counter'], (b'39' * 8).hex())
         self.assertEqual(seen['length'], 41)
 
     def test_opens_a_store_written_in_the_current_format(self) -> None:
-        for sequence in range(1, 13):
-            data = segment(
+        files = {
+            f'wal-{sequence}.log': segment(
                 sequence,
                 frame(1, b'version', str(sequence).encode()),
                 frame(1, f'key-{sequence}'.encode(), b'value'),
-            )
-            (self.directory / f'wal-{sequence}.log').write_bytes(data)
-        sandbox.share(self.directory, writable=True)
+            ).hex()
+            for sequence in range(1, 13)
+        }
+        sandbox.observe('files', 'write', directory=str(self.directory), files=files)
 
         seen = self.observe('reopen_current_format')
 
@@ -88,13 +91,9 @@ class StoreContractTest(unittest.TestCase):
                 directory = self.directory / damage.replace(' ', '-')
                 self.observe('seal_segments', directory)
 
-                sealed = segments(directory)[0]
-                data = bytearray(sealed.read_bytes())
-                if damage == 'flipped byte':
-                    data[-2] ^= 0xFF
-                else:
-                    del data[-3:]
-                sealed.write_bytes(bytes(data))
+                sandbox.observe(
+                    'files', 'damage_sealed', directory=str(directory), kind=damage
+                )
 
                 raised = self.observe(
                     'opening_raises',
@@ -107,19 +106,14 @@ class StoreContractTest(unittest.TestCase):
     def test_reports_a_damaged_snapshot(self) -> None:
         self.observe('compact_one_entry')
 
-        snapshot = self.directory / 'snapshot.db'
-        data = bytearray(snapshot.read_bytes())
-        data[len(data) // 2] ^= 0xFF
-        snapshot.write_bytes(bytes(data))
+        sandbox.observe('files', 'damage_snapshot', directory=str(self.directory))
 
         self.assertIs(self.observe('opening_raises', error='CorruptSnapshot'), True)
 
     def test_writes_after_an_interrupted_append_survive_restarts(self) -> None:
         self.observe('store_kept')
 
-        active = segments(self.directory)[-1]
-        with active.open('ab') as file:
-            file.write(frame(1, b'lost', b'2')[:9])
+        self.append(frame(1, b'lost', b'2')[:9])
 
         seen = self.observe('recover_and_put')
         self.assertIsNone(seen['error'])
@@ -131,8 +125,7 @@ class StoreContractTest(unittest.TestCase):
 
         damaged = bytearray(frame(1, b'bad', b'checksum'))
         damaged[-1] ^= 0xFF
-        with segments(self.directory)[-1].open('ab') as file:
-            file.write(bytes(damaged) + frame(1, b'after-bad', b'2'))
+        self.append(bytes(damaged) + frame(1, b'after-bad', b'2'))
 
         seen = self.observe('recover_and_put')
         if seen['error'] is not None:
