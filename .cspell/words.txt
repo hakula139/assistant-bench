@@ -1,5 +1,4 @@
 acompletion
-anyio
 asciinema
 asyncio
 Atoi
@@ -46,11 +45,9 @@ Halvorsen
 hanzi
 HMAC
 httpx
-idna
 intp
 isinstance
 isort
-jitless
 jobq
 journalctl
 katex
@@ -103,11 +100,9 @@ shfmt
 sigxfsz
 srcdoc
 SSIM
-starlette
 statix
 strconv
 syncd
-sysconfigdata
 tabex
 taplo
 threadpoolctl
@@ -121,7 +116,6 @@ trixie
 trustme
 typer
 unbilled
-undici
 unpushed
 unranked
 unrouted

@@ -1,6 +1,6 @@
 # Harbor
 
-[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins release 0.25.0 and drives it through job configs built from Harbor's own pydantic models.
+[Harbor](https://github.com/harbor-framework/harbor) runs agents on tasks in containers, verifies them with each task's tests, and records every trial. The bench pins one release in `pyproject.toml` and drives it through job configs built from Harbor's own pydantic models.
 
 ## What the Bench Uses
 

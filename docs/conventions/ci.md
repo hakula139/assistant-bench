@@ -9,7 +9,7 @@ GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch:
 | Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones                                                                                           |
 | Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov                                   |
 | Build Site      | `pnpm build`, a dry-run bundle of the production voting Worker, uploading `web/dist` as the `site-dist` artifact                                                            |
-| Python Check    | `uv sync --locked`, Ruff, mypy, basedpyright, dependency stub validation, pytest with coverage uploaded to Codecov, and the fingerprint check                               |
+| Python Check    | `uv sync --locked`, Ruff, mypy, basedpyright, pytest with coverage uploaded to Codecov, and the fingerprint check                                                           |
 | Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below |
 | CI Result       | Fails when any job above fails or is cancelled                                                                                                                              |
 
@@ -21,7 +21,7 @@ The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/
 
 Both jobs authenticate the upload with a GitHub OIDC token, so they alone hold `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing patch check shows the cause in CI.
 
-Only the deploy jobs below read secrets, and each reads them in its deploy step alone. List each new check job in CI Result's `needs`.
+Only the deploy jobs below read secrets, and only in the steps that run Wrangler. List each new check job in CI Result's `needs`.
 
 Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke. Revisit the budget when the workload changes so a stalled job releases its runner and concurrency group promptly.
 

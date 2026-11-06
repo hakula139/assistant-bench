@@ -33,7 +33,7 @@ Every task is a synthetic Python 3.14 application using the standard library and
 | `repair-job-leases`            | Lease SQLite queue jobs atomically across processes, with fencing, expiry and backoff         |
 | `make-pipeline-incremental`    | Skip exactly the build steps whose content, declaration and code fingerprints still match     |
 
-A task's `[metadata] author` preserves the public label of the system whose model wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
+A task's `[metadata] author` names the model that wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
 
 ## Task Conventions
 
@@ -55,7 +55,7 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
 - **Tests:** hidden tests assert documented behavior through the application's real callers, persisted state and controlled concurrency. Each hidden test method sits directly in the body of a top-level class in a `test*.py` module, since `verify.py` lists the expected tests from those bodies alone. `tests/test_repository.py` runs the real verifier against each starter, its reference, and the broken variants of the reference stored as patches under `tests/fixtures/coding-repo/<task>/`, and only the reference may pass the hidden tests. It also appends each bypass in `tests/fixtures/coding-repo/*.py`, which tries to pass without the behavior, to the reference's application packages in every task, and requires the verifier to reject it and to replace reward files planted beforehand. A table-driven test checks how `verify.py` judges each kind of run record. Candidates add focused regression tests.
 
-- **Style:** starters, references, hidden tests and verifier scripts share the root formatting, spelling and strict Python 3.14 typing policy. Each task adds a `[tool.basedpyright] executionEnvironments` entry whose `extraPaths` names its `solution/app`, so its hidden tests resolve the reference package.
+- **Style:** starters, references, hidden tests and verifier scripts share the root formatting, spelling and strict Python 3.14 typing policy. Each task adds two `[tool.basedpyright] executionEnvironments` entries: one rooted at its `environment/app` with empty `extraPaths`, so the starter resolves only its own modules, then one rooted at the task whose `extraPaths` names its `solution/app`, so its hidden tests resolve the reference package.
 
 The hidden tests still call the application in their own process, so code written against `runner.py` itself, such as one that forges its record or rewrites a test class in memory, can still pass, and a passing reward needs review. Moving the hidden assertions out of that process, which [#195](https://github.com/hakula139/assistant-bench/issues/195) tracks, must land before the family turns `public` or closes its first `tests` round.
 

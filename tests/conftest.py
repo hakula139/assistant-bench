@@ -63,42 +63,37 @@ def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]
     return handle
 
 
+def require_loopback(request: httpx.Request | httpx2.Request) -> None:
+    if request.url.host not in {'127.0.0.1', '::1'}:
+        pytest.fail(f'A test attempted a non-loopback request: {request.url.host}')
+
+
 @pytest.fixture(autouse=True)
 def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
     send = httpx.AsyncClient.send
     send2 = httpx2.AsyncClient.send
+    handle = httpx.HTTPTransport.handle_request
 
     async def checked_send(
         client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
     ) -> httpx.Response:
-        if request.url.host not in {'127.0.0.1', '::1'}:
-            pytest.fail(
-                f'A model test attempted a non-loopback request: {request.url.host}'
-            )
+        require_loopback(request)
         return await send(client, request, **kwargs)
-
-    monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
 
     async def checked_send2(
         client: httpx2.AsyncClient, request: httpx2.Request, **kwargs: Any
     ) -> httpx2.Response:
-        if request.url.host not in {'127.0.0.1', '::1'}:
-            pytest.fail(
-                f'A model test attempted a non-loopback request: {request.url.host}'
-            )
+        require_loopback(request)
         return await send2(client, request, **kwargs)
-
-    monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_send2)
-
-    handle = httpx.HTTPTransport.handle_request
 
     def checked_handle(
         transport: httpx.HTTPTransport, request: httpx.Request
     ) -> httpx.Response:
-        if request.url.host not in {'127.0.0.1', '::1', 'localhost'}:
-            pytest.fail(f'A test attempted a non-loopback request: {request.url.host}')
+        require_loopback(request)
         return handle(transport, request)
 
+    monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_send2)
     monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', checked_handle)
 
 

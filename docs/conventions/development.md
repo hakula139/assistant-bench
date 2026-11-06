@@ -20,7 +20,7 @@ The root Python project contains the `assistant_bench` CLI, and `uv sync` instal
 
 Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application. The `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
 
-The project supports Python 3.14, selected by `.python-version` and bounded by the root and typing package requirements. Ruff infers its target from the root requirement, while mypy and basedpyright use the selected interpreter. The host and authored task code share this policy. Each task resolves imports against its complete reference package, while its starter application is checked independently. Editors use the root `.venv`.
+The project supports Python 3.14, selected by `.python-version` and bounded by the root and typing package requirements. Ruff infers its target from the root requirement, while mypy and basedpyright use the selected interpreter. The host and authored task code share this policy. Each coding task's hidden tests and reference resolve imports against its reference package, while its starter resolves only its own modules. Editors use the root `.venv`.
 
 ## Pre-Commit Hooks
 
@@ -42,6 +42,7 @@ Commands stay minimal, and settings live in config files:
 | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv    | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
 | Systems under test                                                               | `systems.toml`                                                                                                        |
+| The generation and Messages protocol versions and the Messages API version       | `pyproject.toml`'s `[tool.assistant-bench]`                                                                           |
 | A family's scorer, systems, and samples                                          | `families/<family>/family.toml`                                                                                       |
 | Model completion and context allowances                                          | The shared model catalog, or a bare route's `systems.toml` table                                                      |
 | Harbor job settings, such as concurrency and retries                             | `jobs.py`, which builds each job config at run time                                                                   |

@@ -80,6 +80,8 @@
           check-added-large-files.enable = true;
           check-yaml.enable = true;
           taplo.enable = true;
+          # The patch adds `concurrency.queue`, unreleased as of v1.7.12. Drop it once Nixpkgs ships
+          # a newer actionlint.
           actionlint = {
             enable = true;
             package = pkgs.actionlint.overrideAttrs (old: {

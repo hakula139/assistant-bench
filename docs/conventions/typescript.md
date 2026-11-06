@@ -19,7 +19,7 @@ web/src/
 ├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
 ├── pages/                                  # Public routes only
 ├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture, JSON Schema, chart stub, and score track helpers, and the page and built-site tests
+├── test/                                   # The fixture, JSON Schema, chart stub, score track, and vote pair helpers, and the page, built-site, and Wrangler config tests
 └── vote/vote.astro                         # The vote page, routed by the integration
 ```
 
@@ -65,7 +65,7 @@ web/src/
 
 - The integration routes `/vote/` in every build. Its island fetches personalized data only at runtime.
 - The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- The voting Worker applies the policy that [Arena](../design/arena.md#vote-api) gives. Keep the page within it, render case and output Markdown only through `lib/markdown.ts`, and keep its images disabled as well, so output text cannot load a remote image.
+- Render case and output Markdown only through `lib/markdown.ts`, which shows raw HTML as text and disables images, so output text cannot load a remote image.
 - `lib/vote-flow.ts` holds every call to the vote API and the tab's draft, which lives in `sessionStorage` alone, so the page writes nothing to `localStorage` and never sends a vote on load.
 - The page's only third-party content is the Turnstile widget. Its script source is in the page's Astro CSP, and its frame source in the `/vote/*` rule of `web/public/_headers`.
 
