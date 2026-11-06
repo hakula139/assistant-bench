@@ -113,28 +113,27 @@ export const terms = {
 export const defectTerms: Record<Defect, Term> = {
   facts: {
     term: 'Wrong facts',
-    definition:
-      'Incorrect claims or invented evidence, including contradictions of the supplied material.',
+    definition: 'False claims, invented evidence, or contradictions of the supplied material.',
   },
   mechanics: {
     term: 'Language errors',
-    definition: 'Grammar, spelling, or punctuation that does not suit the language or style.',
+    definition: 'Grammar or spelling errors, or punctuation unsuited to the language or style.',
   },
   tone: {
     term: 'Wrong tone',
-    definition: 'Too formal, too casual, or wrong for its reader.',
+    definition: 'Too formal or casual for the reader or brief.',
   },
   formulaic: {
     term: 'Formulaic',
-    definition: 'Templated, boilerplate prose, such as Chinese 公文腔.',
+    definition: 'Generic or templated prose.',
   },
   length: {
     term: 'Too long',
-    definition: 'Says more than its reader needs.',
+    definition: 'More than the reader needs.',
   },
   scope: {
     term: 'Misses the brief',
-    definition: 'Misses a requirement or adds unrelated material.',
+    definition: 'Misses requirements or adds unrelated material.',
   },
   conventions: {
     term: 'Conventions',
