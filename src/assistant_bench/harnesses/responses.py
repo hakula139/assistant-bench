@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, override
 
-import httpx
+import httpx2
 from harbor.llms.base import (
     BaseLLM,
     ContextLengthExceededError,
@@ -75,17 +75,19 @@ class ResponseResult:
             'response_model': response.model,
             'response_id': response.id,
             'request_id': self.request_id,
-            'response_error': response.error.model_dump() if response.error else None,
+            'response_error': response.error.model_dump(exclude_unset=True)
+            if response.error
+            else None,
         }
 
     @property
     def items(self) -> list[dict[str, Any]]:
         return [
-            item.model_dump(mode='json', exclude_unset=True)
+            item.model_dump(mode='json', by_alias=True, exclude_unset=True)
             for item in self.response.output
         ]
 
-    def check(self, request: httpx.Request, *, complete: bool) -> None:
+    def check(self, request: httpx2.Request, *, complete: bool) -> None:
         response = self.response
         if response.error is not None or response.status not in (
             'completed',
@@ -260,7 +262,7 @@ class ResponsesLLM(BaseLLM):
         attempt.update(details)
         artifact = self.logs_dir / f'response-{len(self.results)}.json'
         artifact.parent.mkdir(parents=True, exist_ok=True)
-        artifact.write_text(result.response.model_dump_json(indent=2))
+        artifact.write_text(result.response.model_dump_json(indent=2, by_alias=True))
         result.check(raw.http_response.request, complete=True)
         return LLMResponse(
             content=result.response.output_text,

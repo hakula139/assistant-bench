@@ -8,7 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 from unittest.mock import MagicMock
 
 import anthropic
-import httpx
+import httpx2
 import openai
 import pytest
 from anthropic import AsyncAnthropic
@@ -1219,7 +1219,7 @@ class TestTerminus:
             export: NixosConfigExport,
             families_dir: Path,
             data_dir: Path,
-            model_requests: list[httpx.Request],
+            model_requests: list[httpx2.Request],
             terminal_session: TmuxSession,
             tmp_path: Path,
             api: str,

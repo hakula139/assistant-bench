@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import httpx
+import httpx2
 import openai
 import pytest
 from anthropic import AsyncAnthropic
@@ -399,7 +399,7 @@ class TestGenerate:
             endpoint_clients: list[openai.AsyncOpenAI],
             messages_clients: list[AsyncAnthropic],
             export: NixosConfigExport,
-            model_requests: list[httpx.Request],
+            model_requests: list[httpx2.Request],
             tmp_path: Path,
             api: str,
         ) -> None:

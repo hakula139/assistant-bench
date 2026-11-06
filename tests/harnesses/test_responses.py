@@ -1,6 +1,6 @@
 import asyncio
 
-import httpx
+import httpx2
 import openai
 import pytest
 from openai.types.responses import Response
@@ -65,5 +65,5 @@ class TestResponseInput:
         ]
         with pytest.raises(openai.APIError, match='function call'):
             result.check(
-                httpx.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
+                httpx2.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
             )
