@@ -13,6 +13,7 @@ capsys
 cedict
 chatcmpl
 chóng
+closefd
 covariate
 cpus
 CREAT
@@ -32,6 +33,7 @@ esbuild
 evals
 exog
 expit
+fallocate
 fdatasync
 fileno
 fsize
@@ -78,6 +80,8 @@ Orchidarium
 pkgs
 Priya
 pvalue
+pwrite
+pwritev
 pycache
 pydantic
 pydocstyle
@@ -132,8 +136,10 @@ virtualenv
 wenyan
 wght
 workerd
+writev
 writingf
 writingzh
+WRONLY
 xdist
 zhon
 zhuyin

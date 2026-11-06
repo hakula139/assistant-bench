@@ -1,13 +1,20 @@
 """Drive a store in a scenario process that can crash at any file mutation.
 
 `run` opens the store, prints `opened`, applies the operations, and prints
-`done <index>` after each one returns. Every file mutation that opening the
-store and the operations make is counted: creating or truncating a file,
-writing to it, renaming, truncating or removing it. With `crash_at`, the
-process exits with status 86 just before that mutation, or with `tear`, after
-writing only the first half of that write's bytes. Without it, the run prints
-`mutation <kind>` for each one, and `sync file` or `sync dir` for each `fsync`
-or `fdatasync`.
+`done <index>` after each one returns. Each call that opening the store and the
+operations make to change a file or directory is a mutation, numbered from 1:
+creating or truncating a file as it opens, writing to it through a file object
+or a descriptor, resizing it, and creating, renaming or removing an entry. A
+write to a buffered file object counts when `write` is called, even if its bytes
+stay in the buffer until a flush. Memory-mapped writes are not counted.
+
+With `crash_at`, the process exits with status 86 in place of that mutation, so
+neither it nor any later one happens, and bytes still buffered in a file object
+are lost, as in a real crash. With `tear` as well, a write first passes the
+first half of its bytes to the file, along with whatever its file object had
+buffered. Without `crash_at`, the run prints `mutation <kind>` for each
+mutation, with the kind `write` for every write, and `sync file` or `sync dir`
+for each `fsync` or `fdatasync`.
 """
 
 import builtins
@@ -34,12 +41,11 @@ class Injector:
             kind = 'dir' if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 'file'
             print(f'sync {kind}', flush=True)
 
-    def mutate(
-        self,
-        kind: str,
-        partial: Callable[[Any], object] | None = None,
-        data: Any = None,
-    ) -> None:
+    def mutate(self, kind: str, torn: Callable[[], object] | None = None) -> None:
+        """Count a mutation about to happen, crashing if it is `crash_at`.
+
+        `torn` writes the first half of a write's bytes, for a torn crash.
+        """
         if not self.active:
             return
 
@@ -47,9 +53,24 @@ class Injector:
         if self.crash_at is None:
             print(f'mutation {kind}', flush=True)
         elif self.count == self.crash_at:
-            if self.tear and partial is not None and len(data) > 1:
-                partial(data[: len(data) // 2])
+            if self.tear and torn is not None:
+                torn()
             os._exit(CRASH_STATUS)
+
+
+def half(data: Any) -> Any:
+    return data[: len(data) // 2]
+
+
+def writes(mode: str) -> bool:
+    return any(flag in mode for flag in 'wax+')
+
+
+def creates(file: Any, mode: str) -> bool:
+    """Tell whether opening `file` in a writing `mode` creates or truncates it."""
+    if isinstance(file, int):
+        return False
+    return 'w' in mode or 'x' in mode or not os.path.exists(file)
 
 
 class TrackedFile:
@@ -60,11 +81,11 @@ class TrackedFile:
         self._injector = injector
 
     def write(self, data: Any) -> int:
-        def partial(part: Any) -> None:
-            self._file.write(part)
+        def torn() -> None:
+            self._file.write(half(data))
             self._file.flush()
 
-        self._injector.mutate('write', partial, data)
+        self._injector.mutate('write', torn)
         return self._file.write(data)
 
     def writelines(self, lines: Iterable[Any]) -> None:
@@ -89,20 +110,43 @@ class TrackedFile:
         return getattr(self._file, name)
 
 
+class TrackedFileIO(io.FileIO):
+    """Count the mutations made through an `io.FileIO` built directly."""
+
+    injector: Injector
+
+    def __init__(
+        self, file: Any, mode: str = 'r', closefd: bool = True, opener: Any = None
+    ) -> None:
+        if writes(mode) and creates(file, mode):
+            self.injector.mutate('create')
+        super().__init__(file, mode, closefd, opener)
+
+    def write(self, data: Any, /) -> int | None:
+        self.injector.mutate('write', lambda: io.FileIO.write(self, half(data)))
+        return super().write(data)
+
+    def truncate(self, size: int | None = None, /) -> int:
+        self.injector.mutate('truncate')
+        return super().truncate(size)
+
+
 def install(injector: Injector) -> None:
     """Count file mutations made through the `io`, `builtins` and `os` APIs."""
     original_open = io.open
 
     def tracked_open(file: Any, mode: str = 'r', *args: Any, **kwargs: Any) -> Any:
-        if isinstance(file, int) or not any(flag in mode for flag in 'wax+'):
+        if not writes(mode):
             return original_open(file, mode, *args, **kwargs)
 
-        if 'w' in mode or 'x' in mode or not os.path.exists(file):
+        if creates(file, mode):
             injector.mutate('create')
         return TrackedFile(original_open(file, mode, *args, **kwargs), injector)
 
     io.open = tracked_open
     builtins.open = tracked_open
+    TrackedFileIO.injector = injector
+    io.FileIO = TrackedFileIO
 
     original_os_open = os.open
 
@@ -113,19 +157,73 @@ def install(injector: Injector) -> None:
 
     os.open = tracked_os_open
 
-    original_write = os.write
+    track_writes(injector)
+    for name in ('sendfile', 'copy_file_range', 'splice'):
+        if hasattr(os, name):
+            track_copy(name, injector)
 
-    def tracked_write(fd: int, data: Any) -> int:
-        injector.mutate('write', lambda part: original_write(fd, part), data)
-        return original_write(fd, data)
-
-    os.write = tracked_write
-
-    for name in ('replace', 'rename', 'remove', 'unlink', 'truncate', 'ftruncate'):
-        wrap(name, injector)
+    names = (
+        'truncate',
+        'ftruncate',
+        'posix_fallocate',
+        'replace',
+        'rename',
+        'link',
+        'symlink',
+        'remove',
+        'unlink',
+        'mkdir',
+        'rmdir',
+    )
+    for name in names:
+        if hasattr(os, name):
+            wrap(name, injector)
     for name in ('fsync', 'fdatasync'):
         if hasattr(os, name):
             track_sync(name, injector)
+
+
+def track_writes(injector: Injector) -> None:
+    """Count the writes made through descriptors, at their offset or a given one."""
+    write, pwrite, writev, pwritev = os.write, os.pwrite, os.writev, os.pwritev
+
+    def tracked_write(fd: int, data: Any) -> int:
+        injector.mutate('write', lambda: write(fd, half(data)))
+        return write(fd, data)
+
+    def tracked_pwrite(fd: int, data: Any, offset: int) -> int:
+        injector.mutate('write', lambda: pwrite(fd, half(data), offset))
+        return pwrite(fd, data, offset)
+
+    def tracked_writev(fd: int, buffers: Iterable[Any]) -> int:
+        buffers = list(buffers)
+        injector.mutate('write', lambda: write(fd, half(b''.join(buffers))))
+        return writev(fd, buffers)
+
+    def tracked_pwritev(
+        fd: int, buffers: Iterable[Any], offset: int, *flags: int
+    ) -> int:
+        buffers = list(buffers)
+        injector.mutate('write', lambda: pwrite(fd, half(b''.join(buffers)), offset))
+        return pwritev(fd, buffers, offset, *flags)
+
+    os.write = tracked_write
+    os.pwrite = tracked_pwrite
+    os.writev = tracked_writev
+    os.pwritev = tracked_pwritev
+
+
+def track_copy(name: str, injector: Injector) -> None:
+    """Count a call that copies up to a byte count into a descriptor."""
+    original = getattr(os, name)
+    count_at = 3 if name == 'sendfile' else 2
+
+    def tracked(*args: Any, **kwargs: Any) -> Any:
+        torn = (*args[:count_at], args[count_at] // 2, *args[count_at + 1 :])
+        injector.mutate('write', lambda: original(*torn, **kwargs))
+        return original(*args, **kwargs)
+
+    setattr(os, name, tracked)
 
 
 def wrap(name: str, injector: Injector) -> None:
