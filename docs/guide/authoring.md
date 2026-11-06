@@ -115,6 +115,7 @@ A local task is a directory under the data directory's `cases/<family>/`, which 
 model = "claude-opus-5-5"
 api = "anthropic-messages"
 effort = "high"
+display_name = "Claude Opus 5.5 · High"
 
 ["opus-5.5-nixos"]
 model = "claude-opus-5-5"
