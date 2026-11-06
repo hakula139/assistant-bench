@@ -4,8 +4,11 @@ import { defineConfig } from 'astro/config';
 
 import voting from './src/integrations/voting';
 
+const pages = process.env.CI_PAGES_URL;
+
 export default defineConfig({
-  site: 'https://bench.hakula.xyz',
+  site: pages ?? 'https://bench.hakula.xyz',
+  base: pages ? new URL(pages).pathname : '/',
   security: {
     csp: {
       styleDirective: { resources: ["'self'", "'unsafe-inline'"] },

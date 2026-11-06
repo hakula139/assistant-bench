@@ -2,7 +2,7 @@
 import IntervalMark from '@/components/site/IntervalMark.astro';
 import { container, wideContainer } from '@/components/site/PageParts';
 import ThemeToggle from '@/components/site/ThemeToggle.astro';
-import { SITE_NAME, type HeaderSection } from '@/lib/site';
+import { SITE_NAME, sitePath, type HeaderSection } from '@/lib/site';
 
 interface Props {
   /** The header link the page sits under, which the header marks as current. */
@@ -14,9 +14,9 @@ interface Props {
 const { section, wide = false } = Astro.props;
 const path = Astro.url.pathname;
 const links: { section: HeaderSection; href: string; label: string }[] = [
-  { section: 'leaderboards', href: '/', label: 'Leaderboards' },
-  { section: 'methodology', href: '/methodology/', label: 'Methodology' },
-  { section: 'vote', href: '/vote/', label: 'Vote' },
+  { section: 'leaderboards', href: sitePath('/'), label: 'Leaderboards' },
+  { section: 'methodology', href: sitePath('/methodology/'), label: 'Methodology' },
+  { section: 'vote', href: sitePath('/vote/'), label: 'Vote' },
 ];
 ---
 
@@ -28,7 +28,10 @@ const links: { section: HeaderSection; href: string; label: string }[] = [
     ]}
     aria-label="Main"
   >
-    <a href="/" class="flex items-center gap-2 font-semibold text-foreground hover:text-foreground">
+    <a
+      href={sitePath('/')}
+      class="flex items-center gap-2 font-semibold text-foreground hover:text-foreground"
+    >
       <IntervalMark class="h-3.5 w-8" />
       {SITE_NAME}
     </a>

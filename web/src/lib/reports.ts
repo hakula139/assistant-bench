@@ -4,6 +4,7 @@ import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import { systemPagePath } from '@/lib/paths';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
+import { sitePath } from '@/lib/site';
 import type { SystemNames } from '@/lib/systems';
 
 export interface VotesRound {
@@ -59,7 +60,7 @@ function boardParams(family: Family): { aspect: Aspect; board: string } {
 
 export function boardPath(family: Family): string {
   const { aspect, board } = boardParams(family);
-  return `/${aspect}/${board}/`;
+  return sitePath(`/${aspect}/${board}/`);
 }
 
 export function roundPath(family: Family, round: string): string {

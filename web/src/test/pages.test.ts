@@ -20,7 +20,7 @@ import {
   systemPaths,
   type Family,
 } from '@/lib/reports';
-import { REPOSITORY } from '@/lib/site';
+import { SOURCE } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
@@ -300,7 +300,7 @@ describe('family page', () => {
       const html = await render(FamilyPage, { family: loaded, boards: [] });
 
       const document = new JSDOM(html).window.document;
-      const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
+      const href = `${SOURCE}/tree/main/families/${loaded.name}`;
       expect(guide(html)).toBe(section);
       expect(methodology).toContain(`id="${section}"`);
       expect(document.querySelector(`a[href="${href}"]`)?.textContent.trim()).toBe(inputs);

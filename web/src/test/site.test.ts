@@ -14,20 +14,38 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { makeState, VOTE_FAMILY } from '@/test/arena';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const origin = 'https://site.example';
+const repository = 'https://forge.example.com/team/project';
+const base = '/team/project/mr-7/';
 let directory: string;
+let prefixed: string;
+let browser: Browser;
 
 beforeAll(async () => {
+  // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build, and a
+  // `BASE_URL` that would override the configured base.
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'production' };
+  delete env.BASE_URL;
+  delete env.BENCH_NIXOS_CONFIG;
+  delete env.CI_PAGES_URL;
+  delete env.CI_PROJECT_URL;
+  const build = (outDir: string, extra: NodeJS.ProcessEnv = {}) =>
+    promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', outDir], {
+      cwd: root,
+      env: { ...env, ...extra },
+    });
   directory = await mkdtemp(join(tmpdir(), 'bench-site-'));
-  // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build.
-  await promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', directory], {
-    cwd: root,
-    env: { ...process.env, NODE_ENV: 'production' },
-  });
+  prefixed = await mkdtemp(join(tmpdir(), 'bench-site-'));
+  await build(directory);
+  await build(prefixed, { CI_PAGES_URL: `${origin}${base}`, CI_PROJECT_URL: repository });
+  browser = await chromium.launch();
 }, 180_000);
 
 afterAll(async () => {
+  await browser.close();
   await rm(directory, { recursive: true, force: true });
-});
+  await rm(prefixed, { recursive: true, force: true });
+}, 60_000);
 
 test("bundles React's production build", async () => {
   const scripts = (await readdir(directory, { recursive: true })).filter((path) =>
@@ -141,25 +159,18 @@ describe('built vote document', () => {
 });
 
 describe('built pages', () => {
-  const origin = 'https://site.example';
   const vote = '/vote/index.html';
   const api = new Map<string, unknown>([
     ['GET /api/families', { families: [VOTE_FAMILY] }],
     ['GET /api/pair', makeState()],
   ]);
   let pages: string[];
-  let browser: Browser;
 
   beforeAll(async () => {
     pages = (await readdir(directory, { recursive: true }))
       .filter((path) => path.endsWith('.html'))
       .map((path) => `/${path}`)
       .sort();
-    browser = await chromium.launch();
-  }, 60_000);
-
-  afterAll(async () => {
-    await browser.close();
   }, 60_000);
 
   test.each(['light', 'dark'] as const)(
@@ -239,4 +250,109 @@ describe('built pages', () => {
     },
     120_000,
   );
+});
+
+describe('Pages deployment', () => {
+  test('serves navigation, assets, and hydrated islands below its base while keeping the API at the origin root', async () => {
+    const context = await browser.newContext();
+    const fetched = new Set<string>();
+    const missing: string[] = [];
+    const errors: string[] = [];
+    await context.route('**', (route) => route.abort());
+    await context.route(`${origin}/**`, async (route) => {
+      const { pathname } = new URL(route.request().url());
+      fetched.add(pathname);
+      if (pathname === '/api/families') {
+        await route.fulfill({ status: 404, contentType: 'text/html', body: 'Not found' });
+        return;
+      }
+      if (!pathname.startsWith(base)) {
+        missing.push(pathname);
+        await route.fulfill({ status: 404 });
+        return;
+      }
+      const file = join(
+        prefixed,
+        pathname.slice(base.length),
+        pathname.endsWith('/') ? 'index.html' : '',
+      );
+      const found = await stat(file).then(
+        (stats) => stats.isFile(),
+        () => false,
+      );
+      if (!found) {
+        missing.push(pathname);
+      }
+      await route.fulfill(found ? { path: file } : { status: 404 });
+    });
+    const page = await context.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    try {
+      await page.goto(`${origin}${base}`);
+      await page.waitForLoadState('networkidle');
+
+      const navigation = page.getByRole('navigation', { name: 'Main' });
+      expect(
+        await navigation.getByRole('link', { name: 'Leaderboards' }).getAttribute('href'),
+      ).toBe(base);
+      expect(await navigation.getByRole('link', { name: 'Methodology' }).getAttribute('href')).toBe(
+        `${base}methodology/`,
+      );
+      expect(await navigation.getByRole('link', { name: 'Vote' }).getAttribute('href')).toBe(
+        `${base}vote/`,
+      );
+      expect(await page.locator('link[rel="icon"]').getAttribute('href')).toBe(
+        `${base}favicon.svg`,
+      );
+      expect(await page.locator('footer a').getAttribute('href')).toBe(repository);
+      const favicon = await page.evaluate(async (url) => {
+        const response = await fetch(url);
+        return { status: response.status, body: await response.text() };
+      }, `${origin}${base}favicon.svg`);
+      expect(favicon.status).toBe(200);
+      expect(favicon.body).toContain('<svg');
+
+      const board = page.locator(`a[href="${base}writing/en/"]`).first();
+      await board.click();
+      expect(new URL(page.url()).pathname).toBe(`${base}writing/en/`);
+      expect(
+        await page.getByRole('link', { name: 'Cases', exact: true }).getAttribute('href'),
+      ).toBe(`${repository}/-/tree/main/families/writing-en`);
+
+      await navigation.getByRole('link', { name: 'Methodology' }).click();
+      expect(new URL(page.url()).pathname).toBe(`${base}methodology/`);
+      expect(
+        await page.locator(`a[href^="${repository}/-/blob/main/docs/design/"]`).count(),
+      ).toBeGreaterThan(0);
+
+      await page
+        .getByRole('navigation', { name: 'Main' })
+        .getByRole('link', { name: 'Vote' })
+        .click();
+      await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
+      await page
+        .getByRole('alert')
+        .filter({ hasText: 'The voting service is unavailable.' })
+        .waitFor();
+      await page.waitForLoadState('networkidle');
+
+      expect(new URL(page.url()).pathname).toBe(`${base}vote/`);
+      expect(fetched.has('/api/families')).toBe(true);
+      expect([...fetched].filter((path) => path.includes('/api/'))).toEqual(['/api/families']);
+      expect(
+        [...fetched].some((path) => path.startsWith(`${base}_astro/`) && path.endsWith('.css')),
+      ).toBe(true);
+      expect(
+        [...fetched].some((path) => path.startsWith(`${base}_astro/`) && path.endsWith('.woff2')),
+      ).toBe(true);
+      expect(
+        [...fetched].some((path) => path.startsWith(`${base}_astro/`) && path.endsWith('.js')),
+      ).toBe(true);
+      expect(missing).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
 });

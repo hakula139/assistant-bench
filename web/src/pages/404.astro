@@ -1,12 +1,14 @@
 ---
 import { intro, PageHeader } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
+import { sitePath } from '@/lib/site';
 ---
 
 <Base title="Page not found">
   <PageHeader title="Page not found">
     <p class={intro}>
-      Nothing lives at this address. The <a href="/">home page</a> lists every leaderboard.
+      Nothing lives at this address. The <a href={sitePath('/')}>home page</a> lists every
+      leaderboard.
     </p>
   </PageHeader>
 </Base>
