@@ -19,7 +19,8 @@ class CacheTest(unittest.TestCase):
         )
 
     def test_identities_that_join_to_the_same_text_stay_distinct(self) -> None:
-        joiners = ['', '::', *':/|.,;-_=+#@ \t\n\x00\x1e\x1f']
+        separators = [c for c in map(chr, range(128)) if not c.isalnum()]
+        joiners = ['', *separators, *(c * 2 for c in separators), '␞', '§']
         identities = [
             identity
             for joiner in joiners

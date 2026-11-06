@@ -256,6 +256,8 @@ async def generation_order(old_first: bool) -> dict[str, Any]:
         seen['new'] = await asyncio.wait_for(new, 5)
         old_source.set_result('old')
     seen['old'] = await asyncio.wait_for(old, 5)
+    if others := asyncio.all_tasks() - {asyncio.current_task()}:
+        await asyncio.wait(others, timeout=5)
     seen['cached'] = await cache.get('tenant', 'key', unexpected)
     return seen
 
