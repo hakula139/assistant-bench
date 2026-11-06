@@ -1,15 +1,16 @@
-"""Run the candidate's server in a subprocess and talk to it over HTTP."""
+"""Run the candidate's server in the sandbox and talk to it over HTTP."""
 
 import email.utils
 import gzip
 import http.client
 import os
 import re
+import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
-from pathlib import Path
+
+import sandbox
 
 
 MODIFIED = 1_700_000_000
@@ -21,7 +22,8 @@ class ServerCase(unittest.TestCase):
     """Serves a root holding `data.bin`, `notes.txt`, `empty.bin` and `large.bin`."""
 
     def setUp(self) -> None:
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = sandbox.scratch(writable=False)
+        self.addCleanup(shutil.rmtree, self.root)
         self.files = {
             'data.bin': BINARY,
             'notes.txt': TEXT.encode(),
@@ -33,7 +35,7 @@ class ServerCase(unittest.TestCase):
             path.write_bytes(content)
             os.utime(path, (MODIFIED, MODIFIED))
 
-        server = subprocess.Popen(
+        server = sandbox.spawn(
             [
                 sys.executable,
                 '-m',
@@ -48,8 +50,7 @@ class ServerCase(unittest.TestCase):
             stderr=subprocess.DEVNULL,
             text=True,
         )
-        self.addCleanup(server.wait, 10)
-        self.addCleanup(server.kill)
+        self.addCleanup(sandbox.stop, server)
         assert server.stdout is not None
         self.addCleanup(server.stdout.close)
 
