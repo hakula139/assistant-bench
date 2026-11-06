@@ -383,13 +383,10 @@ class TestReport:
             Report.model_validate(payload)
 
     @pytest.mark.parametrize(
-        'change', ['missing', 'extra', 'blank-label', 'duplicate-label', 'extra-field']
+        'change', ['missing', 'extra', 'duplicate-label', 'extra-field']
     )
     def test_requires_exact_public_identity_metadata(
-        self,
-        change: Literal[
-            'missing', 'extra', 'blank-label', 'duplicate-label', 'extra-field'
-        ],
+        self, change: Literal['missing', 'extra', 'duplicate-label', 'extra-field']
     ) -> None:
         payload = json.loads(REPORT_FIXTURE.read_text())
         systems = payload['systems']
@@ -399,8 +396,6 @@ class TestReport:
                 del systems[first]
             case 'extra':
                 systems['unused'] = {'display_name': 'Unused', 'fingerprint': None}
-            case 'blank-label':
-                systems[first]['display_name'] = '  '
             case 'duplicate-label':
                 systems[first]['display_name'] = systems[second]['display_name']
             case 'extra-field':

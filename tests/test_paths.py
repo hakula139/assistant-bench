@@ -6,36 +6,31 @@ from assistant_bench.paths import DATA_DIR_VAR, data_dir, write_atomically
 
 
 class TestDataDir:
-    def test_prefers_the_bench_variable(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('env', 'expected'),
+        [
+            ({DATA_DIR_VAR: 'scratch', 'XDG_DATA_HOME': 'xdg'}, 'scratch'),
+            ({'XDG_DATA_HOME': 'xdg'}, 'xdg/assistant-bench'),
+            ({}, '.local/share/assistant-bench'),
+        ],
+        ids=['bench-variable', 'xdg-data-home', 'home-directory'],
+    )
+    def test_prefers_the_bench_variable_then_xdg_data_home_then_home(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        env: dict[str, str],
+        expected: str,
     ) -> None:
-        monkeypatch.setenv(DATA_DIR_VAR, str(tmp_path / 'scratch'))
-        monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg'))
-
-        path = data_dir()
-
-        assert path == tmp_path / 'scratch'
-
-    def test_falls_back_to_xdg_data_home(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(DATA_DIR_VAR)
-        monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg'))
-
-        path = data_dir()
-
-        assert path == tmp_path / 'xdg' / 'assistant-bench'
-
-    def test_defaults_to_the_home_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(DATA_DIR_VAR)
+        monkeypatch.delenv(DATA_DIR_VAR, raising=False)
         monkeypatch.delenv('XDG_DATA_HOME', raising=False)
         monkeypatch.setenv('HOME', str(tmp_path))
+        for name, value in env.items():
+            monkeypatch.setenv(name, str(tmp_path / value))
 
         path = data_dir()
 
-        assert path == tmp_path / '.local' / 'share' / 'assistant-bench'
+        assert path == tmp_path / expected
 
 
 class TestWriteAtomically:

@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError, model_validator
 
 from assistant_bench.arena.d1 import Database, Param
 from assistant_bench.families import (
@@ -22,7 +22,7 @@ from assistant_bench.families import (
     Gate,
     VotesSettings,
 )
-from assistant_bench.messages import code
+from assistant_bench.messages import InputError, code, error_lines
 from assistant_bench.outputs import Output, Verdict, system_fingerprints
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.scoring.length import text_length
@@ -136,17 +136,17 @@ def prepare(
 
     Raises
     ------
-    ValueError
+    InputError
         The family is not scored by votes or sets no `public_voting`, two cases
         read the same, a kept output lacks a fingerprint, a system has several,
         or no case can form a pair.
     """
     settings = family.settings
     if not isinstance(settings, VotesSettings):
-        raise ValueError(f'Family `{family.name}` is not scored by votes.')
+        raise InputError(f'Family `{family.name}` is not scored by votes.')
 
     if not settings.public_voting:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` sets no `public_voting`, so production votes '
             'on none of its cases. Set `public_voting = true` in '
             f'`families/{family.name}/family.toml` once its committed cases may '
@@ -162,7 +162,7 @@ def prepare(
         if output.case in keys and output.system in settings.systems
     ]
     if unknown := sorted({o.system for o in kept if o.fingerprint is None}):
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: outputs of {code(unknown)} lack a fingerprint, '
             'so they cannot be published. Rerun them with `uv run bench run`.'
         )
@@ -173,7 +173,7 @@ def prepare(
         key=lambda output: output.key,
     )
     if not _pairable(published):
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` has no production case on which two systems '
             'have different passing outputs, so no pair can be voted on.'
         )
@@ -219,7 +219,7 @@ def _refuse_repeated_cases(keys: Mapping[str, str]) -> None:
         by_key[key].append(case)
 
     if repeated := [cases for cases in by_key.values() if len(cases) > 1]:
-        raise ValueError(
+        raise InputError(
             ' '.join(
                 f'Cases {code(cases)} share an instruction and checklist, so a '
                 'voter could not tell them apart.'
@@ -287,10 +287,14 @@ def write(publication: Publication, outputs: Sequence[Output]) -> Path:
 
 def read(path: Path) -> Publication:
     """Read a publication, refusing a file edited since it was prepared."""
-    publication = Publication.model_validate_json(path.read_bytes())
+    try:
+        publication = Publication.model_validate_json(path.read_bytes())
+    except ValidationError as error:
+        raise InputError(error_lines(error, f'Publication `{path}`')) from error
+
     derived = publication.identity()
     if derived != publication.id:
-        raise ValueError(
+        raise InputError(
             f'Publication `{path}` was edited: its content derives ID `{derived}`, '
             f'but it records `{publication.id}`. Prepare it again with '
             f'`uv run bench arena prepare {publication.family}`.'
@@ -345,12 +349,12 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
 
     Raises
     ------
-    ValueError
+    InputError
         A case's source is neither public nor synthetic, or the staged rows do
         not match the publication.
     """
     if private := [c for c in publication.cases if c.source not in PUBLIC_SOURCES]:
-        raise ValueError(
+        raise InputError(
             f'Publication `{publication.id}` holds {len(private)} cases whose source '
             'is neither `public` nor `synthetic`, so it cannot leave this machine.'
         )
@@ -445,7 +449,7 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
         ],
     )
     if activated.changes != 1:
-        raise ValueError(
+        raise InputError(
             f'Publication `{publication.id}` is not completely staged, so it was '
             'not activated. Publish the same file again.'
         )

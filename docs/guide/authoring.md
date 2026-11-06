@@ -65,7 +65,7 @@ Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing ca
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. The image must include bash, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) explains. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
-A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog or an explicitly declared bare route. Authorship remains fixed when that system retires from the runnable configuration.
+A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog. Authorship remains fixed when that system retires from the runnable configuration.
 
 `bench check` checks each task's `task.toml` for what a run needs:
 
@@ -111,19 +111,13 @@ prompt = "nixos-config:claudeCode"
 display_name = "Claude Opus 5.5 · nixos-config"
 ```
 
-| Key                 | Meaning                                                                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`             | A nixos-config catalog model, which supplies the route, the default effort, and prices                                                  |
-| `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`                                        |
-| `api`               | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
-| `thinking_mode`     | For a bare native Messages route, required as `anthropic-adaptive`. Catalog models supply their thinking mode                           |
-| `vendor`            | For a `route`, its model vendor. Required when a task family lists the system                                                           |
-| `price`             | For a `route`, an optional table of `input`, `output`, `cache_read`, and optional `cache_write` prices in USD per million tokens        |
-| `max_output_tokens` | For a `route`, its configured completion allowance, including reasoning. Catalog models supply `maxTokens`                              |
-| `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`                                    |
-| `effort`            | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
-| `prompt`            | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
-| `display_name`      | The required public name that the site and reports show                                                                                 |
+| Key            | Meaning                                                                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`        | A nixos-config catalog model, which supplies the route, vendor, capacities, thinking mode, default effort, and prices                   |
+| `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
+| `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
+| `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
+| `display_name` | The required public name that the site and reports show                                                                                 |
 
 The site shows the display name, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 

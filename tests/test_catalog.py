@@ -3,12 +3,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from assistant_bench.catalog import (
+    Api,
     NixosConfigExport,
     Price,
-    System,
     SystemConfig,
     load_export,
     load_systems,
@@ -16,6 +15,24 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.harnesses import fingerprint
 from support import GENERATION, make_config, make_system
+
+
+class TestLoadExport:
+    def test_reads_the_file_named_by_the_dev_shell(
+        self, export: NixosConfigExport
+    ) -> None:
+        loaded = load_export()
+
+        assert loaded == export
+        assert loaded.rev == '0123456789abcdef0123456789abcdef01234567'
+
+    def test_names_the_dev_shell_when_the_variable_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv('BENCH_NIXOS_CONFIG', raising=False)
+
+        with pytest.raises(ValueError, match='inside `nix develop`'):
+            load_export()
 
 
 class TestPrice:
@@ -37,121 +54,6 @@ class TestPrice:
         )
 
         assert cost == (pytest.approx(expected) if expected is not None else None)
-
-
-class TestLoadExport:
-    def test_reads_the_file_named_by_the_dev_shell(
-        self, export: NixosConfigExport
-    ) -> None:
-        loaded = load_export()
-
-        assert loaded == export
-        assert loaded.rev == '0123456789abcdef0123456789abcdef01234567'
-
-    def test_names_the_dev_shell_when_the_variable_is_unset(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv('BENCH_NIXOS_CONFIG', raising=False)
-
-        with pytest.raises(RuntimeError, match='inside `nix develop`'):
-            load_export()
-
-    @pytest.mark.parametrize('field', ['maxTokens', 'contextWindow'])
-    def test_requires_catalog_capacity_metadata(
-        self, export: NixosConfigExport, field: str
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        document['catalog']['models']['acme-large'].pop(field)
-
-        with pytest.raises(ValidationError, match=field):
-            NixosConfigExport.model_validate(document)
-
-
-class TestSystemConfig:
-    @pytest.mark.parametrize(
-        'table',
-        [
-            {'display_name': 'Acme Large'},
-            {
-                'model': 'acme-large',
-                'route': 'acme/large',
-                'display_name': 'Acme Large',
-            },
-            {'model': 'acme-large'},
-            {
-                'model': 'acme-large',
-                'display_name': 'Acme Large',
-                'price': {'input': 1, 'output': 1, 'cache_read': 0},
-            },
-            {'model': 'acme-large', 'display_name': 'Acme Large', 'vendor': 'other'},
-            {
-                'model': 'acme-large',
-                'display_name': 'Acme Large',
-                'max_output_tokens': 64,
-            },
-            {
-                'model': 'acme-large',
-                'display_name': 'Acme Large',
-                'context_window': 8192,
-            },
-            {'model': 'acme-large', 'display_name': 'Acme Large', 'api': 'unsupported'},
-            {
-                'route': 'acme/large',
-                'display_name': 'Acme Large',
-                'max_output_tokens': 64,
-            },
-            {
-                'route': 'acme/large',
-                'display_name': 'Acme Large',
-                'context_window': 8192,
-            },
-        ],
-        ids=[
-            'no-source',
-            'both-sources',
-            'no-display-name',
-            'model-with-price',
-            'model-with-vendor',
-            'model-with-output-override',
-            'model-with-context-override',
-            'unsupported-api',
-            'route-without-context',
-            'route-without-output-capacity',
-        ],
-    )
-    def test_rejects_an_ambiguous_or_incomplete_table(
-        self, table: dict[str, object]
-    ) -> None:
-        with pytest.raises(ValidationError):
-            SystemConfig.model_validate(table)
-
-
-class TestSystem:
-    def test_requires_captured_generation_metadata(self) -> None:
-        fields = make_system().model_dump()
-        del fields['generation']
-
-        with pytest.raises(ValidationError):
-            System.model_validate(fields)
-
-    @pytest.mark.parametrize(
-        ('limit', 'value'),
-        [
-            pytest.param('max_output_tokens', 0, id='zero-output'),
-            pytest.param('max_output_tokens', -1, id='negative-output'),
-            pytest.param('context_window', 0, id='zero-context'),
-            pytest.param('context_window', -1, id='negative-context'),
-            pytest.param('max_output_tokens', 8192, id='no-prompt-room'),
-            pytest.param('max_output_tokens', 8193, id='output-exceeds-context'),
-        ],
-    )
-    def test_rejects_a_capacity_that_cannot_leave_room_for_a_prompt(
-        self, limit: str, value: int
-    ) -> None:
-        fields = make_system().model_dump() | {limit: value}
-
-        with pytest.raises(ValidationError):
-            System.model_validate(fields)
 
 
 class TestLoadSystems:
@@ -220,17 +122,27 @@ class TestLoadSystems:
                 effort = "low"
                 display_name = "Broken"
                 """,
-                '`systems.toml`: `broken`: set exactly one of `model` and `route`.',
+                '`systems.toml`: `broken.model`: Field required.',
                 id='invalid-table',
             ),
             pytest.param(
                 """\
                 [large]
-                effort = "low"
-                route = 5
-                display_name = "Large"
+                model = "acme-large"
+                display_name = " "
                 """,
-                '`systems.toml`: `large.route`: Input should be a valid string.',
+                '`systems.toml`: `large.display_name`: String should have at least 1 '
+                'character.',
+                id='blank-display-name',
+            ),
+            pytest.param(
+                """\
+                [large]
+                model = "acme-large"
+                display_name = "Large"
+                prompt = 5
+                """,
+                '`systems.toml`: `large.prompt`: Input should be a valid string.',
                 id='invalid-field',
             ),
             pytest.param(
@@ -277,69 +189,6 @@ class TestLoadSystems:
 
 
 class TestResolveSystem:
-    @pytest.mark.parametrize(
-        ('change', 'message'),
-        [
-            (
-                {'apis': ['openai-chat-completions']},
-                'API `anthropic-messages` is not one of',
-            ),
-            ({'apis': []}, 'declares no supported APIs'),
-            ({'thinking': {'efforts': []}}, 'effort `high` is not one of'),
-            ({'thinking': {'mode': 'effort'}}, 'requires adaptive thinking metadata'),
-        ],
-        ids=[
-            'unlisted-api',
-            'missing-api-contract',
-            'missing-effort-contract',
-            'missing-adaptive-mode',
-        ],
-    )
-    def test_rejects_native_capabilities_the_catalog_has_not_declared(
-        self, export: NixosConfigExport, change: dict[str, Any], message: str
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        entry = document['catalog']['models']['acme-large']
-        for field, value in change.items():
-            if field == 'thinking':
-                entry[field].update(value)
-            else:
-                entry[field] = value
-        configured = NixosConfigExport.model_validate(document)
-        config = make_config(api='anthropic-messages', effort='high')
-
-        with pytest.raises(ValueError, match=message):
-            resolve_system('native', config, configured, GENERATION)
-
-    def test_ignores_apis_the_bench_cannot_select(
-        self, export: NixosConfigExport
-    ) -> None:
-        document = export.model_dump(by_alias=True)
-        model = document['catalog']['models']['acme-large']
-        model['apis'].append('google-generate-content')
-        configured = NixosConfigExport.model_validate(document)
-
-        system = resolve_system(
-            'large',
-            make_config(),
-            configured,
-            GENERATION,
-        )
-
-        assert system.api == 'openai-chat-completions'
-
-        model['apis'] = ['google-generate-content']
-        configured = NixosConfigExport.model_validate(document)
-        with pytest.raises(
-            ValueError, match='API `openai-chat-completions` is not one of'
-        ):
-            resolve_system(
-                'large',
-                make_config(),
-                configured,
-                GENERATION,
-            )
-
     def test_resolves_native_capacities_and_thinking_from_catalog_metadata(
         self, export: NixosConfigExport
     ) -> None:
@@ -355,131 +204,78 @@ class TestResolveSystem:
         )
 
     @pytest.mark.parametrize(
-        ('effort', 'default', 'required', 'expected'),
+        ('model', 'effort', 'expected'),
         [
-            ('high', 'medium', True, 'high'),
-            ('max', 'medium', True, 'invalid'),
-            (None, 'high', True, 'high'),
-            (None, 'max', True, 'invalid'),
-            (None, 'max', False, None),
+            ('acme-large', 'high', 'high'),
+            ('acme-large', None, 'medium'),
+            ('acme-small', 'low', 'low'),
+            ('acme-small', None, None),
+            ('local-model', None, None),
         ],
         ids=[
-            'explicit-effort',
-            'unoffered-effort',
+            'accepted-effort',
             'required-default',
-            'unoffered-required-default',
+            'accepted-optional-effort',
             'optional-omission',
+            'no-effort-rules',
         ],
     )
-    def test_validates_effort_against_the_shared_model_list(
+    def test_resolves_the_effort_the_model_accepts(
         self,
         export: NixosConfigExport,
+        model: str,
         effort: str | None,
-        default: str,
-        required: bool,
         expected: str | None,
     ) -> None:
-        document = export.model_dump(by_alias=True)
-        thinking = document['catalog']['models']['acme-large']['thinking']
-        thinking['defaultLevel'] = default
-        thinking['requiresEffort'] = required
-        resolved_export = NixosConfigExport.model_validate(document)
-        config = make_config(api='openai-responses', effort=effort)
+        config = make_config(model=model, effort=effort)
 
-        if expected == 'invalid':
-            with pytest.raises(
-                ValueError, match='effort `max` is not one of `low`, `medium`, `high`'
-            ):
-                resolve_system('large', config, resolved_export, GENERATION)
-        else:
-            system = resolve_system('large', config, resolved_export, GENERATION)
+        system = resolve_system('x', config, export, GENERATION)
 
-            assert system.api == config.api
-            assert system.effort == expected
+        assert system.effort == expected
 
-    def test_resolves_historical_exports_without_vendor_metadata(
+    def test_ignores_apis_the_bench_cannot_select(
         self, export: NixosConfigExport
     ) -> None:
         document = export.model_dump(by_alias=True)
-        for model in document['catalog']['models'].values():
-            model.pop('vendor')
-        historical = NixosConfigExport.model_validate(document)
-
-        system = resolve_system(
-            'large',
-            make_config(),
-            historical,
-            GENERATION,
+        document['catalog']['models']['acme-large']['apis'].append(
+            'google-generate-content'
         )
+        configured = NixosConfigExport.model_validate(document)
+        config = make_config()
 
-        assert system.vendor is None
-        assert fingerprint(system) == fingerprint(make_system())
+        system = resolve_system('large', config, configured, GENERATION)
+
+        assert system.api == 'openai-chat-completions'
 
     @pytest.mark.parametrize(
-        'change', ['price', 'display-name', 'vendor', 'export-revision']
+        ('top', 'model', 'config'),
+        [
+            ({}, {'channelCost': {}}, {}),
+            ({}, {}, {'display_name': 'Other label'}),
+            ({}, {'vendor': 'other'}, {}),
+            ({'rev': 'another-revision'}, {}, {}),
+        ],
+        ids=['price', 'display-name', 'vendor', 'export-revision'],
     )
     def test_keeps_the_fingerprint_when_only_public_metadata_changes(
-        self, export: NixosConfigExport, change: str
+        self,
+        export: NixosConfigExport,
+        top: dict[str, str],
+        model: dict[str, Any],
+        config: dict[str, str],
     ) -> None:
-        document = export.model_dump(by_alias=True)
-        entry = document['catalog']['models']['acme-large']
-        config = make_config()
-        if change == 'price':
-            entry['channelCost'] = {}
-        elif change == 'display-name':
-            config = config.model_copy(update={'display_name': 'Other label'})
-        elif change == 'vendor':
-            entry['vendor'] = 'other'
-        else:
-            document['rev'] = 'another-revision'
+        original = make_config()
+        document: dict[str, Any] = export.model_dump(by_alias=True) | top
+        document['catalog']['models']['acme-large'].update(model)
         changed = NixosConfigExport.model_validate(document)
 
-        system = resolve_system('large', config, changed, GENERATION)
+        system = resolve_system(
+            'large', original.model_copy(update=config), changed, GENERATION
+        )
 
         assert fingerprint(system) == fingerprint(
-            resolve_system(
-                'large',
-                make_config(),
-                export,
-                GENERATION,
-            )
+            resolve_system('large', original, export, GENERATION)
         )
-
-    def test_applies_the_default_effort_a_model_requires(
-        self, export: NixosConfigExport
-    ) -> None:
-        system = resolve_system(
-            'large',
-            make_config(),
-            export,
-            GENERATION,
-        )
-
-        assert system == make_system(name='large')
-
-    def test_leaves_an_optional_effort_to_the_model(
-        self, export: NixosConfigExport
-    ) -> None:
-        system = resolve_system(
-            'small',
-            make_config(model='acme-small'),
-            export,
-            GENERATION,
-        )
-
-        assert system.route == 'acme/small'
-        assert system.effort is None
-        assert (system.max_output_tokens, system.context_window) == (32, 2048)
-
-    def test_keeps_an_accepted_effort(self, export: NixosConfigExport) -> None:
-        system = resolve_system(
-            'small',
-            make_config(model='acme-small', effort='low'),
-            export,
-            GENERATION,
-        )
-
-        assert system.effort == 'low'
 
     def test_reports_a_zero_priced_channel_as_unpriced(
         self, export: NixosConfigExport
@@ -494,35 +290,6 @@ class TestResolveSystem:
         assert system.route == 'local/model'
         assert system.vendor == 'other'
         assert system.price is None
-
-    def test_takes_a_route_and_price_as_given(self, export: NixosConfigExport) -> None:
-        price = Price(input=1.0, output=4.0, cache_read=0.1)
-
-        system = resolve_system(
-            'x',
-            SystemConfig(
-                route='router/acme/x',
-                api='openai-responses',
-                max_output_tokens=32768,
-                context_window=131072,
-                vendor='acme',
-                effort='max',
-                price=price,
-                display_name='Acme X',
-            ),
-            export,
-            GENERATION,
-        )
-
-        assert (system.display_name, system.route, system.effort, system.price) == (
-            'Acme X',
-            'router/acme/x',
-            'max',
-            price,
-        )
-        assert system.vendor == 'acme'
-        assert system.api == 'openai-responses'
-        assert (system.max_output_tokens, system.context_window) == (32768, 131072)
 
     def test_reads_a_nixos_config_system_prompt(
         self, export: NixosConfigExport
@@ -560,12 +327,13 @@ class TestResolveSystem:
             ),
             (
                 make_config(model='acme-unrouted'),
-                'System `x`: catalog model `acme-unrouted` has no channel.',
+                'System `x`: catalog model `acme-unrouted` has no channel. Name a '
+                'catalog model with one channel.',
             ),
             (
                 make_config(model='acme-routed'),
                 'System `x`: catalog model `acme-routed` has channels `acme`, '
-                '`router`. Set its `route` and `price` instead.',
+                '`router`. Name a catalog model with one channel.',
             ),
             (
                 make_config(prompt='nixos-config:omp'),
@@ -593,5 +361,77 @@ class TestResolveSystem:
     ) -> None:
         with pytest.raises(ValueError) as error:
             resolve_system('x', config, export, GENERATION)
+
+        assert str(error.value) == message
+
+    @pytest.mark.parametrize(
+        ('model', 'thinking', 'api', 'message'),
+        [
+            (
+                {'apis': ['openai-chat-completions']},
+                {},
+                'anthropic-messages',
+                'System `x`: API `anthropic-messages` is not one of '
+                '`openai-chat-completions`.',
+            ),
+            (
+                {'apis': ['google-generate-content']},
+                {},
+                'openai-chat-completions',
+                'System `x`: API `openai-chat-completions` is not one of '
+                '`google-generate-content`.',
+            ),
+            (
+                {'apis': []},
+                {},
+                'openai-chat-completions',
+                'System `x`: the catalog model declares no supported APIs.',
+            ),
+            (
+                {},
+                {'defaultLevel': 'max'},
+                'openai-chat-completions',
+                'System `x`: effort `max` is not one of `low`, `medium`, `high`.',
+            ),
+            (
+                {},
+                {'mode': 'effort'},
+                'anthropic-messages',
+                'System `x`: native Messages requires the `anthropic-adaptive` '
+                'thinking mode.',
+            ),
+            (
+                {'maxTokens': 8192},
+                {},
+                'openai-chat-completions',
+                'System `x`: `max_output_tokens` must be less than `context_window`.',
+            ),
+        ],
+        ids=[
+            'unlisted-api',
+            'only-unselectable-apis',
+            'no-apis',
+            'unoffered-required-default',
+            'no-adaptive-mode',
+            'no-prompt-room',
+        ],
+    )
+    def test_rejects_metadata_that_cannot_resolve(
+        self,
+        export: NixosConfigExport,
+        model: dict[str, Any],
+        thinking: dict[str, str],
+        api: Api,
+        message: str,
+    ) -> None:
+        document = export.model_dump(by_alias=True)
+        entry = document['catalog']['models']['acme-large']
+        entry.update(model)
+        entry['thinking'].update(thinking)
+        configured = NixosConfigExport.model_validate(document)
+        config = make_config(api=api)
+
+        with pytest.raises(ValueError) as error:
+            resolve_system('x', config, configured, GENERATION)
 
         assert str(error.value) == message

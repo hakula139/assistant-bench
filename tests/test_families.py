@@ -12,6 +12,7 @@ from assistant_bench.families import (
     TaskTestsSettings,
     VotesSettings,
     case_task,
+    check_case_entries,
     load_cases,
     load_family,
 )
@@ -652,7 +653,7 @@ class TestLoadCases:
             pytest.param(
                 'cases = ["message"]',
                 'cases.0',
-                'Input should be a valid dictionary or instance of Case.',
+                'Input should be a valid dictionary.',
                 id='non-case-entry',
             ),
             pytest.param(
@@ -726,65 +727,12 @@ class TestLoadCases:
             f'and `{local}:cases.1`.'
         )
 
-    @pytest.mark.parametrize(
-        ('written', 'reported'),
-        [
-            pytest.param(
-                ('writing_zh.toml',), ('writing_zh.toml',), id='unknown-family'
-            ),
-            pytest.param(
-                ('smoke-text.jsonl',), ('smoke-text.jsonl',), id='unconverted-cases'
-            ),
-            pytest.param(
-                ('smoke/notes.md',), ('smoke/notes.md',), id='file-beside-tasks'
-            ),
-            pytest.param(
-                ('old-family/task.toml',), ('old-family',), id='removed-family'
-            ),
-            pytest.param(
-                ('a.toml', 'b.toml'), ('a.toml', 'b.toml'), id='several-entries'
-            ),
-        ],
-    )
-    def test_rejects_data_case_entries_that_no_family_reads(
-        self,
-        data_dir: Path,
-        written: tuple[str, ...],
-        reported: tuple[str, ...],
+    def test_reads_cases_beside_a_data_entry_no_family_reads(
+        self, data_dir: Path
     ) -> None:
-        root = data_dir / 'cases'
-        for name in written:
-            path = root / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('cases = []\n')
-
-        with pytest.raises(ValueError) as error:
-            load_cases(load_family('smoke-text'))
-
-        entries = ', '.join(f'`{root / name}`' for name in reported)
-        assert str(error.value) == (
-            f"No family reads {entries} under the data directory's `cases/`. A "
-            '`cases.toml` family reads `cases/<family>.toml` and a `tasks/` family '
-            'reads `cases/<family>/<task>/`, so move each entry to one of those '
-            'paths, out of `cases/`, or under a hidden directory such as '
-            '`cases/.<name>/`.'
-        )
-
-    @pytest.mark.parametrize(
-        'relative',
-        [
-            pytest.param('writing-zh.toml', id='another-case-family'),
-            pytest.param('smoke/held/task.toml', id='another-task-family'),
-            pytest.param('.converted-backup/writing_zh.toml', id='hidden-backup'),
-            pytest.param('smoke/.notes', id='hidden-file-beside-tasks'),
-        ],
-    )
-    def test_accepts_data_case_entries_that_a_family_reads(
-        self, data_dir: Path, relative: str
-    ) -> None:
-        local = data_dir / 'cases' / relative
-        local.parent.mkdir(parents=True, exist_ok=True)
-        local.write_text('cases = []\n')
+        unread = data_dir / 'cases' / 'smoke-text.jsonl'
+        unread.parent.mkdir(parents=True)
+        unread.write_text('cases = []\n')
 
         cases = load_cases(load_family('smoke-text'))
 
@@ -995,7 +943,7 @@ class TestLoadCases:
                 source = "synthetic"
                 """,
                 'Family `f`: `tasks/a/task.toml`: `task`: Input should be a valid '
-                'dictionary or instance of _TaskSection.',
+                'dictionary.',
                 id='task-as-a-string',
             ),
         ],
@@ -1022,6 +970,70 @@ class TestLoadCases:
         cases = load_cases(load_family('f'))
 
         assert [case.id for case in cases] == ['a']
+
+
+class TestCheckCaseEntries:
+    @pytest.mark.parametrize(
+        ('written', 'reported'),
+        [
+            pytest.param(
+                ('writing_zh.toml',), ('writing_zh.toml',), id='unknown-family'
+            ),
+            pytest.param(
+                ('smoke-text.jsonl',), ('smoke-text.jsonl',), id='unconverted-cases'
+            ),
+            pytest.param(
+                ('smoke/notes.md',), ('smoke/notes.md',), id='file-beside-tasks'
+            ),
+            pytest.param(
+                ('old-family/task.toml',), ('old-family',), id='removed-family'
+            ),
+            pytest.param(
+                ('a.toml', 'b.toml'), ('a.toml', 'b.toml'), id='several-entries'
+            ),
+        ],
+    )
+    def test_rejects_data_case_entries_that_no_family_reads(
+        self,
+        data_dir: Path,
+        written: tuple[str, ...],
+        reported: tuple[str, ...],
+    ) -> None:
+        root = data_dir / 'cases'
+        for name in written:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('cases = []\n')
+
+        with pytest.raises(ValueError) as error:
+            check_case_entries()
+
+        entries = ', '.join(f'`{root / name}`' for name in reported)
+        assert str(error.value) == (
+            f"No family reads {entries} under the data directory's `cases/`. A "
+            '`cases.toml` family reads `cases/<family>.toml` and a `tasks/` family '
+            'reads `cases/<family>/<task>/`, so move each entry to one of those '
+            'paths, out of `cases/`, or under a hidden directory such as '
+            '`cases/.<name>/`.'
+        )
+
+    @pytest.mark.parametrize(
+        'relative',
+        [
+            pytest.param('writing-zh.toml', id='another-case-family'),
+            pytest.param('smoke/held/task.toml', id='another-task-family'),
+            pytest.param('.converted-backup/writing_zh.toml', id='hidden-backup'),
+            pytest.param('smoke/.notes', id='hidden-file-beside-tasks'),
+        ],
+    )
+    def test_accepts_data_case_entries_that_a_family_reads(
+        self, data_dir: Path, relative: str
+    ) -> None:
+        local = data_dir / 'cases' / relative
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text('cases = []\n')
+
+        check_case_entries()
 
 
 class TestCaseTask:

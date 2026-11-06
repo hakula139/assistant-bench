@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner, Result
 
-from assistant_bench import jobs
+from assistant_bench import cli, jobs
 from assistant_bench.arena import commands, publication
 from assistant_bench.arena.d1 import D1Error
 from assistant_bench.catalog import System
@@ -31,7 +31,7 @@ SYSTEMS = {
 
 
 def invoke(*args: str) -> Result:
-    return runner.invoke(commands.app, list(args), env={'COLUMNS': '200'})
+    return runner.invoke(cli.app, ['arena', *args], env={'COLUMNS': '200'})
 
 
 def collected() -> list[Output]:
@@ -206,6 +206,20 @@ class TestPublish:
 
         assert result.exit_code == 1
         assert 'was edited' in result.stderr
+        assert store[1] == []
+
+    def test_names_a_file_that_is_not_a_publication(
+        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+    ) -> None:
+        prepared.write_text('{')
+
+        result = invoke('publish', 'production', str(prepared))
+
+        assert (result.exit_code, result.stderr) == (
+            1,
+            f'Publication `{prepared}`: Invalid JSON: EOF while parsing an object at '
+            'line 1 column 1.\n',
+        )
         assert store[1] == []
 
     def test_prints_what_d1_refused(

@@ -49,7 +49,7 @@ from assistant_bench.harnesses import (
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.messages import MessageCompletionError
 from assistant_bench.harnesses.responses import ResponseCompletionError
-from assistant_bench.messages import code, error_lines
+from assistant_bench.messages import InputError, code, error_lines
 from assistant_bench.outputs import Output, tests_pass, write_outputs
 from assistant_bench.paths import data_dir
 from assistant_bench.scoring.gates import failed_gates
@@ -137,20 +137,20 @@ def check_harness(family: Family) -> None:
 
     Raises
     ------
-    ValueError
+    InputError
         The family names an unknown harness or a single-call one.
     """
     harness = family.settings.harness
     if harness is None:
         return
     if harness not in HARNESSES:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: harness `{harness}` is not one of '
             f'{code(HARNESSES)}.'
         )
     if HARNESSES[harness].single_call:
         agents = [name for name, entry in HARNESSES.items() if not entry.single_call]
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: harness `{harness}` makes one request and '
             f"never acts in a task's environment, so choose among {code(agents)}."
         )
@@ -160,7 +160,7 @@ def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System
     """Return the systems a family lists, refusing a name `systems.toml` lacks."""
     unknown = [name for name in family.settings.systems if name not in systems]
     if unknown:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` lists {code(unknown)}, which '
             f'`{SYSTEMS_FILE}` does not define. Fix '
             f'`families/{family.name}/family.toml` or add the system table.'
@@ -169,30 +169,22 @@ def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System
 
 
 def check_systems(family: Family, systems: list[System]) -> None:
-    """Check the family's harness, prompts, and task-system vendor metadata.
+    """Check the family's harness and its systems' prompts.
 
     Raises
     ------
-    ValueError
-        The harness is one `check_harness` refuses, a system has a prompt that
-        it cannot send, or a task system has no vendor metadata.
+    InputError
+        The harness is one `check_harness` refuses, or a system has a prompt
+        that it cannot send.
     """
     check_harness(family)
-    if family.source == 'tasks':
-        unowned = [system.name for system in systems if system.vendor is None]
-        if unowned:
-            raise ValueError(
-                f'Family `{family.name}`: set vendor metadata for {code(unowned)} '
-                'in the model catalog or their `route` tables in `systems.toml`.'
-            )
-
     harness = family.settings.harness
     if harness is None or HARNESSES[harness].sends_prompt:
         return
 
     prompted = [system.name for system in systems if system.prompt is not None]
     if prompted:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` lists {code(prompted)}, whose prompt the '
             f'`{harness}` harness cannot send. Remove them from `systems`.'
         )
@@ -222,12 +214,12 @@ def drifted_systems(
 
     Raises
     ------
-    ValueError
+    InputError
         A source job is not a job directory, or a trial record is unreadable.
     """
     current = {system.name: fingerprint(system) for system in systems}
     recorded: defaultdict[str, set[str]] = defaultdict(set)
-    for trial in load_source_trials(_sources(family)):
+    for trial in _source_trials(_sources(family)):
         kwargs = trial.result.config.agent.kwargs
         name = kwargs.get('system')
         label = kwargs.get('fingerprint')
@@ -296,7 +288,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
 
     Raises
     ------
-    ValueError
+    InputError
         A source job is not a job directory, or a trial record is unreadable.
     """
     current: dict[str, tuple[str | None, str]] = {}
@@ -308,7 +300,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
         )
 
     changed: set[tuple[str, str]] = set()
-    for trial in load_source_trials(_sources(family)):
+    for trial in _source_trials(_sources(family)):
         if trial.task_name not in current:
             continue
         version, digest = current[trial.task_name]
@@ -327,7 +319,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
 
     Raises
     ------
-    ValueError
+    InputError
         A task's `task.toml` does not parse, or it leaves a required setting at
         its default, naming the task and the value to set.
     """
@@ -342,7 +334,7 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
         problems.extend(_task_problems(config, location))
 
     if problems:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` has tasks to fix:\n' + '\n'.join(problems)
         )
 
@@ -353,20 +345,10 @@ class TaskAuthor(BaseModel):
 
 
 def author_vendors(
-    family: Family,
-    tasks: list[Path],
-    systems: dict[str, System],
-    export: NixosConfigExport,
+    family: Family, tasks: list[Path], export: NixosConfigExport
 ) -> dict[str, str]:
     """Validate author provenance independently of runnable systems."""
-    known = {
-        model.vendor
-        for model in export.catalog.models.values()
-        if model.vendor is not None
-    }
-    known.update(
-        system.vendor for system in systems.values() if system.vendor is not None
-    )
+    known = {model.vendor for model in export.catalog.models.values()}
     authors: dict[str, str] = {}
     problems: list[str] = []
     for task in tasks:
@@ -385,7 +367,7 @@ def author_vendors(
             authors[task.name] = author.vendor
 
     if problems:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}` has authors to fix:\n' + '\n'.join(problems)
         )
     return authors
@@ -489,6 +471,13 @@ def _family_jobs(family: Family) -> list[Path]:
 
 def _sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
     return [_source(job_dir) for job_dir in _family_jobs(family)]
+
+
+def _source_trials(sources: list[tuple[SourceJobConfig, Path]]) -> list[SourceTrial]:
+    try:
+        return load_source_trials(sources)
+    except ValueError as error:
+        raise InputError(str(error)) from error
 
 
 def _source(job_dir: Path) -> tuple[SourceJobConfig, Path]:
@@ -613,7 +602,7 @@ def collect(family: Family, systems: dict[str, System]) -> list[Output]:
 
     Raises
     ------
-    ValueError
+    InputError
         A source job is not a job directory, a trial record is unreadable, a
         task is invalid, or the harness is one `check_harness` refuses.
     """
@@ -777,11 +766,11 @@ def _responses(family: Family, output: Output) -> list[dict[str, Any]]:
 def read_trials(
     family: Family, job_dir: Path, systems: dict[str, System]
 ) -> list[Output]:
-    """Return one output per finished trial whose case is still current.
+    """Return one output per finished trial of a case the family still has.
 
     Raises
     ------
-    ValueError
+    InputError
         The directory is not a job directory, or a trial record is unreadable.
     """
     cases = {case.id: case for case in load_cases(family)}
@@ -802,7 +791,7 @@ def _read_trials(
     A `versions` mapping drops a trial whose task version is not current before
     an output reads that task.
     """
-    trials = load_source_trials(sources)
+    trials = _source_trials(sources)
     by_id = {trial.id: trial for trial in trials}
     records: list[_Candidate] = []
     for trial in trials:

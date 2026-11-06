@@ -4,7 +4,7 @@ A system is one generation configuration under test: a model route and API, comp
 
 ## Resolution
 
-A system specifies either a catalog model with `model` or a bare `route`. A catalog model supplies its vendor, single route, prices, configured completion and context allowances, and effort rules. The system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. A bare route supplies its own capacities. Every system sets its [display name](../guide/authoring.md#systems). Both a channel priced at zero and a route without a `price` report as unpriced.
+A system names a catalog model with `model`, which supplies its vendor, single route, prices, configured completion and context allowances, and effort rules. The system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. Every system sets its [display name](../guide/authoring.md#systems). A channel priced at zero reports as unpriced.
 
 The catalog's `maxTokens` is the completion allowance the bench configures, including reasoning. The benchmark baseline selects high effort or its supported equivalent for every model, so every system runs at one configured level. Terminus uses the configured context window minus the completion allowance as its input limit, reserving completion space through Harbor's native context management.
 
