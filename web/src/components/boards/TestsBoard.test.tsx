@@ -29,6 +29,15 @@ describe('TestsBoard', () => {
     );
   });
 
+  test('shows a dash for a system with no timed trial', async () => {
+    const round = await testsRound();
+    round.results.standings[0].latency_sec = null;
+
+    const html = renderToString(<TestsBoard round={round} />);
+
+    expect(text(html)).toContain('Acme Pro 92% 44–100% 83% 6 12 1 $0.2 – Acme Mini');
+  });
+
   test.each([
     [[], ', and a paired sign test over shared tasks separates it from every other system.'],
     [

@@ -367,8 +367,21 @@ describe('VotesBoard', () => {
 
     const html = render(round);
 
-    expect(html).not.toContain('Mean cost per output');
-    expect(html).toContain('Median latency');
+    expect(text(html)).not.toContain('Mean cost per output');
+    expect(text(html)).toContain('Median latency');
+  });
+
+  test('leaves out the latency chart and dashes the latency when no system is timed', async () => {
+    const round = await load();
+    for (const standing of round.results.standings) {
+      standing.latency_sec = null;
+    }
+
+    const html = render(round);
+
+    expect(text(html)).not.toContain('Median latency');
+    expect(text(html)).toContain('Mean cost per output');
+    expect(text(html)).toMatch(/Acme Pro [\d,.]+ \$[\d.]+ – /);
   });
 
   test('drops the rank column in a category and marks the columns that stay family-wide', async () => {
