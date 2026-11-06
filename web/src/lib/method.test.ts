@@ -71,14 +71,14 @@ describe('methodSteps', () => {
       "diff: Every system changes each task's repository through the Terminus 2 agent, within 40 turns.",
     ],
     [
-      'diffs before it lists systems, and so an agent',
-      { render: 'diff', systems: [] },
+      'diffs without an agent or a turn budget',
+      { render: 'diff' },
       "diff: Every system changes each task's repository.",
     ],
   ] satisfies [string, Partial<VotesConfig>, string][])(
     'names the run of a family that renders %s',
     (_, overrides, run) => {
-      const [step] = methodSteps('votes', config(overrides));
+      const [step] = methodSteps(config(overrides));
 
       expect(`${step.step}: ${step.hint ?? ''}`).toBe(run);
     },
@@ -87,7 +87,7 @@ describe('methodSteps', () => {
   test("keeps a voted family's specifics in the hints, under the details every board shows", () => {
     const family = config({ gates: { min_chars: 40 } });
 
-    const steps = methodSteps('votes', family);
+    const steps = methodSteps(family);
 
     expect(steps.map(({ detail }) => detail)).toEqual(
       methodSteps('votes').map(({ detail }) => detail),
@@ -102,7 +102,7 @@ describe('methodSteps', () => {
   test('gates the solutions of a family that renders diffs on their tests', () => {
     const family = config({ render: 'diff', harness: 'terminus-2', max_turns: 40 });
 
-    const steps = methodSteps('votes', family);
+    const steps = methodSteps(family);
 
     expect(steps.map(({ title }) => title)).toEqual(['Run', 'Tests', 'Blind pairs', 'Scores']);
     expect(steps.slice(0, 3).map(({ step, detail, hint }) => [step, detail, hint])).toEqual([
@@ -133,7 +133,7 @@ describe('methodSteps', () => {
       public: true,
     };
 
-    const steps = methodSteps('tests', family);
+    const steps = methodSteps(family);
 
     expect(steps.map(({ title, hint }) => `${title}: ${hint ?? ''}`)).toEqual([
       'Run: Every system attempts each task.',

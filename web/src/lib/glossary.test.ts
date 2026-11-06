@@ -1,15 +1,11 @@
 import { describe, expect, test } from 'vitest';
 
 import { anchorTerm, effectiveVotesTerm, fallbackAnchor, preliminaryTerm } from '@/lib/glossary';
-import { reportSchema } from '@/lib/report';
-import { readFixture } from '@/test/fixture';
+import { readReport } from '@/test/fixture';
 
 describe('recorded ranking terms', () => {
   test("uses each round's anchor and coverage rules in explanatory copy", async () => {
-    const report = reportSchema.parse(await readFixture());
-    if (report.results.scorer !== 'votes') {
-      throw new Error('Expected votes fixture');
-    }
+    const report = await readReport('report', 'votes');
     const method = { ...report.results.method, anchor_score: 1234, actor_cap: 2500 };
     const rules = { ...report.results.rules, preliminary_decisive_votes: 1200 };
 

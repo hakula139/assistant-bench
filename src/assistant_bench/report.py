@@ -294,7 +294,7 @@ class TestsCategoryStanding(_Model):
 
 
 class TestsCategory(_Model):
-    category: str
+    category: Category
     standings: list[TestsCategoryStanding]
 
 
@@ -903,7 +903,7 @@ def _require_every_trial(
 
 
 def _tests_results(
-    outputs: list[Output], categories: Mapping[str, str], samples: int
+    outputs: list[Output], categories: Mapping[str, Category], samples: int
 ) -> TestsResults:
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:
@@ -964,7 +964,7 @@ def _tests_standing(
 def _tests_categories(
     standings: Sequence[TestsStanding],
     shares: Mapping[str, Mapping[str, float]],
-    categories: Mapping[str, str],
+    categories: Mapping[str, Category],
 ) -> list[TestsCategory]:
     boards: list[TestsCategory] = []
     for category in sorted(

@@ -198,9 +198,8 @@ export const categoryTerms: Record<Category, Term> = {
   },
 };
 
-/** Returns the term a category ID names. A family declares only IDs the glossary holds. */
-export function categoryTerm(category: string): Term {
-  return categoryTerms[category as Category];
+export function categoryTerm(category: Category): Term {
+  return categoryTerms[category];
 }
 
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */

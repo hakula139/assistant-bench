@@ -35,7 +35,7 @@ const round = named ?? newest;
 >
   <PageHeader title={title}>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
-    <MethodStrip client:load scorer={config.scorer} config={config} />
+    <MethodStrip client:load of={config} />
     <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
       <a href={sitePath(`/methodology/#${guide.section}`)} class="inline-flex items-center gap-2">
         <BookOpen className="size-4" aria-hidden="true" />

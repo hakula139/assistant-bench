@@ -1,4 +1,4 @@
-/** How a table row's `ScoreTrack` draws its system, read from the classes that give each mark its look. */
+/** How a table row's `ScoreTrack` draws its system, read from the classes that style each mark. */
 export interface TrackDrawing {
   dot: 'filled' | 'hollow' | 'none';
   /** The sides of the axis where an arrowhead marks a score the axis cuts off. */

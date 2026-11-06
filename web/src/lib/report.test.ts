@@ -2,7 +2,7 @@ import { z } from 'astro/zod';
 import { describe, expect, test } from 'vitest';
 
 import { reportSchema } from '@/lib/report';
-import { readFixture } from '@/test/fixture';
+import { readFixture, readReport } from '@/test/fixture';
 import { schemaShape } from '@/test/json-schema';
 
 function replaceField(payload: object, path: (string | number)[], value: unknown): void {
@@ -203,10 +203,7 @@ describe('reportSchema', () => {
   );
 
   test('preserves historical method parameters and thresholds', async () => {
-    const payload = reportSchema.parse(await readFixture());
-    if (payload.results.scorer !== 'votes') {
-      throw new Error('Expected votes fixture');
-    }
+    const payload = await readReport('report', 'votes');
     Object.assign(payload.results.method, {
       l2_penalty: 0.25,
       points_per_logit: 200,
@@ -229,12 +226,8 @@ describe('reportSchema', () => {
   });
 
   test('preserves capped voter weights on the wire', async () => {
-    const parsed = reportSchema.parse(await readFixture());
+    const { results } = await readReport('report', 'votes');
 
-    if (parsed.results.scorer !== 'votes') {
-      throw new Error('Expected a votes fixture');
-    }
-    const results = parsed.results;
     expect(results.method.actor_cap).toBe(100);
     expect(results.votes).toBe(315);
     expect(results.dropped_votes).toBe(42);

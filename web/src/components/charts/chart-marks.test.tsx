@@ -1,18 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { DotRangePlot } from '@/components/charts/DotRangePlot';
 import { ForestPlot } from '@/components/charts/ForestPlot';
 import { ParetoScatter } from '@/components/charts/ParetoScatter';
-import { stubPlotFrame } from '@/test/plot';
+import { drawnSvg, stubPlotFrame } from '@/test/plot';
 
 const rules = { preliminary_decisive_votes: 40 };
 const refit = (system: string, score: number) => ({
   system,
   score,
-  interval: null,
   votes: 40,
   effective_votes: 40,
   decisive_votes: 40,
@@ -74,11 +73,7 @@ describe('chart marks', () => {
     'draws the shared gridlines, reference rules, and tips in %s',
     async (_, chart, references) => {
       const { container } = render(chart);
-      const svg = await vi.waitFor(() => {
-        const drawn = container.querySelector('svg');
-        expect(drawn).not.toBeNull();
-        return drawn as SVGSVGElement;
-      });
+      const svg = await drawnSvg(container);
 
       const grids = [...svg.querySelectorAll('g[aria-label$="-grid"]')];
       const referenceRules = [...svg.querySelectorAll('g[aria-label="rule"]')].filter(

@@ -17,13 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  ARROWHEAD,
-  legendMarks,
-  unplacedText,
-  type ForestRow,
-  type LegendMark,
-} from '@/lib/forest';
+import { ARROWHEAD, unplacedText, type ForestRow, type LegendMark } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
@@ -69,14 +63,6 @@ const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   },
   anchor: { label: 'Anchor', mark: <AnchorRule left="50%" /> },
 };
-
-export function drawnMarks(
-  rows: ForestRow[],
-  domain: [number, number],
-  anchorScore?: number,
-): LegendMark[] {
-  return legendMarks(rows, domain, anchorScore);
-}
 
 export function ForestLegend({
   marks,

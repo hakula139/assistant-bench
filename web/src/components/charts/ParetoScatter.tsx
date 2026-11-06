@@ -100,7 +100,7 @@ const PLACEMENTS = [...NEAR, ...FAR];
  * A frontier label's placement, with the point on the label's edge nearest its dot, in pixels, when
  * the label sits in the far ring and needs a leader line to its dot.
  */
-export interface Label {
+interface Label {
   placement: Placement;
   leader?: [number, number];
 }
@@ -148,11 +148,12 @@ const segmentDistance = (
 };
 
 /**
- * Places frontier labels clear of dots and earlier labels, preferring the upper-left. A label beside
- * its dot must sit closer to it than to any other dot, so that no label reads as another system's.
- * Where no spot beside the dot qualifies, the label moves to a farther ring and takes a leader line
- * that passes no other dot. A label that fits nowhere is left off, since the tip and the table twin
- * still name the system. Prefers spots the step line does not cross, which the labels' halo masks.
+ * Places frontier labels clear of dots and earlier labels, preferring the upper-left. A label
+ * beside its dot must sit closer to it than to any other dot, so no label reads as another
+ * system's. Where no spot beside the dot qualifies, the label moves to a farther ring and takes a
+ * leader line that passes no other dot. A label that fits nowhere is left off, since the tip and
+ * the table twin still name the system. Prefers spots the step line does not cross, which the
+ * labels' halo masks.
  */
 export function placeLabels(
   frontier: ScatterPoint[],
@@ -242,7 +243,7 @@ export function placeLabels(
 
 const extent = (values: number[]): [number, number] => [Math.min(...values), Math.max(...values)];
 
-/** Maps a pixel position back to data through a linear or log scale, which always has an inverse. */
+/** Maps a pixel back to data through a linear or log scale, which always has an inverse. */
 const invert = (scale: Plot.Scale, pixel: number): number => {
   if (scale.invert === undefined) {
     throw new Error(`A ${String(scale.type)} scale has no inverse`);

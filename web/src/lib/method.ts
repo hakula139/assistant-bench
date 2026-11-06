@@ -1,6 +1,6 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
 import { formatCount, formatCountOf, formatPenalty, formatScore } from '@/lib/format';
-import { terms, type Term } from '@/lib/glossary';
+import { inferenceNote, terms, type Term } from '@/lib/glossary';
 import type { VotesMethod, VotesRules } from '@/lib/report';
 
 export function roundMethod(method: VotesMethod, rules: VotesRules): string {
@@ -150,9 +150,11 @@ const renders: Record<VotesConfig['render'], RenderView> = {
 
 /**
  * A scorer's stages in a few words each, alike on every board of one scorer and render. Given a
- * family's config, each step also carries a hint saying what it means on that family's board.
+ * family's config in place of its scorer, each step also carries a hint saying what it means on
+ * that family's board.
  */
-export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[] {
+export function methodSteps(of: Scorer | FamilyConfig): MethodStep[] {
+  const [scorer, config] = typeof of === 'string' ? [of] : [of.scorer, of];
   switch (scorer) {
     case 'votes': {
       const votes = config?.scorer === 'votes' ? config : undefined;
@@ -177,7 +179,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
           detail: 'ranked from votes',
           hint:
             votes &&
-            'Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Uncertainty for new cases and voters is unavailable until the method is calibrated.',
+            `Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. ${inferenceNote}`,
         },
       ];
     }
@@ -208,7 +210,7 @@ export function methodSteps(scorer: Scorer, config?: FamilyConfig): MethodStep[]
 }
 
 /** How a family's board describes itself and where it points its readers. */
-export interface BoardGuide {
+interface BoardGuide {
   summary: string;
   /** What its systems answer, as the link to them names it. */
   inputs: string;

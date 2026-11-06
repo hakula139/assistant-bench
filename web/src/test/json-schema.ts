@@ -4,10 +4,10 @@ const SCALARS = new Set(['boolean', 'integer', 'null', 'number', 'string']);
 
 /**
  * Flattens a JSON Schema into what each path admits: its types, constants and enums, and each
- * object's properties, required keys, extra keys, and the names and string bounds of those keys. `$ref`,
- * unions, and type arrays resolve, so pydantic's and Zod's spellings of one schema compare equal,
- * while titles, descriptions, formats, and numeric bounds are ignored. Each union option that a
- * constant property tags, as `scorer` tags a report's results, gets its own paths, such as
+ * object's properties, required keys, extra keys, and the names and string bounds of those keys.
+ * `$ref`, unions, and type arrays resolve, so pydantic's and Zod's spellings of one schema compare
+ * equal, while titles, descriptions, formats, and numeric bounds are ignored. Each union option
+ * that a constant property tags, as `scorer` tags a report's results, gets its own paths, such as
  * `$.results<votes>.standings[]`.
  */
 export function schemaShape(root: Schema): Record<string, string[]> {

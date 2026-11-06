@@ -12,12 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Category } from '@/lib/categories';
 import { formatCost, formatPercent, formatPercentRange, formatSeconds } from '@/lib/format';
 import { passHatKTerm, terms } from '@/lib/glossary';
+import { byPassRate } from '@/lib/ranking';
 import type { PassRate, TestsResults, TestsStanding } from '@/lib/report';
 import type { TestsRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
-import { useSearchParam } from '@/lib/use-search-param';
+import { useCategory } from '@/lib/use-category';
 
 interface TestsBoardProps {
   /** The closed round the board shows. */
@@ -34,11 +36,14 @@ interface TestsRow {
   standing?: TestsStanding;
 }
 
-const ALL = 'aggregate';
 const RATE_DOMAIN: [number, number] = [0, 1];
 const wide = 'max-md:hidden';
 
-function testsRows(results: TestsResults, category: string | null, names: SystemNames): TestsRow[] {
+function testsRows(
+  results: TestsResults,
+  category: Category | null,
+  names: SystemNames,
+): TestsRow[] {
   const row = (
     { system, tasks, pass_rate }: Omit<TestsRow, 'name' | 'standing'>,
     standing?: TestsStanding,
@@ -50,9 +55,7 @@ function testsRows(results: TestsResults, category: string | null, names: System
           (refit) => row(refit),
         );
 
-  return rows.toSorted(
-    (a, b) => b.pass_rate.rate - a.pass_rate.rate || a.name.localeCompare(b.name),
-  );
+  return rows.toSorted(byPassRate);
 }
 
 const allOf = new Intl.ListFormat('en', { type: 'conjunction' });
@@ -80,16 +83,11 @@ function decisionNote(
  * column's meaning on tap.
  */
 export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
-  const [category, setCategory] = useSearchParam('category', null);
   const names = useMemo(() => reportNames(systems), [systems]);
-  const categories = results.categories.map((board) => board.category);
-  const activeCategory = category !== null && categories.includes(category) ? category : null;
-  const family = activeCategory === null;
+  const [category, filter] = useCategory(results.categories.map((board) => board.category));
+  const family = category === null;
 
-  const rows = useMemo(
-    () => testsRows(results, activeCategory, names),
-    [results, activeCategory, names],
-  );
+  const rows = useMemo(() => testsRows(results, category, names), [results, category, names]);
   const ranges = rows.map((row): DotRange => ({
     label: row.name,
     value: row.pass_rate.rate,
@@ -99,19 +97,7 @@ export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {categories.length > 1 && (
-        <Filter
-          label="Category"
-          value={activeCategory ?? ALL}
-          onChange={(value) => {
-            setCategory(value === ALL ? null : value);
-          }}
-          options={[
-            { value: ALL, label: 'All categories' },
-            ...categories.map((name) => ({ value: name, label: name })),
-          ]}
-        />
-      )}
+      {results.categories.length > 1 && <Filter {...filter} />}
       <DotRangePlot
         rows={ranges}
         label="Pass rate with its 95% interval"

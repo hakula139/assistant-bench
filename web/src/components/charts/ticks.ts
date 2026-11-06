@@ -4,9 +4,9 @@ import { ticks } from 'd3-array';
 const MANTISSAS = [[1, 2, 5], [1, 3], [1]];
 
 /**
- * Picks at most `count` ticks for a log axis over `[min, max]`: 1, 2, and 5 per decade where they
- * fit, then fewer per decade, then every few powers of ten as d3-scale's log ticks do. `linearTicks`
- * serves a span too short to hold two of those, or a domain starting at zero on a linear axis.
+ * Picks at most `count` ticks for a log axis over `[min, max]`: 1, 2, and 5 per decade where
+ * they fit, then fewer per decade, then every few powers of ten as d3-scale's log ticks do.
+ * `linearTicks` serves a span too short to hold two of those, or a linear axis from zero.
  */
 export function logTicks([min, max]: [number, number], count: number): number[] {
   const values = min > 0 && max / min >= 3 ? decadeTicks(min, max, count) : [];
@@ -44,8 +44,8 @@ function decadeTicks(min: number, max: number, count: number): number[] {
 }
 
 /**
- * Picks at most `count` round ticks over `[min, max]`, falling back to both ends where no round step
- * leaves two ticks inside the span, so that an axis never keeps a single label to read its scale by.
+ * Picks at most `count` round ticks over `[min, max]`, falling back to both ends where no round
+ * step leaves two ticks inside the span, so an axis never keeps one label to read its scale by.
  */
 export function linearTicks(min: number, max: number, count: number): number[] {
   if (min === max) {

@@ -18,9 +18,8 @@ import {
   type LegendMark,
 } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
-import { reportSchema } from '@/lib/report';
 import { reportNames } from '@/lib/systems';
-import { readFixture } from '@/test/fixture';
+import { readReport } from '@/test/fixture';
 
 const estimate = (score: number) => ({ score });
 
@@ -152,10 +151,7 @@ describe('clip', () => {
 
 describe('roundRows', () => {
   test("orders and links measured standings, then only the report's unranked systems", async () => {
-    const report = reportSchema.parse(await readFixture());
-    if (report.results.scorer !== 'votes') {
-      throw new Error('the fixture is a votes report');
-    }
+    const report = await readReport('report', 'votes');
     const { standings, unranked } = report.results;
 
     const rows = roundRows(
@@ -182,7 +178,7 @@ describe('unmeasuredRows', () => {
   test('labels each row by display name and orders the rows by it', () => {
     const names = { 'acme-a': 'Zenith', 'acme-b': 'Apex' };
 
-    const rows = unmeasuredRows(['acme-a', 'acme-b'], 'acme-a', names);
+    const rows = unmeasuredRows(['acme-a', 'acme-b'], names);
 
     expect(rows.map((row) => [row.system, row.name])).toEqual([
       ['acme-b', 'Apex'],
@@ -208,7 +204,7 @@ describe('legendMarks', () => {
     ['no anchor rule for an anchor below the axis start', row(1004), 300, ['score']],
     [
       'the anchor rule without a measured dot',
-      { system: 'acme-large', name: 'Acme Large', unplaced: 'anchor' },
+      { system: 'acme-large', name: 'Acme Large', unplaced: 'no-votes' },
       1000,
       ['anchor'],
     ],

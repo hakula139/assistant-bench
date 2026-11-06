@@ -9,9 +9,8 @@ import VotesMethod from '@/components/scorers/votes/Method.astro';
 import VotesPanel from '@/components/scorers/votes/Panel.astro';
 import { votesParts } from '@/components/scorers/votes/parts';
 import TestsThenVotes from '@/components/scorers/votes/TestsThenVotes.astro';
-import { drawnMarks } from '@/components/site/Forest';
 import type { Scorer } from '@/lib/family';
-import type { LegendMark } from '@/lib/forest';
+import { legendMarks, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import type { RenderSection } from '@/lib/method';
 import { votesRounds, type Family } from '@/lib/reports';
@@ -30,7 +29,7 @@ interface ScorerView {
    * has a section in `renderSections`.
    */
   Method: AstroComponentFactory;
-  /** The section's parts by key, each headed at `partId(scorer, key)` and listed in the contents. */
+  /** The section's parts by key, each headed at `partId(scorer, key)` and listed in contents. */
   parts: Record<string, string>;
   /** The legend marks the family's panel draws, which the home page's shared legend names. */
   marks: (family: Family) => LegendMark[];
@@ -47,7 +46,7 @@ export const scorerViews = {
     parts: votesParts,
     marks: (family) => {
       const { rows, domain, anchorScore } = panelForest(family);
-      return drawnMarks(rows, domain, anchorScore);
+      return legendMarks(rows, domain, anchorScore);
     },
     roundDetail: (family) => {
       const round = votesRounds(family).at(-1);

@@ -23,7 +23,7 @@ interface ForestPlotProps {
   rows: ForestPlotRow[];
   /** Every row label from top to bottom, including labels without a row. */
   labels: string[];
-  /** The labels without a row whose systems the board leaves unranked. Other such labels lack votes. */
+  /** The labels without a row whose systems are unranked. Other such labels lack votes. */
   unranked?: string[];
   /** Shared across category plots so their points use the same scale. */
   domain: [number, number];

@@ -1,8 +1,8 @@
 import { vi } from 'vitest';
 
 /**
- * Uses `width` CSS pixels and seven pixels per label character. Vitest restores
- * `ResizeObserver` and canvas mocks after each test. Fonts and SVG bounds stay stubbed for this file.
+ * Uses `width` CSS pixels and seven pixels per label character. Vitest restores `ResizeObserver`
+ * and canvas mocks after each test. Fonts and SVG bounds stay stubbed for this file.
  */
 export function stubPlotFrame(width = 600) {
   vi.stubGlobal(
@@ -27,4 +27,15 @@ export function stubPlotFrame(width = 600) {
     font: '',
     measureText: (text: string) => ({ width: text.length * 7 }),
   } as never);
+}
+
+/** Waits for the chart in `container` to draw, and returns its SVG. */
+export function drawnSvg(container: Element): Promise<SVGSVGElement> {
+  return vi.waitFor(() => {
+    const drawn = container.querySelector<SVGSVGElement>('svg');
+    if (drawn === null) {
+      throw new Error('the chart has not drawn yet');
+    }
+    return drawn;
+  });
 }

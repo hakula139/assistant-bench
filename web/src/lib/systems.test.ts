@@ -20,6 +20,5 @@ describe('reportNames', () => {
     const names = reportNames(metadata);
 
     expect(names).toEqual({ retired: 'Old Public Name', current: 'Current Public Name' });
-    expect(metadata.retired.fingerprint).toBe('synthetic');
   });
 });

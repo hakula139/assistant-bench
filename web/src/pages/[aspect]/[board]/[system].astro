@@ -58,15 +58,15 @@ const rounds = votesRounds(family);
 const { usage } = boardLabels(configOf(family, 'votes'));
 const appearances = rounds.flatMap(({ round, systems, results }) => {
   const standing = results.standings.find((item) => item.system === system);
-  return standing
-    ? [{ round, systems, reference: results.reference, anchor: results.anchor, results, standing }]
-    : [];
+  const { reference, anchor, method, rules } = results;
+  return standing ? [{ round, systems, reference, anchor, method, rules, standing }] : [];
 });
 const last = appearances.at(-1);
-if (last === undefined) {
+const results = rounds.find((item) => item.round === last?.round)?.results;
+if (last === undefined || results === undefined) {
   throw new Error(`${system} has no standing on ${family.config.display_name}`);
 }
-const { round, systems, results, standing } = last;
+const { round, systems, standing } = last;
 const names = reportNames(systems);
 const name = (item: string) => systemName(names, item);
 const standings = results.standings;
@@ -97,15 +97,6 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   });
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
-const roundRows = appearances.map(({ round, systems, reference, anchor, results, standing }) => ({
-  round,
-  systems,
-  reference,
-  anchor,
-  method: results.method,
-  rules: results.rules,
-  standing,
-}));
 ---
 
 <Base title={`${name(system)} on ${family.title}`} section="leaderboards">
@@ -201,7 +192,7 @@ const roundRows = appearances.map(({ round, systems, reference, anchor, results,
     )}
 
     <Section title="Rounds">
-      <RoundsTable client:visible appearances={roundRows} />
+      <RoundsTable client:visible appearances={appearances} />
     </Section>
   </div>
 </Base>

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { DotRangePlot } from '@/components/charts/DotRangePlot';
-import { stubPlotFrame } from '@/test/plot';
+import { drawnSvg, stubPlotFrame } from '@/test/plot';
 
 describe('DotRangePlot', () => {
   beforeEach(() => {
@@ -22,11 +22,7 @@ describe('DotRangePlot', () => {
     const { container } = render(
       <DotRangePlot rows={rows} label="Win rate" format="percent" baseline={0.5} />,
     );
-    const svg = await vi.waitFor(() => {
-      const drawn = container.querySelector('svg');
-      expect(drawn).not.toBeNull();
-      return drawn as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
 
     const dots = [...svg.querySelectorAll('g[aria-label="dot"] circle')];
     const [baseline, ...ranges] = [...svg.querySelectorAll('g[aria-label="rule"] line')];
@@ -125,11 +121,7 @@ describe('DotRangePlot', () => {
     const { container } = render(
       <DotRangePlot rows={rows} label="Value" format={format} domain={domain} />,
     );
-    const svg = await vi.waitFor(() => {
-      const drawn = container.querySelector('svg');
-      expect(drawn).not.toBeNull();
-      return drawn as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
 
     const ticks = [...svg.querySelectorAll('g[aria-label="x-axis tick label"] text')].map(
       (node) => node.textContent,

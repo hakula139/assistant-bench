@@ -27,7 +27,7 @@ import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
 import NotFoundPage from '@/pages/404.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
-import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
+import { FIXTURE_NAMES, readFixture, shownSlugs, visitIslandProps } from '@/test/fixture';
 
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
 vi.mock(import('@/lib/reports'), async (importOriginal) => ({
@@ -217,7 +217,6 @@ describe('family page', () => {
     expect(text(html)).toContain('No round has closed yet.');
     expect(text(html)).toContain('Acme Large no votes');
     expect(text(html)).toContain('Acme Pro no votes');
-    expect(text(html)).not.toMatch(/\bLeader\b/);
   });
 
   test('keys the empty board to the marks it draws', async () => {
@@ -226,7 +225,6 @@ describe('family page', () => {
     const html = await render(FamilyPage, { family: empty, boards: [] });
 
     expect(new JSDOM(html).window.document.querySelector('ul[aria-label="Legend"]')).toBeNull();
-    expect(html).not.toContain('Score, 95% interval');
     expect(islandHints(html, 'Forest')).toEqual(['no votes', 'no votes', 'no votes', 'no votes']);
   });
 
@@ -395,15 +393,11 @@ describe('family panel', () => {
     expect(boardLinks(html).filter((href) => !href.startsWith(boardPath(arena)))).toEqual([]);
   });
 
-  test("draws the latest round's points without a leader", async () => {
+  test("draws the latest round's points", async () => {
     const html = await render(FamilyPanel, { family: await family() });
-
-    const leader = new JSDOM(html).window.document.querySelector('[aria-label="Leader"]');
 
     expect(text(html)).toContain('Votes: Round 2026-10-21 · 315 votes');
     expect(text(html)).toContain('Acme Pro 1,068');
-    expect(leader).toBeNull();
-    expect(islandHints(html, 'Leader')).toEqual([]);
   });
 
   test("gives each row's point score a hint", async () => {
@@ -595,13 +589,16 @@ describe('system page', () => {
     ]);
   });
 
-  test('marks a round whose anchor differs from the reference', async () => {
+  test.each([
+    ['marks a round whose anchor differs from the reference', 'acme-pro', ['2026-10-07']],
+    ['leaves every round unmarked when its anchor is the reference', undefined, []],
+  ])('%s', async (_, earlierAnchor, marked) => {
     const arena = await family();
     const earlier = arena.rounds[0].results;
     if (earlier.scorer !== 'votes') {
       throw new Error('the fixture is a votes report');
     }
-    earlier.anchor = 'acme-pro';
+    earlier.anchor = earlierAnchor ?? earlier.anchor;
 
     const html = await render(SystemPage, {
       family: arena,
@@ -610,19 +607,9 @@ describe('system page', () => {
     });
 
     expect(text(html)).toContain('Round Score Votes');
-    expect(text(html)).toMatch(/2026-10-07 Anchor/);
-    expect(text(html)).not.toMatch(/2026-10-21 Anchor/);
-  });
-
-  test('leaves the round unmarked when every round has one anchor', async () => {
-    const html = await render(SystemPage, {
-      family: await family(),
-      system: 'acme-pro',
-      boards: [],
-    });
-
-    expect(text(html)).toContain('Round Score Votes');
-    expect(text(html)).not.toContain('Anchor');
+    expect(
+      ['2026-10-07', '2026-10-21'].filter((round) => text(html).includes(`${round} Anchor`)),
+    ).toEqual(marked);
   });
 
   test('leaves out the head-to-head chart for a system without votes', async () => {
@@ -684,10 +671,10 @@ describe('stacks', () => {
     ['system page', SystemPage],
   ])('space the islands on the %s with gap', async (_, page) => {
     const html = await render(page, { family: await family(), system: 'acme-pro', boards: [] });
-    // An island inside a run of text, such as a hint in a stat's detail, flows with the text.
 
     const parents = [...new JSDOM(html).window.document.querySelectorAll('astro-island')]
       .map((island) => island.parentElement)
+      // An island inside a run of text, such as a hint in a stat's detail, flows with the text.
       .filter((parent) => parent?.localName !== 'span')
       .map(classesOf);
     expect(parents).not.toEqual([]);
@@ -787,25 +774,21 @@ describe('header', () => {
     ]);
   });
 
-  test('marks Leaderboards as the section of family and system pages', async () => {
-    const arena = await family();
+  test.each([
+    ['family', FamilyPage, '/writing/arena/'],
+    ['system', SystemPage, '/writing/arena/acme-pro/'],
+  ])('marks Leaderboards as the section of a %s page', async (_, page, path) => {
+    const html = await render(
+      page,
+      { family: await family(), system: 'acme-pro', boards: [] },
+      path,
+    );
 
-    const pages = [
-      await render(FamilyPage, { family: arena, boards: [] }, '/writing/arena/'),
-      await render(
-        SystemPage,
-        { family: arena, system: 'acme-pro', boards: [] },
-        '/writing/arena/acme-pro/',
-      ),
-    ];
-
-    for (const html of pages) {
-      expect(navLinks(html, 'Main')).toEqual([
-        ['/', 'Leaderboards', 'true'],
-        ['/methodology/', 'Methodology', null],
-        ['/vote/', 'Vote', null],
-      ]);
-    }
+    expect(navLinks(html, 'Main')).toEqual([
+      ['/', 'Leaderboards', 'true'],
+      ['/methodology/', 'Methodology', null],
+      ['/vote/', 'Vote', null],
+    ]);
   });
 
   test.each(['methodology', 'vote'] as const)(
@@ -903,21 +886,11 @@ describe('board switcher', () => {
 /** The ID of each closed round serialized into the page's islands, as an object with results. */
 function islandRounds(html: string): string[] {
   const rounds: string[] = [];
-  const walk = (value: unknown) => {
-    if (Array.isArray(value)) {
-      value.forEach(walk);
-    } else if (typeof value === 'object' && value !== null) {
-      // Astro serializes each prop as a `[type, value]` pair, where type 0 is a plain value.
-      if ('results' in value && 'round' in value && Array.isArray(value.round)) {
-        rounds.push(String(value.round[1]));
-      }
-      Object.values(value).forEach(walk);
+  visitIslandProps(html, (value) => {
+    if ('results' in value && 'round' in value && Array.isArray(value.round)) {
+      rounds.push(String(value.round[1]));
     }
-  };
-
-  for (const element of new JSDOM(html).window.document.querySelectorAll('astro-island')) {
-    walk(JSON.parse(element.getAttribute('props') ?? '{}'));
-  }
+  });
 
   return rounds;
 }

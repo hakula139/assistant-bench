@@ -6,20 +6,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { TestsBoard } from '@/components/boards/TestsBoard';
 import { passHatKTerm, terms } from '@/lib/glossary';
-import { reportSchema } from '@/lib/report';
 import type { TestsRound } from '@/lib/reports';
-import { readFixture } from '@/test/fixture';
+import { readReport } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
 async function testsRound(): Promise<TestsRound> {
-  const { round, closed_at, systems, results } = reportSchema.parse(
-    await readFixture('report-tests'),
-  );
-  if (results.scorer !== 'tests') {
-    throw new Error('Expected the tests fixture');
-  }
+  const { round, closed_at, systems, results } = await readReport('report-tests', 'tests');
   return { round, closed_at, systems, results };
 }
 
@@ -39,29 +33,22 @@ describe('TestsBoard', () => {
   });
 
   test.each([
-    [['acme-mini'], 'Acme Mini.'],
-    [['acme-small', 'acme-mini'], 'Acme Mini and Acme Small.'],
-  ])(
-    'names the systems the paired sign test cannot separate from the leader, in board order: %j',
-    async (tied, names) => {
-      const round = await testsRound();
-      round.results.decision.tied = tied;
-
-      const html = renderToString(<TestsBoard round={round} />);
-
-      expect(text(html)).toContain(
-        `Acme Pro has the top pass rate, but a paired sign test over shared tasks cannot separate it from ${names}`,
-      );
-    },
-  );
-
-  test('says when the leader is separated from every other system', async () => {
+    [[], ', and a paired sign test over shared tasks separates it from every other system.'],
+    [
+      ['acme-mini'],
+      ', but a paired sign test over shared tasks cannot separate it from Acme Mini.',
+    ],
+    [
+      ['acme-small', 'acme-mini'],
+      ', but a paired sign test over shared tasks cannot separate it from Acme Mini and Acme Small.',
+    ],
+  ])('names the systems tied with the leader in board order: %j', async (tied, decision) => {
     const round = await testsRound();
-    round.results.decision.tied = [];
+    round.results.decision.tied = tied;
 
     const html = renderToString(<TestsBoard round={round} />);
 
-    expect(text(html)).toContain('separates it from every other system.');
+    expect(text(html)).toContain(`Acme Pro has the top pass rate${decision}`);
   });
 
   test('leaves out the decision when the round ranks one system', async () => {
@@ -88,6 +75,14 @@ describe('TestsBoard', () => {
       'Acme Small0%0–71%3',
     ]);
     expect(screen.queryByText(/paired sign test/)).toBeNull();
+  });
+
+  test('labels each category option by its term', async () => {
+    renderInDom(<TestsBoard round={await testsRound()} />);
+
+    const options = screen.getAllByRole('option').map((option) => option.textContent);
+
+    expect(options).toEqual(['All categories', 'Bug fix', 'Feature']);
   });
 
   test.each([

@@ -12,15 +12,11 @@ import {
   VotesStat,
 } from '@/components/boards/SystemTables';
 import { terms } from '@/lib/glossary';
-import { reportSchema } from '@/lib/report';
 import { reportNames } from '@/lib/systems';
-import { readFixture } from '@/test/fixture';
+import { readReport } from '@/test/fixture';
 
 async function round() {
-  const report = reportSchema.parse(await readFixture());
-  if (report.results.scorer !== 'votes') {
-    throw new Error('the fixture is a votes report');
-  }
+  const report = await readReport('report', 'votes');
   return { systems: report.systems, ...report.results };
 }
 

@@ -1,8 +1,8 @@
 ---
 import { VotesBoard } from '@/components/boards/VotesBoard';
-import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
+import { Forest, ForestLegend } from '@/components/site/Forest';
 import { note } from '@/components/site/PageParts';
-import { EMPTY_DOMAIN, unmeasuredRows } from '@/lib/forest';
+import { EMPTY_DOMAIN, legendMarks, unmeasuredRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
 import type { Report } from '@/lib/report';
 import { boardPath, configOf, votesRound, type Family } from '@/lib/reports';
@@ -16,8 +16,7 @@ interface Props {
 const { family, round: report } = Astro.props;
 const config = configOf(family, 'votes');
 const round = report && votesRound(report);
-const rows =
-  round === undefined ? unmeasuredRows(config.systems, config.reference, family.systemNames) : [];
+const rows = round === undefined ? unmeasuredRows(config.systems, family.systemNames) : [];
 ---
 
 {round === undefined ? (
@@ -30,7 +29,7 @@ const rows =
       domain={EMPTY_DOMAIN}
       large
     />
-    <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
+    <ForestLegend marks={legendMarks(rows, EMPTY_DOMAIN)} />
   </div>
 ) : (
   <VotesBoard client:load base={boardPath(family)} round={round} labels={boardLabels(config)} />

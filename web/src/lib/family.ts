@@ -18,8 +18,8 @@ const visibility = z.discriminatedUnion('public', [
 
 /** The bounds the votes scorer's gates check beyond a blank or truncated output. */
 const gatesSchema = z.object({
-  min_chars: z.number().int().optional(),
-  max_chars: z.number().int().optional(),
+  min_chars: z.int().optional(),
+  max_chars: z.int().optional(),
   script: z.literal('hans').optional(),
 });
 

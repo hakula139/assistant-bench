@@ -8,7 +8,7 @@ import {
 import { configOf, latest, systemPath, type Family } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
 
-/** The rows and axis of a voted family's home panel: its latest round, or its systems before one. */
+/** A voted family's home panel rows and axis: its latest round, or its systems before one. */
 export function panelForest(family: Family): {
   rows: ForestRow[];
   domain: [number, number];
@@ -20,7 +20,7 @@ export function panelForest(family: Family): {
 
   if (!report || results?.scorer !== 'votes') {
     return {
-      rows: unmeasuredRows(config.systems, config.reference, family.systemNames),
+      rows: unmeasuredRows(config.systems, family.systemNames),
       domain: EMPTY_DOMAIN,
     };
   }

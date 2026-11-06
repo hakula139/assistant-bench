@@ -1,7 +1,7 @@
 ---
 import { panelForest } from '@/components/scorers/votes/forest';
 import { Forest } from '@/components/site/Forest';
-import { latest, type Family } from '@/lib/reports';
+import type { Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
@@ -9,23 +9,10 @@ interface Props {
 
 const { family } = Astro.props;
 const { rows, domain, anchorScore } = panelForest(family);
-const { title } = family;
-const results = latest(family)?.results;
+const caption =
+  anchorScore === undefined
+    ? `${family.title} systems, none measured yet`
+    : `${family.title} point scores`;
 ---
 
-{results?.scorer === 'votes' ? (
-  <Forest
-    client:visible
-    caption={`${title} point scores`}
-    rows={rows}
-    domain={domain}
-    anchorScore={anchorScore}
-  />
-) : (
-  <Forest
-    client:visible
-    caption={`${title} systems, none measured yet`}
-    rows={rows}
-    domain={domain}
-  />
-)}
+<Forest client:visible caption={caption} rows={rows} domain={domain} anchorScore={anchorScore} />
