@@ -230,6 +230,11 @@ class TestWorkspaceDiff:
         diff = workspace_diff(tmp_path / 'base', tmp_path / 'workspace')
 
         assert diff == (
-            header('link', 'old mode 120000\nnew mode 100644\n')
+            header('link', 'deleted file mode 120000\n')
+            + '--- a/link\n+++ /dev/null\n@@ -1 +0,0 @@\n-target\n'
+            '\\ No newline at end of file\n'
+            + header('link', 'new file mode 100644\n')
+            + '--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+target\n'
+            '\\ No newline at end of file\n'
             + header('run.sh', 'old mode 100644\nnew mode 100755\n')
         )
