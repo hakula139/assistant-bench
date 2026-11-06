@@ -92,7 +92,8 @@ const PAIR_FAMILY = `
   WHERE pairs.id = ? AND pairs.actor_id = ?`;
 const REPLACE = `
   UPDATE pairs SET id = ?, case_key = ?, a_output = ?, b_output = ?, issued_at = ?
-  WHERE id = ? AND actor_id = ?`;
+  WHERE id = ? AND actor_id = ?
+    AND publication_id = (SELECT publication_id FROM active WHERE family = pairs.family)`;
 
 const key = (...parts: string[]) => JSON.stringify(parts);
 const sorted = (a: string, b: string) => (a < b ? ([a, b] as const) : ([b, a] as const));
