@@ -1,0 +1,39 @@
+--- a/tenantcache/cache.py
++++ b/tenantcache/cache.py
+@@ -11,8 +11,8 @@
+
+         self.ttl = ttl
+         self.clock = clock
+-        self._values: dict[tuple[str, str], tuple[float, T]] = {}
+-        self._loads: dict[tuple[str, str], asyncio.Future[T]] = {}
++        self._values: dict[str, tuple[float, T]] = {}
++        self._loads: dict[str, asyncio.Future[T]] = {}
+         self._tasks: set[asyncio.Task[None]] = set()
+
+     @staticmethod
+@@ -22,7 +22,7 @@
+
+     async def _load(
+         self,
+-        identity: tuple[str, str],
++        identity: str,
+         future: asyncio.Future[T],
+         loader: Callable[[], Awaitable[T]],
+     ) -> None:
+@@ -42,7 +42,7 @@
+                 self._loads.pop(identity)
+
+     async def get(self, tenant: str, key: str, loader: Callable[[], Awaitable[T]]) -> T:
+-        identity = (tenant, key)
++        identity = f'{tenant}:{key}'
+         cached = self._values.get(identity)
+         if cached is not None and self.clock() < cached[0]:
+             return cached[1]
+@@ -59,6 +59,6 @@
+         return await asyncio.shield(future)
+
+     def invalidate(self, tenant: str, key: str) -> None:
+-        identity = (tenant, key)
++        identity = f'{tenant}:{key}'
+         self._values.pop(identity, None)
+         self._loads.pop(identity, None)
