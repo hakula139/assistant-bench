@@ -1,10 +1,16 @@
 import type { FamilyConfig, Scorer, VotesConfig } from '@/lib/family';
-import { formatCount, formatCountOf, formatPenalty, formatScore } from '@/lib/format';
+import {
+  formatCount,
+  formatCountOf,
+  formatPenalty,
+  formatPercent,
+  formatScore,
+} from '@/lib/format';
 import { inferenceNote, terms, type Term } from '@/lib/glossary';
 import type { VotesMethod, VotesRules } from '@/lib/report';
 
 export function roundMethod(method: VotesMethod, rules: VotesRules): string {
-  return `Bradley-Terry, L2 penalty ${formatPenalty(method.l2_penalty)}, ${formatScore(method.points_per_logit)} points per logit, anchor ${formatScore(method.anchor_score)}. Each voter contributes at most ${formatCountOf(method.actor_cap, 'vote')} of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Preliminary coverage requires ${formatCount(rules.preliminary_decisive_votes)} raw decisive votes.`;
+  return `Bradley-Terry, L2 penalty ${formatPenalty(method.l2_penalty)}, ${formatScore(method.points_per_logit)} points per logit, anchor ${formatScore(method.anchor_score)}. Each voter contributes at most ${formatCountOf(method.actor_cap, 'vote')} of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Score intervals cover ${formatPercent(method.interval_level)} with the votes on one case counted as one draw, and a score is preliminary while its interval is wider than ±${formatScore(rules.preliminary_half_width)} points.`;
 }
 
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */

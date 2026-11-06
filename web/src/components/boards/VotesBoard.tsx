@@ -16,7 +16,7 @@ import {
 import { TableTwin } from '@/components/charts/TableTwin';
 import { ForestLegend } from '@/components/site/Forest';
 import { note, Section, stack, Stat, statList } from '@/components/site/PageParts';
-import { Hint, StatusMark } from '@/components/site/Term';
+import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { Category } from '@/lib/categories';
+import { decisionNote } from '@/lib/decision';
 import { unplacedText } from '@/lib/forest';
 import {
   formatCost,
@@ -53,9 +54,9 @@ import type {
   CategoryBoard,
   CategoryStanding,
   CostGap,
+  ScoreInterval,
   Standing,
   VotesResults,
-  VotesRules,
 } from '@/lib/report';
 import type { VotesReport } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
@@ -70,30 +71,40 @@ interface VotesBoardProps {
   labels: BoardLabels;
 }
 
+const waldTest = { figure: 'score', test: 'a case-clustered Wald test' };
+
+const categoryNote =
+  'A category holds too few cases for a score interval, so its scores are points only and drawn as preliminary.';
+
 function leaderboardRows(
   base: string,
   results: VotesResults,
   category: Category | null,
   names: SystemNames,
 ): LeaderboardRow[] {
-  const row = (fit: CategoryStanding, standing: Standing | undefined): LeaderboardRow => ({
+  const row = (
+    fit: CategoryStanding,
+    standing: Standing | undefined,
+    interval: ScoreInterval | null,
+  ): LeaderboardRow => ({
     system: fit.system,
     name: systemName(names, fit.system),
     href: standing ? systemPagePath(base, fit.system) : undefined,
     standing,
     score: fit.score,
+    interval,
     votes: fit.votes,
-    preliminary: isPreliminary(fit, results.rules),
+    preliminary: isPreliminary(interval, results.rules),
   });
 
   if (category === null) {
-    return results.standings.map((standing) => row(standing, standing));
+    return results.standings.map((standing) => row(standing, standing, standing.interval));
   }
 
   const standings = new Map(results.standings.map((standing) => [standing.system, standing]));
   const board = results.categories.find((item) => item.category === category);
 
-  return (board?.standings ?? []).map((refit) => row(refit, standings.get(refit.system)));
+  return (board?.standings ?? []).map((refit) => row(refit, standings.get(refit.system), null));
 }
 
 /** The family board's systems by score, then the systems only some category board ranks. */
@@ -125,7 +136,8 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
           label={terms.votes.term}
           detail={
             <>
-              from {formatCountOf(results.voters, 'voter')}
+              from {formatCountOf(results.voters, 'voter')} on{' '}
+              {formatCountOf(results.cases, 'case')}
               {results.dropped_votes > 0 && (
                 <>
                   , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>
@@ -154,27 +166,14 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
 }
 
 /** One system's score in a category, with its vote count, or why the category has no score. */
-function CategoryCell({
-  board,
-  system,
-  rules,
-}: {
-  board: CategoryBoard;
-  system: string;
-  rules: VotesRules;
-}) {
+function CategoryCell({ board, system }: { board: CategoryBoard; system: string }) {
   const refit = board.standings.find((item) => item.system === system);
 
   return (
     <TableCell numeric>
       {refit ? (
         <span className="flex flex-col items-end leading-tight">
-          <span className="flex items-center gap-1.5">
-            {isPreliminary(refit, rules) && (
-              <StatusMark status="preliminary" term={preliminaryTerm(rules)} compact />
-            )}
-            {formatScore(refit.score)}
-          </span>
+          {formatScore(refit.score)}
           <span className="text-xs text-muted-foreground">
             {formatCountOf(refit.votes, 'vote')}
           </span>
@@ -269,6 +268,9 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
               .join(', ')}`}
           </p>
         )}
+        {category === null && results.decision && results.standings.length > 1 && (
+          <p className={note}>{decisionNote(results.decision, rows, names, waldTest)}</p>
+        )}
         <ForestLegend
           className="max-lg:hidden"
           marks={leaderboardMarks(rows, results.method.anchor_score)}
@@ -278,8 +280,9 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
       {boards.length > 0 && (
         <Section title="Categories">
+          <p className={note}>{categoryNote}</p>
           <ForestLegend
-            marks={categoryMarks(boards, results.method.anchor_score, results.rules)}
+            marks={categoryMarks(boards, results.method.anchor_score)}
             anchorScore={results.method.anchor_score}
           />
           <CategoryForests
@@ -287,7 +290,6 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
             systems={order}
             names={names}
             anchorScore={results.method.anchor_score}
-            rules={results.rules}
           />
           <TableTwin>
             <Table>
@@ -306,12 +308,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                   <TableRow key={system}>
                     <TableCell>{systemName(names, system)}</TableCell>
                     {boards.map((board) => (
-                      <CategoryCell
-                        key={board.category}
-                        board={board}
-                        system={system}
-                        rules={results.rules}
-                      />
+                      <CategoryCell key={board.category} board={board} system={system} />
                     ))}
                   </TableRow>
                 ))}

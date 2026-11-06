@@ -15,7 +15,7 @@ const estimate = (score: number) => ({ score });
 describe('Forest', () => {
   afterEach(cleanup);
 
-  test('draws settled and preliminary dots, an arrowhead below the axis, the anchor rule, and a gridline under each axis label', () => {
+  test('draws settled and preliminary dots, a score interval, an arrowhead below the axis, the anchor rule, and a gridline under each axis label', () => {
     const domain: [number, number] = [400, 1100];
     const grid = ['0%', '14.29%', '28.57%', '42.86%', '57.14%', '71.43%', '85.71%', '100%'];
 
@@ -25,7 +25,12 @@ describe('Forest', () => {
         domain={domain}
         anchorScore={1000}
         rows={[
-          { system: 'settled', name: 'settled', estimate: estimate(1000), preliminary: false },
+          {
+            system: 'settled',
+            name: 'settled',
+            estimate: { score: 1000, interval: { lower: 950, upper: 1050 } },
+            preliminary: false,
+          },
           {
             system: 'preliminary',
             name: 'preliminary',
@@ -42,10 +47,31 @@ describe('Forest', () => {
     const labels = [...container.querySelectorAll<HTMLElement>('thead [aria-hidden] span')];
 
     expect(drawings).toEqual([
-      { dot: 'filled', arrows: [], dotAt: '85.71%', ruleAt: '85.71%', gridAt: grid },
-      { dot: 'hollow', arrows: [], dotAt: '71.43%', ruleAt: '85.71%', gridAt: grid },
-      { dot: 'none', arrows: ['start'], dotAt: null, ruleAt: '85.71%', gridAt: grid },
-      { dot: 'none', arrows: [], dotAt: null, ruleAt: '85.71%', gridAt: grid },
+      {
+        dot: 'filled',
+        arrows: [],
+        dotAt: '85.71%',
+        ruleAt: '85.71%',
+        gridAt: grid,
+        interval: ['78.57%', '14.29%'],
+      },
+      {
+        dot: 'hollow',
+        arrows: [],
+        dotAt: '71.43%',
+        ruleAt: '85.71%',
+        gridAt: grid,
+        interval: null,
+      },
+      {
+        dot: 'none',
+        arrows: ['start'],
+        dotAt: null,
+        ruleAt: '85.71%',
+        gridAt: grid,
+        interval: null,
+      },
+      { dot: 'none', arrows: [], dotAt: null, ruleAt: '85.71%', gridAt: grid, interval: null },
     ]);
     expect(labels.map((label) => [label.textContent, label.style.left])).toEqual(
       forestTicks(domain).map((tick, index) => [formatScore(tick), grid[index]]),

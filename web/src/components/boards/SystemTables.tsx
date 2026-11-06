@@ -82,13 +82,7 @@ export function HeadToHeadTable({
   );
 }
 
-export function CategoryTable({
-  categories,
-  rules,
-}: {
-  categories: ForestPlotRow[];
-  rules: VotesRules;
-}) {
+export function CategoryTable({ categories }: { categories: ForestPlotRow[] }) {
   return (
     <Table>
       <TableHeader>
@@ -96,7 +90,6 @@ export function CategoryTable({
           <TableHead>Category</TableHead>
           <TableHead numeric>Score</TableHead>
           <TableHead numeric>Votes</TableHead>
-          <TableHead>Coverage</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -105,7 +98,6 @@ export function CategoryTable({
             <TableCell>{label}</TableCell>
             <TableCell numeric>{formatScore(refit.score)}</TableCell>
             <TableCell numeric>{formatCount(refit.votes)}</TableCell>
-            <TableCell>{isPreliminary(refit, rules) ? 'preliminary' : ''}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -233,7 +225,7 @@ export function RoundsTable({
                         )}
                       />
                     )}
-                    {isPreliminary(past, rules) && (
+                    {isPreliminary(past.interval, rules) && (
                       <StatusMark status="preliminary" term={preliminaryTerm(rules)} />
                     )}
                   </span>

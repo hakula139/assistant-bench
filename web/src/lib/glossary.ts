@@ -10,7 +10,7 @@ export interface Term {
 }
 
 export const inferenceNote =
-  'Uncertainty for new cases and voters is unavailable until the method is calibrated.';
+  "Each score's interval covers new cases like the round's, judged by the same voters, and does not extend to new voters.";
 
 /** The board terms, shared by the boards' labels, their definitions on tap, and the methodology. */
 export const terms = {
@@ -25,7 +25,13 @@ export const terms = {
   },
   preliminary: {
     term: 'Preliminary',
-    definition: "A coverage marker for systems below the round's recorded decisive-vote threshold.",
+    definition:
+      "A score whose interval is wider than the round's recorded threshold, or that has no interval, as category scores do.",
+  },
+  scoreInterval: {
+    term: 'Score interval',
+    definition:
+      "The range of scores that new cases like the round's support at the recorded level, from a sandwich variance that treats the votes on one case as one draw.",
   },
   decisive: {
     term: 'Decisive',
@@ -217,7 +223,7 @@ export function effectiveVotesTerm(method: VotesMethod): Term {
 export function preliminaryTerm(rules: VotesRules): Term {
   return {
     ...terms.preliminary,
-    definition: `Fewer than ${formatCount(rules.preliminary_decisive_votes)} raw votes with a winner. This marks coverage and does not measure confidence.`,
+    definition: `A score interval wider than ±${formatScore(rules.preliminary_half_width)} points, or no interval, as category scores have none.`,
   };
 }
 

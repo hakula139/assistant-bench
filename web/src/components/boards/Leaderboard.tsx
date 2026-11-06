@@ -30,10 +30,11 @@ import {
   formatPercent,
   formatPercentRange,
   formatScore,
+  formatScoreRange,
   MISSING,
 } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
-import type { PassRate, Standing } from '@/lib/report';
+import type { PassRate, ScoreInterval, Standing } from '@/lib/report';
 
 /** Score fields belong to the selected overall or category fit. */
 export interface LeaderboardRow {
@@ -48,6 +49,8 @@ export interface LeaderboardRow {
    */
   standing: Standing | undefined;
   score: number;
+  /** The family board's score interval, which category refits lack. */
+  interval: ScoreInterval | null;
   votes: number;
   preliminary: boolean;
 }
@@ -93,7 +96,7 @@ function ScoreCell({
   domain: [number, number];
   anchorScore: number;
 }) {
-  const summary = `${row.name}: ${formatScore(row.score)}`;
+  const summary = `${row.name}: ${formatScore(row.score)}${row.interval ? ` (${formatScoreRange(row.interval)})` : ''}`;
   return (
     <div role="img" aria-label={summary} title={summary} className="absolute inset-x-4 inset-y-0">
       <ScoreTrack domain={domain} anchorScore={anchorScore} estimate={row} />
@@ -239,6 +242,11 @@ export function Leaderboard({
             >
               <span className="font-medium">{formatScore(row.original.score)}</span>
             </Hint>
+            {row.original.interval && (
+              <span className="text-xs text-muted-foreground">
+                {formatScoreRange(row.original.interval)}
+              </span>
+            )}
           </span>
         ),
         meta: { numeric: true },

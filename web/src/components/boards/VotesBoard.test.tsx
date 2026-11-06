@@ -15,8 +15,16 @@ import { FIXTURE_NAMES, readReport, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 import { trackDrawing, type TrackDrawing } from '@/test/track';
 
-const load = (name: 'report' | 'report-early' = 'report'): Promise<VotesReport> =>
-  readReport(name, 'votes');
+async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesReport> {
+  const round = await readReport(name, 'votes');
+  if (name === 'report') {
+    for (const standing of round.results.standings) {
+      const half = standing.system === 'acme-tiny' ? 80 : 20;
+      standing.interval = { lower: standing.score - half, upper: standing.score + half };
+    }
+  }
+  return round;
+}
 
 const PASS_RATES: Record<string, PassRate | null> = {
   'acme-mini': { rate: 0.9, lower: 0.6, upper: 1 },
@@ -98,12 +106,12 @@ describe('VotesBoard', () => {
   });
   afterEach(cleanup);
 
-  test('draws the labels, coverage marks, and copy of the round it shows', async () => {
+  test('draws the labels, preliminary marks, and copy of the round it shows', async () => {
     const earlier = await load('report-early');
     const current = await load();
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
     current.systems['acme-pro'].display_name = 'Current Pro';
-    earlier.results.rules.preliminary_decisive_votes = 12;
+    earlier.results.rules.preliminary_half_width = 75;
     earlier.results.method.anchor_score = 1234;
     for (const row of earlier.results.standings) {
       row.score += 234;
@@ -118,7 +126,7 @@ describe('VotesBoard', () => {
       if (pro === undefined) {
         throw new Error('Fixture ranks acme-pro');
       }
-      pro.decisive_votes = 13;
+      pro.interval = { lower: pro.score - 60, upper: pro.score + 60 };
     }
     const draw = (round: VotesReport) =>
       renderToString(<VotesBoard base={BOARD} round={round} labels={CASES} />);
@@ -132,7 +140,7 @@ describe('VotesBoard', () => {
     expect(historicalRow?.textContent).not.toContain('Preliminary');
     expect(text(historical)).not.toContain('Current Pro');
     expect(text(historical)).toContain('anchor 1,234');
-    expect(text(historical)).toContain('12 raw decisive votes');
+    expect(text(historical)).toContain('wider than ±75 points');
 
     const latest = draw(current);
 
@@ -141,7 +149,7 @@ describe('VotesBoard', () => {
     );
     expect(currentRow?.textContent).toContain('Current ProPreliminary');
     expect(text(latest)).not.toContain('Historical Pro');
-    expect(text(latest)).toContain('40 raw decisive votes');
+    expect(text(latest)).toContain('wider than ±50 points');
   });
 
   test('starts in score order and sorts systems in both directions', async () => {
@@ -193,7 +201,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(stats(html)).toEqual([
-      ['Votes', '315 from 7 voters, 42 left out'],
+      ['Votes', '315 from 7 voters on 30 cases, 42 left out'],
       ['Effective votes', '286'],
       ['Split-half τ', '0.40'],
       ['Length bias', 'Favors longer, 29.9'],
@@ -230,7 +238,7 @@ describe('VotesBoard', () => {
     const html = render(round);
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
-    expect(stats(html)[0]).toEqual(['Votes', '315 from 7 voters']);
+    expect(stats(html)[0]).toEqual(['Votes', '315 from 7 voters on 30 cases']);
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
@@ -249,12 +257,12 @@ describe('VotesBoard', () => {
   test('keys the legend to the marks the board draws', async () => {
     const round = await load();
     for (const standing of round.results.standings) {
-      standing.decisive_votes = round.results.rules.preliminary_decisive_votes;
+      standing.interval = { lower: standing.score - 20, upper: standing.score + 20 };
     }
 
     const html = render(round);
 
-    expect(legend(html)).toBe('Point score Score below the axis Anchor, 1,000');
+    expect(legend(html)).toBe('Point score Score interval Score below the axis Anchor, 1,000');
   });
 
   test('marks only the anchor and the preliminary systems', async () => {
@@ -268,6 +276,29 @@ describe('VotesBoard', () => {
 
     expect(marked('Anchor')).toEqual(['Acme Large']);
     expect(marked('Preliminary')).toEqual(['Acme Tiny']);
+  });
+
+  test.each([
+    [[], ', and a case-clustered Wald test separates it from every other system.'],
+    [['acme-large'], ', but a case-clustered Wald test cannot separate it from Acme Large.'],
+  ])('names the systems tied with the leader: %j', async (tied, decision) => {
+    const round = await load();
+    if (round.results.decision === null) {
+      throw new Error('Fixture decides its leader');
+    }
+    round.results.decision.tied = tied;
+
+    const html = render(round);
+
+    expect(text(html)).toContain(`Acme Pro has the top score${decision}`);
+  });
+
+  test("leaves the decision out of a category's board", async () => {
+    window.history.replaceState(null, '', '/?category=message');
+
+    const html = render(await load());
+
+    expect(text(html)).not.toContain('has the top score');
   });
 
   test('marks the stand-in anchor when the reference is not ranked', async () => {
@@ -322,11 +353,12 @@ describe('VotesBoard', () => {
     );
   });
 
-  test("labels and titles each system's point with its display name and score", async () => {
+  test("labels and titles each system's point with its display name, score, and interval", async () => {
     const html = render(await load());
 
-    const point = parse(html).querySelector('[role="img"][aria-label="Acme Pro: 1,068"]');
-    expect(point?.getAttribute('title')).toBe('Acme Pro: 1,068');
+    const summary = 'Acme Pro: 1,068 (1,048–1,088)';
+    const point = parse(html).querySelector(`[role="img"][aria-label="${summary}"]`);
+    expect(point?.getAttribute('title')).toBe(summary);
     expect(point?.querySelector('[data-slot="score-track"]')).not.toBeNull();
   });
 
@@ -356,7 +388,7 @@ describe('VotesBoard', () => {
   test('counts the single voter of an early round', async () => {
     const html = render(await load('report-early'));
 
-    expect(stats(html)[0]).toEqual(['Votes', '33 from 1 voter, 2 left out']);
+    expect(stats(html)[0]).toEqual(['Votes', '33 from 1 voter on 30 cases, 2 left out']);
   });
 
   test('leaves out the cost chart when no system is priced', async () => {
@@ -438,7 +470,7 @@ describe('VotesBoard', () => {
     const html = render(await load());
 
     expect(text(head(html))).toMatch(/^ Rank What Rank means System /);
-    expect(text(html)).toContain('1 Acme Pro 1,068 98');
+    expect(text(html)).toContain('1 Acme Pro 1,068 1,048–1,088 98');
   });
 
   test('labels each category board, header, and filter option in report order', async () => {
@@ -537,7 +569,7 @@ describe('VotesBoard', () => {
     ]);
 
     expect(legends).toEqual([
-      ['max-lg:hidden', null, 'Point score Score below the axis Anchor, 1,000'],
+      ['max-lg:hidden', null, 'Point score Score interval Score below the axis Anchor, 1,000'],
       [undefined, 'Categories', expect.stringContaining('Preliminary')],
     ]);
   });
@@ -581,7 +613,7 @@ describe('VotesBoard', () => {
     },
   );
 
-  test("draws each system's score, coverage, and cut before hydration, with the anchor's rule through every row", async () => {
+  test("draws each system's score, interval, and cut before hydration, with the anchor's rule through every row", async () => {
     const round = await load();
     round.results.reference = 'acme-new';
     round.systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
@@ -595,16 +627,21 @@ describe('VotesBoard', () => {
     );
     expect(
       Object.fromEntries(
-        Object.entries(drawn).map(([name, { dot, arrows }]) => [name, { dot, arrows }]),
+        Object.entries(drawn).map(([name, { dot, arrows, interval }]) => [
+          name,
+          { dot, arrows, interval: interval !== null },
+        ]),
       ),
     ).toEqual({
-      'Acme Pro': { dot: 'filled', arrows: [] },
-      'Acme Large': { dot: 'filled', arrows: [] },
-      'Acme Small': { dot: 'filled', arrows: [] },
-      'Acme Flash': { dot: 'filled', arrows: [] },
-      'Acme Mini': { dot: 'filled', arrows: [] },
-      'Acme Tiny': { dot: 'none', arrows: ['start'] },
+      'Acme Pro': { dot: 'filled', arrows: [], interval: true },
+      'Acme Large': { dot: 'filled', arrows: [], interval: true },
+      'Acme Small': { dot: 'filled', arrows: [], interval: true },
+      'Acme Flash': { dot: 'filled', arrows: [], interval: true },
+      'Acme Mini': { dot: 'filled', arrows: [], interval: true },
+      'Acme Tiny': { dot: 'none', arrows: ['start'], interval: false },
     });
+    const [left, width] = (drawn['Acme Pro'].interval ?? []).map(Number.parseFloat);
+    expect(left + width / 2).toBeCloseTo(Number.parseFloat(drawn['Acme Pro'].dotAt ?? ''));
   });
 
   test.each(['report', 'report-early'] as const)(
@@ -647,9 +684,7 @@ describe('VotesBoard', () => {
 
     expect(text(html)).toContain('Acme Edge Preliminary 847 31 – –');
     expect(html).not.toContain(`href="${BOARD}acme-edge/"`);
-    expect(text(html)).toContain(
-      'Acme Mini Preliminary 857 36 votes no votes Preliminary 934 36 votes',
-    );
-    expect(text(html)).toContain('Acme Edge unranked Preliminary 847 31 votes no votes Score');
+    expect(text(html)).toContain('Acme Mini 857 36 votes no votes 934 36 votes');
+    expect(text(html)).toContain('Acme Edge unranked 847 31 votes no votes Score');
   });
 });

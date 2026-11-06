@@ -98,6 +98,12 @@ describe('reportSchema', () => {
     ['nonpositive cap', ['method', 'actor_cap'], 0],
     ['boolean cap', ['method', 'actor_cap'], true],
     ['retired method name', ['method', 'name'], 'bradley-terry'],
+    ['an interval level of one', ['method', 'interval_level'], 1],
+    ['a nonpositive preliminary half-width', ['rules', 'preliminary_half_width'], 0],
+    ['a leader outside the standings', ['decision', 'leader'], 'acme-edge'],
+    ['a leader tied with itself', ['decision', 'tied'], ['acme-pro']],
+    ['intervals without a decision', ['decision'], null],
+    ['a decision without every interval', ['standings', 0, 'interval'], null],
   ] satisfies [string, (string | number)[], unknown][])(
     'rejects votes rounds with %s',
     async (_, path, value) => {
@@ -139,7 +145,6 @@ describe('reportSchema', () => {
   );
 
   test.each([
-    ['interval', ['standings', 0, 'interval'], { lower: 900, upper: 1100 }],
     ['standing fingerprint', ['standings', 0, 'fingerprint'], 'duplicate'],
     ['preliminary flag', ['standings', 0, 'preliminary'], true],
     ['category preliminary flag', ['categories', 0, 'standings', 0, 'preliminary'], true],
@@ -200,8 +205,9 @@ describe('reportSchema', () => {
       points_per_logit: 200,
       anchor_score: 1234,
       actor_cap: 50,
+      interval_level: 0.9,
     });
-    Object.assign(payload.results.rules, { preliminary_decisive_votes: 12 });
+    Object.assign(payload.results.rules, { preliminary_half_width: 75 });
 
     const parsed = reportSchema.parse(payload);
 

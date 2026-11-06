@@ -26,12 +26,13 @@ describe('roundMethod', () => {
       points_per_logit: 400 / Math.log(10),
       anchor_score: 1000,
       actor_cap: 1000,
+      interval_level: 0.9,
     };
 
-    const text = roundMethod(method, { preliminary_decisive_votes: 1200 });
+    const text = roundMethod(method, { preliminary_half_width: 75 });
 
     expect(text).toBe(
-      "Bradley-Terry, L2 penalty 0.0125, 174 points per logit, anchor 1,000. Each voter contributes at most 1,000 votes of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Preliminary coverage requires 1,200 raw decisive votes.",
+      "Bradley-Terry, L2 penalty 0.0125, 174 points per logit, anchor 1,000. Each voter contributes at most 1,000 votes of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Score intervals cover 90% with the votes on one case counted as one draw, and a score is preliminary while its interval is wider than ±75 points.",
     );
   });
 });
@@ -95,7 +96,7 @@ describe('methodSteps', () => {
     expect(steps.slice(1).map(({ hint }) => hint)).toEqual([
       gateRule(family),
       'One rater votes on two outputs for a case without seeing which systems wrote them.',
-      'Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Uncertainty for new cases and voters is unavailable until the method is calibrated.',
+      "Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Each score's interval covers new cases like the round's, judged by the same voters, and does not extend to new voters.",
     ]);
   });
 

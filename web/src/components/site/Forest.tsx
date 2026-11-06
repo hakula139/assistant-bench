@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import {
   AnchorRule,
   CutArrow,
+  IntervalBar,
   ScoreDot,
   ScoreTrack,
   TrackAxis,
@@ -18,7 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ARROWHEAD, unplacedText, type ForestRow, type LegendMark } from '@/lib/forest';
-import { formatScore } from '@/lib/format';
+import { formatScore, formatScoreRange } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
 interface ForestProps {
@@ -30,9 +31,12 @@ interface ForestProps {
 }
 
 function scoreText(row: ForestRow): string {
-  return 'estimate' in row
-    ? `${formatScore(row.estimate.score)}${row.preliminary ? ', preliminary' : ''}`
-    : unplacedText[row.unplaced];
+  if (!('estimate' in row)) {
+    return unplacedText[row.unplaced];
+  }
+
+  const { score, interval } = row.estimate;
+  return `${formatScore(score)}${interval ? ` (${formatScoreRange(interval)})` : ''}${row.preliminary ? ', preliminary' : ''}`;
 }
 
 function details(row: ForestRow): Term {
@@ -50,6 +54,7 @@ function details(row: ForestRow): Term {
 const legendKey: Record<LegendMark, { label: string; mark: ReactNode }> = {
   score: { label: 'Point score', mark: <ScoreDot preliminary={false} left="50%" /> },
   preliminary: { label: 'Preliminary', mark: <ScoreDot preliminary left="50%" /> },
+  interval: { label: 'Score interval', mark: <IntervalBar left="0%" width="100%" /> },
   cut: {
     label: 'Score below the axis',
     mark: (
@@ -127,9 +132,7 @@ export function Forest({ rows, domain, caption, anchorScore, large = false }: Fo
                 domain={domain}
                 anchorScore={anchorScore}
                 estimate={
-                  'estimate' in row
-                    ? { score: row.estimate.score, preliminary: row.preliminary }
-                    : undefined
+                  'estimate' in row ? { ...row.estimate, preliminary: row.preliminary } : undefined
                 }
               />
             </TableCell>

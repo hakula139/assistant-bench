@@ -1,11 +1,12 @@
 import { nice, ticks, tickStep } from 'd3-array';
 
 import { isPreliminary } from '@/lib/ranking';
-import type { Standing, VotesRules } from '@/lib/report';
+import type { ScoreInterval, Standing, VotesRules } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 export interface Estimate {
   score: number;
+  interval?: ScoreInterval | null;
 }
 
 /** Maximum visible gap below the top point, in score points. */
@@ -17,8 +18,8 @@ export const EMPTY_DOMAIN: [number, number] = [600, 1400];
 const TICKS = 5;
 
 /**
- * Clips the low end below the top point and keeps ticks at whole-score resolution. Equal points
- * use the empty plot's display span centered on their score.
+ * Spans every point and interval, clipping the low end below the top point, and keeps ticks at
+ * whole-score resolution. Equal points use the empty plot's display span centered on their score.
  */
 export function forestDomain(estimates: Estimate[]): [number, number] {
   if (estimates.length === 0) {
@@ -27,10 +28,10 @@ export function forestDomain(estimates: Estimate[]): [number, number] {
 
   const top = Math.max(...estimates.map((estimate) => estimate.score));
   const low = Math.max(
-    Math.min(...estimates.map((estimate) => estimate.score)),
+    Math.min(...estimates.map(({ score, interval }) => interval?.lower ?? score)),
     top - AXIS_SPAN_BELOW_TOP,
   );
-  const high = top;
+  const high = Math.max(...estimates.map(({ score, interval }) => interval?.upper ?? score));
 
   if (low === high) {
     const halfSpan = (EMPTY_DOMAIN[1] - EMPTY_DOMAIN[0]) / 2;
@@ -120,6 +121,8 @@ export interface Clipped {
   score: number;
   /** Whether the score itself lies below the axis start. */
   offScale: boolean;
+  /** The interval's bounds, the lower one raised to the axis start, for a score on the axis. */
+  range?: [number, number];
 }
 
 /** Whether a reference rule at `value`, when set, lies within the axis domain and can be drawn. */
@@ -133,10 +136,12 @@ export const onAxis = ([start, stop]: [number, number], value?: number): value i
 export const ARROWHEAD = { width: 10, height: 12 };
 
 /** Clips an estimate to an axis from `forestDomain`, which never cuts the top end. */
-export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
+export function clip({ score, interval }: Estimate, [start]: [number, number]): Clipped {
+  const offScale = score < start;
   return {
     score: Math.max(score, start),
-    offScale: score < start,
+    offScale,
+    ...(interval && !offScale && { range: [Math.max(interval.lower, start), interval.upper] }),
   };
 }
 
@@ -190,16 +195,16 @@ export function roundRows(
         name: systemName(names, standing.system),
         href: href(standing.system),
         estimate: standing,
-        preliminary: isPreliminary(standing, rules),
+        preliminary: isPreliminary(standing.interval, rules),
       })),
     ...unranked.toSorted(byName(names)).map((system) => unplaced(system, 'unranked')),
   ];
 }
 
 /** A mark a forest plot draws, which its legend names. */
-export type LegendMark = 'score' | 'preliminary' | 'cut' | 'anchor';
+export type LegendMark = 'score' | 'preliminary' | 'interval' | 'cut' | 'anchor';
 
-const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'cut', 'anchor'];
+const LEGEND_ORDER: LegendMark[] = ['score', 'preliminary', 'interval', 'cut', 'anchor'];
 
 /**
  * Returns the marks a forest plot of `rows` on `domain` draws, in legend order. The plot rules
@@ -220,6 +225,10 @@ export function legendMarks(
         drawn.add('cut');
       } else {
         drawn.add(row.preliminary ? 'preliminary' : 'score');
+      }
+
+      if (clipped.range) {
+        drawn.add('interval');
       }
     }
   }

@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'vitest';
 
 import { isPreliminary } from '@/lib/ranking';
-import type { VotesRules } from '@/lib/report';
+import type { ScoreInterval, VotesRules } from '@/lib/report';
 
 describe('isPreliminary', () => {
-  test.each([
-    [11, 12, true],
-    [12, 12, false],
-    [12, 40, true],
-    [40, 40, false],
+  test.each<[ScoreInterval | null, number, boolean]>([
+    [{ lower: 940, upper: 1060 }, 50, true],
+    [{ lower: 950, upper: 1050 }, 50, false],
+    [{ lower: 950, upper: 1050 }, 40, true],
+    [null, 50, true],
   ])(
-    'derives %i decisive votes against the recorded threshold %i',
-    (decisive, threshold, expected) => {
-      const rules: VotesRules = { preliminary_decisive_votes: threshold };
+    'compares the half-width of %j with the recorded threshold %i',
+    (interval, threshold, expected) => {
+      const rules: VotesRules = { preliminary_half_width: threshold };
 
-      const preliminary = isPreliminary({ decisive_votes: decisive }, rules);
+      const preliminary = isPreliminary(interval, rules);
 
       expect(preliminary).toBe(expected);
     },

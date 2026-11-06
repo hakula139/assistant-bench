@@ -8,7 +8,6 @@ import { ForestPlot } from '@/components/charts/ForestPlot';
 import { ParetoScatter } from '@/components/charts/ParetoScatter';
 import { drawnSvg, stubPlotFrame } from '@/test/plot';
 
-const rules = { preliminary_decisive_votes: 40 };
 const refit = (system: string, score: number) => ({
   system,
   score,
@@ -28,7 +27,6 @@ const charts: [string, ReactElement, number][] = [
       labels={['docs', 'reply']}
       domain={[600, 1200]}
       anchorScore={1000}
-      rules={rules}
     />,
     1,
   ],

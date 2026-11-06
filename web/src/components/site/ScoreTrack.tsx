@@ -1,11 +1,18 @@
 import { cn } from 'cn';
 
-import { ARROWHEAD, axisIntervals, clip, forestTicks, onAxis, sparseTicks } from '@/lib/forest';
+import {
+  ARROWHEAD,
+  axisIntervals,
+  clip,
+  forestTicks,
+  onAxis,
+  sparseTicks,
+  type Estimate,
+} from '@/lib/forest';
 import { formatScore } from '@/lib/format';
 
-/** A placed system's point score, drawn hollow while its coverage is preliminary. */
-interface TrackScore {
-  score: number;
+/** A placed system's point score and interval, the point drawn hollow while preliminary. */
+interface TrackScore extends Estimate {
   preliminary: boolean;
 }
 
@@ -39,10 +46,11 @@ const axisFits: Record<number, string> = {
   16: '@max-[40rem]:hidden',
 };
 
-const position =
-  ([start, stop]: [number, number]) =>
-  (value: number) =>
-    `${(((value - start) / (stop - start)) * 100).toFixed(2)}%`;
+const share = ([start, stop]: [number, number], value: number) =>
+  ((value - start) / (stop - start)) * 100;
+
+const position = (domain: [number, number]) => (value: number) =>
+  `${share(domain, value).toFixed(2)}%`;
 
 /** A point score, centered at `left` within a positioned parent. */
 export function ScoreDot({ preliminary, left }: { preliminary: boolean; left: string }) {
@@ -54,6 +62,17 @@ export function ScoreDot({ preliminary, left }: { preliminary: boolean; left: st
         preliminary ? 'border-chart-series bg-background' : 'border-background bg-chart-series',
       )}
       style={{ left }}
+    />
+  );
+}
+
+/** A score interval from `left` over `width` of a positioned parent. */
+export function IntervalBar({ left, width }: { left: string; width: string }) {
+  return (
+    <span
+      data-slot="score-interval"
+      className={cn(middle, 'h-0.5 rounded-full bg-chart-series')}
+      style={{ left, width }}
     />
   );
 }
@@ -131,6 +150,7 @@ export function ScoreTrack({
 }) {
   const at = position(domain);
   const clipped = estimate && { ...clip(estimate, domain), preliminary: estimate.preliminary };
+  const range = clipped?.range;
 
   return (
     <span aria-hidden="true" data-slot="score-track" className={extent}>
@@ -138,6 +158,12 @@ export function ScoreTrack({
         <span key={tick} className={cn(rule, 'bg-chart-grid')} style={{ left: at(tick) }} />
       ))}
       {onAxis(domain, anchorScore) && <AnchorRule left={at(anchorScore)} />}
+      {range && (
+        <IntervalBar
+          left={at(range[0])}
+          width={`${(share(domain, range[1]) - share(domain, range[0])).toFixed(2)}%`}
+        />
+      )}
       {clipped &&
         (clipped.offScale ? (
           <CutArrow />

@@ -25,7 +25,7 @@ import {
 import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
-import { formatScore } from '@/lib/format';
+import { formatScore, formatScoreRange } from '@/lib/format';
 import { categoryTerms, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
 import { isPreliminary } from '@/lib/ranking';
@@ -118,13 +118,18 @@ const latencyRows = distributionRows((item) => item.latency_sec);
       </Breadcrumb>
     </Fragment>
     <Fragment slot="status">
-      {isPreliminary(standing, results.rules) && (
+      {isPreliminary(standing.interval, results.rules) && (
         <StatusMark client:visible status="preliminary" term={preliminaryTerm(results.rules)} />
       )}
     </Fragment>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <dl class={statList}>
-      <Stat label="Score">{formatScore(standing.score)}</Stat>
+      <Stat
+        label="Score"
+        detail={standing.interval ? formatScoreRange(standing.interval) : undefined}
+      >
+        {formatScore(standing.score)}
+      </Stat>
       <Stat label="Rank">{standing.rank}</Stat>
       <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
       <Stat label="Round">
@@ -161,11 +166,10 @@ const latencyRows = distributionRows((item) => item.latency_sec);
           labels={categoryRows.map((row) => row.label)}
           domain={categoryDomain}
           anchorScore={results.method.anchor_score}
-          rules={results.rules}
           label="Category point scores"
         />
         <TableTwin>
-          <CategoryTable categories={categoryRows} rules={results.rules} />
+          <CategoryTable categories={categoryRows} />
         </TableTwin>
       </Section>
     )}

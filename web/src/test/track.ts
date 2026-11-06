@@ -7,6 +7,8 @@ export interface TrackDrawing {
   dotAt: string | null;
   ruleAt: string | null;
   gridAt: string[];
+  /** The score interval's start and width on the axis, as `left` and `width` styles. */
+  interval: [string, string] | null;
 }
 
 export function trackDrawing(row: Element): TrackDrawing {
@@ -15,7 +17,8 @@ export function trackDrawing(row: Element): TrackDrawing {
     throw new Error(`the row "${row.textContent}" draws no score track`);
   }
 
-  const dot = track.querySelector<HTMLElement>('.rounded-full');
+  const dot = track.querySelector<HTMLElement>('.rounded-full:not([data-slot="score-interval"])');
+  const interval = track.querySelector<HTMLElement>('[data-slot="score-interval"]');
   const arrows = [...track.querySelectorAll('svg')].map((svg) =>
     svg.classList.contains('left-0') ? 'start' : 'end',
   );
@@ -35,5 +38,6 @@ export function trackDrawing(row: Element): TrackDrawing {
     gridAt: [...track.querySelectorAll<HTMLElement>('.bg-chart-grid')].map(
       (line) => line.style.left,
     ),
+    interval: interval && [interval.style.left, interval.style.width],
   };
 }

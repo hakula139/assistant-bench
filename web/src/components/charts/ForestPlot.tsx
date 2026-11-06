@@ -11,8 +11,7 @@ import {
 import { PlotFigure, type PlotFrame } from '@/components/charts/PlotFigure';
 import { clip, forestTicks, labelledTicks, onAxis, unplacedText } from '@/lib/forest';
 import { formatCountOf, formatScore } from '@/lib/format';
-import { isPreliminary } from '@/lib/ranking';
-import type { CategoryStanding, VotesRules } from '@/lib/report';
+import type { CategoryStanding } from '@/lib/report';
 
 export interface ForestPlotRow {
   label: string;
@@ -28,7 +27,6 @@ interface ForestPlotProps {
   /** Shared across category plots so their points use the same scale. */
   domain: [number, number];
   anchorScore: number;
-  rules: VotesRules;
   /** Names the chart, unless an enclosing figure's caption already does. */
   label?: string;
 }
@@ -41,14 +39,14 @@ const ARROW_INSET = 8;
 export const forestPlotHeight = (labels: string[]) => labels.length * ROW_HEIGHT + 36;
 
 export function forestPlotOptions(
-  { rows, labels, unranked = [], domain, anchorScore, rules }: ForestPlotProps,
+  { rows, labels, unranked = [], domain, anchorScore }: ForestPlotProps,
   { width, measure }: PlotFrame,
 ): Plot.PlotOptions {
   const data = rows.map(({ label, refit }): ForestDatum & { refit: CategoryStanding } => ({
     y: label,
     score: refit.score,
     clipped: clip(refit, domain),
-    preliminary: isPreliminary(refit, rules),
+    preliminary: true,
     refit,
   }));
 
@@ -89,27 +87,28 @@ export function forestPlotOptions(
           x: (datum: (typeof data)[number]) => datum.clipped.score,
           y: 'y',
           title: ({ y, refit }: (typeof data)[number]) =>
-            `${String(y)}\n${formatScore(refit.score)}\n${formatCountOf(refit.votes, 'vote')}${isPreliminary(refit, rules) ? ', preliminary' : ''}`,
+            `${String(y)}\n${formatScore(refit.score)}\n${formatCountOf(refit.votes, 'vote')}`,
         }),
       ),
     ],
   };
 }
 
-/** One forest plot of category refits, labelled by system or by category. */
+/**
+ * One forest plot of category refits, labelled by system or by category. A refit has no interval,
+ * so every point is drawn preliminary.
+ */
 export function ForestPlot({
   rows,
   labels,
   unranked,
   domain,
   anchorScore,
-  rules,
   label,
 }: ForestPlotProps) {
   const plot = useCallback(
-    (frame: PlotFrame) =>
-      forestPlotOptions({ rows, labels, unranked, domain, anchorScore, rules }, frame),
-    [rows, labels, unranked, domain, anchorScore, rules],
+    (frame: PlotFrame) => forestPlotOptions({ rows, labels, unranked, domain, anchorScore }, frame),
+    [rows, labels, unranked, domain, anchorScore],
   );
 
   return <PlotFigure plot={plot} height={forestPlotHeight(labels)} label={label} />;

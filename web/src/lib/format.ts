@@ -25,6 +25,11 @@ export const MISSING = '–';
 const minus = (text: string) => text.replace('-', '\u2212');
 
 export const formatScore = (value: number) => minus(whole.format(value));
+
+/** Prints a score interval as whole points, as in "1,002–1,134". */
+export const formatScoreRange = ({ lower, upper }: { lower: number; upper: number }) =>
+  `${formatScore(lower)}–${formatScore(upper)}`;
+
 export const formatTau = (value: number | null) =>
   value === null ? MISSING : minus(tau.format(value));
 export const formatCount = (value: number) => whole.format(value);

@@ -197,9 +197,9 @@ describe('family page', () => {
       'ranked from votes',
     ]);
     expect(new JSDOM(html).window.document.querySelector('dl dd')?.textContent).toBe(
-      '315 from 7 voters, 42 left out',
+      '315 from 7 voters on 30 cases, 42 left out',
     );
-    expect(text(html)).toContain('1 Acme Pro 1,068 98');
+    expect(text(html)).toContain('1 Acme Pro Preliminary 1,068 1,002–1,134 98');
   });
 
   test('lists every system with no votes before the first round closes', async () => {
@@ -311,10 +311,12 @@ describe('methodology page', () => {
     expect(stepHints(html)).toEqual([]);
   });
 
-  test('states unavailable population inference and opens the example points', async () => {
+  test('limits the score interval to new cases and opens the example points', async () => {
     const html = await render(MethodologyPage, {});
 
-    expect(text(html)).toContain('Uncertainty for new cases and voters is unavailable');
+    expect(text(html)).toContain(
+      "Each score's interval covers new cases like the round's, judged by the same voters, and does not extend to new voters.",
+    );
     expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
   });
 
@@ -487,9 +489,9 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(text(html)).toContain('Writing Arena Writing Acme Pro Score');
+    expect(text(html)).toContain('Writing Arena Writing Acme Pro Preliminary Score');
     expect(headerStats(html)).toEqual([
-      'Score 1,068',
+      'Score 1,068 1,002–1,134',
       'Rank 1',
       'Votes 98 (82 decisive)',
       'Round 2026-10-21',
@@ -515,7 +517,14 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(islandHints(html, 'RoundsTable')).toEqual(['2026-10-21', '1,068', '2026-10-07', '900']);
+    expect(islandHints(html, 'RoundsTable')).toEqual([
+      '2026-10-21',
+      'Preliminary',
+      '1,068',
+      '2026-10-07',
+      'Preliminary',
+      '900',
+    ]);
   });
 
   test("counts each issue tagged on the system's outputs, with its share and a hint on each issue", async () => {
@@ -612,7 +621,11 @@ describe('system page', () => {
       boards: [],
     });
 
-    expect(headerStats(html).slice(0, 3)).toEqual(['Score 346', 'Rank 6', 'Votes 0 (0 decisive)']);
+    expect(headerStats(html).slice(0, 3)).toEqual([
+      'Score 346 249–443',
+      'Rank 6',
+      'Votes 0 (0 decisive)',
+    ]);
     expect(html).not.toContain('Head to head');
     expect(text(html)).toContain(
       'Issue Votes Share Misses the brief 0 – Wrong facts 0 – Hard to follow 0 – Wrong tone 0 – Language errors 0 –',
