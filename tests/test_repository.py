@@ -32,6 +32,14 @@ CODING_TASKS = sorted(path.parent for path in (CODING / 'tasks').glob('*/task.to
 CODING_FIXTURES = REPO_ROOT / 'tests' / 'fixtures' / 'coding-repo'
 CODING_BYPASSES = sorted(path.stem for path in CODING_FIXTURES.glob('*.py'))
 SOLVE_TIMEOUT_SEC = 60
+INSTRUCTION_ENDING = (
+    "Use only Python 3.14's standard library. Verification runs the code as an "
+    'unprivileged user from a copy of `/app` that it may not be able to write, so '
+    'keep the files the code or its tests create in temporary directories. It runs '
+    'the tests in `/app/tests` and then its own hidden tests, and fails either run '
+    'that takes more than five minutes on two CPUs.\n'
+)
+"""Ends every coding instruction, stating `TIMEOUT_SEC` and the CPUs."""
 COMMITTED_SOURCES = {'synthetic', 'public'}
 
 URL = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"\']+', re.IGNORECASE)
@@ -368,10 +376,7 @@ def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
     timeout = load_coding_verifier().TIMEOUT_SEC
 
     assert (timeout, config['environment']['cpus']) == (5 * 60, 2)
-    assert (
-        'fails either run that takes more than five minutes on two CPUs.'
-        in (task / 'instruction.md').read_text()
-    )
+    assert (task / 'instruction.md').read_text().endswith(INSTRUCTION_ENDING)
     assert config['verifier']['timeout_sec'] >= verifier_wait_sec()
     assert (
         pytest_config['faulthandler_timeout'] > SOLVE_TIMEOUT_SEC + verifier_wait_sec()

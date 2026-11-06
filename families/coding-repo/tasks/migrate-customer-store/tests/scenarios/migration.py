@@ -1,3 +1,5 @@
+import itertools
+import os
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from shopstore import (
 )
 
 
+CRASH_STATUS = 86
 FAILURES: dict[str, type[Exception]] = {
     'MigrationError': MigrationError,
     'SchemaVersionError': SchemaVersionError,
@@ -44,14 +47,43 @@ def snapshot(connection: sqlite3.Connection) -> list[Any]:
     ]
 
 
+def null_name_rejected(connection: sqlite3.Connection) -> bool:
+    """Try to clear the first customer's display_name, then undo the attempt.
+
+    The name counts as required when the update fails or leaves it set, as an
+    `ON CONFLICT IGNORE` or `REPLACE` constraint does. An `ON CONFLICT ROLLBACK`
+    constraint ends the connection's whole transaction, so call this only with
+    every earlier write committed.
+    """
+    first = '(SELECT min(id) FROM customers)'
+    connection.execute('SAVEPOINT null_name')
+    try:
+        connection.execute(
+            f'UPDATE customers SET display_name = NULL WHERE id = {first}'
+        )
+        name = connection.execute(
+            f'SELECT display_name FROM customers WHERE id = {first}'
+        ).fetchone()
+        return name is not None and name[0] is not None
+    except sqlite3.IntegrityError:
+        return True
+    finally:
+        if connection.in_transaction:
+            connection.execute('ROLLBACK TO null_name')
+            connection.execute('RELEASE null_name')
+
+
 def schema(connection: sqlite3.Connection) -> dict[str, Any]:
     def indexed(index: str) -> list[str]:
         return [row[2] for row in connection.execute(f'PRAGMA index_info({index})')]
 
+    columns = {
+        row[1]: row for row in connection.execute('PRAGMA table_info(customers)')
+    }
     return {
-        'columns': {
-            row[1]: row for row in connection.execute('PRAGMA table_info(customers)')
-        },
+        'columns': columns,
+        'null_name_rejected': 'display_name' in columns
+        and null_name_rejected(connection),
         'customers_name': indexed('customers_name'),
         'orders_customer_id': indexed('orders_customer_id'),
         'foreign_key_check': connection.execute('PRAGMA foreign_key_check').fetchall(),
@@ -166,6 +198,23 @@ def repair_after_rollback(path: str) -> dict[str, Any]:
             ).fetchall(),
             'schema': schema(connection),
         }
+
+
+def crash_migration(path: str, statement: int) -> None:
+    """Migrate the store, crashing as its SQL statement number `statement` starts.
+
+    Exiting with `CRASH_STATUS` skips SQLite's cleanup, as a crash would.
+    """
+    started = itertools.count(1)
+
+    def trace(_: str) -> None:
+        if next(started) == statement:
+            os._exit(CRASH_STATUS)
+
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.set_trace_callback(trace)
+        migrate(connection)
 
 
 def open_store_rejection(path: str, error: str) -> dict[str, Any] | None:

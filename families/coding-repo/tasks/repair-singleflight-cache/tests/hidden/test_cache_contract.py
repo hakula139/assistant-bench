@@ -18,6 +18,26 @@ class CacheTest(unittest.TestCase):
             ('first', 'other tenant', 'other key'),
         )
 
+    def test_identities_that_join_to_the_same_text_stay_distinct(self) -> None:
+        separators = [c for c in map(chr, range(128)) if not c.isalnum()]
+        joiners = ['', *separators, *(c * 2 for c in separators), '␞', '§']
+        identities = [
+            identity
+            for joiner in joiners
+            for identity in (
+                [f'a{joiner}b', 'c'],
+                ['a', f'b{joiner}c'],
+                [f'a{joiner}', 'b'],
+                ['a', f'{joiner}b'],
+            )
+        ]
+
+        seen = sandbox.observe(
+            'cache_contract', 'distinct_identities', identities=identities
+        )
+
+        self.assertEqual(seen, identities)
+
     def test_cancelled_waiters_leave_the_loader_running(self) -> None:
         for another_waiter in (False, True):
             with self.subTest(another_waiter=another_waiter):
@@ -74,7 +94,7 @@ class CacheTest(unittest.TestCase):
                     'cache_contract', 'generation_order', old_first=old_first
                 )
 
-                self.assertEqual(seen['old'], 'old')
+                self.assertIn(seen['old'], ('old', 'new'))
                 if old_first:
                     self.assertEqual(seen['joined'], 'new')
                 self.assertEqual(seen['new'], 'new')

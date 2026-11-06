@@ -1,0 +1,26 @@
+--- a/ledgerload/importer.py
++++ b/ledgerload/importer.py
+@@ -25,12 +25,6 @@
+         if original is not None and original != digest:
+             raise SourceError(0, 'Source bytes changed.')
+
+-        with store.connection:
+-            store.connection.execute(
+-                'INSERT OR IGNORE INTO sources (source_id, sha256) VALUES (?, ?)',
+-                (source_id, digest),
+-            )
+-
+         checkpoint = store.checkpoint(source_id)
+         remaining = (
+             (index, row) for index, row in records(content) if index > checkpoint
+@@ -38,6 +32,10 @@
+         while True:
+             batch_processed = batch_inserted = 0
+             with store.connection:
++                store.connection.execute(
++                    'INSERT OR IGNORE INTO sources (source_id, sha256) VALUES (?, ?)',
++                    (source_id, digest),
++                )
+                 for _ in range(batch_size):
+                     try:
+                         index, row = next(remaining)

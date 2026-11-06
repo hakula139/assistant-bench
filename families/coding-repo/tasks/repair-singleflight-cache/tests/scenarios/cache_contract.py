@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import functools
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +22,14 @@ def raised(error: BaseException) -> list[str]:
 
 def account(value: Account) -> dict[str, Any]:
     return dataclasses.asdict(value)
+
+
+async def settle(task: asyncio.Task[Any]) -> None:
+    """Yield until `task` is done or a finished load has had ample turns to settle."""
+    for _ in range(100):
+        if task.done():
+            return
+        await asyncio.sleep(0)
 
 
 async def overlapping_requests() -> dict[str, Any]:
@@ -69,6 +78,18 @@ async def tenants_and_keys_do_not_block() -> dict[str, Any]:
         release.set()
         first_value = await asyncio.wait_for(first, 5)
     return {'first': first_value, 'other': other, 'separate': separate}
+
+
+async def distinct_identities(identities: list[list[str]]) -> list[list[str]]:
+    cache = SingleFlightCache[list[str]](10, clock=Clock())
+
+    async def load(identity: list[str]) -> list[str]:
+        return identity
+
+    return [
+        await cache.get(tenant, key, functools.partial(load, [tenant, key]))
+        for tenant, key in identities
+    ]
 
 
 async def cancelled_waiter(another_waiter: bool) -> dict[str, Any]:
@@ -224,7 +245,7 @@ async def generation_order(old_first: bool) -> dict[str, Any]:
     seen: dict[str, Any] = {}
     if old_first:
         old_source.set_result('old')
-        seen['old'] = await asyncio.wait_for(old, 5)
+        await settle(old)
         joined = asyncio.create_task(cache.get('tenant', 'key', unexpected))
         await asyncio.sleep(0)
         new_source.set_result('new')
@@ -234,7 +255,9 @@ async def generation_order(old_first: bool) -> dict[str, Any]:
         new_source.set_result('new')
         seen['new'] = await asyncio.wait_for(new, 5)
         old_source.set_result('old')
-        seen['old'] = await asyncio.wait_for(old, 5)
+    seen['old'] = await asyncio.wait_for(old, 5)
+    if others := asyncio.all_tasks() - {asyncio.current_task()}:
+        await asyncio.wait(others, timeout=5)
     seen['cached'] = await cache.get('tenant', 'key', unexpected)
     return seen
 

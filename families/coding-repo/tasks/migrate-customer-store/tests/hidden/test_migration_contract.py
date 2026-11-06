@@ -7,6 +7,23 @@ from typing import Any
 import sandbox
 
 
+CRASH_STATUS = 86
+CRASH_STATEMENT_LIMIT = 500
+"""The most SQL statements a migration of `LEGACY_CUSTOMERS` may run."""
+LEGACY_CUSTOMERS: list[tuple[int, str | None]] = [
+    (7, ''),
+    (2, '  Zoë 王  '),
+    (9, 'Åda'),
+]
+MIGRATED_REPORT = {
+    'customers': [
+        {'id': 2, 'name': '  Zoë 王  ', 'orders': 2, 'total_cents': 500},
+        {'id': 7, 'name': '', 'orders': 1, 'total_cents': 90},
+        {'id': 9, 'name': 'Åda', 'orders': 0, 'total_cents': 0},
+    ],
+    'total_cents': 590,
+}
+"""The report of `LEGACY_CUSTOMERS` and the fixed orders once migrated."""
 LEGACY_SCHEMA = """
 PRAGMA foreign_keys = ON;
 CREATE TABLE customers (
@@ -38,7 +55,10 @@ class TestCustomerMigration(unittest.TestCase):
     def assert_schema(self, schema: dict[str, Any]) -> None:
         columns = schema['columns']
         self.assertNotIn('full_name', columns)
-        self.assertEqual(columns['display_name'][3], 1)
+        self.assertIn('display_name', columns)
+        self.assertTrue(
+            schema['null_name_rejected'], 'display_name accepted a NULL name'
+        )
         self.assertEqual(schema['customers_name'], ['display_name'])
         self.assertEqual(schema['orders_customer_id'], ['customer_id'])
         self.assertEqual(schema['foreign_key_check'], [])
@@ -73,27 +93,19 @@ class TestCustomerMigration(unittest.TestCase):
     def test_legacy_rows_relationships_and_indexes_survive_reopen_and_new_writes(
         self,
     ) -> None:
-        self.legacy([(7, ''), (2, '  Zoë 王  '), (9, 'Åda')])
-        expected = {
-            'customers': [
-                {'id': 2, 'name': '  Zoë 王  ', 'orders': 2, 'total_cents': 500},
-                {'id': 7, 'name': '', 'orders': 1, 'total_cents': 90},
-                {'id': 9, 'name': 'Åda', 'orders': 0, 'total_cents': 0},
-            ],
-            'total_cents': 590,
-        }
+        self.legacy(LEGACY_CUSTOMERS)
 
         opened = self.observe('open_legacy')
 
         self.assertEqual(opened['version'], 2)
         self.assertEqual(opened['ids'], [2, 7, 9])
-        self.assertEqual(opened['report'], expected)
+        self.assertEqual(opened['report'], MIGRATED_REPORT)
         self.assertEqual(opened['json'], {'id': 2, 'name': '  Zoë 王  '})
         self.assert_schema(opened['schema'])
 
         reopened = self.observe('reopen_and_write')
 
-        self.assertEqual(reopened['report'], expected)
+        self.assertEqual(reopened['report'], MIGRATED_REPORT)
         self.assertTrue(
             reopened['orphan_rejected'], 'an orphan order raised no IntegrityError'
         )
@@ -114,6 +126,36 @@ class TestCustomerMigration(unittest.TestCase):
         self.assertEqual(seen['version'], 2)
         self.assertEqual(seen['rows'], [[2, 'valid first row'], [7, 'repaired']])
         self.assert_schema(seen['schema'])
+
+    def test_migration_crashed_at_any_statement_leaves_version_1_or_complete_version_2(
+        self,
+    ) -> None:
+        self.legacy(LEGACY_CUSTOMERS)
+        before = self.observe('stored')['snapshot']
+
+        for statement in range(1, CRASH_STATEMENT_LIMIT + 1):
+            label = f'crashed at statement {statement}'
+            self.db = str(sandbox.scratch() / 'customers.sqlite')
+            self.legacy(LEGACY_CUSTOMERS)
+
+            process = sandbox.start(
+                'migration', 'crash_migration', path=self.db, statement=statement
+            )
+            process.communicate(timeout=30)
+            migrated = process.returncode == 0
+            if not migrated:
+                self.assertEqual(process.returncode, CRASH_STATUS, label)
+            after = self.observe('stored')['snapshot']
+
+            if after[0] != 2:
+                self.assertEqual(after, before, label)
+            reopened = self.observe('report')
+            self.assertEqual(reopened['report'], MIGRATED_REPORT, label)
+            self.assert_schema(reopened['schema'])
+            if migrated:
+                break
+        else:
+            self.fail(f'migrate ran over {CRASH_STATEMENT_LIMIT} SQL statements')
 
     def test_open_store_rejects_null_without_partial_schema_or_data_changes(
         self,

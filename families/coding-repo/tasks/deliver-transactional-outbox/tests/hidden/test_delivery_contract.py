@@ -9,6 +9,12 @@ import sandbox
 OUTBOX_MISSING = 'The durable outbox table must exist before adding its trigger.'
 
 
+def order_fields(payload: str) -> dict[str, object]:
+    """Decode a hex payload to the fields the README requires, ignoring any others."""
+    decoded = json.loads(bytes.fromhex(payload))
+    return {key: decoded.get(key) for key in ('order_id', 'amount_cents')}
+
+
 class TestOrderDelivery(unittest.TestCase):
     def test_identical_placement_is_idempotent_and_conflicts_preserve_work(
         self,
@@ -26,7 +32,7 @@ class TestOrderDelivery(unittest.TestCase):
             [('café-1', 'order:café-1')],
         )
         self.assertEqual(
-            json.loads(bytes.fromhex(notifications[0]['payload'])),
+            order_fields(notifications[0]['payload']),
             {'order_id': 'café-1', 'amount_cents': 1250},
         )
 
@@ -120,10 +126,7 @@ class TestOrderDelivery(unittest.TestCase):
                 self.assertEqual(result['returncode'], 0, result['stderr'])
                 json.loads(result['stdout'])
         self.assertEqual(
-            {
-                key: json.loads(bytes.fromhex(payload))
-                for key, payload in seen['effects'].items()
-            },
+            {key: order_fields(payload) for key, payload in seen['effects'].items()},
             {'order:cli': {'order_id': 'cli', 'amount_cents': 425}},
         )
         self.assertEqual(seen['after'], [])
