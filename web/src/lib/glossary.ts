@@ -198,10 +198,6 @@ export const categoryTerms: Record<Category, Term> = {
   },
 };
 
-export function categoryTerm(category: Category): Term {
-  return categoryTerms[category];
-}
-
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */
 export function anchorTerm(method: VotesMethod): Term {
   return {
@@ -244,11 +240,14 @@ export function passHatKTerm(k: number | 'k'): Term {
   };
 }
 
-/** What a round's `fingerprint` for a system identifies, quoting the hash. */
-export function fingerprintTerm(fingerprint: string): Term {
+/** What a round's `fingerprint` for a system identifies, quoting the hash, or that it has none. */
+export function fingerprintTerm(fingerprint: string | null): Term {
   return {
     term: 'Fingerprint',
-    definition: `${fingerprint}, a hash of the route, effort, harness, and prompt the system ran with that round.`,
+    definition:
+      fingerprint === null
+        ? 'This round recorded no fingerprint for the system.'
+        : `${fingerprint}, a hash of the route, effort, harness, and prompt the system ran with that round.`,
   };
 }
 

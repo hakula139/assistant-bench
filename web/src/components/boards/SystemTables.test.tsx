@@ -60,35 +60,38 @@ describe('RoundsTable', () => {
       '20261021abcdef01, a hash of the route, effort, harness, and prompt the system ran with that round.',
     ],
     ['2026-10-07', 'This round recorded no fingerprint for the system.'],
-  ])('opens the fingerprint of round %s from its date', async (date, definition) => {
-    const past = await round();
-    const appearances = [
-      { round: '2026-10-07', fingerprint: null },
-      { round: '2026-10-21', fingerprint: '20261021abcdef01' },
-    ].map(({ round, fingerprint }) => ({
-      round,
-      reference: 'acme-large',
-      anchor: 'acme-large',
-      systems: {
-        ...past.systems,
-        [past.standings[0].system]: { ...past.systems[past.standings[0].system], fingerprint },
-      },
-      method: past.method,
-      rules: past.rules,
-      standing: past.standings[0],
-    }));
-    render(<RoundsTable appearances={appearances} />);
+  ])(
+    'opens the fingerprint, or its absence, of round %s from its date',
+    async (date, definition) => {
+      const past = await round();
+      const appearances = [
+        { round: '2026-10-07', fingerprint: null },
+        { round: '2026-10-21', fingerprint: '20261021abcdef01' },
+      ].map(({ round, fingerprint }) => ({
+        round,
+        reference: 'acme-large',
+        anchor: 'acme-large',
+        systems: {
+          ...past.systems,
+          [past.standings[0].system]: { ...past.systems[past.standings[0].system], fingerprint },
+        },
+        method: past.method,
+        rules: past.rules,
+        standing: past.standings[0],
+      }));
+      render(<RoundsTable appearances={appearances} />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: date }));
+      await userEvent.setup().click(screen.getByRole('button', { name: date }));
 
-    expect(
-      (
-        await screen.findByRole('dialog', {
-          name: past.systems[past.standings[0].system].display_name,
-        })
-      ).textContent,
-    ).toContain(definition);
-  });
+      expect(
+        (
+          await screen.findByRole('dialog', {
+            name: past.systems[past.standings[0].system].display_name,
+          })
+        ).textContent,
+      ).toContain(definition);
+    },
+  );
 });
 
 describe('vote counts', () => {

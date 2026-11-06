@@ -97,7 +97,7 @@ export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {results.categories.length > 1 && <Filter {...filter} />}
+      {filter && <Filter {...filter} />}
       <DotRangePlot
         rows={ranges}
         label="Pass rate with its 95% interval"

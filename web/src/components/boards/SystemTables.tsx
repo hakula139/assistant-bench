@@ -217,9 +217,7 @@ export function RoundsTable({
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Hint
                       term={{
-                        ...(identity.fingerprint === null
-                          ? { definition: 'This round recorded no fingerprint for the system.' }
-                          : fingerprintTerm(identity.fingerprint)),
+                        ...fingerprintTerm(identity.fingerprint),
                         term: identity.display_name,
                       }}
                     >

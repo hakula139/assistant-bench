@@ -426,11 +426,17 @@ describe('family panel', () => {
     expect(shownSlugs(html, SLUGS)).toEqual([]);
   });
 
-  test("lists a tests family's systems by pass rate, best first", async () => {
-    const html = await render(FamilyPanel, { family: await testsFamily() });
+  test("lists a tests family's systems by pass rate, best first, and ties by display name", async () => {
+    const tested = await testsFamily();
+    const [round] = tested.rounds;
+    const [top, , tied] = round.results.standings;
+    tied.pass_rate = top.pass_rate;
+    round.systems[tied.system].display_name = 'Acme Alpha';
+
+    const html = await render(FamilyPanel, { family: tested });
 
     expect(text(html)).toContain(
-      'System Pass rate 95% interval Acme Pro 92% 44–100% Acme Mini 83% 36–100% Acme Small 17% 0–64%',
+      'System Pass rate 95% interval Acme Alpha 92% 44–100% Acme Pro 92% 44–100% Acme Mini 83% 36–100%',
     );
   });
 });
@@ -591,14 +597,14 @@ describe('system page', () => {
 
   test.each([
     ['marks a round whose anchor differs from the reference', 'acme-pro', ['2026-10-07']],
-    ['leaves every round unmarked when its anchor is the reference', undefined, []],
+    ['leaves every round unmarked when its anchor is the reference', 'acme-large', []],
   ])('%s', async (_, earlierAnchor, marked) => {
     const arena = await family();
     const earlier = arena.rounds[0].results;
     if (earlier.scorer !== 'votes') {
       throw new Error('the fixture is a votes report');
     }
-    earlier.anchor = earlierAnchor ?? earlier.anchor;
+    earlier.anchor = earlierAnchor;
 
     const html = await render(SystemPage, {
       family: arena,

@@ -38,7 +38,7 @@ import {
   MISSING,
 } from '@/lib/format';
 import {
-  categoryTerm,
+  categoryTerms,
   effectiveVotesTerm,
   fallbackAnchor,
   preliminaryTerm,
@@ -246,7 +246,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
   return (
     <div className={stack}>
-      {boards.length > 0 && <Filter {...filter} />}
+      {filter && <Filter {...filter} />}
 
       <RoundSummary round={round} lengthBias={labels.lengthBias} />
 
@@ -296,7 +296,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                   <TableHead>System</TableHead>
                   {boards.map((board) => (
                     <TableHead key={board.category} numeric>
-                      {categoryTerm(board.category).term}
+                      {categoryTerms[board.category].term}
                     </TableHead>
                   ))}
                 </TableRow>
