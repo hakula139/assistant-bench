@@ -6,7 +6,6 @@ import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
 import {
   actorOf,
   admitted,
-  browser,
   call,
   CODING,
   pairOf,
@@ -338,12 +337,9 @@ describe('freshness', () => {
 
   test('leaves excluded votes after the cutoff out', async () => {
     await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
+    const from = await admitted();
 
-    const response = await call(
-      browser(),
-      'GET',
-      `/freshness?family=${WRITING}&local=0&local_votes=0`,
-    );
+    const response = await call(from, 'GET', `/freshness?family=${WRITING}&local=0&local_votes=0`);
 
     expect(await response.json()).toEqual({ status: 'current' });
   });
@@ -351,9 +347,9 @@ describe('freshness', () => {
   test('reuses an answer for the same parameters, in any order, for a minute', async () => {
     await seedVote(WRITING, caseKey, systems);
     const { ids } = await read();
+    const from = await admitted();
     const ask = async (query: string) =>
-      (await (await call(browser(), 'GET', `/freshness?${query}`)).json<{ status: string }>())
-        .status;
+      (await (await call(from, 'GET', `/freshness?${query}`)).json<{ status: string }>()).status;
     const cut = `local=${ids[0]}&local_votes=1`;
     expect(await ask(`family=${WRITING}&${cut}`)).toBe('current');
 
@@ -364,7 +360,9 @@ describe('freshness', () => {
   });
 
   test('rejects a cutoff without its counted votes', async () => {
-    const response = await call(browser(), 'GET', `/freshness?family=${WRITING}&local=0`);
+    const from = await admitted();
+
+    const response = await call(from, 'GET', `/freshness?family=${WRITING}&local=0`);
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid_request' });

@@ -265,6 +265,7 @@ function Ballot({
   choice,
   undoable,
   locked,
+  error,
   recovery,
   onChoose,
   onUndo,
@@ -274,6 +275,7 @@ function Ballot({
   choice: Choice | null;
   undoable: boolean;
   locked: boolean;
+  error: string | null;
   recovery: ReactNode;
   onChoose: (choice: Choice | null) => void;
   onUndo: () => void;
@@ -287,7 +289,12 @@ function Ballot({
         'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
       )}
     >
-      {recovery !== null && <div className="sm:col-span-2">{recovery}</div>}
+      {(error !== null || recovery !== null) && (
+        <div className="flex flex-col items-start gap-2 sm:col-span-2">
+          <ErrorAlert error={error} />
+          {recovery}
+        </div>
+      )}
       <ToggleGroup
         type="single"
         variant="choice"
@@ -369,13 +376,12 @@ export function VoteApp() {
     pair,
     draft,
     sitekey,
-    failedVote,
+    voteFailed,
     error,
     notice,
     saved,
     busy,
     locked,
-    choiceBody,
     start,
     reconnect,
     verified,
@@ -449,7 +455,7 @@ export function VoteApp() {
     if (event.key === 'Enter') {
       if (target instanceof Node && target.contains(pairView.current)) {
         event.preventDefault();
-        submit(failedVote ?? choiceBody);
+        submit();
       }
       return;
     }
@@ -504,13 +510,8 @@ export function VoteApp() {
   const recovery =
     sitekey !== null ? (
       <Verification sitekey={sitekey} onReady={verified} />
-    ) : failedVote !== null ? (
-      <Button
-        disabled={busy}
-        onClick={() => {
-          submit(failedVote);
-        }}
-      >
+    ) : voteFailed ? (
+      <Button disabled={busy} onClick={submit}>
         Retry vote
       </Button>
     ) : (
@@ -626,22 +627,17 @@ export function VoteApp() {
         ))}
       </div>
 
-      {(error !== null || hasText) && (
-        <div className="flex flex-col gap-3">
-          <ErrorAlert error={error} />
-          {hasText && (
-            <div className="flex flex-wrap items-center gap-3">
-              <Toggle
-                variant="outline"
-                pressed={draft.markdown}
-                onPressedChange={(markdown) => {
-                  update({ markdown });
-                }}
-              >
-                Markdown
-              </Toggle>
-            </div>
-          )}
+      {hasText && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Toggle
+            variant="outline"
+            pressed={draft.markdown}
+            onPressedChange={(markdown) => {
+              update({ markdown });
+            }}
+          >
+            Markdown
+          </Toggle>
         </div>
       )}
 
@@ -649,15 +645,14 @@ export function VoteApp() {
         choice={draft.choice}
         undoable={state.undo}
         locked={locked}
-        recovery={sitekey !== null || failedVote !== null ? recovery : null}
+        error={error}
+        recovery={sitekey !== null || voteFailed ? recovery : null}
         onChoose={(choice) => {
           update({ choice });
         }}
         onUndo={undo}
         onSkip={skip}
-        onSubmit={() => {
-          submit(choiceBody);
-        }}
+        onSubmit={submit}
       />
     </div>
   );

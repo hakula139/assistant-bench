@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { TurnstileProps } from '@marsidev/react-turnstile';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from 'vitest';
@@ -512,6 +512,25 @@ describe('VoteApp', () => {
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
   });
 
+  test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    let attempts = 0;
+    override(api, '/api/votes', () =>
+      ++attempts === 1
+        ? Promise.reject(new TypeError('The vote response was lost'))
+        : Promise.resolve(Response.json({ error: 'rate_limited' }, { status: 429 })),
+    );
+    await user.keyboard('a{Enter}');
+    await screen.findByRole('button', { name: 'Retry vote' });
+
+    await user.click(screen.getByRole('button', { name: 'Retry vote' }));
+
+    expect(await screen.findByText('Too many requests. Wait a moment, then retry.')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Retry vote' })).toBeDefined();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', true);
+  });
+
   test('unlocks the ballot when a retried vote finds its pair gone', async () => {
     const api = stubApi();
     const user = await startVoting();
@@ -587,6 +606,45 @@ describe('VoteApp', () => {
       );
     },
   );
+
+  test('keeps the choice for a fresh submit after a vote refused for admission', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    const fetch = api.fetch.getMockImplementation();
+    let refused = false;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && !refused) {
+        refused = true;
+        return Promise.resolve(
+          Response.json({ error: 'admission_required', sitekey: SITEKEY }, { status: 401 }),
+        );
+      }
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
+    });
+    await user.keyboard('a{Enter}');
+    await screen.findByTestId('turnstile');
+
+    act(() => {
+      widget().onSuccess?.('proof');
+    });
+    await waitFor(() => {
+      expect(api.pairRequests).toHaveLength(2);
+      expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', false);
+    });
+
+    expect(screen.getByText('Output A1')).toBeDefined();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    );
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', false);
+
+    await user.keyboard('{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts).toEqual([{ pair: pairId(1), choice: 'a', defects: { a: [], b: [] } }]);
+  });
 
   test('loads the current pair with a notice when another tab has voted on this one', async () => {
     const api = stubApi();

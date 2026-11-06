@@ -104,6 +104,7 @@ export function useVoteSession() {
     history.replaceState(null, '', window.location.pathname);
     setFamily(undefined);
     setState(null);
+    setDraft(null);
     setNotice(null);
     setError(errorMessage(reason));
   };
@@ -131,7 +132,8 @@ export function useVoteSession() {
 
   /**
    * Runs a pair action. A refusal with the `stale` code loads the current pair under that code's
-   * message, and a `vote` whose outcome is unknown locks the ballot until it is resent.
+   * message, and a `vote` whose outcome is unknown locks the ballot until it is resent. A retry
+   * refused by the rate limit leaves the first attempt's outcome unknown.
    */
   const perform = (
     name: string,
@@ -142,7 +144,9 @@ export function useVoteSession() {
       try {
         await action();
       } catch (reason) {
-        setFailedVote(vote !== undefined && unsettled(reason) ? vote : null);
+        const unknown =
+          unsettled(reason) || (vote === failedVote && isCode(reason, 'rate_limited'));
+        setFailedVote(vote !== undefined && unknown ? vote : null);
         if (isCode(reason, stale)) {
           await load(name, { notice: errorMessages[stale] });
         } else {
@@ -216,7 +220,9 @@ export function useVoteSession() {
     reconnect();
   };
 
-  const submit = (body: VoteRequest | null) => {
+  /** Resends the vote whose outcome is unknown, or else sends the draft's choice. */
+  const submit = () => {
+    const body = failedVote ?? choiceBody;
     if (body === null || family === undefined || busy || sitekey !== null) {
       return;
     }
@@ -291,13 +297,12 @@ export function useVoteSession() {
     pair,
     draft,
     sitekey,
-    failedVote,
+    voteFailed: failedVote !== null,
     error,
     notice,
     saved,
     busy,
     locked,
-    choiceBody,
     start,
     reconnect,
     verified,
