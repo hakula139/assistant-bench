@@ -54,7 +54,13 @@ describe('RoundsTable', () => {
     expect(historical.textContent).not.toContain('Current Pro');
   });
 
-  test("opens a round's fingerprint from its date, and leaves a round without one plain", async () => {
+  test.each([
+    [
+      '2026-10-21',
+      '20261021abcdef01, a hash of the route, effort, harness, and prompt the system ran with that round.',
+    ],
+    ['2026-10-07', 'This round recorded no fingerprint for the system.'],
+  ])('opens the fingerprint of round %s from its date', async (date, definition) => {
     const past = await round();
     const appearances = [
       { round: '2026-10-07', fingerprint: null },
@@ -73,7 +79,7 @@ describe('RoundsTable', () => {
     }));
     render(<RoundsTable appearances={appearances} />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: '2026-10-21' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: date }));
 
     expect(
       (
@@ -81,10 +87,7 @@ describe('RoundsTable', () => {
           name: past.systems[past.standings[0].system].display_name,
         })
       ).textContent,
-    ).toContain(
-      '20261021abcdef01, a hash of the route, effort, harness, and prompt the system ran with that round.',
-    );
-    expect(screen.queryByRole('button', { name: '2026-10-07' })).toBeNull();
+    ).toContain(definition);
   });
 });
 

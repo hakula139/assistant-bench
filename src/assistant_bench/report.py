@@ -422,7 +422,9 @@ def close(
     `closed_at` is an aware time, and its UTC date names the round.
     """
     closed_at = closed_at.astimezone(UTC)
-    categories = {case.id: case.category for case in load_cases(family)}
+    categories: dict[str, Category] = {
+        case.id: case.category for case in load_cases(family)
+    }
     outputs = [
         output for output in read_outputs(family.name) if output.case in categories
     ]
@@ -966,10 +968,11 @@ def _tests_categories(
     shares: Mapping[str, Mapping[str, float]],
     categories: Mapping[str, Category],
 ) -> list[TestsCategory]:
+    present: set[Category] = {
+        categories[task] for row in shares.values() for task in row
+    }
     boards: list[TestsCategory] = []
-    for category in sorted(
-        {categories[task] for row in shares.values() for task in row}
-    ):
+    for category in sorted(present):
         rows: list[TestsCategoryStanding] = []
         for standing in standings:
             mine = [
