@@ -88,6 +88,18 @@ class TestUpdateLedger:
         ]
         assert update_ledger(VOTES) == ledger
 
+    def test_keys_each_attempt_by_its_job_trial_and_start(self, data_dir: Path) -> None:
+        later = attempt(started_at=START + timedelta(seconds=1))
+        write_attempts(jobs.jobs_dir(VOTES) / 'job-1', attempt(), attempt(), later)
+        ledger = data_dir / 'spend' / 'f.jsonl'
+        ledger.parent.mkdir(parents=True)
+        recorded = entry().model_dump_json() + '\n'
+        ledger.write_text(recorded * 2)
+
+        entries = update_ledger(VOTES)
+
+        assert [item.started_at for item in entries] == [START, later.started_at]
+
     def test_keeps_the_attempt_harbor_retried(
         self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -159,21 +171,27 @@ class TestSummarize:
     def test_leaves_a_system_the_catalog_lacks_unpriced(self) -> None:
         (spend,) = summarize([entry(system='retired')], {})
 
-        assert (spend.priced, spend.tokens.input, spend.known_usd) == (
+        assert (spend.priced, spend.tokens.input_tokens, spend.known_usd) == (
             False,
             1_000_000,
             0.0,
         )
 
-    def test_counts_retries_into_the_tokens_per_trial(self) -> None:
+    def test_counts_retries_into_the_tokens_per_answered_trial(self) -> None:
         entries = [
             entry(responses=(USAGE,)),
             entry(responses=(USAGE, None), started_at=START + timedelta(minutes=1)),
+            entry(trial='b__1', responses=()),
         ]
 
         spend = spend_of(LARGE, *entries)
 
-        assert (spend.trials, spend.responses, spend.measured) == (1, 3, 2)
+        assert (spend.trials, spend.answered, spend.responses, spend.measured) == (
+            2,
+            1,
+            3,
+            2,
+        )
         assert spend.profile == Tokens(3_000_000, 0, 0, 300_000)
 
 
@@ -245,6 +263,7 @@ class TestBudgetProblems:
         [
             pytest.param(None, 100, [], id='no-budget'),
             pytest.param(10.0, 2, [], id='within'),
+            pytest.param(9.0, 2, [], id='exactly-met'),
             pytest.param(
                 5.0,
                 2,
@@ -272,4 +291,18 @@ class TestBudgetProblems:
         assert budget_problems(family, [], projections) == [
             'System `acme-large` has 1 pending trial and no usage to estimate a '
             'cost from.'
+        ]
+
+    def test_refuses_a_priced_system_whose_spend_has_no_known_cost(self) -> None:
+        family = with_settings(VOTES, budget_usd=100.0)
+        spend = [
+            spend_of(LARGE, entry(responses=(None,))),
+            spend_of(UNPRICED, entry(system=UNPRICED.name, responses=(None,))),
+        ]
+
+        problems = budget_problems(family, spend, [])
+
+        assert problems == [
+            'System `acme-large` has 1 response without a known cost and none to '
+            'impute one from.'
         ]

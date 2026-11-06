@@ -139,47 +139,55 @@ VALID = {'prompt_tokens': 120, 'completion_tokens': 40}
 
 class TestAppendAttempt:
     @pytest.mark.parametrize(
-        ('metadata', 'expected'),
+        ('requests', 'expected'),
         [
-            pytest.param({'response_model': None}, [], id='no-response'),
             pytest.param(
-                {
-                    **measure('openai-chat-completions', None)[1],
-                    'response_model': 'large',
-                },
+                [
+                    {
+                        **measure('openai-chat-completions', None)[1],
+                        'response_model': None,
+                    }
+                ],
+                [],
+                id='no-response',
+            ),
+            pytest.param(
+                [
+                    {
+                        **measure('openai-chat-completions', None)[1],
+                        'response_model': 'large',
+                    }
+                ],
                 [None],
                 id='response-without-usage',
             ),
             pytest.param(
-                {
-                    **measure('openai-chat-completions', VALID)[1],
-                    'response_model': 'large',
-                },
-                [MeasuredUsage(120, 0, 0, 40, None)],
-                id='response',
-            ),
-            pytest.param(
-                {
-                    'calls': [
-                        measure('openai-chat-completions', VALID)[1],
-                        measure('openai-chat-completions', [])[1],
-                    ]
-                },
+                [
+                    {
+                        **measure('openai-chat-completions', VALID)[1],
+                        'response_model': 'large',
+                    },
+                    {'response_status': 'request_failed', 'latency_sec': 0.5},
+                    {
+                        **measure('openai-chat-completions', [])[1],
+                        'response_model': 'large',
+                    },
+                ],
                 [MeasuredUsage(120, 0, 0, 40, None), None],
-                id='terminal-calls',
+                id='requests',
             ),
         ],
     )
     def test_records_each_response_in_the_job_directory(
         self,
         logs_dir: Path,
-        metadata: dict[str, Any],
+        requests: list[dict[str, Any]],
         expected: list[MeasuredUsage | None],
     ) -> None:
         labels = Labels(system='acme-large', fingerprint='0' * 12)
 
-        append_attempt(logs_dir, labels, START, metadata)
-        append_attempt(logs_dir, labels, START, metadata)
+        append_attempt(logs_dir, labels, START, requests)
+        append_attempt(logs_dir, labels, START, requests)
 
         lines = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
         attempts = [Attempt.model_validate_json(line) for line in lines]

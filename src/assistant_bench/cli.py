@@ -19,7 +19,12 @@ from assistant_bench import collection, jobs, report
 from assistant_bench.arena import votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import D1Error, connect
-from assistant_bench.arguments import FamilyArgument, FamilyArguments, known_names
+from assistant_bench.arguments import (
+    FamilyArgument,
+    FamilyArguments,
+    SystemOptions,
+    known_names,
+)
 from assistant_bench.catalog import (
     SYSTEMS_FILE,
     NixosConfigExport,
@@ -47,6 +52,7 @@ from assistant_bench.spend import (
     budget_problems,
     project,
     summarize,
+    total_usd,
     update_ledger,
 )
 from assistant_bench.tasks import (
@@ -161,23 +167,13 @@ def check(
 
 
 @app.command()
-def run(
-    families: FamilyArguments = None,
-    names: Annotated[
-        list[str] | None,
-        typer.Option(
-            '--system',
-            help='Limit the run to this system. Without a family, this sends it '
-            'to every family that lists it. Repeat for several.',
-        ),
-    ] = None,
-) -> None:
+def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     """Generate the missing trials of every family, or the named ones, and collect them.
 
     A run without a family sends every family that lists systems. Each trial sends
     paid requests to the endpoint configured in .env. Before any trial starts, the
-    run prints each family's projected cost and refuses a family it would take
-    past its `budget_usd`.
+    run prints each family's projected cost, and one family it would take past its
+    `budget_usd` refuses the whole run.
     """
     export, systems = _catalog()
     prepared = _prepare(families, names, export, systems)
@@ -197,16 +193,7 @@ def run(
 
 
 @app.command()
-def spend(
-    families: FamilyArguments = None,
-    names: Annotated[
-        list[str] | None,
-        typer.Option(
-            '--system',
-            help='Limit the projection to this system, as `bench run` does.',
-        ),
-    ] = None,
-) -> None:
+def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     """Print the spend ledger, and the projection of `bench run` with these arguments.
 
     Nothing runs, and no request reaches the endpoint.
@@ -626,8 +613,8 @@ def _spend_line(entry: Spend) -> str:
     if not entry.priced:
         line = (
             f'System `{entry.system}` is unpriced: {attempts} used '
-            f'{entry.tokens.input:,.0f} input and {entry.tokens.output:,.0f} output '
-            'tokens'
+            f'{entry.tokens.input_tokens:,.0f} input and '
+            f'{entry.tokens.output_tokens:,.0f} output tokens'
         )
         if entry.unknown:
             line += (
@@ -676,15 +663,13 @@ def _echo_projection(
         elif not projection.priced and projection.tokens is not None:
             typer.echo(
                 f'{name} is unpriced: {trials} of about '
-                f'{projection.tokens.input:,.0f} input and '
-                f'{projection.tokens.output:,.0f} output tokens.'
+                f'{projection.tokens.input_tokens:,.0f} input and '
+                f'{projection.tokens.output_tokens:,.0f} output tokens.'
             )
         else:
             typer.echo(f'{name}: {trials} with no usage to estimate a cost from.')
 
-    total = sum(entry.spent_usd for entry in spent) + sum(
-        projection.usd or 0 for projection in projections
-    )
+    total = total_usd(spent, projections)
     budget = family.settings.budget_usd
     typer.echo(
         f'Family `{family.name}`: ${total:.2f} spent and projected'

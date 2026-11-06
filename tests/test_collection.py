@@ -25,9 +25,12 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
+from assistant_bench.spend import Entry
 from assistant_bench.tasks import (
     TASK_VERSION,
     render_task_config,
@@ -117,6 +120,35 @@ class TestCollect:
         cases = data_dir / 'cases' / 'smoke-text.toml'
         cases.parent.mkdir(parents=True)
         cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.toml').read_text())
+
+    def test_records_the_ledger_before_refusing_an_unreadable_trial(
+        self, data_dir: Path
+    ) -> None:
+        job = data_dir / 'jobs' / 'f' / 'job-1'
+        write_trial(
+            job,
+            'c__1',
+            trial_config.AgentConfig(
+                import_path='x:Y', kwargs={'system': 'acme-large'}
+            ),
+            task='f/c',
+        )
+        (job / 'c__1' / 'lock.json').unlink()
+        attempt = Attempt(
+            trial='c__1',
+            system='acme-large',
+            fingerprint='fp',
+            started_at=START,
+            finished_at=START,
+            responses=[None],
+        )
+        (job / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
+
+        with pytest.raises(InputError):
+            collection.collect(VOTES, {'acme-large': make_system()})
+
+        (line,) = (data_dir / 'spend' / 'f.jsonl').read_text().splitlines()
+        assert Entry.model_validate_json(line).trial == 'c__1'
 
     @pytest.mark.parametrize('deleted', [False, True], ids=['edited', 'removed'])
     def test_excludes_stale_case_sources_without_rerendering_installed_tasks(

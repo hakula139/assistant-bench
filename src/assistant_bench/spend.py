@@ -28,21 +28,22 @@ def update_ledger(family: Family) -> list[Entry]:
     """Add each job's unrecorded attempts to the family's ledger, and return it.
 
     The ledger is the data directory's `spend/<family>.jsonl`, so the spend of a
-    deleted trial or job stays recorded.
+    deleted trial or job stays recorded. An attempt is keyed by its job, trial,
+    and start time, and the ledger holds each key once.
     """
     path = _ledger_file(family.name)
-    entries = (
+    entries = _unique(
         [Entry.model_validate_json(line) for line in path.read_text().splitlines()]
         if path.exists()
         else []
     )
     seen = {_key(entry) for entry in entries}
-    added = [
+    added = _unique(
         entry
         for attempts in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
         for entry in _read_attempts(attempts)
         if _key(entry) not in seen
-    ]
+    )
     if added:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('a') as file:
@@ -62,6 +63,10 @@ def _read_attempts(path: Path) -> list[Entry]:
     ]
 
 
+def _unique(entries: Iterable[Entry]) -> list[Entry]:
+    return list({_key(entry): entry for entry in entries}.values())
+
+
 def _key(entry: Entry) -> tuple[str, str, str]:
     return entry.job, entry.trial, entry.started_at.isoformat()
 
@@ -71,21 +76,38 @@ def _key(entry: Entry) -> tuple[str, str, str]:
 
 @dataclass(frozen=True)
 class Tokens:
-    input: float
-    cache: float
-    cache_write: float
-    output: float
+    """Token counts named as `MeasuredUsage` names them, which may be fractional."""
+
+    input_tokens: float
+    cache_tokens: float
+    cache_write_tokens: float
+    output_tokens: float
+
+    @classmethod
+    def total(cls, usages: Iterable[MeasuredUsage]) -> Tokens:
+        measured = list(usages)
+        return cls(
+            sum(usage.input_tokens for usage in measured),
+            sum(usage.cache_tokens for usage in measured),
+            sum(usage.cache_write_tokens for usage in measured),
+            sum(usage.output_tokens for usage in measured),
+        )
 
     def scaled(self, factor: float) -> Tokens:
         return Tokens(
-            self.input * factor,
-            self.cache * factor,
-            self.cache_write * factor,
-            self.output * factor,
+            self.input_tokens * factor,
+            self.cache_tokens * factor,
+            self.cache_write_tokens * factor,
+            self.output_tokens * factor,
         )
 
     def cost(self, price: Price) -> float | None:
-        return price.cost(self.input, self.cache, self.output, self.cache_write)
+        return price.cost(
+            self.input_tokens,
+            self.cache_tokens,
+            self.output_tokens,
+            self.cache_write_tokens,
+        )
 
 
 @dataclass(frozen=True)
@@ -95,6 +117,9 @@ class Spend:
     system: str
     priced: bool
     trials: int
+    answered: int
+    """Trials with at least one response."""
+
     responses: int
     measured: int
     """Responses with valid usage."""
@@ -120,10 +145,10 @@ class Spend:
 
     @property
     def profile(self) -> Tokens | None:
-        """Return the mean tokens per trial, imputing each unmeasured response."""
+        """Return the mean tokens per answered trial, imputing unmeasured responses."""
         if not self.measured:
             return None
-        return self.tokens.scaled(self.responses / self.measured / self.trials)
+        return self.tokens.scaled(self.responses / self.measured / self.answered)
 
 
 def summarize(entries: Iterable[Entry], systems: Mapping[str, System]) -> list[Spend]:
@@ -146,19 +171,18 @@ def summarize(entries: Iterable[Entry], systems: Mapping[str, System]) -> list[S
 def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
     responses = [response for attempt in attempts for response in attempt.responses]
     measured = [response for response in responses if response is not None]
-    tokens = Tokens(
-        sum(usage.input_tokens for usage in measured),
-        sum(usage.cache_tokens for usage in measured),
-        sum(usage.cache_write_tokens for usage in measured),
-        sum(usage.output_tokens for usage in measured),
-    )
     trials = len({(attempt.job, attempt.trial) for attempt in attempts})
+    answered = len(
+        {(attempt.job, attempt.trial) for attempt in attempts if attempt.responses}
+    )
+    tokens = Tokens.total(measured)
     price = system.price if system else None
     if system is None or price is None:
         return Spend(
             name,
             priced=False,
             trials=trials,
+            answered=answered,
             responses=len(responses),
             measured=len(measured),
             tokens=tokens,
@@ -169,9 +193,7 @@ def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
         )
 
     known = [
-        cost
-        for cost in (_cost(price, response) for response in responses)
-        if cost is not None
+        cost for cost in (usage.cost(price) for usage in measured) if cost is not None
     ]
     unknown = len(responses) - len(known)
     ceiling = (
@@ -181,6 +203,7 @@ def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
         name,
         priced=True,
         trials=trials,
+        answered=answered,
         responses=len(responses),
         measured=len(measured),
         tokens=tokens,
@@ -188,17 +211,6 @@ def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
         known_usd=sum(known),
         imputed_usd=unknown * sum(known) / len(known) if known else None,
         ceiling_usd=unknown * ceiling,
-    )
-
-
-def _cost(price: Price, usage: MeasuredUsage | None) -> float | None:
-    if usage is None or usage.cache_write_unpriced:
-        return None
-    return price.cost(
-        usage.input_tokens,
-        usage.cache_tokens,
-        usage.output_tokens,
-        usage.cache_write_tokens,
     )
 
 
@@ -237,9 +249,9 @@ def project(
 ) -> list[Projection]:
     """Estimate each system's pending trials from the family's ledger.
 
-    A system with valid usage of its own uses its mean tokens per trial, so its
-    retries enter the estimate. Any other system borrows the tokens per trial
-    that cost the most at its prices, or, when unpriced, the most tokens.
+    A system with valid usage of its own uses its mean tokens per answered trial,
+    so its retries enter the estimate. Any other system borrows the tokens per
+    trial that cost the most at its prices, or, when unpriced, the most tokens.
     """
     own = {entry.system: entry.profile for entry in spend}
     profiles = [profile for profile in own.values() if profile is not None]
@@ -271,7 +283,7 @@ def project(
 def _rank(price: Price | None) -> Callable[[Tokens], float]:
     def rank(profile: Tokens) -> float:
         if price is None:
-            return profile.input + profile.output
+            return profile.input_tokens + profile.output_tokens
         cost = profile.cost(price)
         return cost if cost is not None else -1.0
 
@@ -281,37 +293,51 @@ def _rank(price: Price | None) -> Callable[[Tokens], float]:
 # ── Budget ──
 
 
+def total_usd(spend: list[Spend], projections: list[Projection]) -> float:
+    """Return the ledger's known and imputed spend plus the projection's cost."""
+    return sum(entry.spent_usd for entry in spend) + sum(
+        projection.usd or 0 for projection in projections
+    )
+
+
 def budget_problems(
     family: Family, spend: list[Spend], projections: list[Projection]
 ) -> list[str]:
     """Return why the run would exceed the family's `budget_usd`, if it would.
 
-    The ledger's known and imputed spend plus the projection must stay within
-    the budget. Unpriced systems count no dollars, while a priced system with
-    pending trials and no estimate refuses, since nothing bounds its cost.
+    The total that `total_usd` returns must stay within the budget. Unpriced
+    systems count no dollars, while a priced system refuses when nothing bounds
+    its cost: pending trials without an estimate, or responses without a known
+    cost and none to impute one from.
     """
     budget = family.settings.budget_usd
     if budget is None:
         return []
 
     problems = [
+        f'System `{entry.system}` has '
+        f'{count_of(entry.unknown, "response")} without a known cost and none to '
+        'impute one from.'
+        for entry in spend
+        if entry.priced and entry.unknown and entry.imputed_usd is None
+    ] + [
         f'System `{projection.system}` has '
         f'{count_of(projection.pending, "pending trial")} and no usage to estimate '
         'a cost from.'
         for projection in projections
         if projection.priced and projection.usd is None
     ]
-    spent = {entry.system: entry.spent_usd for entry in spend if entry.priced}
-    projected = {
-        projection.system: projection.usd
-        for projection in projections
-        if projection.priced and projection.usd
-    }
-    total = sum(spent.values()) + sum(usd or 0 for usd in projected.values())
+    total = total_usd(spend, projections)
     if total > budget:
+        spent = {entry.system: entry.spent_usd for entry in spend if entry.priced}
+        projected = {
+            projection.system: projection.usd or 0
+            for projection in projections
+            if projection.priced and projection.usd
+        }
         shares = ', '.join(
             f'`{name}` ${spent.get(name, 0):.2f} spent and '
-            f'${projected.get(name) or 0:.2f} projected'
+            f'${projected.get(name, 0):.2f} projected'
             for name in sorted(spent.keys() | projected.keys())
         )
         problems.append(

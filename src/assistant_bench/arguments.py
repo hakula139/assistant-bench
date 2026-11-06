@@ -61,3 +61,11 @@ FamilyArguments = Annotated[
     list[str] | None,
     typer.Argument(metavar='FAMILY...', help=FAMILY_HELP, callback=_families),
 ]
+SystemOptions = Annotated[
+    list[str] | None,
+    typer.Option(
+        '--system',
+        help='Limit the run to this system. Without a family, this sends it to '
+        'every family that lists it. Repeat for several.',
+    ),
+]

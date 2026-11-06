@@ -93,7 +93,7 @@ class ChatCompletionsLLM(LiteLLM):
         if response.get('error') is not None and 'choices' not in response:
             return
 
-        call: dict[str, Any] = {}
+        call: dict[str, Any] = {'response_model': response.get('model')}
         self.calls.append(call)
         if (
             response.get('object') == 'chat.completion'
@@ -315,4 +315,9 @@ class Terminus(Terminus2):
                 context.n_cache_tokens = None
                 context.n_output_tokens = None
             context.cost_usd = None
-            append_attempt(self.logs_dir, self.options, started_at, context.metadata)
+            append_attempt(
+                self.logs_dir,
+                self.options,
+                started_at,
+                llm.attempts if isinstance(llm, NativeLLM) else calls,
+            )

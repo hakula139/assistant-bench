@@ -52,6 +52,7 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.responses import ResponsesLLM
 from assistant_bench.harnesses.terminus import ChatCompletionsLLM, Terminus
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
 from assistant_bench.outputs import Output, StopDetails
 from support import (
     StubEndpoint,
@@ -979,6 +980,32 @@ class TestTerminus:
             assert client.is_closed()
             assert len(endpoint.requests) == 2
 
+        def test_records_the_usage_of_a_broken_stream_in_the_attempt(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            terminal_session: TmuxSession,
+            logs_dir: Path,
+        ) -> None:
+            text = terminus_completion()['choices'][0]['message']['content']
+            endpoint.streams = [
+                message_stream(message('Partial.', message_id='partial'))[:-1],
+                *(
+                    message_stream(message(text, message_id=name))
+                    for name in ('finished', 'confirmed')
+                ),
+            ]
+            context = AgentContext()
+
+            asyncio.run(messages_agent.execute(terminal_session, context))
+
+            assert context.metadata is not None
+            assert len(context.metadata['calls']) == 2
+            (line,) = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
+            attempt = Attempt.model_validate_json(line)
+            assert (attempt.trial, len(attempt.responses)) == ('trial', 3)
+            assert None not in attempt.responses
+
         def test_native_budget_continuation_keeps_signed_blocks_and_all_usage(
             self,
             endpoint: StubEndpoint,
@@ -1566,7 +1593,7 @@ class TestTerminus:
             assert tuple(
                 first[key] for key in ('input_tokens', 'cache_tokens', 'output_tokens')
             ) == (120, 100, 40)
-            assert second == {}
+            assert second == {'response_model': 'large-2026'}
 
         @pytest.mark.parametrize(
             ('api', 'usage'),

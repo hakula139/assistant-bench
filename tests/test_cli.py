@@ -108,6 +108,9 @@ def write_job(job_dir: Path) -> None:
     (job_dir / 'result.json').touch()
 
 
+SPENDER = make_system(name='large', context_window=2_000_000, max_output_tokens=200_000)
+
+
 def write_spent_attempt(
     job_dir: Path,
     system: str = 'large',
@@ -1164,7 +1167,7 @@ class TestRun:
         write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write(f'budget_usd = {budget}\n')
-        resolved['large'] = make_system(name='large')
+        resolved['large'] = SPENDER
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
 
         result = invoke('run', 'f')
@@ -1304,7 +1307,7 @@ class TestSpend:
         submitted: list[JobConfig],
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message'})
-        resolved['large'] = make_system(name='large')
+        resolved['large'] = SPENDER
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
 
         result = invoke('spend', 'f')
@@ -1312,7 +1315,7 @@ class TestSpend:
         assert result.exit_code == 0, result.output
         assert result.stdout == (
             'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 imputed '
-            'for 1 response without a known cost, at most $0.02.\n'
+            'for 1 response without a known cost, at most $6.00.\n'
             'System `large`: 1 pending trial at $6.00 each from its own usage, '
             '$6.00 in all.\n'
             'Family `f`: $12.00 spent and projected.\n'
@@ -1329,7 +1332,7 @@ class TestSpend:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 100\n')
-        resolved['large'] = make_system(name='large')
+        resolved['large'] = SPENDER
         resolved['small'] = make_system(name='small', price=None)
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'small', (None,))
 
@@ -1352,7 +1355,7 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
     ) -> None:
         write_votes_family(families_dir, ['large'], name='f')
-        resolved['large'] = make_system(name='large')
+        resolved['large'] = SPENDER
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
 
         result = invoke('collect', 'f')
@@ -1360,7 +1363,7 @@ class TestCollect:
         assert result.exit_code == 0, result.output
         assert (
             'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 imputed '
-            'for 1 response without a known cost, at most $0.02.\n'
+            'for 1 response without a known cost, at most $6.00.\n'
         ) in result.output
 
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(

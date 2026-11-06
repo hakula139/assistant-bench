@@ -25,6 +25,7 @@ from assistant_bench.families import (
     load_cases,
 )
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.jobs import (
     check_harness,
     current_inputs,
@@ -101,7 +102,8 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     can regrade one trial twice, so each solution keeps only its first output.
 
     The spend summarizes the family's ledger once `update_ledger` has added the
-    attempts of its jobs.
+    attempts of its jobs, which it does first, so a refusal leaves no attempt
+    unrecorded.
 
     Raises
     ------
@@ -109,6 +111,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
         A source job is not a job directory, a trial record is unreadable, a
         task is invalid, or the harness is one `check_harness` refuses.
     """
+    entries = update_ledger(family)
     check_harness(family)
     cases = {case.id: case for case in load_cases(family)}
     expected = current_inputs(family, list(systems.values()))
@@ -164,7 +167,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     )
 
     write_outputs(family.name, outputs)
-    return Collection(outputs, summarize(update_ledger(family), systems))
+    return Collection(outputs, summarize(entries, systems))
 
 
 def read_trials(family: Family, job_dir: Path) -> list[Output]:
@@ -369,12 +372,14 @@ def _cost(system: System | None, context: AgentContext) -> float | None:
         or system.price is None
         or context.n_input_tokens is None
         or context.n_output_tokens is None
-        or (context.metadata or {}).get('cache_write_unpriced', False)
     ):
         return None
-    return system.price.cost(
+    metadata = context.metadata or {}
+    return MeasuredUsage(
         context.n_input_tokens,
         context.n_cache_tokens or 0,
+        metadata.get('cache_write_tokens', 0),
         context.n_output_tokens,
-        (context.metadata or {}).get('cache_write_tokens', 0),
-    )
+        metadata.get('reasoning_tokens'),
+        metadata.get('cache_write_unpriced', False),
+    ).cost(system.price)

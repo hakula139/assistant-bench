@@ -77,7 +77,7 @@ class Generate(BaseAgent):
             await self._generate(instruction, context)
         finally:
             append_attempt(
-                self.logs_dir, self.options, started_at, context.metadata or {}
+                self.logs_dir, self.options, started_at, [context.metadata or {}]
             )
 
     async def _generate(self, instruction: str, context: AgentContext) -> None:

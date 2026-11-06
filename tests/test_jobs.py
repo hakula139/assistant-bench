@@ -33,6 +33,7 @@ from support import (
     FIXTURES,
     START,
     VOTES,
+    break_setting,
     finish_job,
     make_system,
     response,
@@ -414,6 +415,25 @@ class TestPendingTrials:
         pending = jobs.pending_trials(jobs.job(family, [large, small], tasks))
 
         assert pending == Counter({'acme-large': 1, 'small': 2})
+
+    def test_counts_no_regrade_of_a_minor_bumped_task(self, families_dir: Path) -> None:
+        family = voted_tasks(families_dir, 'again', 'echo')
+        systems = jobs.family_systems(family, [make_system()])
+        tasks = [case_task(family, task_id) for task_id in ('again', 'echo')]
+        first = finish_job(jobs.job(family, systems, tasks))
+        break_setting(tasks[1], ('task', 'version'), '1.1.0')
+        job = jobs.job(family, systems, tasks)
+
+        pending = jobs.pending_trials(job)
+
+        assert pending == Counter()
+        plan = asyncio.run(JobPlan.from_config(job))
+        (source,) = job.source_jobs
+        diff = compare_job_trials(plan, load_source_trials([(source, first)]))
+        assert [trial.action for trial in diff.trials] == [
+            DiffAction.REUSE,
+            DiffAction.REGRADE,
+        ]
 
     def test_counts_nothing_without_tasks(self) -> None:
         pending = jobs.pending_trials(jobs.job(VOTES, [make_system()], []))
