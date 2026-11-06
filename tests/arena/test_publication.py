@@ -135,6 +135,57 @@ class TestPrepare:
         assert outputs['acme-pro'].verdict == 'fail'
         assert outputs['acme-pro'].content is None
 
+    def test_grades_an_errored_task_trial_by_its_tests_and_an_untested_one_not_at_all(
+        self,
+    ) -> None:
+        family = make_votes_family('coding-fixture', diff=True)
+        timeout = 'AgentTimeoutError'
+
+        published = prepare(
+            family,
+            [make_case('fix-parser', category='bug-fix')],
+            [
+                make_trial(
+                    'fix-parser', 'acme-large', text='--- a/x\n+++ b/x\n+fixed\n'
+                ),
+                make_trial(
+                    'fix-parser',
+                    'acme-small',
+                    error=timeout,
+                    reward=1.0,
+                    text='--- a/x\n+++ b/x\n+late\n',
+                ),
+                make_trial(
+                    'fix-parser',
+                    'acme-pro',
+                    [Gate.TESTS],
+                    error=timeout,
+                    reward=0.0,
+                    text='--- a/x\n+++ b/x\n',
+                ),
+                make_trial(
+                    'fix-parser',
+                    'acme-pro',
+                    gate_failures=None,
+                    error='RuntimeError',
+                    reward=None,
+                    text=None,
+                    trial='fix-parser__acme-pro__2',
+                ),
+            ],
+        )
+
+        verdicts = sorted(
+            (output.system, output.verdict, output.errored, output.content)
+            for output in published.outputs
+        )
+        assert verdicts == [
+            ('acme-large', 'pass', False, '--- a/x\n+++ b/x\n+fixed\n'),
+            ('acme-pro', 'fail', True, None),
+            ('acme-pro', 'ungraded', True, None),
+            ('acme-small', 'pass', True, '--- a/x\n+++ b/x\n+late\n'),
+        ]
+
     def test_keeps_content_only_on_passing_outputs(self) -> None:
         family = make_votes_family()
         cases = [make_case('c')]
