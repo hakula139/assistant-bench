@@ -154,7 +154,6 @@ dependencies = [
     { name = "scipy" },
     { name = "semver" },
     { name = "threadpoolctl" },
-    { name = "tomli-w" },
     { name = "typer" },
     { name = "zhon" },
 ]
@@ -171,6 +170,7 @@ dev = [
     { name = "ruff" },
     { name = "scipy-stubs" },
     { name = "statsmodels" },
+    { name = "tomli-w" },
     { name = "trustme" },
     { name = "types-jsonschema" },
     { name = "types-pyopenssl" },
@@ -190,7 +190,6 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "semver", specifier = ">=3.1.0" },
     { name = "threadpoolctl", specifier = ">=3.7.0" },
-    { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.27.3" },
     { name = "zhon", specifier = ">=2.1.1" },
 ]
@@ -207,6 +206,7 @@ dev = [
     { name = "ruff", specifier = ">=0.17.1" },
     { name = "scipy-stubs", specifier = ">=1.18.1.1" },
     { name = "statsmodels", specifier = ">=0.15.0" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "trustme", specifier = ">=1.2.1" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
     { name = "types-pyopenssl", specifier = ">=24.1.0.20240722" },
