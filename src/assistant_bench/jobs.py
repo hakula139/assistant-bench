@@ -105,28 +105,14 @@ def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
 
     A task names no image, since its trial starts no container while the agent calls
     the endpoint from the host. It has no tests, which Harbor accepts while the
-    verifier is disabled. A task's version follows its content. Directories of cases
-    the family no longer has are removed.
+    verifier is disabled. A task's version follows its content. The directory is
+    rebuilt, so cases the family no longer has leave no task.
     """
     directory = tasks_dir(family)
-    directory.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    for case in cases:
-        installed = case_task(family, case.id)
-        if installed.exists():
-            shutil.rmtree(installed)
-        paths.append(_render_task(family, case, installed))
-
-    rendered = {path.name for path in paths}
-    for installed in directory.iterdir():
-        if installed.name in rendered:
-            continue
-        if installed.is_dir():
-            shutil.rmtree(installed)
-        else:
-            installed.unlink()
-
-    return paths
+    if directory.exists():
+        shutil.rmtree(directory)
+    directory.mkdir(parents=True)
+    return [_render_task(family, case, directory / case.id) for case in cases]
 
 
 def _render_task(family: Family, case: Case, task_dir: Path) -> Path:

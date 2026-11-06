@@ -283,6 +283,19 @@ class TestRenderTasks:
             path.name for path in (data_dir / 'tasks' / 'smoke-text').iterdir()
         ) == ['en-greeting', 'zh-greeting']
 
+    def test_writes_only_under_the_data_directory(
+        self, data_dir: Path, families_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        before = {path: path.read_bytes() for path in families_dir.rglob('*.*')}
+
+        (path,) = jobs.render_tasks(family, load_cases(family))
+
+        assert path == data_dir / 'tasks' / 'f' / 'echo'
+        assert {path: path.read_bytes() for path in families_dir.rglob('*.*')} == (
+            before
+        )
+
 
 def voted_tasks(families_dir: Path, *task_ids: str) -> Family:
     """Write task family `f`, scored by votes, that runs `acme-large` as terminus-2."""
