@@ -1,3 +1,5 @@
+import itertools
+import os
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from shopstore import (
 )
 
 
+CRASH_STATUS = 86
 FAILURES: dict[str, type[Exception]] = {
     'MigrationError': MigrationError,
     'SchemaVersionError': SchemaVersionError,
@@ -166,6 +169,23 @@ def repair_after_rollback(path: str) -> dict[str, Any]:
             ).fetchall(),
             'schema': schema(connection),
         }
+
+
+def crash_migration(path: str, statement: int) -> None:
+    """Migrate the store, crashing as its SQL statement number `statement` starts.
+
+    Exiting with `CRASH_STATUS` skips SQLite's cleanup, as a crash would.
+    """
+    started = itertools.count(1)
+
+    def trace(_: str) -> None:
+        if next(started) == statement:
+            os._exit(CRASH_STATUS)
+
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.set_trace_callback(trace)
+        migrate(connection)
 
 
 def open_store_rejection(path: str, error: str) -> dict[str, Any] | None:

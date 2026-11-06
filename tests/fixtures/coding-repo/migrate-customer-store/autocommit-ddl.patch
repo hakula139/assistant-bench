@@ -1,0 +1,11 @@
+--- a/shopstore/migrations.py
++++ b/shopstore/migrations.py
+@@ -17,8 +17,6 @@
+         raise SchemaVersionError(version)
+
+     with connection:
+-        connection.execute('BEGIN IMMEDIATE')
+-
+         if version == 1:
+             missing = connection.execute(
+                 'SELECT id FROM customers WHERE full_name IS NULL LIMIT 1'
