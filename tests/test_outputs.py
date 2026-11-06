@@ -31,13 +31,14 @@ class TestPoolConflicts:
                     {'job': 'job-2', 'response_models': ('large-2026',)},
                     {'job': 'job-1', 'response_models': ('large-2026',)},
                     {'job': 'job-2', 'response_models': ('large-2026',)},
+                    {'job': 'job-4', 'response_models': ('large-2026',)},
                     {'job': 'job-3', 'response_models': ('other-2026',)},
                 ],
                 TASKS,
                 [
                     'System `s` reported several models: `large-2026` from job '
-                    '`job-1` (1 output) and job `job-2` (2 outputs), `other-2026` from '
-                    'job `job-3` (1 output).'
+                    '`job-1` (1 output), job `job-2` (2 outputs) and job `job-4` (1 '
+                    'output), `other-2026` from job `job-3` (1 output).'
                 ],
                 id='two-models',
             ),
@@ -82,6 +83,15 @@ class TestPoolConflicts:
                     'and 5,101 in job `job-2`.'
                 ],
                 id='past-tolerance',
+            ),
+            pytest.param(
+                [{'input_tokens': 1_000}, {'input_tokens': 1_050}],
+                VOTES,
+                [
+                    'System `s` sent case `c` with 1,000 and 1,050 input tokens in job '
+                    '`j`.'
+                ],
+                id='one-job',
             ),
             pytest.param(
                 [{'input_tokens': 300}, {'input_tokens': 400}],

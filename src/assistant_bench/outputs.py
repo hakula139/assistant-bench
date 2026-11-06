@@ -3,12 +3,12 @@
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from assistant_bench.families import Family, Gate
-from assistant_bench.messages import InputError, count_of, error_lines
+from assistant_bench.messages import InputError, count_of, error_lines, series
 from assistant_bench.paths import data_dir, write_atomically
 
 
@@ -108,8 +108,8 @@ def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
 
     A system and fingerprint pools several models when its outputs report more
     than one model or, in a case family, where every sample of a case sends one
-    request, when two outputs of a case differ by more than `max(2, 2%)` in input
-    tokens. Outputs that lack the value are skipped.
+    request, when two outputs of a case differ in input tokens by more than the
+    larger of 2 and 2% of the lower count. Outputs that lack the value are skipped.
     """
     pools: defaultdict[tuple[str, str], list[Output]] = defaultdict(list)
     for output in outputs:
@@ -124,7 +124,7 @@ def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
         if len(jobs) > 1:
             models = ', '.join(
                 f'`{model}` from '
-                + ' and '.join(
+                + series(
                     f'job `{job}` ({count_of(count, "output")})'
                     for job, count in sorted(counts.items())
                 )
@@ -133,15 +133,21 @@ def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
             conflicts.append(f'System `{system}` reported several models: {models}.')
 
         if family.source == 'cases' and (spreads := _token_spreads(pool)):
-            case, (low, low_job), (high, high_job) = spreads[0]
+            spread = spreads[0]
+            tokens = (
+                f'{spread.low:,} and {spread.high:,} input tokens in job '
+                f'`{spread.low_job}`'
+                if spread.low_job == spread.high_job
+                else f'{spread.low:,} input tokens in job `{spread.low_job}` and '
+                f'{spread.high:,} in job `{spread.high_job}`'
+            )
             others = (
                 f', one of {count_of(len(spreads), "case")} whose counts differ'
                 if len(spreads) > 1
                 else ''
             )
             conflicts.append(
-                f'System `{system}` sent case `{case}` with {low:,} input tokens in '
-                f'job `{low_job}` and {high:,} in job `{high_job}`{others}.'
+                f'System `{system}` sent case `{spread.case}` with {tokens}{others}.'
             )
 
     return conflicts
@@ -171,19 +177,27 @@ def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
         )
 
 
-def _token_spreads(
-    pool: Iterable[Output],
-) -> list[tuple[str, tuple[int, str], tuple[int, str]]]:
-    """Return each case whose input tokens spread past the tolerance, with extremes."""
+class _Spread(NamedTuple):
+    case: str
+    low: int
+    low_job: str
+    high: int
+    high_job: str
+
+
+def _token_spreads(pool: Iterable[Output]) -> list[_Spread]:
+    """Return each case whose input tokens spread past the tolerance."""
     counts: defaultdict[str, list[tuple[int, str]]] = defaultdict(list)
     for output in pool:
         if output.input_tokens is not None:
             counts[output.case].append((output.input_tokens, output.job))
-    return [
-        (case, low, high)
-        for case, values in sorted(counts.items())
-        if (high := max(values))[0] - (low := min(values))[0] > max(2, 0.02 * low[0])
-    ]
+
+    spreads: list[_Spread] = []
+    for case, values in sorted(counts.items()):
+        (low, low_job), (high, high_job) = min(values), max(values)
+        if high - low > max(2, 0.02 * low):
+            spreads.append(_Spread(case, low, low_job, high, high_job))
+    return spreads
 
 
 def read_outputs(family: str) -> list[Output]:
@@ -192,8 +206,8 @@ def read_outputs(family: str) -> list[Output]:
     Raises
     ------
     InputError
-        A line does not validate as an output, as a file an older collection
-        wrote does not.
+        A line does not validate as an output, for example one an older
+        collection wrote.
     """
     path = _outputs_file(family)
     if not path.exists():

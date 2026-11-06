@@ -39,7 +39,7 @@ from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.tasks import render_task_config
+from assistant_bench.tasks import render_task_config, render_tasks
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
@@ -1531,30 +1531,33 @@ class TestCollect:
             'response without a known cost, imputed from its own usage.\n'
         ) in result.output
 
+    @pytest.mark.parametrize('command', ['collect', 'run'])
     def test_names_a_system_whose_outputs_report_several_models(
-        self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        command: str,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
         system = make_system(name='large')
         resolved['large'] = system
-        config = jobs.job(load_family('f'), [system], [])
+        family = load_family('f')
+        tasks = {task.name: task for task in render_tasks(family, load_cases(family))}
         for job, case, model in (
             ('job-1', 'c1', 'large-2026'),
             ('job-2', 'c2', 'other-2026'),
         ):
-            write_trial(
-                data_dir / 'jobs' / 'f' / job,
-                f'{case}__1',
-                config.agents[0],
-                task=f'f/{case}',
-                output='Hi.',
-                instruction=None,
-                context=AgentContext(metadata={'response_model': model}),
-                environment=config.environment,
-                verifier_disabled=config.verifier.disable,
+            config = jobs.job(family, [system], [tasks[case]])
+            (path,) = finish_job(config.model_copy(update={'job_name': job})).glob(
+                '*/result.json'
             )
+            trial = TrialResult.model_validate_json(path.read_text())
+            trial.agent_result = AgentContext(metadata={'response_model': model})
+            path.write_text(trial.model_dump_json())
 
-        result = invoke('collect', 'f')
+        result = invoke(command, 'f')
 
         assert result.exit_code == 0, result.output
         assert (
