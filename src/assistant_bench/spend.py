@@ -1,11 +1,10 @@
 """The spend ledger of every agent attempt, and the cost projection of a run."""
 
-import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Family
@@ -22,14 +21,37 @@ class Entry(Attempt):
     """An attempt the ledger keeps after its job directory is gone."""
 
     job: str
+    price: Price | None
+    """The system's catalog price when the ledger added the attempt."""
+
+    ceiling_usd: float | None
+    """The cost of one response at a full context window and completion allowance,
+    at `price` and its dearest input rate, `None` when unpriced."""
+
+    @classmethod
+    def of(cls, attempt: Attempt, job: str, system: System | None) -> Self:
+        """Return the attempt priced as the system's catalog entry prices it now."""
+        price = system.price if system else None
+        ceiling = (
+            (
+                system.context_window * max(price.input, price.cache_write or 0)
+                + system.max_output_tokens * price.output
+            )
+            / 1_000_000
+            if system and price
+            else None
+        )
+        return cls(**attempt.model_dump(), job=job, price=price, ceiling_usd=ceiling)
 
 
-def update_ledger(family: Family) -> list[Entry]:
+def update_ledger(family: Family, systems: Mapping[str, System]) -> list[Entry]:
     """Add each job's unrecorded attempts to the family's ledger, and return it.
 
     The ledger is the data directory's `spend/<family>.jsonl`, so the spend of a
     deleted trial or job stays recorded. An attempt is keyed by its job, trial,
-    and start time, and the ledger holds each key once.
+    and start time, and the ledger holds each key once. Each added attempt keeps
+    its system's current price, so a later price change or a system leaving the
+    catalog leaves its cost as it was.
     """
     path = _ledger_file(family.name)
     entries = _unique(
@@ -41,7 +63,7 @@ def update_ledger(family: Family) -> list[Entry]:
     added = [
         entry
         for attempts in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
-        for entry in _read_attempts(attempts)
+        for entry in _read_attempts(attempts, systems)
         if _key(entry) not in seen
     ]
     if added:
@@ -56,10 +78,13 @@ def _ledger_file(family: str) -> Path:
     return data_dir() / 'spend' / f'{family}.jsonl'
 
 
-def _read_attempts(path: Path) -> list[Entry]:
+def _read_attempts(path: Path, systems: Mapping[str, System]) -> list[Entry]:
+    attempts = [
+        Attempt.model_validate_json(line) for line in path.read_text().splitlines()
+    ]
     return [
-        Entry.model_validate({**json.loads(line), 'job': path.parent.name})
-        for line in path.read_text().splitlines()
+        Entry.of(attempt, path.parent.name, systems.get(attempt.system))
+        for attempt in attempts
     ]
 
 
@@ -110,40 +135,53 @@ class Tokens:
         )
 
 
+type Imputation = Literal['own', 'borrowed']
+
+
 @dataclass(frozen=True)
 class Spend:
-    """A system's ledger entries in one family, at current catalog prices."""
+    """A system's ledger entries in one family, at the prices the entries keep."""
 
     system: str
     priced: bool
+    """Whether any entry has a price. Responses of unpriced entries count no
+    dollars."""
+
     trials: int
     answered: int
     """Trials with at least one response."""
 
     responses: int
     measured: int
-    """Responses with valid usage and no unpriced cache write."""
+    """Responses with a known cost, or with valid usage and no unpriced cache
+    write when unpriced."""
 
     tokens: Tokens
     """The tokens of the measured responses."""
 
-    unknown: int
-    """Responses without a known cost, or unmeasured ones when unpriced."""
-
     known_usd: float
-    imputed_usd: float | None
-    """The unknown responses at the mean known cost per response, `None` without
-    a known cost to impute from."""
+    imputed: int
+    """Priced responses without a known cost that another cost stands in for."""
 
-    ceiling_usd: float | None
-    """The unknown responses at a full context window and completion allowance
-    each, `None` when unpriced."""
+    imputed_usd: float
+    imputation: Imputation | None
+    """Whether the imputed cost is the system's own mean known cost per response or
+    the family's costliest other usage per response at the system's prices."""
+
+    ceiling: int
+    """Priced responses without a known cost and nothing to impute from, counted
+    at a full context window and completion allowance each."""
+
+    ceiling_usd: float
+
+    @property
+    def unknown(self) -> int:
+        """Return the responses without a known cost, or the unmeasured ones."""
+        return self.responses - self.measured
 
     @property
     def spent_usd(self) -> float:
-        """Return the known cost plus the unknown responses' imputed cost or ceiling."""
-        imputed = self.imputed_usd if self.imputed_usd is not None else self.ceiling_usd
-        return self.known_usd + (imputed or 0)
+        return self.known_usd + self.imputed_usd + self.ceiling_usd
 
     @property
     def profile(self) -> Tokens | None:
@@ -153,71 +191,98 @@ class Spend:
         return self.tokens.scaled(self.responses / self.measured / self.answered)
 
 
-def summarize(entries: Iterable[Entry], systems: Mapping[str, System]) -> list[Spend]:
-    """Price each system's ledger entries.
+def summarize(entries: Iterable[Entry]) -> list[Spend]:
+    """Price each system's ledger entries at the prices they keep.
 
-    A system the catalog no longer has, or whose channel has no price, is
-    unpriced. A response whose usage is invalid, or whose cache write has no
-    declared price, is unmeasured and has no known cost.
+    A response has no known cost when its usage is invalid or its cache write has
+    no declared price. Such a response costs the system's mean known cost per
+    response, or else the family's costliest usage per response from another
+    system at its own entry's price, or else its ceiling.
     """
     by_system: defaultdict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
         by_system[entry.system].append(entry)
 
+    rates = {
+        name: rate
+        for name, attempts in by_system.items()
+        if (rate := _response_tokens(attempts)) is not None
+    }
     return [
-        _spend(name, attempts, systems.get(name))
+        _spend(
+            name,
+            attempts,
+            [rate for other, rate in rates.items() if other != name],
+        )
         for name, attempts in sorted(by_system.items())
     ]
 
 
-def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
-    responses = [response for attempt in attempts for response in attempt.responses]
-    measured = [
-        response
-        for response in responses
-        if response is not None and not response.cache_write_unpriced
-    ]
-    trials = len({(attempt.job, attempt.trial) for attempt in attempts})
-    answered = len(
-        {(attempt.job, attempt.trial) for attempt in attempts if attempt.responses}
-    )
-    tokens = Tokens.total(measured)
-    price = system.price if system else None
-    if system is None or price is None:
-        return Spend(
-            name,
-            priced=False,
-            trials=trials,
-            answered=answered,
-            responses=len(responses),
-            measured=len(measured),
-            tokens=tokens,
-            unknown=len(responses) - len(measured),
-            known_usd=0.0,
-            imputed_usd=None,
-            ceiling_usd=None,
+def _measured(entry: Entry) -> list[MeasuredUsage]:
+    price = entry.price
+    return [
+        usage
+        for usage in entry.responses
+        if usage is not None
+        and (
+            not usage.cache_write_unpriced
+            if price is None
+            else usage.cost(price) is not None
         )
-
-    known = [
-        cost for cost in (usage.cost(price) for usage in measured) if cost is not None
     ]
-    unknown = len(responses) - len(known)
-    ceiling = (
-        system.context_window * price.input + system.max_output_tokens * price.output
-    ) / 1_000_000
+
+
+def _response_tokens(attempts: list[Entry]) -> Tokens | None:
+    measured = [usage for attempt in attempts for usage in _measured(attempt)]
+    if not measured:
+        return None
+    return Tokens.total(measured).scaled(1 / len(measured))
+
+
+def _spend(name: str, attempts: list[Entry], borrowed: list[Tokens]) -> Spend:
+    measured = [usage for attempt in attempts for usage in _measured(attempt)]
+    known = [
+        cost
+        for attempt in attempts
+        if attempt.price is not None
+        for usage in _measured(attempt)
+        if (cost := usage.cost(attempt.price)) is not None
+    ]
+    own = sum(known) / len(known) if known else None
+    imputed: list[float] = []
+    ceilings: list[float] = []
+    for attempt in attempts:
+        if attempt.price is None or attempt.ceiling_usd is None:
+            continue
+        for _ in range(len(attempt.responses) - len(_measured(attempt))):
+            rate = own if own is not None else _borrowed_cost(borrowed, attempt.price)
+            if rate is None:
+                ceilings.append(attempt.ceiling_usd)
+            else:
+                imputed.append(rate)
+
     return Spend(
         name,
-        priced=True,
-        trials=trials,
-        answered=answered,
-        responses=len(responses),
+        priced=any(attempt.price is not None for attempt in attempts),
+        trials=len({(attempt.job, attempt.trial) for attempt in attempts}),
+        answered=len(
+            {(attempt.job, attempt.trial) for attempt in attempts if attempt.responses}
+        ),
+        responses=sum(len(attempt.responses) for attempt in attempts),
         measured=len(measured),
-        tokens=tokens,
-        unknown=unknown,
+        tokens=Tokens.total(measured),
         known_usd=sum(known),
-        imputed_usd=unknown * sum(known) / len(known) if known else None,
-        ceiling_usd=unknown * ceiling,
+        imputed=len(imputed),
+        imputed_usd=sum(imputed),
+        imputation=('own' if own is not None else 'borrowed') if imputed else None,
+        ceiling=len(ceilings),
+        ceiling_usd=sum(ceilings),
     )
+
+
+def _borrowed_cost(rates: list[Tokens], price: Price) -> float | None:
+    costs = [cost for rate in rates if (cost := rate.cost(price)) is not None]
+    return max(costs, default=None)
 
 
 # ── Projection ──
@@ -265,10 +330,15 @@ def project(
     for system in systems:
         basis: Basis | None = None
         profile = own.get(system.name)
+        lenders = [
+            lender
+            for lender in profiles
+            if system.price is None or lender.cost(system.price) is not None
+        ]
         if profile is not None:
             basis = 'own'
-        elif profiles:
-            basis, profile = 'borrowed', max(profiles, key=_rank(system.price))
+        elif lenders:
+            basis, profile = 'borrowed', max(lenders, key=_rank(system.price))
         count = pending[system.name]
         projections.append(
             Projection(
@@ -291,7 +361,8 @@ def _rank(price: Price | None) -> Callable[[Tokens], float]:
         if price is None:
             return profile.input_tokens + profile.output_tokens
         cost = profile.cost(price)
-        return cost if cost is not None else -1.0
+        assert cost is not None
+        return cost
 
     return rank
 
@@ -300,7 +371,7 @@ def _rank(price: Price | None) -> Callable[[Tokens], float]:
 
 
 def total_usd(spend: list[Spend], projections: list[Projection]) -> float:
-    """Return the ledger's known and imputed spend plus the projection's cost."""
+    """Return the ledger's spend plus the projection's cost."""
     return sum(entry.spent_usd for entry in spend) + sum(
         projection.usd or 0 for projection in projections
     )
@@ -311,9 +382,10 @@ def budget_problems(
 ) -> list[str]:
     """Return why the run would exceed the family's `budget_usd`, if it would.
 
-    The total that `total_usd` returns must stay within the budget. Unpriced
-    systems count no dollars, while a selected priced system refuses when its
-    pending trials have no estimate.
+    The total that `total_usd` returns must stay within the budget, and the
+    refusal names each system's share counted at ceilings. Unpriced systems
+    count no dollars, while a selected priced system refuses when its pending
+    trials have no estimate.
     """
     budget = family.settings.budget_usd
     if budget is None:
@@ -328,14 +400,14 @@ def budget_problems(
     ]
     total = total_usd(spend, projections)
     if total > budget:
-        spent = {entry.system: entry.spent_usd for entry in spend if entry.priced}
+        spent = {entry.system: entry for entry in spend if entry.priced}
         projected = {
             projection.system: usd
             for projection in projections
             if projection.priced and (usd := projection.usd)
         }
         shares = ', '.join(
-            f'`{name}` ${spent.get(name, 0):.2f} spent and '
+            f'`{name}` {_spent_share(spent.get(name))} and '
             f'${projected.get(name, 0):.2f} projected'
             for name in sorted(spent.keys() | projected.keys())
         )
@@ -345,3 +417,12 @@ def budget_problems(
         )
 
     return problems
+
+
+def _spent_share(entry: Spend | None) -> str:
+    if entry is None:
+        return '$0.00 spent'
+    share = f'${entry.spent_usd:.2f} spent'
+    if entry.ceiling:
+        share += f', ${entry.ceiling_usd:.2f} of it counted at ceilings,'
+    return share

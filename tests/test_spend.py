@@ -30,9 +30,11 @@ from support import START, VOTES, StubEndpoint, make_system, with_settings
 # $3 at `make_system`'s price.
 USAGE = MeasuredUsage(1_000_000, 0, 0, 100_000, None)
 UNPRICED_WRITE = MeasuredUsage(10, 0, 10, 10, None, cache_write_unpriced=True)
-# A full context window and completion allowance cost $0.30.
+# A full context window and completion allowance cost $0.35 at the $2.50 write rate.
 LARGE = make_system(context_window=100_000, max_output_tokens=10_000)
+NO_WRITE_PRICE = make_system(price=Price(input=2.0, output=10.0, cache_read=0.2))
 UNPRICED = make_system(name='acme-small', price=None)
+SYSTEMS = {LARGE.name: LARGE}
 
 
 def attempt(
@@ -51,8 +53,8 @@ def attempt(
     )
 
 
-def entry(job: str = 'job-1', **fields: Any) -> Entry:
-    return Entry.model_validate({**attempt(**fields).model_dump(), 'job': job})
+def entry(job: str = 'job-1', priced_as: System | None = LARGE, **fields: Any) -> Entry:
+    return Entry.of(attempt(**fields), job, priced_as)
 
 
 def write_attempts(job_dir: Path, *attempts: Attempt) -> None:
@@ -65,8 +67,8 @@ async def run_in_process(config: JobConfig) -> None:
     await (await Job.create(config)).run()
 
 
-def spend_of(system: System, *entries: Entry) -> Spend:
-    (spend,) = summarize(entries, {system.name: system})
+def spend_of(*entries: Entry) -> Spend:
+    (spend,) = summarize(entries)
     return spend
 
 
@@ -76,17 +78,17 @@ class TestUpdateLedger:
     ) -> None:
         job_dir = jobs.jobs_dir(VOTES) / 'job-1'
         write_attempts(job_dir, attempt())
-        update_ledger(VOTES)
+        update_ledger(VOTES, SYSTEMS)
         shutil.rmtree(job_dir)
         write_attempts(jobs.jobs_dir(VOTES) / 'job-2', attempt(trial='b__1'))
 
-        ledger = update_ledger(VOTES)
+        ledger = update_ledger(VOTES, SYSTEMS)
 
         assert [(item.job, item.trial) for item in ledger] == [
             ('job-1', 'a__1'),
             ('job-2', 'b__1'),
         ]
-        assert update_ledger(VOTES) == ledger
+        assert update_ledger(VOTES, SYSTEMS) == ledger
 
     def test_keys_each_attempt_by_its_job_trial_and_start(self, data_dir: Path) -> None:
         later = attempt(started_at=START + timedelta(seconds=1))
@@ -96,7 +98,7 @@ class TestUpdateLedger:
         recorded = entry().model_dump_json() + '\n'
         ledger.write_text(recorded * 2)
 
-        entries = update_ledger(VOTES)
+        entries = update_ledger(VOTES, SYSTEMS)
 
         assert [item.started_at for item in entries] == [START, later.started_at]
 
@@ -115,7 +117,7 @@ class TestUpdateLedger:
 
         trials = [path for path in jobs.job_path(config).iterdir() if path.is_dir()]
         assert len(trials) == 1
-        ledger = update_ledger(family)
+        ledger = update_ledger(family, {})
         assert [item.trial for item in ledger] == [trials[0].name] * 2
         assert [len(item.responses) for item in ledger] == [0, 1]
 
@@ -124,58 +126,77 @@ class TestSummarize:
     @pytest.mark.parametrize(
         ('system', 'responses', 'expected'),
         [
+            pytest.param(LARGE, (USAGE,), (True, 0, 3.0, 0.0, 0.0), id='known'),
             pytest.param(
-                LARGE,
-                (USAGE,),
-                (True, 0, 3.0, 0.0, 0.0),
-                id='known',
-            ),
-            pytest.param(
-                LARGE,
-                (USAGE, None),
-                (True, 1, 3.0, 3.0, 0.3),
-                id='invalid-usage',
+                LARGE, (USAGE, None), (True, 1, 3.0, 3.0, 0.0), id='invalid-usage'
             ),
             pytest.param(
                 LARGE,
                 (USAGE, UNPRICED_WRITE),
-                (True, 1, 3.0, 3.0, 0.3),
+                (True, 1, 3.0, 3.0, 0.0),
                 id='unpriced-cache-write',
             ),
             pytest.param(
-                UNPRICED,
-                (USAGE, None),
-                (False, 1, 0.0, None, None),
-                id='unpriced',
+                NO_WRITE_PRICE,
+                (USAGE, MeasuredUsage(10, 0, 10, 10, None)),
+                (True, 1, 3.0, 3.0, 0.0),
+                id='undeclared-cache-write-price',
+            ),
+            pytest.param(LARGE, (None, None), (True, 2, 0.0, 0.0, 0.7), id='ceiling'),
+            pytest.param(
+                UNPRICED, (USAGE, None), (False, 1, 0.0, 0.0, 0.0), id='unpriced'
             ),
         ],
     )
-    def test_prices_the_known_usage_and_bounds_the_rest(
+    def test_prices_the_known_usage_and_imputes_the_rest(
         self,
         system: System,
         responses: tuple[MeasuredUsage | None, ...],
         expected: tuple[object, ...],
     ) -> None:
-        entries = [entry(system=system.name, responses=responses)]
+        entries = [entry(system=system.name, priced_as=system, responses=responses)]
 
-        spend = spend_of(system, *entries)
+        spend = spend_of(*entries)
 
         assert (
             spend.priced,
             spend.unknown,
             spend.known_usd,
             spend.imputed_usd,
-            spend.ceiling_usd,
+            pytest.approx(spend.ceiling_usd),
         ) == expected
 
-    def test_leaves_a_system_the_catalog_lacks_unpriced(self) -> None:
-        (spend,) = summarize([entry(system='retired')], {})
+    def test_imputes_from_the_costliest_other_system_before_any_ceiling(
+        self,
+    ) -> None:
+        entries = [
+            entry(system='cheap', responses=(MeasuredUsage(1_000_000, 0, 0, 0, None),)),
+            entry(system='dear', responses=(USAGE,)),
+            entry(system='new', responses=(None, None, None)),
+        ]
 
-        assert (spend.priced, spend.tokens.input_tokens, spend.known_usd) == (
-            False,
-            1_000_000,
-            0.0,
-        )
+        *_, spend = summarize(entries)
+
+        assert (spend.system, spend.imputation, spend.imputed) == ('new', 'borrowed', 3)
+        assert (spend.imputed_usd, spend.ceiling_usd) == (9.0, 0.0)
+
+    @pytest.mark.parametrize(
+        'later',
+        [
+            {},
+            {LARGE.name: make_system(price=Price(input=0.2, output=1.0, cache_read=0))},
+        ],
+        ids=['retired', 'repriced'],
+    )
+    def test_keeps_the_price_each_attempt_was_recorded_at(
+        self, data_dir: Path, later: dict[str, System]
+    ) -> None:
+        write_attempts(jobs.jobs_dir(VOTES) / 'job-1', attempt())
+        update_ledger(VOTES, SYSTEMS)
+
+        (spend,) = summarize(update_ledger(VOTES, later))
+
+        assert (spend.priced, spend.known_usd) == (True, 3.0)
 
     def test_counts_retries_into_the_tokens_per_answered_trial(self) -> None:
         entries = [
@@ -187,7 +208,7 @@ class TestSummarize:
             entry(trial='b__1', responses=()),
         ]
 
-        spend = spend_of(LARGE, *entries)
+        spend = spend_of(*entries)
 
         assert (spend.trials, spend.answered, spend.responses, spend.measured) == (
             2,
@@ -201,7 +222,7 @@ class TestSummarize:
 class TestProject:
     def test_estimates_from_its_own_usage_first(self) -> None:
         cheap = make_system(price=Price(input=1.0, output=1.0, cache_read=0.1))
-        spend = [spend_of(cheap, entry())]
+        spend = [spend_of(entry(priced_as=cheap))]
 
         (projection,) = project(Counter({cheap.name: 2}), spend, [cheap])
 
@@ -229,8 +250,6 @@ class TestProject:
     def test_borrows_the_costliest_usage_at_its_own_prices(
         self, price: Price | None, expected: float | None
     ) -> None:
-        reader = make_system(name='reader')
-        writer = make_system(name='writer')
         spend = summarize(
             [
                 entry(
@@ -240,8 +259,7 @@ class TestProject:
                 entry(
                     system='writer', responses=(MeasuredUsage(0, 0, 0, 200_000, None),)
                 ),
-            ],
-            {'reader': reader, 'writer': writer},
+            ]
         )
         target = make_system(name='new', price=price)
 
@@ -249,6 +267,28 @@ class TestProject:
 
         assert (projection.basis, projection.usd) == ('borrowed', expected)
         assert projection.tokens is not None
+
+    @pytest.mark.parametrize(
+        ('lenders', 'expected'),
+        [(('writer', 'reader'), ('borrowed', 3.0)), (('writer',), (None, None))],
+        ids=['costable-lender', 'no-costable-lender'],
+    )
+    def test_borrows_only_usage_its_own_price_can_cost(
+        self, lenders: tuple[str, ...], expected: tuple[object, object]
+    ) -> None:
+        usage = {
+            'writer': MeasuredUsage(2_000_000, 0, 1_000_000, 0, None),
+            'reader': USAGE,
+        }
+        spend = summarize(
+            [entry(system=name, responses=(usage[name],)) for name in lenders]
+        )
+
+        (projection,) = project(
+            Counter({NO_WRITE_PRICE.name: 1}), spend, [NO_WRITE_PRICE]
+        )
+
+        assert (projection.basis, projection.usd) == expected
 
     def test_has_no_estimate_without_usage(self) -> None:
         (projection,) = project(Counter({LARGE.name: 3}), [], [LARGE])
@@ -282,10 +322,22 @@ class TestBudgetProblems:
         self, budget: float | None, pending: int, expected: list[str]
     ) -> None:
         family = with_settings(VOTES, budget_usd=budget)
-        spend = [spend_of(LARGE, entry())]
+        spend = [spend_of(entry())]
         projections = project(Counter({LARGE.name: pending}), spend, [LARGE])
 
         assert budget_problems(family, spend, projections) == expected
+
+    def test_names_the_share_counted_at_ceilings(self) -> None:
+        family = with_settings(VOTES, budget_usd=0.5)
+        spend = [spend_of(entry(responses=(None, None)))]
+
+        problems = budget_problems(family, spend, [])
+
+        assert problems == [
+            'Family `f` would reach $0.70, over its `budget_usd` of $0.50: '
+            '`acme-large` $0.70 spent, $0.70 of it counted at ceilings, and $0.00 '
+            'projected.'
+        ]
 
     def test_refuses_a_priced_system_without_an_estimate(self) -> None:
         family = with_settings(VOTES, budget_usd=100.0)

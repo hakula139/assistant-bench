@@ -621,15 +621,18 @@ def _spend_line(entry: Spend) -> str:
         return f'{line}.'
 
     line = f'System `{entry.system}`: {attempts} cost ${entry.known_usd:.2f}'
-    if entry.unknown:
-        imputed = (
-            f'${entry.imputed_usd:.2f} imputed'
-            if entry.imputed_usd is not None
-            else 'an unknown cost'
-        )
+    if entry.imputed:
+        source = 'its own' if entry.imputation == 'own' else "another system's"
         line += (
-            f', plus {imputed} for {count_of(entry.unknown, "response")} without a '
-            f'known cost, at most ${entry.ceiling_usd or 0:.2f}'
+            f', plus ${entry.imputed_usd:.2f} for '
+            f'{count_of(entry.imputed, "response")} without a known cost, imputed '
+            f'at {source} cost per response'
+        )
+    if entry.ceiling:
+        line += (
+            f', plus ${entry.ceiling_usd:.2f} for '
+            f'{count_of(entry.ceiling, "response")} without a known cost, counted at '
+            'their ceiling'
         )
     return f'{line}.'
 
@@ -640,7 +643,7 @@ def _projection(
     job: JobConfig,
     systems: Mapping[str, System],
 ) -> tuple[list[Spend], list[Projection]]:
-    spent = summarize(update_ledger(family), systems)
+    spent = summarize(update_ledger(family, systems))
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 

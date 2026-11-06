@@ -111,7 +111,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
         A source job is not a job directory, a trial record is unreadable, a
         task is invalid, or the harness is one `check_harness` refuses.
     """
-    entries = update_ledger(family)
+    entries = update_ledger(family, systems)
     check_harness(family)
     cases = {case.id: case for case in load_cases(family)}
     expected = current_inputs(family, list(systems.values()))
@@ -167,7 +167,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     )
 
     write_outputs(family.name, outputs)
-    return Collection(outputs, summarize(entries, systems))
+    return Collection(outputs, summarize(entries))
 
 
 def read_trials(family: Family, job_dir: Path) -> list[Output]:

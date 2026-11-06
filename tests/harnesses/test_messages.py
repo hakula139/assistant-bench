@@ -95,7 +95,7 @@ class TestMessageResult:
             parsed = Message.model_validate(payload).model_copy(
                 update={'usage': Usage.model_construct(**usage)}
             )
-            result = MessageResult(parsed, complete=True)
+            result = MessageResult(parsed, complete=True, final_usage=True)
 
             details = result.details
 
@@ -282,17 +282,19 @@ class TestRequestMessages:
         assert client.is_closed()
 
     @pytest.mark.parametrize(
-        ('ending', 'error'),
+        ('ending', 'error', 'input_tokens'),
         [
-            (None, MessageStreamError),
+            (None, MessageStreamError, 130),
             (
                 b'event: error\ndata: {"type":"error","error":'
                 b'{"type":"overloaded_error","message":"Unavailable."}}\n\n',
                 anthropic.APIError,
+                None,
             ),
             (
                 b'event: content_block_delta\ndata: {broken\n\n',
                 json.JSONDecodeError,
+                None,
             ),
         ],
         ids=['clean-eof-before-stop', 'native-error', 'malformed-event'],
@@ -303,6 +305,7 @@ class TestRequestMessages:
         tmp_path: Path,
         ending: bytes | None,
         error: type[Exception],
+        input_tokens: int | None,
         messages_clients: list[anthropic.AsyncAnthropic],
     ) -> None:
         payload = message()
@@ -317,7 +320,7 @@ class TestRequestMessages:
         assert not result.complete
         assert result.details['finish_reason'] is None
         assert result.details['response_status'] == 'incomplete'
-        assert result.details['input_tokens'] == 130
+        assert result.details.get('input_tokens') == input_tokens
         assert result.details['request_id'] == 'req-1'
         assert json.loads(artifact.read_text())['content'][0] == payload['content'][0]
         (client,) = messages_clients
@@ -425,8 +428,7 @@ class TestRequestMessages:
         assert result.details['finish_reason'] is None
         assert result.details['reasoning_tokens'] is None
         assert artifact.exists() is during_thinking
-        assert result.details.get('input_tokens') == (130 if during_thinking else None)
-        assert result.details.get('output_tokens') == (0 if during_thinking else None)
+        assert 'input_tokens' not in result.details
         (client,) = messages_clients
         assert client.is_closed()
         assert len(endpoint.requests) == 1

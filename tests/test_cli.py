@@ -1180,7 +1180,7 @@ class TestRun:
         )
         assert len(submitted) == 1 - exit_code
 
-    def test_counts_another_systems_unknown_cost_at_its_ceiling(
+    def test_imputes_a_systems_unknown_costs_from_another_system(
         self,
         families_dir: Path,
         data_dir: Path,
@@ -1189,20 +1189,24 @@ class TestRun:
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
-            file.write('budget_usd = 19\n')
+            file.write('budget_usd = 22\n')
         resolved['large'] = SPENDER
         resolved['small'] = make_system(
             name='small', context_window=2_000_000, max_output_tokens=200_000
         )
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-2', 'small', (None,))
+        write_spent_attempt(
+            data_dir / 'jobs' / 'f' / 'job-2', 'small', (None, None, None)
+        )
 
-        result = invoke('run', 'f', '--system', 'large')
+        result = invoke('run', 'f', '--system', 'small')
 
         assert (result.exit_code, result.stderr) == (0, '')
-        assert (
-            'Family `f`: $18.00 spent and projected, against a budget of $19.00.\n'
-        ) in result.stdout
+        assert result.stdout.startswith(
+            "System `small`: 1 pending trial at $6.00 each from another system's "
+            'usage, $6.00 in all.\nFamily `f`: $21.00 spent and projected, against '
+            'a budget of $22.00.\n'
+        )
         assert len(submitted) == 1
 
     def test_refuses_a_later_family_before_running_any(
@@ -1339,8 +1343,8 @@ class TestSpend:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 imputed '
-            'for 1 response without a known cost, at most $6.00.\n'
+            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'response without a known cost, imputed at its own cost per response.\n'
             'System `large`: 1 pending trial at $6.00 each from its own usage, '
             '$6.00 in all.\n'
             'Family `f`: $12.00 spent and projected.\n'
@@ -1387,8 +1391,8 @@ class TestCollect:
 
         assert result.exit_code == 0, result.output
         assert (
-            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 imputed '
-            'for 1 response without a known cost, at most $6.00.\n'
+            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'response without a known cost, imputed at its own cost per response.\n'
         ) in result.output
 
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(

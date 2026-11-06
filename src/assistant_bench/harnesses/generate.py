@@ -155,23 +155,25 @@ class Generate(BaseAgent):
             extra_body=extra_body,
         )
         completion = raw.parse()
-        choice = completion.choices[0]
-        (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
-
-        details = measure('openai-chat-completions', completion.usage)
+        details = {
+            **measure('openai-chat-completions', completion.usage),
+            'responded': True,
+            'response_model': completion.model,
+            'request_id': raw.headers.get('x-request-id'),
+        }
+        context.metadata = details
         usage = MeasuredUsage.from_details(details)
         if usage is not None:
             usage.record(context)
 
+        choice = completion.choices[0]
+        (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
         return {
             **details,
-            'responded': True,
             'finish_reason': 'refusal'
             if choice.message.refusal
             else choice.finish_reason,
             'refusal': choice.message.refusal,
-            'response_model': completion.model,
-            'request_id': raw.headers.get('x-request-id'),
         }
 
     async def _responses(

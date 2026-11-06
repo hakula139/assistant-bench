@@ -1,4 +1,4 @@
-"""The family arguments, system option, and name refusal the commands share."""
+"""The family arguments, system option, and name refusals the commands share."""
 
 from collections.abc import Collection, Iterable
 from typing import Annotated

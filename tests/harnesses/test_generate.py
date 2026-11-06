@@ -22,6 +22,7 @@ from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.harnesses.native import NativeCompletionError
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.gates import failed_gates
 from assistant_bench.tasks import render_tasks
@@ -734,6 +735,20 @@ class TestGenerate:
             assert context.metadata['finish_reason'] == 'refusal'
             assert context.metadata['refusal'] == 'I cannot answer.'
             assert len(endpoint.requests) == 1
+
+        def test_records_the_usage_of_a_reply_without_choices(
+            self, endpoint: StubEndpoint, logs_dir: Path
+        ) -> None:
+            endpoint.response = completion() | {'choices': []}
+
+            with pytest.raises(IndexError):
+                run_agent(endpoint, logs_dir)
+
+            attempts = logs_dir.parent.parent / ATTEMPTS_FILE
+            (line,) = attempts.read_text().splitlines()
+            assert Attempt.model_validate_json(line).responses == [
+                MeasuredUsage(120, 100, 0, 40, 25)
+            ]
 
         def test_preserves_a_truncated_attempt_when_a_new_protocol_regenerates_it(
             self, endpoint: StubEndpoint, tmp_path: Path
