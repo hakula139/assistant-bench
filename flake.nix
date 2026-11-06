@@ -120,9 +120,11 @@
           };
         };
 
-        nodeTools = with pkgs; [
-          nodejs_26
-          (pnpm.override { nodejs-slim = nodejs-slim_26; })
+        nodejs = pkgs.nodejs_26;
+        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs.nodejs-slim_26; };
+        nodeTools = [
+          nodejs
+          pnpm
         ];
 
         # CI runs Node and Ruff with local dependencies absent from the check's store source.
@@ -207,6 +209,24 @@
         cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
         flock = pkgs.lib.getExe pkgs.flock;
         git = pkgs.lib.getExe pkgs.git;
+
+        # ------------------------------------------------------------------------------------------
+        # GitLab Pages Toolchain
+        # ------------------------------------------------------------------------------------------
+        # The Pages job builds outside the dev shell, so its pins must follow the dev shell's tools.
+        pagesCheck =
+          variable: pattern: expected:
+          pkgs.runCommand "pages-${variable}" { } ''
+            value=$(sed -n 's/^  ${variable}: //p' ${./.gitlab/ci/pages.yml})
+            if [[ "$value" != ${pattern} ]]; then
+              echo "${variable} in .gitlab/ci/pages.yml is $value, but the dev shell has" \
+                "${expected}." >&2
+              exit 1
+            fi
+            touch "$out"
+          '';
+
+        nodeMajor = pkgs.lib.versions.major nodejs.version;
       in
       {
         # ------------------------------------------------------------------------------------------
@@ -246,7 +266,11 @@
         # ------------------------------------------------------------------------------------------
         # Checks
         # ------------------------------------------------------------------------------------------
-        checks.pre-commit = preCommitCheck;
+        checks = {
+          pre-commit = preCommitCheck;
+          pages-pnpm = pagesCheck "BENCH_PNPM_VERSION" pnpm.version "pnpm ${pnpm.version}";
+          pages-node = pagesCheck "BENCH_NODE_IMAGE" "node:${nodeMajor}-*" "Node.js ${nodeMajor}";
+        };
 
         # ------------------------------------------------------------------------------------------
         # Formatter

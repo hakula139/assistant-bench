@@ -8,14 +8,6 @@
       "managerFilePatterns": ["/^\\.gitlab/ci/pages\\.yml$/"],
       "matchStrings": ["BENCH_NODE_IMAGE: (?<depName>node):(?<currentValue>\\S+)"],
       "datasourceTemplate": "docker"
-    },
-    {
-      "customType": "regex",
-      "description": "The GitLab Pages job's pnpm, which a variable names",
-      "managerFilePatterns": ["/^\\.gitlab/ci/pages\\.yml$/"],
-      "matchStrings": ["BENCH_PNPM_VERSION: (?<currentValue>\\S+)"],
-      "depNameTemplate": "pnpm",
-      "datasourceTemplate": "npm"
     }
   ],
   "packageRules": [
