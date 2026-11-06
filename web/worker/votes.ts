@@ -4,10 +4,10 @@ import type { Defect } from '@/lib/defects';
 import { ApiError, type Bindings } from './api';
 import { FRESHNESS_CACHE_SECONDS, UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
 
-type Store = Bindings['STORE'];
-
-// Every row present counts toward the tag's cap, so excluding a vote refunds nothing, while an
-// undone vote is gone and no longer counts.
+/**
+ * Every row present counts toward the tag's cap, so excluding a vote refunds nothing, while an
+ * undone vote is gone and no longer counts.
+ */
 const TAG_VOTES = 'SELECT count(*) AS votes FROM votes WHERE ip_tag = ? AND recorded_at > ?';
 const PRIOR = 'SELECT choice, defects FROM votes WHERE pair_id = ? AND actor_id = ?';
 const PAIR_DEFECTS = `
@@ -40,7 +40,7 @@ const RESTORE = `
   ON CONFLICT (actor_id, family) DO UPDATE SET
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at`;
-// Deletes the vote whose pair RESTORE just reinstated, which it chose undoable and counted.
+/** Deletes the vote whose pair `RESTORE` just reinstated, which it chose undoable and counted. */
 const WITHDRAW = `
   DELETE FROM votes
   WHERE actor_id = ?1 AND family = ?2
@@ -66,11 +66,60 @@ function same(prior: Prior, request: VoteRequest): boolean {
   );
 }
 
-/** Answers a retried vote: success when it repeats the stored one, `stale_pair` otherwise. */
-function retried(prior: Prior, request: VoteRequest): void {
-  if (!same(prior, request)) {
+/** A vote's stored copy, its pair's defects while pending, and its tag's votes in the window. */
+interface Found {
+  prior: Prior | undefined;
+  defects: string | undefined;
+  votes: number;
+}
+
+async function find(
+  db: D1Database,
+  actor: string,
+  tag: string,
+  request: VoteRequest,
+  now: number,
+): Promise<Found> {
+  const [priorRows, pairRows, tagRows] = await db.batch([
+    db.prepare(PRIOR).bind(request.pair, actor),
+    db.prepare(PAIR_DEFECTS).bind(request.pair, actor),
+    db.prepare(TAG_VOTES).bind(tag, now - WINDOW_MS),
+  ]);
+  const [{ votes }] = tagRows.results as { votes: number }[];
+  return {
+    prior: (priorRows.results as Prior[]).at(0),
+    defects: (pairRows.results as { defects: string }[]).at(0)?.defects,
+    votes,
+  };
+}
+
+/**
+ * Decides a vote from what it finds: `null` when it repeats the stored vote, the tags to store in
+ * the family's order when it may be recorded, and an `ApiError` otherwise.
+ */
+function decide(request: VoteRequest, { prior, defects, votes }: Found): TaggedDefects | null {
+  if (prior !== undefined) {
+    if (!same(prior, request)) {
+      throw new ApiError(409, 'stale_pair');
+    }
+    return null;
+  }
+  if (defects === undefined) {
     throw new ApiError(409, 'stale_pair');
   }
+
+  const allowed = JSON.parse(defects) as Defect[];
+  const tagged = Object.values(request.defects).flat();
+  if (tagged.some((defect) => !allowed.includes(defect))) {
+    throw new ApiError(400, 'invalid_request');
+  }
+  if (votes >= VOTES_PER_TAG) {
+    throw new ApiError(429, 'daily_limit');
+  }
+  return {
+    a: allowed.filter((defect) => request.defects.a.includes(defect)),
+    b: allowed.filter((defect) => request.defects.b.includes(defect)),
+  };
 }
 
 /**
@@ -85,29 +134,10 @@ export async function record(
   request: VoteRequest,
   now: number,
 ): Promise<void> {
-  const [priorRows, pairRows] = await db.batch([
-    db.prepare(PRIOR).bind(request.pair, actor),
-    db.prepare(PAIR_DEFECTS).bind(request.pair, actor),
-  ]);
-  const prior = (priorRows.results as Prior[]).at(0);
-  if (prior !== undefined) {
-    retried(prior, request);
+  const defects = decide(request, await find(db, actor, tag, request, now));
+  if (defects === null) {
     return;
   }
-  const pair = (pairRows.results as { defects: string }[]).at(0);
-  if (pair === undefined) {
-    throw new ApiError(409, 'stale_pair');
-  }
-
-  const allowed = JSON.parse(pair.defects) as Defect[];
-  const tagged = Object.values(request.defects).flat();
-  if (tagged.some((defect) => !allowed.includes(defect))) {
-    throw new ApiError(400, 'invalid_request');
-  }
-  const defects = {
-    a: allowed.filter((defect) => request.defects.a.includes(defect)),
-    b: allowed.filter((defect) => request.defects.b.includes(defect)),
-  };
 
   const [inserted] = await db.batch([
     db
@@ -128,23 +158,10 @@ export async function record(
     return;
   }
 
-  const [againRows, stillRows, tagRows] = await db.batch([
-    db.prepare(PRIOR).bind(request.pair, actor),
-    db.prepare(PAIR_DEFECTS).bind(request.pair, actor),
-    db.prepare(TAG_VOTES).bind(tag, now - WINDOW_MS),
-  ]);
-  const again = (againRows.results as Prior[]).at(0);
-  if (again !== undefined) {
-    retried(again, request);
-    return;
+  // A miss that still looks recordable met the actor's earlier vote on the same comparison.
+  if (decide(request, await find(db, actor, tag, request, now)) !== null) {
+    throw new ApiError(409, 'stale_pair');
   }
-  if (stillRows.results.length > 0) {
-    const [{ votes }] = tagRows.results as { votes: number }[];
-    if (votes >= VOTES_PER_TAG) {
-      throw new ApiError(429, 'daily_limit');
-    }
-  }
-  throw new ApiError(409, 'stale_pair');
 }
 
 /**
@@ -164,26 +181,21 @@ export async function undo(db: D1Database, actor: string, family: string, now: n
 }
 
 /**
- * Whether the family's counted votes in this store differ from what a round read, through a
- * counted vote after its cutoff or an exclusion or restore at or below it. A round that read
- * nothing from this store is `unknown`.
+ * Whether the family's counted production votes differ from what a round read, through a counted
+ * vote after its cutoff or an exclusion or restore at or below it. Another store, or a round that
+ * read no production votes, is `unknown`.
  */
 export async function freshness(
   db: D1Database,
-  store: Store,
+  store: Bindings['STORE'],
   query: FreshnessQuery,
 ): Promise<Freshness> {
-  if (store === 'staging') {
-    return 'unknown';
-  }
-  const cutoff = query[store];
-  const votes = query[`${store}_votes`];
-  if (cutoff === undefined || votes === undefined) {
+  if (store !== 'production' || !('production' in query)) {
     return 'unknown';
   }
   const row = await db
     .prepare(FRESHNESS)
-    .bind(query.family, Number(cutoff), Number(votes))
+    .bind(query.family, Number(query.production), Number(query.production_votes))
     .first<{ stale: number }>();
   return row?.stale ? 'stale' : 'current';
 }

@@ -19,7 +19,7 @@ export const ACTOR_MAX_AGE_MS = 400 * DAY_MS;
 /** How long actors and votes keep their IP tag. */
 export const TAG_RETENTION_MS = 60 * DAY_MS;
 
-/** How long an untouched pending pair survives. */
+/** How long a pending pair survives after its issue. */
 export const PAIR_RETENTION_MS = 30 * DAY_MS;
 
 /** How long a data center reuses a freshness answer. */

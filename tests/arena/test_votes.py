@@ -1,3 +1,5 @@
+import math
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +17,7 @@ from assistant_bench.arena.votes import (
     Vote,
 )
 from assistant_bench.families import Choice
+from assistant_bench.paths import REPO_ROOT
 from assistant_bench.report import Cutoff, Cutoffs
 from assistant_bench.scoring.ranking import Comparison
 from support import (
@@ -146,6 +149,20 @@ class TestReadCut:
         assert cut.cutoff == second
         assert [row.id for row in cut.votes] == [first, second]
         assert cut.votes[0].defects == TaggedDefects(b=('facts',))
+
+    def test_cuts_at_the_worker_undo_window(self) -> None:
+        limits = (REPO_ROOT / 'web' / 'worker' / 'limits.ts').read_text()
+        constants = dict(
+            re.findall(r'^(?:export )?const (\w+) = (.+);$', limits, re.MULTILINE)
+        )
+
+        def value(expression: str) -> int:
+            return math.prod(
+                value(constants[factor]) if factor in constants else int(factor)
+                for factor in expression.split(' * ')
+            )
+
+        assert value(constants['UNDO_MS']) == votes.UNDO_WINDOW_MS
 
     def test_reads_every_counted_vote_across_pages(
         self,

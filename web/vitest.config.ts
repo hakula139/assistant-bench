@@ -31,6 +31,7 @@ export default getViteConfig({
               bindings: {
                 ACTOR_KEY: 'test-actor-key',
                 IP_TAG_KEY: 'test-ip-tag-key',
+                STORE: 'production',
                 TEST_MIGRATIONS: await readD1Migrations('migrations'),
                 TEST_PUBLICATION: await readFile(
                   new URL('../tests/fixtures/arena-publication.sql', import.meta.url),

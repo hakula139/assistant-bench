@@ -9,7 +9,7 @@ export const familyName = z
   .check(z.maxLength(FAMILY_NAME_MAX_LENGTH), z.regex(familyNamePattern));
 export const pairId = z.uuid();
 export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
-export const defectSchema = z.enum(defects);
+const defectSchema = z.enum(defects);
 export const taggedDefects = z.strictObject({
   a: z.array(defectSchema),
   b: z.array(defectSchema),
@@ -31,22 +31,11 @@ export const voteRequest = z.strictObject({
   defects: taggedDefects,
 });
 export const undoRequest = familyQuery;
-/** Each store's cutoff with the counted votes the round read up to it, or neither. */
-export const freshnessQuery = z
-  .strictObject({
-    family: familyName,
-    production: z.optional(queryCount),
-    production_votes: z.optional(queryCount),
-    local: z.optional(queryCount),
-    local_votes: z.optional(queryCount),
-  })
-  .check(
-    z.refine(
-      (query) =>
-        (query.production === undefined) === (query.production_votes === undefined) &&
-        (query.local === undefined) === (query.local_votes === undefined),
-    ),
-  );
+/** The production cutoff with the counted votes the round read up to it, or neither. */
+export const freshnessQuery = z.union([
+  z.strictObject({ family: familyName, production: queryCount, production_votes: queryCount }),
+  z.strictObject({ family: familyName }),
+]);
 
 // ── Responses ──
 
@@ -76,7 +65,7 @@ export const pairState = z.strictObject({
   undo: z.boolean(),
 });
 export const freshnessView = z.strictObject({ status: z.enum(['current', 'stale', 'unknown']) });
-export const errorCode = z.enum([
+const errorCode = z.enum([
   'invalid_request',
   'forbidden',
   'not_found',

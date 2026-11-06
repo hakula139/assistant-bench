@@ -27,6 +27,9 @@ const sharedRules = {
 const classicZod =
   "Build classic Zod schemas only at build time. Constructing one runs Zod's eval probe, which the pages' script policy reports as a violation.";
 
+const namedZod =
+  "Import zod/mini as a namespace, since the named `z` export keeps all of Zod in the Worker's bundle.";
+
 export default defineConfig([
   {
     plugins: { perfectionist },
@@ -72,6 +75,19 @@ export default defineConfig([
             })),
           ],
           patterns: [{ group: ['zod/*', '!zod/mini'], message: classicZod }],
+        },
+      ],
+    },
+  },
+  {
+    files: ['worker/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ImportDeclaration[source.value='zod/mini'] > ImportSpecifier[imported.name='z']",
+          message: namedZod,
         },
       ],
     },
