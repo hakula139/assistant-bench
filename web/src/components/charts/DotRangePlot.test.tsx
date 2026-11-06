@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DotRangePlot } from '@/components/charts/DotRangePlot';
 import { drawnSvg, stubPlotFrame } from '@/test/plot';
@@ -76,11 +76,13 @@ describe('DotRangePlot', () => {
         }),
       );
 
-      expect(
-        [...svg.querySelectorAll('g[aria-label="tip"] tspan')].map((span) =>
-          span.textContent.replaceAll('\u200b', ''),
-        ),
-      ).toEqual(lines);
+      await vi.waitFor(() => {
+        expect(
+          [...svg.querySelectorAll('g[aria-label="tip"] tspan')].map((span) =>
+            span.textContent.replaceAll('\u200b', ''),
+          ),
+        ).toEqual(lines);
+      });
     }
   });
 
