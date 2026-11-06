@@ -35,7 +35,7 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponsesLLM
-from assistant_bench.harnesses.usage import measure, measured_usage
+from assistant_bench.harnesses.usage import MeasuredUsage, measure
 
 
 _RESPONSE = TypeAdapter(dict[str, Any])
@@ -103,13 +103,7 @@ class ChatCompletionsLLM(LiteLLM):
     @override
     def _extract_usage_info(self, response: Any) -> UsageInfo | None:
         """Use original SDK counters before LiteLLM fills absent values."""
-        usage = (
-            measured_usage(
-                'openai-chat-completions', self.calls[-1].get('reported_usage')
-            )
-            if self.calls
-            else None
-        )
+        usage = MeasuredUsage.from_details(self.calls[-1]) if self.calls else None
         return usage.harbor if usage is not None else None
 
 

@@ -29,9 +29,9 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import (
     check_harness,
     current_inputs,
-    source,
+    family_sources,
+    job_source,
     source_trials,
-    sources,
 )
 from assistant_bench.outputs import Output, tests_pass, write_outputs
 from assistant_bench.scoring.gates import failed_gates
@@ -106,6 +106,8 @@ class UsageGap:
 
 @dataclass(frozen=True)
 class Collection:
+    """The outputs a collection wrote, and the usage gaps of their systems."""
+
     outputs: list[Output]
     usage_gaps: list[UsageGap]
 
@@ -139,7 +141,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     candidates = [
         candidate
         for candidate in _read_trials(
-            family, sources(family), current_versions(family, cases)
+            family, family_sources(family), current_versions(family, cases)
         )
         if (
             candidate.trial.lock.agent,
@@ -254,14 +256,14 @@ def read_trials(family: Family, job_dir: Path) -> list[Output]:
     cases = {case.id: case for case in load_cases(family)}
     return [
         _output(family, candidate, None, cases[candidate.case].instruction)
-        for candidate in _read_trials(family, [source(job_dir)])
+        for candidate in _read_trials(family, [job_source(job_dir)])
         if candidate.case in cases
     ]
 
 
 def _read_trials(
     family: Family,
-    jobs: list[tuple[SourceJobConfig, Path]],
+    sources: list[tuple[SourceJobConfig, Path]],
     versions: dict[str, str | None] | None = None,
 ) -> list[_Candidate]:
     """Return each kept trial's verdict, origin, and selection metadata.
@@ -269,7 +271,7 @@ def _read_trials(
     A `versions` mapping drops a trial whose task version is not current before
     an output reads that task.
     """
-    trials = source_trials(jobs)
+    trials = source_trials(sources)
     by_id = {trial.id: trial for trial in trials}
     records: list[_Candidate] = []
     for trial in trials:
@@ -289,7 +291,7 @@ def _is_current(version: str | None, current: str | None) -> bool:
 
     Harbor reuses a trial whose version equals the task's or has another patch,
     whatever its pre-release and build metadata say, and reruns or regrades any
-    other difference. A rendered case keeps its patch, so it matches only exactly.
+    other difference.
     """
     if version is None or current is None:
         return False

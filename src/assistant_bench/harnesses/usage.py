@@ -1,8 +1,8 @@
 """Validate reported token counters before they enter trial accounting."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Annotated, Any, assert_never
+from dataclasses import dataclass, fields
+from typing import Annotated, Any, Self, assert_never
 
 from harbor.models.agent.context import AgentContext
 from harbor.models.metric import UsageInfo
@@ -23,6 +23,13 @@ class MeasuredUsage:
     output_tokens: int
     reasoning_tokens: int | None
     cache_write_unpriced: bool = False
+
+    @classmethod
+    def from_details(cls, details: Mapping[str, Any]) -> Self | None:
+        """Return the usage that `measure`'s details record, `None` if invalid."""
+        if 'input_tokens' not in details:
+            return None
+        return cls(**{field.name: details[field.name] for field in fields(cls)})
 
     @property
     def details(self) -> dict[str, Any]:

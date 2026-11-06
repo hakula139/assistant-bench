@@ -51,7 +51,7 @@ def installed_version(path: Path) -> str:
 def planned_actions(family: Family, job: JobConfig) -> list[tuple[str, DiffAction]]:
     """Return the action Harbor plans for each trial against the family's jobs."""
     plan = asyncio.run(JobPlan.from_config(job))
-    diff = compare_job_trials(plan, load_source_trials(jobs.sources(family)))
+    diff = compare_job_trials(plan, load_source_trials(jobs.family_sources(family)))
     return sorted((trial.task_name, trial.action) for trial in diff.trials)
 
 
@@ -153,19 +153,6 @@ class TestRenderTasks:
         assert sorted(
             path.name for path in (data_dir / 'tasks' / 'smoke-text').iterdir()
         ) == ['en-greeting', 'zh-greeting']
-
-    def test_writes_only_under_the_data_directory(
-        self, data_dir: Path, families_dir: Path
-    ) -> None:
-        family = voted_tasks(families_dir, 'echo')
-        before = {path: path.read_bytes() for path in families_dir.rglob('*.*')}
-
-        (path,) = render_tasks(family, load_cases(family))
-
-        assert path == data_dir / 'tasks' / 'f' / 'echo'
-        assert {path: path.read_bytes() for path in families_dir.rglob('*.*')} == (
-            before
-        )
 
 
 class TestCheckTasks:

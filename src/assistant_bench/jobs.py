@@ -142,7 +142,7 @@ def drifted_systems(
     """
     current = {system.name: fingerprint(system) for system in systems}
     recorded: defaultdict[str, set[str]] = defaultdict(set)
-    for trial in source_trials(sources(family)):
+    for trial in source_trials(family_sources(family)):
         kwargs = trial.result.config.agent.kwargs
         name = kwargs.get('system')
         label = kwargs.get('fingerprint')
@@ -183,13 +183,13 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     starts no container, and any other job runs in Harbor's Docker environment.
     """
     agents = [_agent_config(system) for system in systems]
-    diffs = [config for config, _ in sources(family)]
+    sources = [config for config, _ in family_sources(family)]
     tasks_source = family.source == 'tasks'
     return _job(
         _jobs_dir(family),
         agents,
         tasks,
-        diffs,
+        sources,
         environment=_environment(systems),
         n_attempts=family.settings.samples,
         n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
@@ -259,8 +259,12 @@ def _jobs_dir(family: Family) -> Path:
     return data_dir() / 'jobs' / family.name
 
 
-def sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
-    return [source(job_dir) for job_dir in _family_jobs(family)]
+def family_sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
+    return [job_source(job_dir) for job_dir in _family_jobs(family)]
+
+
+def job_source(job_dir: Path) -> tuple[SourceJobConfig, Path]:
+    return SourceJobConfig(action='diff', type='local', path=job_dir), job_dir
 
 
 def source_trials(sources: list[tuple[SourceJobConfig, Path]]) -> list[SourceTrial]:
@@ -275,10 +279,6 @@ def source_trials(sources: list[tuple[SourceJobConfig, Path]]) -> list[SourceTri
         return load_source_trials(sources)
     except ValueError as error:
         raise InputError(str(error)) from error
-
-
-def source(job_dir: Path) -> tuple[SourceJobConfig, Path]:
-    return SourceJobConfig(action='diff', type='local', path=job_dir), job_dir
 
 
 def _job(

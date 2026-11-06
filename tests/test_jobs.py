@@ -2,7 +2,7 @@ import asyncio
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,7 @@ from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
 from support import (
     FIXTURES,
+    START,
     VOTES,
     finish_job,
     make_system,
@@ -38,9 +39,6 @@ from support import (
     write_trial,
     write_votes_family,
 )
-
-
-START = datetime(2026, 10, 21, tzinfo=UTC)
 
 
 class RetryProbe(TrialQueue):

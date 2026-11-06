@@ -25,9 +25,6 @@ class NativeResult(Protocol):
     @property
     def details(self) -> dict[str, Any]: ...
 
-    @property
-    def usage(self) -> MeasuredUsage | None: ...
-
     def check(self, *, complete: bool) -> None: ...
 
 
@@ -118,7 +115,7 @@ class NativeLLM(BaseLLM):
         details = result.details
         self.calls.append(details)
         result.check(complete=True)
-        usage = result.usage
+        usage = MeasuredUsage.from_details(details)
         return LLMResponse(
             content=result.text,
             model_name=details['response_model'],

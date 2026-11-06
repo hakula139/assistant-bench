@@ -17,7 +17,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measure, measured_usage
+from assistant_bench.harnesses.usage import measure
 
 
 _input = TypeAdapter(ResponseInputParam)
@@ -32,10 +32,6 @@ class ResponseResult:
     @property
     def text(self) -> str:
         return self.response.output_text
-
-    @property
-    def usage(self) -> MeasuredUsage | None:
-        return measured_usage('openai-responses', self.response.usage)
 
     @property
     def details(self) -> dict[str, Any]:

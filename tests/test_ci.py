@@ -6,28 +6,23 @@ from typing import Any
 import pytest
 
 from assistant_bench import ci
-
-
-def git(*args: str) -> str:
-    return subprocess.run(
-        ['git', *args], check=True, stdout=subprocess.PIPE, text=True
-    ).stdout.strip()
+from support import commit_all, new_repository
 
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.chdir(tmp_path)
-    git('init', '--quiet')
-    git('config', 'user.email', 'test@example.com')
-    git('config', 'user.name', 'Test')
-    for task in ('a', 'b'):
-        directory = Path('families/coding-repo/tasks') / task
-        directory.mkdir(parents=True)
-        (directory / 'instruction.md').write_text(f'Task {task}.')
-        (directory / 'task.toml').write_text('version = "1.0.0"')
-    git('add', '.')
-    git('commit', '--quiet', '-m', 'Initial tasks')
-    return git('rev-parse', 'HEAD')
+    return new_repository(
+        tmp_path,
+        {
+            f'families/coding-repo/tasks/{task}/{name}': content
+            for task in ('a', 'b')
+            for name, content in (
+                ('instruction.md', f'Task {task}.'),
+                ('task.toml', 'version = "1.0.0"'),
+            )
+        },
+    )
 
 
 class TestSelectedTasks:
@@ -103,8 +98,7 @@ class TestSelectedTasks:
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
-        git('add', '.')
-        git('commit', '--quiet', '-m', 'Change inputs')
+        commit_all(Path(), 'Change inputs')
 
         selected = ci.selected_tasks(repository)
 
@@ -139,8 +133,7 @@ class TestSelectedTasks:
         changed = Path(path)
         changed.parent.mkdir(parents=True, exist_ok=True)
         changed.write_text('Changed')
-        git('add', '.')
-        git('commit', '--quiet', '-m', 'Change a runtime input')
+        commit_all(Path(), 'Change a runtime input')
 
         selected = ci.selected_tasks(repository)
 

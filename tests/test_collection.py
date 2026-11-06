@@ -1,5 +1,5 @@
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -34,6 +34,7 @@ from assistant_bench.tasks import (
     render_tasks,
 )
 from support import (
+    START,
     VOTES,
     break_setting,
     finish_generation,
@@ -45,8 +46,6 @@ from support import (
     write_votes_family,
 )
 
-
-START = datetime(2026, 10, 21, tzinfo=UTC)
 
 GREETING_DIFF = (
     'diff --git a/greeting.txt b/greeting.txt\nnew file mode 100644\n'

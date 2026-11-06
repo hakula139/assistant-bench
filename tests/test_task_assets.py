@@ -1,9 +1,9 @@
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from assistant_bench import task_assets
+from support import new_repository
 
 
 SHARED_FILES = (
@@ -14,29 +14,26 @@ SHARED_FILES = (
 )
 
 
-def git(root: Path, *args: str) -> None:
-    subprocess.run(['git', *args], cwd=root, check=True)
-
-
 def shared_tree(root: Path) -> tuple[Path, list[Path]]:
     """Commit the shared files and two tasks in a new repository at `root`."""
     coding = root / 'families' / 'coding-repo'
-    for relative in SHARED_FILES:
-        source = coding / 'shared' / relative
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text(f'canonical {relative}\n')
-
     tasks = [coding / 'tasks' / name for name in ('a', 'b')]
-    for task in tasks:
-        task.mkdir(parents=True)
-        (task / 'task.toml').write_text(f'name = "{task.name}"\n')
-
-    (root / '.gitignore').write_text('.DS_Store\n__pycache__/\n')
-    git(root, 'init', '--quiet')
-    git(root, 'config', 'user.email', 'test@example.com')
-    git(root, 'config', 'user.name', 'Test')
-    git(root, 'add', '.')
-    git(root, 'commit', '--quiet', '-m', 'Shared files')
+    new_repository(
+        root,
+        {
+            '.gitignore': '.DS_Store\n__pycache__/\n',
+            **{
+                f'families/coding-repo/shared/{relative}': f'canonical {relative}\n'
+                for relative in SHARED_FILES
+            },
+            **{
+                f'families/coding-repo/tasks/{task.name}/task.toml': (
+                    f'name = "{task.name}"\n'
+                )
+                for task in tasks
+            },
+        },
+    )
     return coding, tasks
 
 

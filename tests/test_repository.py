@@ -112,14 +112,14 @@ def test_committed_task_families_set_what_a_run_needs(name: str) -> None:
     check_tasks(family, tasks)
 
 
-@pytest.mark.parametrize('shared', task_assets.shared_files(REPO_ROOT), ids=str)
-def test_coding_tasks_copy_their_shared_files(shared: Path) -> None:
-    canonical = (CODING / 'shared' / shared).read_bytes()
+def test_coding_tasks_copy_their_shared_files() -> None:
+    for shared in task_assets.shared_files(REPO_ROOT):
+        canonical = (CODING / 'shared' / shared).read_bytes()
 
-    for task in CODING_TASKS:
-        copy = task / shared
+        for task in CODING_TASKS:
+            copy = task / shared
 
-        assert copy.read_bytes() == canonical, f'`{copy}` needs regeneration'
+            assert copy.read_bytes() == canonical, f'`{copy}` needs regeneration'
 
 
 def test_coding_tasks_hold_no_symlinks() -> None:

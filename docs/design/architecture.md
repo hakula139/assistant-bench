@@ -15,9 +15,9 @@ src/assistant_bench/
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
+├── arguments.py                            # The family arguments and name refusals the commands share
 ├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
-├── arguments.py                            # The family arguments and name refusals the commands share
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/

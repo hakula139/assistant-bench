@@ -18,7 +18,7 @@ from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
-from assistant_bench.harnesses.usage import measure
+from assistant_bench.harnesses.usage import MeasuredUsage, measure
 
 
 OUTPUT_FILE = 'output.txt'
@@ -124,7 +124,7 @@ class Generate(BaseAgent):
             (self.logs_dir / OUTPUT_FILE).write_text(result.text)
         finally:
             context.metadata = result.details
-            usage = result.usage
+            usage = MeasuredUsage.from_details(context.metadata)
             if result.complete and usage is not None:
                 usage.record(context)
 
@@ -184,13 +184,14 @@ class Generate(BaseAgent):
         response = result.response
         (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
 
-        usage = result.usage
+        details = result.details
+        usage = MeasuredUsage.from_details(details)
         if usage is not None:
             usage.record(context)
 
-        context.metadata = result.details
+        context.metadata = details
         result.check(complete=False)
-        return result.details
+        return details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:
         assert isinstance(self.options, GenerateOptions)

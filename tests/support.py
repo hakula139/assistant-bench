@@ -8,6 +8,7 @@ import shutil
 import socket
 import sqlite3
 import ssl
+import subprocess
 import textwrap
 import threading
 import tomllib
@@ -87,6 +88,7 @@ REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
 TESTS_REPORT_FIXTURE = FIXTURES / 'report-tests.json'
 REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
+START = datetime(2026, 10, 21, tzinfo=UTC)
 
 
 # ── Families ──
@@ -372,7 +374,7 @@ def write_trial(
         exception_type=error or '',
         exception_message='',
         exception_traceback='',
-        occurred_at=datetime(2026, 10, 21, tzinfo=UTC),
+        occurred_at=START,
     )
     result = TrialResult(
         task_name=task,
@@ -444,7 +446,7 @@ def finish_job(job: JobConfig) -> Path:
             verifier_result=None
             if job.verifier.disable
             else VerifierResult(rewards={'reward': 1.0}),
-            finished_at=datetime(2026, 10, 21, tzinfo=UTC),
+            finished_at=START,
         )
         _record_trial(job_dir, result, lock)
     (job_dir / 'config.json').write_text(job.model_dump_json())
@@ -471,6 +473,35 @@ def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+# ── Git Repositories ──
+
+
+def git(root: Path, *args: str) -> str:
+    """Run git in `root` and return its output, stripped."""
+    return subprocess.run(
+        ['git', *args], cwd=root, check=True, stdout=subprocess.PIPE, text=True
+    ).stdout.strip()
+
+
+def new_repository(root: Path, files: Mapping[str, str]) -> str:
+    """Commit the files in a new repository at `root`, and return the commit."""
+    for path, content in files.items():
+        file = root / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content)
+    git(root, 'init', '--quiet')
+    git(root, 'config', 'user.email', 'test@example.com')
+    git(root, 'config', 'user.name', 'Test')
+    return commit_all(root, 'Initial files')
+
+
+def commit_all(root: Path, message: str) -> str:
+    """Commit every change in the repository at `root`, and return the commit."""
+    git(root, 'add', '.')
+    git(root, 'commit', '--quiet', '-m', message)
+    return git(root, 'rev-parse', 'HEAD')
 
 
 # ── Stub Endpoint ──

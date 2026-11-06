@@ -20,7 +20,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measure, measured_usage
+from assistant_bench.harnesses.usage import measure
 
 
 _input = TypeAdapter(list[MessageParam])
@@ -37,12 +37,6 @@ class MessageResult:
     request_id: str | None = None
     complete: bool = False
     latency_sec: float | None = None
-
-    @property
-    def usage(self) -> MeasuredUsage | None:
-        return measured_usage(
-            'anthropic-messages', getattr(self.message, 'usage', None)
-        )
 
     @property
     def text(self) -> str:

@@ -66,7 +66,11 @@ def _git_paths(directory: Path, *args: str) -> list[Path]:
 
 
 def main() -> None:
-    """Copy each shared file into every authored coding task."""
+    """Copy each shared file into every authored coding task, removing stale copies.
+
+    A stale copy is a task's copy of a file that `HEAD` holds under `shared/` and
+    the working tree no longer does.
+    """
     argparse.ArgumentParser(description=__doc__).parse_args()
     updated, removed = sync(REPO_ROOT)
 

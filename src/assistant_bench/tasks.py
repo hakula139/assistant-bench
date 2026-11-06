@@ -15,12 +15,12 @@ from pydantic import BaseModel, Field, ValidationError
 
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import Case, Family, case_task, task_location, tasks_dir
-from assistant_bench.jobs import source_trials, sources
+from assistant_bench.jobs import family_sources, source_trials
 from assistant_bench.messages import InputError, code, error_lines
 
 
-# Keep the base version fixed: collection matches rendered task versions exactly,
-# while Harbor reuses trials across patch versions.
+# Never bump the patch: Harbor and collection reuse a trial at another patch
+# whatever its build metadata, so every edited case would keep its trials.
 TASK_VERSION = '1.0.0'
 AGENT_TIMEOUT_SEC = 3600.0
 WORKSPACE = '/app'
@@ -222,7 +222,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
         )
 
     changed: set[tuple[str, str]] = set()
-    for trial in source_trials(sources(family)):
+    for trial in source_trials(family_sources(family)):
         if trial.task_name not in current:
             continue
         version, digest = current[trial.task_name]
