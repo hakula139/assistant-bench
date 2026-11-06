@@ -35,7 +35,7 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponsesLLM
-from assistant_bench.harnesses.usage import measured_usage
+from assistant_bench.harnesses.usage import measure, measured_usage
 
 
 _RESPONSE = TypeAdapter(dict[str, Any])
@@ -94,15 +94,11 @@ class ChatCompletionsLLM(LiteLLM):
 
         call: dict[str, Any] = {}
         self.calls.append(call)
-        if response.get('object') != 'chat.completion':
-            return
-        if response.get('usage') is None:
-            return
-        call['reported_usage'] = response['usage']
-        usage = measured_usage('openai-chat-completions', response['usage'])
-        call['usage_invalid'] = usage is None
-        if usage is not None:
-            call.update(usage.details)
+        if (
+            response.get('object') == 'chat.completion'
+            and response.get('usage') is not None
+        ):
+            call.update(measure('openai-chat-completions', response['usage'])[1])
 
     @override
     def _extract_usage_info(self, response: Any) -> UsageInfo | None:

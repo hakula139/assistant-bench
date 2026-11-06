@@ -17,7 +17,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
+from assistant_bench.harnesses.usage import MeasuredUsage, measure, measured_usage
 
 
 _input = TypeAdapter(ResponseInputParam)
@@ -40,8 +40,6 @@ class ResponseResult:
     @property
     def details(self) -> dict[str, Any]:
         response = self.response
-        usage = self.usage
-        reported = usage_payload(response.usage)
         refusals = [
             content.refusal
             for item in response.output
@@ -67,10 +65,7 @@ class ResponseResult:
             else incomplete or response.status or 'unknown'
         )
         return {
-            **(usage.details if usage else {}),
-            'reasoning_tokens': usage.reasoning_tokens if usage else None,
-            'reported_usage': reported,
-            'usage_invalid': reported is not None and usage is None,
+            **measure('openai-responses', response.usage)[1],
             'finish_reason': finish,
             'response_status': response.status,
             'incomplete_reason': incomplete,

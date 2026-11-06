@@ -1082,7 +1082,7 @@ class TestCollect:
             pytest.param({}, 0, 0, id='no-response'),
             pytest.param(
                 {
-                    'native_usage': None,
+                    'reported_usage': None,
                     'response_model': None,
                     'response_id': None,
                     'request_id': 'req-1',
@@ -1095,7 +1095,7 @@ class TestCollect:
             ),
             pytest.param(
                 {
-                    'native_usage': None,
+                    'reported_usage': None,
                     'response_model': 'large-2026',
                     'response_id': None,
                     'response_status': 'completed',

@@ -490,7 +490,7 @@ class TestGenerate:
             assert context.metadata['nixos_config_rev'] == export.rev
             if api == 'anthropic-messages':
                 assert context.metadata['response_status'] == 'incomplete'
-                assert context.metadata['native_usage'] is None
+                assert context.metadata['reported_usage'] is None
             else:
                 assert context.metadata == {
                     'latency_sec': context.metadata['latency_sec'],

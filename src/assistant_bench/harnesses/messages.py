@@ -20,7 +20,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
+from assistant_bench.harnesses.usage import MeasuredUsage, measure, measured_usage
 
 
 _input = TypeAdapter(list[MessageParam])
@@ -77,9 +77,8 @@ class MessageResult:
             for block in message.content
         ):
             finish = 'unexpected_content'
-        usage = self.usage
-        reported = usage_payload(getattr(message, 'usage', None))
-        details: dict[str, Any] = {
+        _, recorded = measure('anthropic-messages', getattr(message, 'usage', None))
+        return {
             'finish_reason': finish if self.complete else None,
             'native_stop_reason': stop,
             'stop_details': message.stop_details.model_dump(
@@ -94,13 +93,8 @@ class MessageResult:
             'latency_sec': self.latency_sec,
             'anthropic_sdk_version': metadata.version('anthropic'),
             'anthropic_api_version': load_generation().anthropic_api_version,
-            'native_usage': reported,
-            'reasoning_tokens': usage.reasoning_tokens if usage else None,
-            'usage_invalid': reported is not None and usage is None,
+            **recorded,
         }
-        if usage is not None:
-            details |= usage.details
-        return details
 
     def check(self, *, complete: bool) -> None:
         if not self.complete:
