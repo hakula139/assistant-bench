@@ -1,6 +1,5 @@
 """Family settings, cases, and the merge of committed and local cases."""
 
-import tomllib
 from collections.abc import Iterator
 from enum import StrEnum
 from pathlib import Path
@@ -16,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench.messages import code, error_lines, sentence
+from assistant_bench.messages import InputError, code, error_lines, validated_toml
 from assistant_bench.paths import FAMILIES_DIR, data_dir
 
 
@@ -250,6 +249,10 @@ class _TaskManifest(BaseModel):
     metadata: _TaskMetadata
 
 
+_CASE_MANIFEST = TypeAdapter(_CaseManifest)
+_TASK_MANIFEST = TypeAdapter(_TaskManifest)
+
+
 # ── Loading ──
 
 
@@ -263,42 +266,37 @@ def load_family(name: str) -> Family:
 
     Raises
     ------
-    ValueError
+    InputError
         No family has the name, the family holds both or neither of
         `cases.toml` and `tasks/`, `family.toml` does not parse or validate, a
-        public family sets no aspect or names itself without that aspect's
-        prefix, or the settings do not fit the source. A case family is scored by
-        `votes`, sets no `harness`, and renders no diffs. A task family sets no
-        `language` or `gates`, renders diffs when scored by votes, and needs a
-        `harness` when it lists systems.
+        public family's name does not start with its aspect, or the settings do
+        not fit the source.
     """
     directory = FAMILIES_DIR / name
     if not (directory / 'family.toml').is_file():
-        raise ValueError(
+        raise InputError(
             f'No family named `{name}`. Choose among {code(family_names())}.'
         )
 
     has_cases = (directory / 'cases.toml').is_file()
     if has_cases == (directory / 'tasks').is_dir():
-        raise ValueError(
+        raise InputError(
             f'Family `{name}`: expected exactly one of `cases.toml` and `tasks/`.'
         )
 
-    prefix = f'Family `{name}`: `family.toml`'
-    try:
-        with (directory / 'family.toml').open('rb') as file:
-            settings = _SETTINGS.validate_python(tomllib.load(file))
-    except tomllib.TOMLDecodeError as error:
-        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
-    except ValidationError as error:
-        # The first part of each error's path is the scorer's tag.
-        raise ValueError(error_lines(error, prefix, skip=1)) from error
+    # The first part of each error's path is the scorer's tag.
+    settings = validated_toml(
+        _SETTINGS,
+        (directory / 'family.toml').read_text(),
+        f'Family `{name}`: `family.toml`',
+        skip=1,
+    )
 
     if settings.public:
         if settings.aspect is None:
-            raise ValueError(f'Family `{name}`: a public family needs an `aspect`.')
+            raise InputError(f'Family `{name}`: a public family needs an `aspect`.')
         if not name.startswith(f'{settings.aspect}-'):
-            raise ValueError(
+            raise InputError(
                 f'Family `{name}`: a public family ID starts with its aspect, '
                 f'as in `{settings.aspect}-<name>`.'
             )
@@ -317,18 +315,18 @@ def _check_source_settings(family: Family) -> None:
     prefix = f'Family `{family.name}`'
     if family.source == 'cases':
         if not isinstance(settings, VotesSettings):
-            raise ValueError(
+            raise InputError(
                 f'{prefix}: score a `cases.toml` family by `votes`, since only '
                 'a `tasks/` family has tests.'
             )
         if settings.harness is not None:
-            raise ValueError(
+            raise InputError(
                 f'{prefix}: a `cases.toml` family runs every system as `generate`, '
                 'so remove `harness`.'
             )
 
         if settings.render == 'diff':
-            raise ValueError(
+            raise InputError(
                 f'{prefix}: a `cases.toml` family yields replies, so set `render` '
                 'to `"text"`.'
             )
@@ -339,18 +337,18 @@ def _check_source_settings(family: Family) -> None:
             key for key in ('language', 'gates') if key in settings.model_fields_set
         ]
         if gate_keys:
-            raise ValueError(
+            raise InputError(
                 f"{prefix}: a `tasks/` family's tests are its only gate, so remove "
                 f'{code(gate_keys)}.'
             )
         if settings.render != 'diff':
-            raise ValueError(
+            raise InputError(
                 f'{prefix}: a `tasks/` family scored by `votes` yields diffs, so set '
                 '`render = "diff"`.'
             )
 
     if settings.systems and settings.harness is None:
-        raise ValueError(
+        raise InputError(
             f'{prefix}: a `tasks/` family that lists systems needs `harness`.'
         )
 
@@ -363,23 +361,12 @@ def load_cases(family: Family) -> list[Case]:
 
     Raises
     ------
-    ValueError
-        The data directory's `cases/` holds an entry that no family reads, a case
-        document does not parse or validate, a task has no `task.toml` or
+    InputError
+        A case document does not parse or validate, a task has no `task.toml` or
         `instruction.md` or names itself apart from its directory, two cases share
         an ID, within one source or across both, or a case's category is missing
         from the family's `categories`.
     """
-    unread = _unread_case_entries()
-    if unread:
-        raise ValueError(
-            f"No family reads {code(unread)} under the data directory's "
-            '`cases/`. A `cases.toml` family reads `cases/<family>.toml` and a '
-            '`tasks/` family reads `cases/<family>/<task>/`, so move each entry '
-            'to one of those paths, out of `cases/`, or under a hidden directory '
-            'such as `cases/.<name>/`.'
-        )
-
     entries = (
         _task_entries(family) if family.source == 'tasks' else _case_entries(family)
     )
@@ -387,12 +374,12 @@ def load_cases(family: Family) -> list[Case]:
     locations: dict[str, str] = {}
     for location, case in entries:
         if case.id in cases:
-            raise ValueError(
+            raise InputError(
                 f'Family `{family.name}`: case `{case.id}` appears at '
                 f'`{locations[case.id]}` and `{location}`.'
             )
         if case.category not in family.settings.categories:
-            raise ValueError(
+            raise InputError(
                 f'Family `{family.name}`: case `{case.id}` at `{location}` has '
                 f'category `{case.category}`, missing from `categories` in '
                 '`family.toml`.'
@@ -407,13 +394,30 @@ def _hidden(path: Path) -> bool:
     return path.name.startswith('.')
 
 
-def _unread_case_entries() -> list[Path]:
-    """Return each visible entry under the data cases directory that no family reads.
+def check_case_entries() -> None:
+    """Refuse a visible entry under the data cases directory that no family reads.
 
-    A case family reads `cases/<family>.toml`, while a task family reads each
-    directory under `cases/<family>/`. A task family's loose files are reported
-    individually, and hidden entries are ignored, so backups can remain.
+    A case family reads `cases/<family>.toml` and a task family each directory
+    under `cases/<family>/`. Hidden entries are ignored, so backups can remain.
+
+    Raises
+    ------
+    InputError
+        A visible entry is one no family reads.
     """
+    unread = _unread_case_entries()
+    if unread:
+        raise InputError(
+            f"No family reads {code(unread)} under the data directory's "
+            '`cases/`. A `cases.toml` family reads `cases/<family>.toml` and a '
+            '`tasks/` family reads `cases/<family>/<task>/`, so move each entry '
+            'to one of those paths, out of `cases/`, or under a hidden directory '
+            'such as `cases/.<name>/`.'
+        )
+
+
+def _unread_case_entries() -> list[Path]:
+    """Return each unread entry, listing a task family's loose files one by one."""
     root = data_dir() / 'cases'
     if not root.is_dir():
         return []
@@ -451,17 +455,9 @@ def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
     for path in paths:
         if not path.exists():
             continue
-        prefix = f'Family `{family.name}`: `{path}`'
-        try:
-            with path.open('rb') as file:
-                manifest = _CaseManifest.model_validate(tomllib.load(file))
-        except tomllib.TOMLDecodeError as error:
-            raise ValueError(
-                sentence(f'{prefix} is not valid TOML: {error}')
-            ) from error
-        except ValidationError as error:
-            raise ValueError(error_lines(error, prefix)) from error
-
+        manifest = validated_toml(
+            _CASE_MANIFEST, path.read_text(), f'Family `{family.name}`: `{path}`'
+        )
         for index, case in enumerate(manifest.cases):
             yield f'{path}:cases.{index}', case
 
@@ -480,29 +476,26 @@ def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
 def _task_case(family: Family, directory: Path, location: str) -> Case:
     config_path = directory / 'task.toml'
     if not config_path.is_file():
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: task `{directory.name}` at `{location}` '
             'has no `task.toml`.'
         )
 
-    prefix = f'Family `{family.name}`: `{location}/task.toml`'
-    try:
-        manifest = _TaskManifest.model_validate(tomllib.loads(config_path.read_text()))
-    except tomllib.TOMLDecodeError as error:
-        raise ValueError(sentence(f'{prefix} is not valid TOML: {error}')) from error
-    except ValidationError as error:
-        raise ValueError(error_lines(error, prefix)) from error
-
+    manifest = validated_toml(
+        _TASK_MANIFEST,
+        config_path.read_text(),
+        f'Family `{family.name}`: `{location}/task.toml`',
+    )
     expected = f'{family.name}/{directory.name}'
     if manifest.task.name != expected:
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: set `[task] name` to `"{expected}"` in '
             f'`{location}/task.toml`.'
         )
 
     instruction_path = directory / 'instruction.md'
     if not instruction_path.is_file():
-        raise ValueError(
+        raise InputError(
             f'Family `{family.name}`: task `{directory.name}` at `{location}` '
             'has no `instruction.md`.'
         )
@@ -515,7 +508,7 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
             instruction=instruction_path.read_text(),
         )
     except ValidationError as error:
-        raise ValueError(
+        raise InputError(
             error_lines(error, f'Family `{family.name}`: `{location}`')
         ) from error
 

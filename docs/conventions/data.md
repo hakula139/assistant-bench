@@ -19,7 +19,7 @@ A `transcript` case or task passes gitleaks before it enters the local cases, si
 
 Run artifacts live in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs and collected outputs stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs and endpoint metadata. [Running](../guide/running.md#the-data-directory) lists its layout.
 
-The loader refuses and names each visible entry under `cases/` that no family reads, so a run cannot silently drop its cases. Hidden files and directories are ignored, so a backup can stay under `cases/.<name>/`.
+`bench check` refuses and names each visible entry under `cases/` that no family reads, so a run cannot silently drop its cases. Hidden files and directories are ignored, so a backup can stay under `cases/.<name>/`.
 
 `bench arena publish` refuses a transcript-derived or held-out case before anything leaves the machine, as [Arena](../design/arena.md#publication-and-closing) describes. A publication sends the reviewed cases, each passing output's content, and for every output its system, fingerprint, verdict, length and content digest, along with the family's display labels, defects and reference. The vote cuts that `bench close` saves under `votes/` omit network tags and output content.
 

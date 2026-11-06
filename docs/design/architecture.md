@@ -16,6 +16,7 @@ src/assistant_bench/
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── manifest.py                             # The committed manifest of every runnable system's fingerprint
 ├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
+├── arguments.py                            # The family arguments and name refusals the commands share
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
@@ -49,7 +50,7 @@ Imports point downward through these layers, so a module never imports one above
 
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands` and `manifest`
-3. `jobs`
+3. `jobs` and `arguments`
 4. The remaining `arena` modules
 5. `report`
 6. `outputs`, `harnesses`, and `scoring`

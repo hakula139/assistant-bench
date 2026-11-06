@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from assistant_bench.families import Gate
+from assistant_bench.messages import InputError
 from assistant_bench.paths import data_dir, write_atomically
 
 
@@ -73,7 +74,7 @@ class Output(BaseModel):
 
 
 def tests_pass(reward: float | None) -> bool:
-    """Return whether the verifier awarded at least 1, including errored trials."""
+    """Return whether the verifier awarded at least 1."""
     return reward is not None and reward >= 1
 
 
@@ -82,7 +83,7 @@ def system_fingerprints(outputs: Iterable[Output]) -> dict[str, str | None]:
 
     Raises
     ------
-    ValueError
+    InputError
         A system has outputs under several fingerprints.
     """
     by_system: defaultdict[str, set[str | None]] = defaultdict(set)
@@ -91,7 +92,7 @@ def system_fingerprints(outputs: Iterable[Output]) -> dict[str, str | None]:
 
     for system, fingerprints in sorted(by_system.items()):
         if len(fingerprints) > 1:
-            raise ValueError(
+            raise InputError(
                 f'System `{system}` has outputs under several fingerprints. Give '
                 'the changed system a new name, as `docs/guide/authoring.md#systems` '
                 'describes.'

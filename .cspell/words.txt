@@ -85,6 +85,7 @@ pyenv
 pypi
 pyproject
 pytest
+PYTHONDEVMODE
 PYTHONDONTWRITEBYTECODE
 RDONLY
 redoc

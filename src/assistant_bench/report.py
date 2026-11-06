@@ -18,7 +18,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_validator,
     model_validator,
 )
 
@@ -30,6 +29,7 @@ from assistant_bench.families import (
     FamilyName,
     load_cases,
 )
+from assistant_bench.messages import InputError
 from assistant_bench.outputs import (
     Output,
     Verdict,
@@ -63,13 +63,6 @@ class PublicSystem(_Model):
 
     fingerprint: str | None
     """Configuration provenance, unknown when null."""
-
-    @field_validator('display_name')
-    @classmethod
-    def nonempty_name(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError('A public display name must contain text.')
-        return value
 
 
 class Distribution(_Model):
@@ -416,7 +409,7 @@ def close_tests(
     ]
 
     if not outputs:
-        raise ValueError(f'Family `{family.name}` has no outputs on its current cases.')
+        raise InputError(f'Family `{family.name}` has no outputs on its current cases.')
 
     samples = family.settings.samples
     _require_every_trial(outputs, categories, samples)
@@ -461,7 +454,7 @@ def _report(
         fingerprint = fingerprints.get(system)
         known = frozen.get(system)
         if known is not None and fingerprint is not None and known != fingerprint:
-            raise ValueError(f'System `{system}` changed its published fingerprint.')
+            raise InputError(f'System `{system}` changed its published fingerprint.')
 
         public[system] = PublicSystem(
             display_name=names[system], fingerprint=fingerprint
@@ -489,7 +482,7 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
 
     Raises
     ------
-    ValueError
+    InputError
         Two closed reports froze different fingerprints under one system.
     """
     frozen: dict[str, str | None] = {}
@@ -499,7 +492,7 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
             if metadata.fingerprint is None:
                 frozen.setdefault(system, None)
             elif known is not None and known != metadata.fingerprint:
-                raise ValueError(
+                raise InputError(
                     f'System `{system}` reuses an identifier across fingerprints.'
                 )
             else:
@@ -512,7 +505,7 @@ def _closed(family: str) -> list[Report]:
     for path in sorted((REPORTS_DIR / family).glob('*.json')):
         report = Report.model_validate_json(path.read_text())
         if report.family != family or report.round != path.stem:
-            raise ValueError(
+            raise InputError(
                 f'Report `{path.name}` does not match its family and round path.'
             )
         reports.append(report)
@@ -587,7 +580,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     outputs = list(analysis.outputs)
     comparisons = [row.comparison for row in votes] + list(analysis.settlements)
     if not comparisons:
-        raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
+        raise InputError(f'Family `{analysis.family}` has no eligible comparisons.')
 
     board = ranking.rate_root(comparisons, analysis.systems, analysis.reference)
     ratings = board.ratings
@@ -809,7 +802,7 @@ def _require_every_trial(
             f'`{system}` on {", ".join(f"`{task}`" for task in short)}'
             for system, short in missing.items()
         )
-        raise ValueError(
+        raise InputError(
             f'Every system needs {samples} trials of each current task before '
             f'closing, but these lack some: {listed}. Run `uv run bench run '
             '--system <name>` for each, then close again.'

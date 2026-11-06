@@ -6,13 +6,12 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import Literal, Protocol
 
 import httpx
-import typer
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
-from assistant_bench.messages import sentence
+from assistant_bench.messages import InputError, sentence
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -23,9 +22,6 @@ TIMEOUT_SEC = 120.0
 """Long enough to upload a statement of several megabytes over a slow link."""
 
 TargetName = Literal['staging', 'production']
-Target = Annotated[
-    TargetName, typer.Argument(help='The vote store: staging or production.')
-]
 
 type Param = str | int | float | None
 type Row = dict[str, JsonValue]
@@ -96,9 +92,7 @@ class RestDatabase:
             ) from error
 
         if not payload.success or response.is_error or len(payload.result) != 1:
-            messages = ' '.join(
-                error.message.rstrip('.') + '.' for error in payload.errors
-            )
+            messages = ' '.join(sentence(error.message) for error in payload.errors)
             raise D1Error(
                 f'D1 refused the statement with HTTP {response.status_code}. '
                 f'{messages}'.rstrip()
@@ -138,11 +132,9 @@ def connect(target: TargetName) -> Generator[Database]:
 
     Raises
     ------
-    ValueError
+    InputError
         `web/wrangler.toml` records no database ID for the target, or `.env`
-        names no token file.
-    OSError
-        The token file cannot be read.
+        names no token file or one that cannot be read.
     """
     config = _config()
     databases = [
@@ -151,13 +143,13 @@ def connect(target: TargetName) -> Generator[Database]:
         if binding.binding == 'DB'
     ]
     if len(databases) != 1:
-        raise ValueError(
+        raise InputError(
             f'Target `{target}` needs one `DB` binding in `web/wrangler.toml`.'
         )
 
     database = databases[0]
     if database.database_id is None:
-        raise ValueError(
+        raise InputError(
             f'Target `{target}` has no D1 database ID in `web/wrangler.toml`. '
             f'Create it with `wrangler d1 create {database.database_name}` and '
             'record its ID there.'
@@ -165,12 +157,19 @@ def connect(target: TargetName) -> Generator[Database]:
 
     path = os.environ.get(TOKEN_FILE_VAR)
     if not path:
-        raise ValueError(
+        raise InputError(
             f'Set `{TOKEN_FILE_VAR}` in `.env` to the path of a file holding a '
             'Cloudflare API token with D1 Edit.'
         )
 
-    token = Path(path).read_text().strip()
+    try:
+        token = Path(path).read_text().strip()
+    except OSError as error:
+        raise InputError(
+            f'`{TOKEN_FILE_VAR}` names `{path}`, which cannot be read: '
+            f'{error.strerror}.'
+        ) from error
+
     with httpx.Client(
         base_url=API_BASE_URL,
         headers={'Authorization': f'Bearer {token}'},

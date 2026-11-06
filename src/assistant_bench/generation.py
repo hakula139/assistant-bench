@@ -6,6 +6,7 @@ from importlib import metadata
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
 
 
@@ -53,5 +54,5 @@ def load_generation() -> Generation:
         (REPO_ROOT / 'uv.lock').read_text(),
     )
     if metadata.version('harbor') != generation.harbor:
-        raise ValueError('Installed Harbor differs from uv.lock. Run `uv sync`.')
+        raise InputError('Installed Harbor differs from uv.lock. Run `uv sync`.')
     return generation

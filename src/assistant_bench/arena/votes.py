@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import median
 from typing import Literal, Protocol, get_args
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Json
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Json, ValidationError
 
 from assistant_bench.arena.d1 import Database, Param, Row
 from assistant_bench.arena.publication import (
@@ -19,6 +19,7 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.families import Choice, Defect, Family, FamilyName
+from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
@@ -204,7 +205,7 @@ def _paged[T: _Keyed](
             return rows
 
 
-class FamilyStatus(BaseModel):
+class FamilyStatus(_Model):
     family: str
     publication_id: str
     activated_at: int
@@ -353,7 +354,7 @@ def groups(database: Database, family: str, by: Grouping) -> list[Group]:
 
 def check_reason(reason: str) -> None:
     if not reason.strip():
-        raise ValueError('Give a reason for the exclusion.')
+        raise InputError('Give a reason for the exclusion.')
 
 
 def exclude(database: Database, family: str, selector: Selector, reason: str) -> int:
@@ -363,7 +364,7 @@ def exclude(database: Database, family: str, selector: Selector, reason: str) ->
 
     Raises
     ------
-    ValueError
+    InputError
         The reason is blank.
     """
     check_reason(reason)
@@ -400,7 +401,17 @@ def write_snapshot(snapshot: Snapshot) -> Path:
 
 
 def read_snapshot(path: Path) -> Snapshot:
-    return Snapshot.model_validate_json(path.read_bytes())
+    """Read a snapshot that `write_snapshot` saved.
+
+    Raises
+    ------
+    InputError
+        The file does not validate as a snapshot.
+    """
+    try:
+        return Snapshot.model_validate_json(path.read_bytes())
+    except ValidationError as error:
+        raise InputError(error_lines(error, f'Snapshot `{path}`')) from error
 
 
 # ── Closing ──
@@ -418,11 +429,11 @@ def voting_input(
 
     Raises
     ------
-    ValueError
+    InputError
         The snapshot belongs to another family.
     """
     if snapshot.family != family.name:
-        raise ValueError(
+        raise InputError(
             f'The snapshot belongs to family `{snapshot.family}`, not `{family.name}`.'
         )
 

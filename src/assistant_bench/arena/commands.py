@@ -3,32 +3,20 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated
 
 import typer
 
 from assistant_bench import jobs
 from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import D1Error, Database, Target, connect
+from assistant_bench.arena.d1 import Database, TargetName, connect
+from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
 from assistant_bench.catalog import load_export, load_systems
-from assistant_bench.families import Choice, family_names, load_cases, load_family
-from assistant_bench.messages import code, count_of
+from assistant_bench.families import Choice, load_cases, load_family
+from assistant_bench.messages import InputError, code, count_of
 
 
 app = typer.Typer(no_args_is_help=True)
-
-
-def _known_family(name: str | None) -> str | None:
-    """Return the name, refusing one with no family."""
-    known = family_names()
-    if name is not None and name not in known:
-        raise typer.BadParameter(
-            f'No family named `{name}`. Choose among {code(known)}.'
-        )
-    return name
-
-
-FAMILY_HELP = 'A directory name under families/, such as writing-zh.'
 
 CHOICE_LABELS: dict[Choice, str] = {
     'a': 'A',
@@ -39,8 +27,8 @@ CHOICE_LABELS: dict[Choice, str] = {
 CLEARED = '(cleared)'
 """Stands for the network tag of a vote older than the tags' retention."""
 
-FamilyArgument = Annotated[
-    str, typer.Argument(metavar='FAMILY', help=FAMILY_HELP, callback=_known_family)
+Target = Annotated[
+    TargetName, typer.Argument(help='The vote store: staging or production.')
 ]
 IpTag = Annotated[
     str | None, typer.Option(help='A network tag, as `bench arena votes` lists it.')
@@ -62,21 +50,17 @@ def prepare(family: FamilyArgument) -> None:
     listing beside it. Reviewing the listing and publishing that exact file
     approves it.
     """
-    try:
-        selected = load_family(family)
-        systems = load_systems(load_export())
-        listed = jobs.listed_systems(selected, systems)
-        outputs = jobs.collect(selected, systems)
-        prepared = publication.prepare(
-            selected,
-            load_cases(selected),
-            outputs,
-            {system.name: system.display_name for system in listed},
-        )
-        path = publication.write(prepared, outputs)
-    except (OSError, RuntimeError, ValueError) as error:
-        _fail(str(error))
-
+    selected = load_family(family)
+    systems = load_systems(load_export())
+    listed = jobs.listed_systems(selected, systems)
+    outputs = jobs.collect(selected, systems)
+    prepared = publication.prepare(
+        selected,
+        load_cases(selected),
+        outputs,
+        {system.name: system.display_name for system in listed},
+    )
+    path = publication.write(prepared, outputs)
     typer.echo(
         f'Publication of `{family}` with {count_of(len(prepared.cases), "case")} '
         f'and {count_of(len(prepared.outputs), "output")} written to `{path}`. Review '
@@ -88,16 +72,18 @@ def prepare(family: FamilyArgument) -> None:
 def publish(
     target: Target,
     file: Annotated[
-        Path, typer.Argument(help='A reviewed publication written by `prepare`.')
+        Path,
+        typer.Argument(
+            help='A reviewed publication written by `prepare`.',
+            exists=True,
+            dir_okay=False,
+        ),
     ],
 ) -> None:
     """Stage a reviewed publication in the vote store and activate it."""
-    try:
-        prepared = publication.read(file)
-        with connect(target) as database:
-            changed = publication.publish(database, prepared, datetime.now(UTC))
-    except (D1Error, OSError, ValueError) as error:
-        _fail(str(error))
+    prepared = publication.read(file)
+    with connect(target) as database:
+        changed = publication.publish(database, prepared, datetime.now(UTC))
 
     if not changed:
         typer.echo(
@@ -116,21 +102,17 @@ def publish(
 @app.command()
 def status(
     target: Target,
-    family: Annotated[
-        str | None,
-        typer.Argument(metavar='[FAMILY]', help=FAMILY_HELP, callback=_known_family),
-    ] = None,
+    family: OptionalFamilyArgument = None,
 ) -> None:
     """Show each active family's publication and votes, or only the named family's."""
-    try:
-        with connect(target) as database:
-            rows = votes.status(database, family)
-    except (D1Error, OSError, ValueError) as error:
-        _fail(str(error))
+    with connect(target) as database:
+        rows = votes.status(database, family)
 
     if not rows:
         if family is not None:
-            _fail(f'Family `{family}` has no active publication in `{target}`.')
+            raise InputError(
+                f'Family `{family}` has no active publication in `{target}`.'
+            )
         typer.echo(f'No family has an active publication in `{target}`.')
 
     for row in rows:
@@ -165,16 +147,15 @@ def list_votes(
     """
     selector = _selector(ip_tag=ip_tag, actor=actor)
     if selector is not None and by is not None:
-        _fail('Pass `--by` only to summarize, without `--ip-tag` or `--actor`.')
+        raise InputError(
+            'Pass `--by` only to summarize, without `--ip-tag` or `--actor`.'
+        )
 
-    try:
-        with connect(target) as database:
-            if selector is None:
-                text = _summary(database, family, by or 'ip')
-            else:
-                text = _listing(database, family, selector)
-    except (D1Error, OSError, ValueError) as error:
-        _fail(str(error))
+    with connect(target) as database:
+        if selector is None:
+            text = _summary(database, family, by or 'ip')
+        else:
+            text = _listing(database, family, selector)
 
     typer.echo(text or f'No vote of `{family}` in `{target}` matches.')
 
@@ -196,12 +177,9 @@ def exclude(
     excluded votes out of the round.
     """
     selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
-    try:
-        votes.check_reason(reason)
-        with connect(target) as database:
-            changed = votes.exclude(database, family, selector, reason)
-    except (D1Error, OSError, ValueError) as error:
-        _fail(str(error))
+    votes.check_reason(reason)
+    with connect(target) as database:
+        changed = votes.exclude(database, family, selector, reason)
 
     typer.echo(f'Excluded {count_of(changed, "vote")} of `{family}` in `{target}`.')
 
@@ -216,11 +194,8 @@ def restore(
 ) -> None:
     """Count the excluded votes of one network tag, one browser, or the given IDs."""
     selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
-    try:
-        with connect(target) as database:
-            changed = votes.restore(database, family, selector)
-    except (D1Error, OSError, ValueError) as error:
-        _fail(str(error))
+    with connect(target) as database:
+        changed = votes.restore(database, family, selector)
 
     typer.echo(f'Restored {count_of(changed, "vote")} of `{family}` in `{target}`.')
 
@@ -296,7 +271,7 @@ def _selector(
     if vote:
         given['--vote'] = votes.Selector(column='id', values=tuple(vote))
     if len(given) > 1:
-        _fail(f'Pass only one of {code(given)}.')
+        raise InputError(f'Pass only one of {code(given)}.')
 
     return next(iter(given.values()), None)
 
@@ -306,7 +281,7 @@ def _required_selector(
 ) -> votes.Selector:
     selector = _selector(ip_tag=ip_tag, actor=actor, vote=vote)
     if selector is None:
-        _fail('Pass one of `--ip-tag`, `--actor` or `--vote`.')
+        raise InputError('Pass one of `--ip-tag`, `--actor` or `--vote`.')
 
     return selector
 
@@ -331,8 +306,3 @@ def _seconds(milliseconds: float) -> str:
 
 def _time(milliseconds: int) -> str:
     return f'{datetime.fromtimestamp(milliseconds / 1000, UTC):%Y-%m-%d %H:%M} UTC'
-
-
-def _fail(message: str) -> NoReturn:
-    typer.echo(message, err=True)
-    raise typer.Exit(1)

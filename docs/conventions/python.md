@@ -12,7 +12,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Errors
 
-- Raise `ValueError` for input an author can fix, naming the item and the accepted values. Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. The CLI prints the `ValueError` of an invalid family, case, task, or system to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family or system.
+- Raise `messages.InputError` for input an author or operator can fix, naming the item and the accepted values. Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. Wrap a `ValidationError` from author input in an `InputError` worded by `error_lines`, while pydantic validators keep raising `ValueError`. Commands raise these errors without catching them, and the root command group prints each `InputError` or `D1Error` to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family, task, or system. Any other exception is a bug and ends with its traceback. To see the traceback behind a printed error, rerun the command with `PYTHONDEVMODE=1`.
 - Let HTTP and Harbor errors propagate. Harbor records them on the trial, and its retry policy decides what reruns.
 
 ## Modules

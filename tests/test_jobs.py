@@ -301,13 +301,6 @@ class TestCheckSystems:
         ('harness', 'system', 'message'),
         [
             pytest.param(
-                'terminus-2',
-                make_system(vendor=None),
-                'Family `f`: set vendor metadata for `acme-large` in the model '
-                'catalog or their `route` tables in `systems.toml`.',
-                id='missing-vendor',
-            ),
-            pytest.param(
                 'claude-code',
                 make_system(),
                 'Family `f`: harness `claude-code` is not one of `generate`, '
@@ -344,7 +337,6 @@ class TestCheckSystems:
         ('family', 'system'),
         [
             pytest.param(VOTES, make_system(prompt='Be brief.'), id='case-family'),
-            pytest.param(VOTES, make_system(vendor=None), id='legacy-case-system'),
             pytest.param(None, make_system(), id='task-family'),
         ],
     )
@@ -821,30 +813,17 @@ class TestCheckTasks:
 
 
 class TestAuthorVendors:
-    @pytest.mark.parametrize(
-        ('author', 'vendor', 'systems'),
-        [
-            ('retired-author', 'acme', {}),
-            ('writer', 'other', {'writer': make_system(name='writer', vendor='other')}),
-        ],
-        ids=['catalog-vendor-with-retired-label', 'explicit-bare-vendor'],
-    )
     def test_resolves_provenance_without_requiring_a_runnable_author(
-        self,
-        families_dir: Path,
-        export: NixosConfigExport,
-        author: str,
-        vendor: str,
-        systems: dict[str, System],
+        self, families_dir: Path, export: NixosConfigExport
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         task = case_task(family, 'echo')
-        break_setting(task, ('metadata', 'author'), author)
-        break_setting(task, ('metadata', 'author_vendor'), vendor)
+        break_setting(task, ('metadata', 'author'), 'retired-author')
+        break_setting(task, ('metadata', 'author_vendor'), 'acme')
 
-        vendors = jobs.author_vendors(family, [task], systems, export)
+        vendors = jobs.author_vendors(family, [task], export)
 
-        assert vendors == {'echo': vendor}
+        assert vendors == {'echo': 'acme'}
 
     @pytest.mark.parametrize(
         ('field', 'value', 'message'),
@@ -888,7 +867,7 @@ class TestAuthorVendors:
         break_setting(task, ('metadata', field), value)
 
         with pytest.raises(ValueError) as error:
-            jobs.author_vendors(family, [task], {}, export)
+            jobs.author_vendors(family, [task], export)
 
         assert str(error.value).startswith(
             f'Family `f` has authors to fix:\n`tasks/echo/task.toml`: {message}'

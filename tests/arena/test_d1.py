@@ -184,3 +184,17 @@ class TestConnect:
     def test_names_the_token_variable_when_env_sets_none(self, config: Path) -> None:
         with pytest.raises(ValueError, match=d1.TOKEN_FILE_VAR), d1.connect('staging'):
             pass
+
+    def test_names_a_token_file_that_cannot_be_read(
+        self, config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        token = tmp_path / 'd1-token'
+        monkeypatch.setenv(d1.TOKEN_FILE_VAR, str(token))
+
+        with pytest.raises(ValueError) as raised, d1.connect('staging'):
+            pass
+
+        assert str(raised.value) == (
+            f'`{d1.TOKEN_FILE_VAR}` names `{token}`, which cannot be read: '
+            'No such file or directory.'
+        )
