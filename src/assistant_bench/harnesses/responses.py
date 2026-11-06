@@ -72,6 +72,7 @@ class ResponseResult:
         response = self.response
         return {
             **measure('openai-responses', response.usage),
+            'responded': True,
             'finish_reason': self.finish_reason,
             'response_status': response.status,
             'incomplete_reason': self.incomplete_reason,

@@ -376,10 +376,10 @@ def _cost(system: System | None, context: AgentContext) -> float | None:
         return None
     metadata = context.metadata or {}
     return MeasuredUsage(
-        context.n_input_tokens,
-        context.n_cache_tokens or 0,
-        metadata.get('cache_write_tokens', 0),
-        context.n_output_tokens,
-        metadata.get('reasoning_tokens'),
-        metadata.get('cache_write_unpriced', False),
+        input_tokens=context.n_input_tokens,
+        cache_tokens=context.n_cache_tokens or 0,
+        cache_write_tokens=metadata.get('cache_write_tokens', 0),
+        output_tokens=context.n_output_tokens,
+        reasoning_tokens=metadata.get('reasoning_tokens'),
+        cache_write_unpriced=metadata.get('cache_write_unpriced', False),
     ).cost(system.price)

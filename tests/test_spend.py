@@ -1,7 +1,7 @@
 import asyncio
 import shutil
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +24,12 @@ from assistant_bench.spend import (
     update_ledger,
 )
 from assistant_bench.tasks import render_tasks
-from support import VOTES, StubEndpoint, make_system, with_settings
+from support import START, VOTES, StubEndpoint, make_system, with_settings
 
 
-START = datetime(2026, 10, 21, tzinfo=UTC)
 # $3 at `make_system`'s price.
 USAGE = MeasuredUsage(1_000_000, 0, 0, 100_000, None)
+UNPRICED_WRITE = MeasuredUsage(10, 0, 10, 10, None, cache_write_unpriced=True)
 # A full context window and completion allowance cost $0.30.
 LARGE = make_system(context_window=100_000, max_output_tokens=10_000)
 UNPRICED = make_system(name='acme-small', price=None)
@@ -138,7 +138,7 @@ class TestSummarize:
             ),
             pytest.param(
                 LARGE,
-                (USAGE, MeasuredUsage(10, 0, 10, 10, None, cache_write_unpriced=True)),
+                (USAGE, UNPRICED_WRITE),
                 (True, 1, 3.0, 3.0, 0.3),
                 id='unpriced-cache-write',
             ),
@@ -180,7 +180,10 @@ class TestSummarize:
     def test_counts_retries_into_the_tokens_per_answered_trial(self) -> None:
         entries = [
             entry(responses=(USAGE,)),
-            entry(responses=(USAGE, None), started_at=START + timedelta(minutes=1)),
+            entry(
+                responses=(USAGE, None, UNPRICED_WRITE),
+                started_at=START + timedelta(minutes=1),
+            ),
             entry(trial='b__1', responses=()),
         ]
 
@@ -189,10 +192,10 @@ class TestSummarize:
         assert (spend.trials, spend.answered, spend.responses, spend.measured) == (
             2,
             1,
-            3,
+            4,
             2,
         )
-        assert spend.profile == Tokens(3_000_000, 0, 0, 300_000)
+        assert spend.profile == Tokens(4_000_000, 0, 0, 400_000)
 
 
 class TestProject:
@@ -291,18 +294,4 @@ class TestBudgetProblems:
         assert budget_problems(family, [], projections) == [
             'System `acme-large` has 1 pending trial and no usage to estimate a '
             'cost from.'
-        ]
-
-    def test_refuses_a_priced_system_whose_spend_has_no_known_cost(self) -> None:
-        family = with_settings(VOTES, budget_usd=100.0)
-        spend = [
-            spend_of(LARGE, entry(responses=(None,))),
-            spend_of(UNPRICED, entry(system=UNPRICED.name, responses=(None,))),
-        ]
-
-        problems = budget_problems(family, spend, [])
-
-        assert problems == [
-            'System `acme-large` has 1 response without a known cost and none to '
-            'impute one from.'
         ]

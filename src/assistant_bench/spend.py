@@ -38,12 +38,12 @@ def update_ledger(family: Family) -> list[Entry]:
         else []
     )
     seen = {_key(entry) for entry in entries}
-    added = _unique(
+    added = [
         entry
         for attempts in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
         for entry in _read_attempts(attempts)
         if _key(entry) not in seen
-    )
+    ]
     if added:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('a') as file:
@@ -103,10 +103,10 @@ class Tokens:
 
     def cost(self, price: Price) -> float | None:
         return price.cost(
-            self.input_tokens,
-            self.cache_tokens,
-            self.output_tokens,
-            self.cache_write_tokens,
+            input_tokens=self.input_tokens,
+            cached_tokens=self.cache_tokens,
+            output_tokens=self.output_tokens,
+            cache_write_tokens=self.cache_write_tokens,
         )
 
 
@@ -122,13 +122,13 @@ class Spend:
 
     responses: int
     measured: int
-    """Responses with valid usage."""
+    """Responses with valid usage and no unpriced cache write."""
 
     tokens: Tokens
-    """The tokens of the responses with valid usage."""
+    """The tokens of the measured responses."""
 
     unknown: int
-    """Responses without a known cost, or without valid usage when unpriced."""
+    """Responses without a known cost, or unmeasured ones when unpriced."""
 
     known_usd: float
     imputed_usd: float | None
@@ -141,7 +141,9 @@ class Spend:
 
     @property
     def spent_usd(self) -> float:
-        return self.known_usd + (self.imputed_usd or 0)
+        """Return the known cost plus the unknown responses' imputed cost or ceiling."""
+        imputed = self.imputed_usd if self.imputed_usd is not None else self.ceiling_usd
+        return self.known_usd + (imputed or 0)
 
     @property
     def profile(self) -> Tokens | None:
@@ -156,7 +158,7 @@ def summarize(entries: Iterable[Entry], systems: Mapping[str, System]) -> list[S
 
     A system the catalog no longer has, or whose channel has no price, is
     unpriced. A response whose usage is invalid, or whose cache write has no
-    declared price, has no known cost.
+    declared price, is unmeasured and has no known cost.
     """
     by_system: defaultdict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
@@ -170,7 +172,11 @@ def summarize(entries: Iterable[Entry], systems: Mapping[str, System]) -> list[S
 
 def _spend(name: str, attempts: list[Entry], system: System | None) -> Spend:
     responses = [response for attempt in attempts for response in attempt.responses]
-    measured = [response for response in responses if response is not None]
+    measured = [
+        response
+        for response in responses
+        if response is not None and not response.cache_write_unpriced
+    ]
     trials = len({(attempt.job, attempt.trial) for attempt in attempts})
     answered = len(
         {(attempt.job, attempt.trial) for attempt in attempts if attempt.responses}
@@ -306,21 +312,14 @@ def budget_problems(
     """Return why the run would exceed the family's `budget_usd`, if it would.
 
     The total that `total_usd` returns must stay within the budget. Unpriced
-    systems count no dollars, while a priced system refuses when nothing bounds
-    its cost: pending trials without an estimate, or responses without a known
-    cost and none to impute one from.
+    systems count no dollars, while a selected priced system refuses when its
+    pending trials have no estimate.
     """
     budget = family.settings.budget_usd
     if budget is None:
         return []
 
     problems = [
-        f'System `{entry.system}` has '
-        f'{count_of(entry.unknown, "response")} without a known cost and none to '
-        'impute one from.'
-        for entry in spend
-        if entry.priced and entry.unknown and entry.imputed_usd is None
-    ] + [
         f'System `{projection.system}` has '
         f'{count_of(projection.pending, "pending trial")} and no usage to estimate '
         'a cost from.'
@@ -331,9 +330,9 @@ def budget_problems(
     if total > budget:
         spent = {entry.system: entry.spent_usd for entry in spend if entry.priced}
         projected = {
-            projection.system: projection.usd or 0
+            projection.system: usd
             for projection in projections
-            if projection.priced and projection.usd
+            if projection.priced and (usd := projection.usd)
         }
         shares = ', '.join(
             f'`{name}` ${spent.get(name, 0):.2f} spent and '

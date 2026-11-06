@@ -423,10 +423,6 @@ class TestPendingTrials:
         first = finish_job(jobs.job(family, systems, tasks))
         break_setting(tasks[1], ('task', 'version'), '1.1.0')
         job = jobs.job(family, systems, tasks)
-
-        pending = jobs.pending_trials(job)
-
-        assert pending == Counter()
         plan = asyncio.run(JobPlan.from_config(job))
         (source,) = job.source_jobs
         diff = compare_job_trials(plan, load_source_trials([(source, first)]))
@@ -434,6 +430,10 @@ class TestPendingTrials:
             DiffAction.REUSE,
             DiffAction.REGRADE,
         ]
+
+        pending = jobs.pending_trials(job)
+
+        assert pending == Counter()
 
     def test_counts_nothing_without_tasks(self) -> None:
         pending = jobs.pending_trials(jobs.job(VOTES, [make_system()], []))

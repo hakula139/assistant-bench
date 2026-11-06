@@ -41,10 +41,10 @@ class MeasuredUsage:
         if self.cache_write_unpriced:
             return None
         return price.cost(
-            self.input_tokens,
-            self.cache_tokens,
-            self.output_tokens,
-            self.cache_write_tokens,
+            input_tokens=self.input_tokens,
+            cached_tokens=self.cache_tokens,
+            output_tokens=self.output_tokens,
+            cache_write_tokens=self.cache_write_tokens,
         )
 
     @property
@@ -198,8 +198,7 @@ def append_attempt(
 
     The file sits in the job directory, since Harbor deletes a failed attempt's
     trial directory before retrying it. `requests` holds the details of each
-    request the attempt sent, and one whose `response_model` is missing or `None`
-    received no response.
+    request the attempt sent, and those without a true `responded` got no reply.
     """
     attempt = Attempt(
         trial=logs_dir.parent.name,
@@ -210,7 +209,7 @@ def append_attempt(
         responses=[
             MeasuredUsage.from_details(request)
             for request in requests
-            if request.get('response_model') is not None
+            if request.get('responded', False)
         ],
     )
     with (logs_dir.parent.parent / ATTEMPTS_FILE).open('a') as file:

@@ -15,7 +15,7 @@ src/assistant_bench/
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
-├── arguments.py                            # The family arguments and name refusals the commands share
+├── arguments.py                            # The family arguments, system option, and name refusals the commands share
 ├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
 ├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs

@@ -617,9 +617,7 @@ def _spend_line(entry: Spend) -> str:
             f'{entry.tokens.output_tokens:,.0f} output tokens'
         )
         if entry.unknown:
-            line += (
-                f', besides {count_of(entry.unknown, "response")} without valid usage'
-            )
+            line += f', besides {count_of(entry.unknown, "unmeasured response")}'
         return f'{line}.'
 
     line = f'System `{entry.system}`: {attempts} cost ${entry.known_usd:.2f}'

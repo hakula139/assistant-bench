@@ -204,8 +204,9 @@ class TestRequestMessages:
 
         assert len(endpoint.requests) == 1
         assert not result.complete
-        assert result.details['reported_usage'] is None
-        assert 'input_tokens' not in result.details
+        details = result.details
+        assert (details['responded'], details['reported_usage']) == (False, None)
+        assert 'input_tokens' not in details
         assert not artifact.exists()
         (client,) = messages_clients
         assert client.is_closed()

@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +13,7 @@ from assistant_bench.harnesses.usage import (
     measure,
     measured_usage,
 )
-
-
-START = datetime(2026, 10, 21, tzinfo=UTC)
+from support import START
 
 
 class TestMeasuredUsage:
@@ -142,38 +139,22 @@ class TestAppendAttempt:
         ('requests', 'expected'),
         [
             pytest.param(
-                [
-                    {
-                        **measure('openai-chat-completions', None)[1],
-                        'response_model': None,
-                    }
-                ],
+                [{**measure('openai-chat-completions', None), 'responded': False}],
                 [],
                 id='no-response',
             ),
             pytest.param(
                 [
                     {
-                        **measure('openai-chat-completions', None)[1],
-                        'response_model': 'large',
-                    }
-                ],
-                [None],
-                id='response-without-usage',
-            ),
-            pytest.param(
-                [
-                    {
-                        **measure('openai-chat-completions', VALID)[1],
-                        'response_model': 'large',
+                        **measure('openai-chat-completions', VALID),
+                        'responded': True,
+                        'response_model': None,
                     },
                     {'response_status': 'request_failed', 'latency_sec': 0.5},
-                    {
-                        **measure('openai-chat-completions', [])[1],
-                        'response_model': 'large',
-                    },
+                    {**measure('openai-chat-completions', []), 'responded': True},
+                    {**measure('openai-chat-completions', None), 'responded': True},
                 ],
-                [MeasuredUsage(120, 0, 0, 40, None), None],
+                [MeasuredUsage(120, 0, 0, 40, None), None, None],
                 id='requests',
             ),
         ],

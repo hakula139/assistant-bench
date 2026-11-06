@@ -1180,6 +1180,31 @@ class TestRun:
         )
         assert len(submitted) == 1 - exit_code
 
+    def test_counts_another_systems_unknown_cost_at_its_ceiling(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 19\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(
+            name='small', context_window=2_000_000, max_output_tokens=200_000
+        )
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-2', 'small', (None,))
+
+        result = invoke('run', 'f', '--system', 'large')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert (
+            'Family `f`: $18.00 spent and projected, against a budget of $19.00.\n'
+        ) in result.stdout
+        assert len(submitted) == 1
+
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
@@ -1341,7 +1366,7 @@ class TestSpend:
         assert result.exit_code == 0, result.output
         assert result.stdout == (
             'System `small` is unpriced: 1 trial and 1 response used 0 input and 0 '
-            'output tokens, besides 1 response without valid usage.\n'
+            'output tokens, besides 1 unmeasured response.\n'
             'System `large`: 1 pending trial with no usage to estimate a cost from.\n'
             'System `small`: 1 pending trial with no usage to estimate a cost from.\n'
             'Family `f`: $0.00 spent and projected, against a budget of $100.00.\n'

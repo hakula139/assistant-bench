@@ -165,6 +165,7 @@ class Generate(BaseAgent):
 
         return {
             **details,
+            'responded': True,
             'finish_reason': 'refusal'
             if choice.message.refusal
             else choice.finish_reason,

@@ -78,6 +78,7 @@ class MessageResult:
     def details(self) -> dict[str, Any]:
         message = self.message
         return {
+            'responded': message is not None,
             'finish_reason': self.finish_reason,
             'native_stop_reason': message.stop_reason if message else None,
             'stop_details': message.stop_details.model_dump(
