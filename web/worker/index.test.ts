@@ -68,7 +68,7 @@ describe('blinding', () => {
     }
     await send(from, 'POST', '/votes/undo', { family: BLIND });
     await send(from, 'POST', '/votes/undo', { family: BLIND });
-    await send(from, 'GET', `/freshness?family=${BLIND}&local=0&local_votes=0`);
+    await send(from, 'GET', `/freshness?family=${BLIND}&production=0&production_votes=0`);
 
     for (const response of responses) {
       const text = [
