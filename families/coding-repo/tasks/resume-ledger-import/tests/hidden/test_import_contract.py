@@ -158,20 +158,33 @@ class ImportFileTest(unittest.TestCase):
                 self.assertEqual(stored['checkpoint'], 2)
 
     def test_source_bytes_are_bound_even_after_first_batch_fails(self) -> None:
-        self.write_rows([('a', '1.00', 'first'), ('b', 'invalid', '')])
+        self.write_rows([('a', '1.00', 'first'), ('b', '2.00', '')])
         original_digest = hashlib.sha256(self.csv_path.read_bytes()).hexdigest()
-
-        caught = self.raised(
-            self.import_file(self.db, 'bound', batch_size=2), 'SourceError'
+        sandbox.observe(
+            'imports',
+            'execute',
+            db=str(self.db),
+            statement="""
+            CREATE TRIGGER stop_first_batch BEFORE UPDATE OF checkpoint ON sources
+            BEGIN
+                SELECT RAISE(ABORT, 'checkpoint unavailable');
+            END
+            """,
         )
 
-        self.assertEqual(caught['record_index'], 2)
+        self.raised(self.import_file(self.db, 'bound', batch_size=2), 'sqlite3.Error')
+
         stored = self.ledger(self.db, 'bound')
         self.assertEqual(stored['rows'], [])
         self.assertEqual(stored['checkpoint'], 0)
         self.assertEqual(stored['digest'], original_digest)
-
-        self.write_rows([('a', '1.00', 'first'), ('b', '2.00', '')])
+        sandbox.observe(
+            'imports',
+            'execute',
+            db=str(self.db),
+            statement='DROP TRIGGER stop_first_batch',
+        )
+        self.write_rows([('a', '1.00', 'first'), ('b', '2.50', '')])
 
         changed = self.raised(
             self.import_file(self.db, 'bound', batch_size=2), 'SourceError'
