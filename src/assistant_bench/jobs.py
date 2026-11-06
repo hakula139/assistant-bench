@@ -8,6 +8,7 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, assert_never
 from uuid import UUID
@@ -515,6 +516,8 @@ def _job(
 
     return JobConfig(
         jobs_dir=jobs_dir,
+        # Collection orders jobs by name, which Harbor sets only to the second.
+        job_name=f'{datetime.now():%Y-%m-%d__%H-%M-%S-%f}',
         n_attempts=n_attempts,
         n_concurrent_trials=n_concurrent,
         quiet=True,
