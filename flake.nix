@@ -52,13 +52,13 @@
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
         # ------------------------------------------------------------------------------------------
-        promptFragments = "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
+        promptFragments = import "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
         nixosConfigExport = pkgs.writeText "nixos-config.json" (
           builtins.toJSON {
             inherit (nixos-config) rev;
             catalog = import "${nixos-config}/data/llm-models.nix";
             instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
-              inherit (import promptFragments) readPrompt;
+              inherit promptFragments;
             };
           }
         );
