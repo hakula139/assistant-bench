@@ -87,6 +87,7 @@ class TrackedFile:
     def __init__(self, file: Any, injector: Injector) -> None:
         self._file = file
         self._injector = injector
+        self._unreported = False
 
     def write(self, data: Any) -> int:
         def torn() -> None:
@@ -95,9 +96,16 @@ class TrackedFile:
 
         self._injector.mutate('write', torn)
         written = self._file.write(data)
+        self._unreported = True
         if isinstance(self._file, io.RawIOBase):
-            self._injector.reached(self._file.fileno())
+            self._report()
         return written
+
+    def _report(self) -> None:
+        """Report the bytes written since the last report as reaching the file."""
+        if self._unreported:
+            self._unreported = False
+            self._injector.reached(self._file.fileno())
 
     def writelines(self, lines: Iterable[Any]) -> None:
         for line in lines:
@@ -109,7 +117,7 @@ class TrackedFile:
 
     def flush(self) -> None:
         self._file.flush()
-        self._injector.reached(self._file.fileno())
+        self._report()
 
     def close(self) -> None:
         if not self._file.closed:
