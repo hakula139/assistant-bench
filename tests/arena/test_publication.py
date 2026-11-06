@@ -139,7 +139,6 @@ class TestPrepare:
         self,
     ) -> None:
         family = make_votes_family('coding-fixture', diff=True)
-        timeout = 'AgentTimeoutError'
 
         published = prepare(
             family,
@@ -151,7 +150,7 @@ class TestPrepare:
                 make_trial(
                     'fix-parser',
                     'acme-small',
-                    error=timeout,
+                    error='AgentTimeoutError',
                     reward=1.0,
                     text='--- a/x\n+++ b/x\n+late\n',
                 ),
@@ -159,7 +158,7 @@ class TestPrepare:
                     'fix-parser',
                     'acme-pro',
                     [Gate.TESTS],
-                    error=timeout,
+                    error='AgentTimeoutError',
                     reward=0.0,
                     text='--- a/x\n+++ b/x\n',
                 ),
