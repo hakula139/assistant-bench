@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from importlib import metadata
 from pathlib import Path
-from typing import Any, ClassVar, Self, override
+from typing import Any, ClassVar, Self, assert_never, override
 
 from anthropic import AsyncAnthropic
 from harbor.agents.agent_auth_resolution import ResolvedModelConnection
@@ -18,44 +18,39 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 from tenacity import retry_if_not_exception_type
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
-from assistant_bench.harnesses.messages import (
-    MessageCompletionError,
-    MessagesChat,
-    MessagesLLM,
-    attach_content,
-)
-from assistant_bench.harnesses.options import ApiOptions
-from assistant_bench.harnesses.responses import (
-    ResponseCompletionError,
-    ResponsesChat,
-    ResponsesLLM,
+from assistant_bench.harnesses.messages import MessagesLLM
+from assistant_bench.harnesses.native import (
+    NativeChat,
+    NativeCompletionError,
+    NativeLLM,
+    NativeSettings,
     attach_items,
 )
+from assistant_bench.harnesses.options import ApiOptions
+from assistant_bench.harnesses.responses import ResponsesLLM
 from assistant_bench.harnesses.usage import measured_usage
 
 
-_RESPONSE_METADATA = TypeAdapter(
-    dict[str, Any], config=ConfigDict(hide_input_in_errors=True)
-)
+_RESPONSE = TypeAdapter(dict[str, Any])
 
 
 class TerminusOptions(Terminus2Options, Labels, ApiOptions):
     pass
 
 
-class _ConfiguredLiteLLM(LiteLLM):
+class ChatCompletionsLLM(LiteLLM):
     """Keep resolved capacities per instance, outside LiteLLM's global registry."""
 
     _context_limit: int
     _output_limit: int
-    results: list[dict[str, Any]]
+    calls: list[dict[str, Any]]
 
     @classmethod
     def configured(
@@ -64,7 +59,7 @@ class _ConfiguredLiteLLM(LiteLLM):
         llm = cls(model_name=model_name, **kwargs)
         llm._context_limit = context_limit
         llm._output_limit = output_limit
-        llm.results = []
+        llm.calls = []
         return llm
 
     @override
@@ -93,33 +88,30 @@ class _ConfiguredLiteLLM(LiteLLM):
     def _record_usage(self, details: dict[str, Any]) -> None:
         if details.get('log_event_type') != 'post_api_call':
             return
-        try:
-            response = _RESPONSE_METADATA.validate_json(details['original_response'])
-        except ValidationError:
-            return
+        response = _RESPONSE.validate_json(details['original_response'])
         if response.get('error') is not None and 'choices' not in response:
             return
 
-        result: dict[str, Any] = {}
-        self.results.append(result)
+        call: dict[str, Any] = {}
+        self.calls.append(call)
         if response.get('object') != 'chat.completion':
             return
         if response.get('usage') is None:
             return
-        result['reported_usage'] = response['usage']
+        call['reported_usage'] = response['usage']
         usage = measured_usage('openai-chat-completions', response['usage'])
-        result['usage_invalid'] = usage is None
+        call['usage_invalid'] = usage is None
         if usage is not None:
-            result.update(usage.details)
+            call.update(usage.details)
 
     @override
     def _extract_usage_info(self, response: Any) -> UsageInfo | None:
         """Use original SDK counters before LiteLLM fills absent values."""
         usage = (
             measured_usage(
-                'openai-chat-completions', self.results[-1].get('reported_usage')
+                'openai-chat-completions', self.calls[-1].get('reported_usage')
             )
-            if self.results
+            if self.calls
             else None
         )
         return usage.harbor if usage is not None else None
@@ -134,13 +126,12 @@ class Terminus(Terminus2):
 
     options_model: ClassVar[type[Terminus2Options]] = TerminusOptions
     _endpoint_client: AsyncOpenAI | AsyncAnthropic
-    _responses_summaries: dict[str, LLMResponse]
+    _summary_replies: dict[str, LLMResponse]
 
     @override
     def version(self) -> str:
         assert isinstance(self.options, TerminusOptions)
-        api = 'openai-responses' if self.options.use_responses_api else self.options.api
-        return load_generation().version('terminus-2', api)
+        return load_generation().version('terminus-2', self.options.api)
 
     @classmethod
     @override
@@ -152,7 +143,7 @@ class Terminus(Terminus2):
         env: Mapping[str, str],
         explicit_env: Mapping[str, str] | None = None,
     ) -> None:
-        preflight(env, kwargs.get('api', 'openai-chat-completions'))
+        preflight(env, ApiOptions.model_validate(kwargs).api)
 
     @override
     def _init_llm(
@@ -169,79 +160,62 @@ class Terminus(Terminus2):
         model_info: dict[str, Any] | None,
         use_responses_api: bool,
     ) -> BaseLLM:
-        if llm_backend != LLMBackend.LITELLM:
-            raise ValueError('The bench endpoint requires the LiteLLM backend.')
-        if model_info is None:
-            raise ValueError('Terminus requires resolved model capacities.')
-
         assert isinstance(self.options, TerminusOptions)
-        endpoint = Endpoint.read(self._get_env, self.options.api)
-        if self.options.api == 'anthropic-messages':
-            assert self.options.thinking_mode is not None
-            self._endpoint_client = endpoint.messages_client()
-            return MessagesLLM(
-                client=self._endpoint_client,
-                model_name=model_name,
-                context_limit=model_info['max_input_tokens'],
-                output_limit=model_info['max_output_tokens'],
-                effort=reasoning_effort,
-                thinking_mode=self.options.thinking_mode,
-                logs_dir=self.logs_dir,
-            )
-        self._endpoint_client = endpoint.client()
-        if use_responses_api:
-            assert isinstance(self.options, TerminusOptions)
-            return ResponsesLLM(
-                client=self._endpoint_client,
-                model_name=model_name,
-                context_limit=model_info['max_input_tokens'],
-                output_limit=model_info['max_output_tokens'],
-                effort=reasoning_effort,
-                temperature=temperature,
-                logs_dir=self.logs_dir,
-            )
-
-        constructor_kwargs: dict[str, Any] = {
-            **(llm_kwargs or {}),
-            'client': self._endpoint_client,
-            'max_retries': self._endpoint_client.max_retries,
-            'timeout': self._endpoint_client.timeout,
-        }
-        if temperature is not None:
-            constructor_kwargs['temperature'] = temperature
-        configure_litellm_debug(debug=constructor_kwargs.pop('litellm_debug', False))
-
-        return _ConfiguredLiteLLM.configured(
+        assert model_info is not None
+        settings = NativeSettings(
+            model_name=model_name,
             context_limit=model_info['max_input_tokens'],
             output_limit=model_info['max_output_tokens'],
-            model_name=model_name,
-            api_base=str(endpoint.base_url),
-            collect_rollout_details=collect_rollout_details,
-            session_id=session_id,
-            max_thinking_tokens=max_thinking_tokens,
-            reasoning_effort=reasoning_effort,
-            use_responses_api=use_responses_api,
-            **constructor_kwargs,
+            effort=reasoning_effort,
+            logs_dir=self.logs_dir,
         )
+        endpoint = Endpoint.read(self._get_env, self.options.api)
+        match self.options.api:
+            case 'anthropic-messages':
+                self._endpoint_client = endpoint.messages_client()
+                return MessagesLLM(self._endpoint_client, settings)
+            case 'openai-responses':
+                self._endpoint_client = endpoint.client()
+                return ResponsesLLM(self._endpoint_client, settings)
+            case 'openai-chat-completions':
+                self._endpoint_client = endpoint.client()
+                constructor_kwargs: dict[str, Any] = {
+                    **(llm_kwargs or {}),
+                    'client': self._endpoint_client,
+                    'max_retries': self._endpoint_client.max_retries,
+                    'timeout': self._endpoint_client.timeout,
+                }
+                configure_litellm_debug(
+                    debug=constructor_kwargs.pop('litellm_debug', False)
+                )
+                return ChatCompletionsLLM.configured(
+                    # Pins LiteLLM to its OpenAI-compatible provider.
+                    model_name=f'openai/{model_name}',
+                    api_base=str(endpoint.base_url),
+                    collect_rollout_details=collect_rollout_details,
+                    session_id=session_id,
+                    max_thinking_tokens=max_thinking_tokens,
+                    reasoning_effort=reasoning_effort,
+                    context_limit=settings.context_limit,
+                    output_limit=settings.output_limit,
+                    **constructor_kwargs,
+                )
+            case _:
+                assert_never(self.options.api)
 
     _query_llm = Terminus2._query_llm.retry_with(
         retry=Terminus2._query_llm.retry.retry
-        & retry_if_not_exception_type((ResponseCompletionError, MessageCompletionError))
+        & retry_if_not_exception_type(NativeCompletionError)
     )
 
     @override
     async def _run_agent_loop(
         self, initial_prompt: str, chat: Chat, original_instruction: str = ''
     ) -> None:
-        if isinstance(self._llm, (ResponsesLLM, MessagesLLM)):
-            chat_type = (
-                MessagesChat if isinstance(self._llm, MessagesLLM) else ResponsesChat
-            )
-            responses_chat = chat_type(
+        if isinstance(self._llm, NativeLLM):
+            chat = NativeChat(
                 self._llm, interleaved_thinking=self.options.interleaved_thinking
             )
-            responses_chat.messages.extend(chat.messages)
-            chat = responses_chat
             self._chat = chat
         await super()._run_agent_loop(initial_prompt, chat, original_instruction)
 
@@ -258,14 +232,9 @@ class Terminus(Terminus2):
         subagent_name_for_logging: str = 'subagent',
     ) -> tuple[LLMResponse, SubagentTrajectoryRef]:
         """Retain SDK items when Harbor builds the answers branch from its summary."""
-        if (
-            isinstance(self._llm, (ResponsesLLM, MessagesLLM))
-            and filename_suffix == 'answers'
-        ):
-            attach = (
-                attach_content if isinstance(self._llm, MessagesLLM) else attach_items
-            )
-            attach(message_history[-1], self._responses_summaries['summary'])
+        native = isinstance(self._llm, NativeLLM)
+        if native and filename_suffix == 'answers':
+            attach_items(message_history[-1], self._summary_replies['summary'])
         response, trajectory = await super()._run_subagent(
             prompt,
             message_history,
@@ -276,30 +245,22 @@ class Terminus(Terminus2):
             summary_text,
             subagent_name_for_logging,
         )
-        if isinstance(self._llm, (ResponsesLLM, MessagesLLM)):
-            self._responses_summaries[filename_suffix] = response
+        if native:
+            self._summary_replies[filename_suffix] = response
         return response, trajectory
 
     @override
     async def _summarize(
         self, chat: Chat, original_instruction: str, session: TmuxSession
     ) -> tuple[str, list[SubagentTrajectoryRef] | None]:
-        self._responses_summaries = {}
+        self._summary_replies = {}
         try:
             result = await super()._summarize(chat, original_instruction, session)
-            if (
-                isinstance(self._llm, (ResponsesLLM, MessagesLLM))
-                and result[1] is not None
-            ):
-                attach = (
-                    attach_content
-                    if isinstance(self._llm, MessagesLLM)
-                    else attach_items
-                )
-                attach(chat.messages[-1], self._responses_summaries['questions'])
+            if isinstance(self._llm, NativeLLM) and result[1] is not None:
+                attach_items(chat.messages[-1], self._summary_replies['questions'])
             return result
         finally:
-            self._responses_summaries = {}
+            self._summary_replies = {}
 
     @override
     async def run(
@@ -310,12 +271,14 @@ class Terminus(Terminus2):
     ) -> None:
         nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
+        llm = self._llm
+        assert isinstance(llm, NativeLLM | ChatCompletionsLLM)
         failed_attempt: dict[str, Any] = {}
         try:
             await super().run(instruction, environment, context)
-        except MessageCompletionError, ResponseCompletionError:
-            assert isinstance(self._llm, (MessagesLLM, ResponsesLLM))
-            failed_attempt = self._llm.attempts[-1]
+        except NativeCompletionError:
+            assert isinstance(llm, NativeLLM)
+            failed_attempt = llm.attempts[-1]
             raise
         finally:
             await self._endpoint_client.close()
@@ -326,36 +289,26 @@ class Terminus(Terminus2):
                 'finish_reason': failed_attempt.get('finish_reason'),
                 'stop_details': failed_attempt.get('stop_details'),
             }
-            if isinstance(self._llm, (ResponsesLLM, MessagesLLM, _ConfiguredLiteLLM)):
-                if isinstance(self._llm, MessagesLLM):
-                    context.metadata['message_attempts'] = self._llm.attempts
-                elif isinstance(self._llm, ResponsesLLM):
-                    context.metadata['response_attempts'] = self._llm.attempts
-                context.metadata['cache_write_unpriced'] = any(
-                    result.get('cache_write_unpriced', False)
-                    for result in self._llm.results
+            if isinstance(llm, NativeLLM):
+                context.metadata['attempts'] = llm.attempts
+            calls = llm.calls
+            context.metadata['cache_write_unpriced'] = any(
+                call.get('cache_write_unpriced', False) for call in calls
+            )
+            context.metadata['calls'] = calls
+            if calls and all('input_tokens' in call for call in calls):
+                context.n_input_tokens = sum(call['input_tokens'] for call in calls)
+                context.n_cache_tokens = sum(call['cache_tokens'] for call in calls)
+                context.n_output_tokens = sum(call['output_tokens'] for call in calls)
+                context.metadata['cache_write_tokens'] = sum(
+                    call['cache_write_tokens'] for call in calls
                 )
-                context.metadata['responses'] = self._llm.results
-                results = self._llm.results
-                if results and all('input_tokens' in result for result in results):
-                    context.n_input_tokens = sum(
-                        result['input_tokens'] for result in results
-                    )
-                    context.n_cache_tokens = sum(
-                        result['cache_tokens'] for result in results
-                    )
-                    context.n_output_tokens = sum(
-                        result['output_tokens'] for result in results
-                    )
-                    context.metadata['cache_write_tokens'] = sum(
-                        result['cache_write_tokens'] for result in results
-                    )
-                    reasoning = [result['reasoning_tokens'] for result in results]
-                    context.metadata['reasoning_tokens'] = (
-                        None if None in reasoning else sum(reasoning)
-                    )
-                else:
-                    context.n_input_tokens = None
-                    context.n_cache_tokens = None
-                    context.n_output_tokens = None
-                context.cost_usd = None
+                reasoning = [call['reasoning_tokens'] for call in calls]
+                context.metadata['reasoning_tokens'] = (
+                    None if None in reasoning else sum(reasoning)
+                )
+            else:
+                context.n_input_tokens = None
+                context.n_cache_tokens = None
+                context.n_output_tokens = None
+            context.cost_usd = None

@@ -27,7 +27,7 @@
 - A reused trial is skipped and stays in its source job, without a copy in the new one.
 - A retry deletes the failed attempt's directory, so only the final attempt of a trial remains.
 - `AgentContext.n_input_tokens` includes the cached tokens counted in `n_cache_tokens`.
-- Harbor reads telemetry consent only from `HARBOR_TELEMETRY`, and LiteLLM loads a `.env` above its own install unless `LITELLM_MODE=PRODUCTION`, so `bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits.
+- Harbor reads telemetry consent only from `HARBOR_TELEMETRY`, LiteLLM loads a `.env` above its own install unless `LITELLM_MODE=PRODUCTION`, and importing LiteLLM downloads its cost map unless `LITELLM_LOCAL_MODEL_COST_MAP=true`, so `bench` sets all three in its own environment, which Harbor inherits.
 - `config.json` in each job directory records every agent's `kwargs` and `env` in plain text.
 - terminus-2 stops only after the model repeats `task_complete: true`, so one completed trial makes at least two model calls.
 - terminus-2 adds Anthropic `cache_control` blocks whenever the model name contains `anthropic` or `claude`, so an OpenAI-compatible route for an Anthropic model must accept them.

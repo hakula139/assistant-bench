@@ -6,7 +6,7 @@ import pytest
 
 from assistant_bench.catalog import SystemIdentity
 from assistant_bench.generation import Generation
-from assistant_bench.harnesses import HARNESSES, agent_kwargs, fingerprint, options
+from assistant_bench.harnesses import HARNESSES, fingerprint, options
 from support import make_generation, make_system
 
 
@@ -132,18 +132,3 @@ class TestFingerprint:
         after = fingerprint(system)
 
         assert after != before
-
-
-class TestAgentKwargs:
-    @pytest.mark.parametrize('harness', ['generate', 'terminus-2'])
-    def test_labels_the_harness_options_with_the_system_and_fingerprint(
-        self, harness: str
-    ) -> None:
-        system = make_system(harness=harness)
-
-        kwargs = agent_kwargs(system)
-
-        assert kwargs == {
-            'system': 'acme-large',
-            'fingerprint': fingerprint(system),
-        } | HARNESSES[harness].options(system)

@@ -57,7 +57,7 @@ class Generate(BaseAgent):
         env: Mapping[str, str] | None = None,
     ) -> None:
         super().preflight(kwargs, env)
-        preflight(env, (kwargs or {}).get('api', 'openai-chat-completions'))
+        preflight(env, ApiOptions.model_validate(kwargs).api)
 
     @override
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -109,7 +109,6 @@ class Generate(BaseAgent):
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
         result = MessageResult()
-        assert self.options.thinking_mode is not None
         try:
             async with endpoint.messages_client() as client:
                 await request_messages(
@@ -119,7 +118,6 @@ class Generate(BaseAgent):
                     messages=[{'role': 'user', 'content': instruction}],
                     system=self.options.system_prompt,
                     max_tokens=self.options.max_output_tokens,
-                    thinking_mode=self.options.thinking_mode,
                     effort=self.options.effort,
                     artifact=self.logs_dir / 'message.json',
                 )
@@ -200,7 +198,7 @@ class Generate(BaseAgent):
             context.n_output_tokens = usage.output_tokens
 
         context.metadata = result.details
-        result.check(raw.http_response.request, complete=False)
+        result.check(complete=False)
         return result.details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:

@@ -22,9 +22,6 @@ class Harness:
     options: Callable[[SystemIdentity], dict[str, Any]]
     """Builds the agent's kwargs other than the trial labels."""
 
-    model_prefix: str = ''
-    """Prepended to the system route in the job's model name."""
-
     sends_prompt: bool = False
     single_call: bool = False
     """Makes one request without acting in the task's environment.
@@ -32,9 +29,6 @@ class Harness:
     A job using only these harnesses runs in `HOST_ENVIRONMENT` without a
     container. They cannot solve task-family tasks.
     """
-
-    def model_name(self, route: str) -> str:
-        return f'{self.model_prefix}{route}'
 
 
 HOST_ENVIRONMENT = 'assistant_bench.harnesses.host:HostEnvironment'
@@ -49,8 +43,6 @@ HARNESSES: dict[str, Harness] = {
     'terminus-2': Harness(
         import_path='assistant_bench.harnesses.terminus:Terminus',
         options=options.terminus,
-        # Pins LiteLLM to its OpenAI-compatible provider.
-        model_prefix='openai/',
     ),
 }
 
@@ -66,7 +58,7 @@ def fingerprint(identity: SystemIdentity) -> str:
     encoded = json.dumps(
         {
             'harness': identity.harness,
-            'model_name': harness.model_name(identity.route),
+            'model_name': identity.route,
             'options': harness.options(identity),
             'version': identity.generation.version(identity.harness, identity.api),
         },

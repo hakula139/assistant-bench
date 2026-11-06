@@ -15,11 +15,13 @@ from assistant_bench.harnesses.endpoint import (
     Endpoint,
 )
 from assistant_bench.harnesses.messages import (
-    MessageCompletionError,
-    MessageLengthExceededError,
     MessageResult,
     MessageStreamError,
     request_messages,
+)
+from assistant_bench.harnesses.native import (
+    NativeCompletionError,
+    NativeLengthExceededError,
 )
 from support import StubEndpoint, message, message_stream
 
@@ -37,7 +39,6 @@ def request(endpoint: StubEndpoint, result: MessageResult, artifact: Path) -> No
                 system='Be direct.',
                 max_tokens=128000,
                 effort='high',
-                thinking_mode='anthropic-adaptive',
                 artifact=artifact,
             )
 
@@ -118,12 +119,12 @@ class TestMessageResult:
             ('stop', 'tool', 'finish', 'error'),
             [
                 ('end_turn', False, 'stop', None),
-                ('max_tokens', False, 'length', MessageLengthExceededError),
-                ('refusal', False, 'refusal', MessageCompletionError),
-                ('pause_turn', False, 'pause_turn', MessageCompletionError),
-                ('stop_sequence', False, 'stop_sequence', MessageCompletionError),
-                ('tool_use', True, 'unexpected_content', MessageCompletionError),
-                ('end_turn', True, 'unexpected_content', MessageCompletionError),
+                ('max_tokens', False, 'length', NativeLengthExceededError),
+                ('refusal', False, 'refusal', NativeCompletionError),
+                ('pause_turn', False, 'pause_turn', NativeCompletionError),
+                ('stop_sequence', False, 'stop_sequence', NativeCompletionError),
+                ('tool_use', True, 'unexpected_content', NativeCompletionError),
+                ('end_turn', True, 'unexpected_content', NativeCompletionError),
             ],
             ids=[
                 'complete',
@@ -241,7 +242,6 @@ class TestRequestMessages:
                     system='Be direct.',
                     max_tokens=128000,
                     effort='high',
-                    thinking_mode='anthropic-adaptive',
                     artifact=tmp_path / 'message.json',
                 )
 
@@ -398,7 +398,6 @@ class TestRequestMessages:
                         system=None,
                         max_tokens=128000,
                         effort='high',
-                        thinking_mode='anthropic-adaptive',
                         artifact=artifact,
                     )
                 )

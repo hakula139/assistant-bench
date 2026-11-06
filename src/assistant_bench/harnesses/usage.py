@@ -46,8 +46,6 @@ class MeasuredUsage:
 
 def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
     """Return inclusive counters only when every reported count is consistent."""
-    if reported is None:
-        return None
     try:
         reported = _reported.validate_python(usage_payload(reported), strict=True)
         write_value: object

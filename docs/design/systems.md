@@ -28,12 +28,12 @@ Closed reports freeze each public label and output fingerprint in `Report.system
 
 ## Harnesses
 
-`System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route after its `model_prefix` as the model name.
+`System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route as the model name.
 
-| Harness      | Agent                                         | Model name       | Environment                                      |
-| ------------ | --------------------------------------------- | ---------------- | ------------------------------------------------ |
-| `generate`   | `assistant_bench.harnesses.generate:Generate` | `<route>`        | `assistant_bench.harnesses.host:HostEnvironment` |
-| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | `openai/<route>` | Harbor's Docker environment                      |
+| Harness      | Agent                                         | Environment                                      |
+| ------------ | --------------------------------------------- | ------------------------------------------------ |
+| `generate`   | `assistant_bench.harnesses.generate:Generate` | `assistant_bench.harnesses.host:HostEnvironment` |
+| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | Harbor's Docker environment                      |
 
 Harbor gives every trial of a job the same environment. A job whose harnesses are all `single_call` runs in `HostEnvironment`, which starts no container and refuses every command and file transfer, and any other job runs in Harbor's Docker environment. `bench check`'s oracle and nop jobs run in Docker, since both act in the task's container.
 
@@ -41,7 +41,7 @@ Harbor gives every trial of a job the same environment. A job whose harnesses ar
 
 `terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its generation version combines the bench's declared generation protocol with the locked Harbor version, since Harbor supplies its prompt and loop. `generate` uses only the bench's generation protocol. Resolved systems capture those versions, and each native agent reports the same version after checking that the installed Harbor matches the lock. A Harbor upgrade changes Terminus fingerprints while unrelated grading or tooling changes preserve the single-call protocol.
 
-The `openai/` prefix routes Chat Completions through LiteLLM's OpenAI-compatible provider, while Responses and Messages use their native SDKs through Harbor's `BaseLLM` interface. `harnesses/endpoint.py` builds every client from the [endpoint variables](../guide/running.md#the-model-endpoint), with automatic redirects disabled. `bench` removes `ANTHROPIC_CUSTOM_HEADERS`, which an assistant's shell may export for its own gateway, before Harbor starts, since the Anthropic SDK would send those headers, and native Messages refuses it when set. The key never enters a job's `kwargs`, `env`, or `config.json`.
+Terminus routes Chat Completions through LiteLLM under an `openai/` prefix, which pins its OpenAI-compatible provider, while Responses and Messages use their native SDKs through Harbor's `BaseLLM` interface. `harnesses/endpoint.py` builds every client from the [endpoint variables](../guide/running.md#the-model-endpoint), with automatic redirects disabled. `bench` removes `ANTHROPIC_CUSTOM_HEADERS`, which an assistant's shell may export for its own gateway, before Harbor starts, since the Anthropic SDK would send those headers, and native Messages refuses it when set. The key never enters a job's `kwargs`, `env`, or `config.json`.
 
 A single-call response that exhausts its allowance, refuses, or fails remains an incomplete attempt, while Terminus keeps Harbor's output-length handling, which salvages or re-requests a truncated turn. Neither harness retries for quality. Thinking blocks, signatures, and reasoning items stay in private artifacts and conversation state, outside model-visible user text and public outputs. Harbor owns the terminal command loop, its context management, and summarization.
 

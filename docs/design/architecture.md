@@ -26,6 +26,7 @@ src/assistant_bench/
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
 │   ├── labels.py                           # The kwargs that label a trial for collection
 │   ├── messages.py                         # Native Messages streaming and conversation content
+│   ├── native.py                           # The native SDK model client, conversation, and errors Terminus shares
 │   ├── options.py                          # The kwargs each harness builds from a system's generation identity
 │   ├── responses.py                        # Native SDK results and stateless conversation items
 │   ├── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint

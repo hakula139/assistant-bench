@@ -21,6 +21,7 @@ from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from assistant_bench.harnesses.messages import MessageStreamError
+from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.gates import failed_gates
 from support import (
@@ -36,7 +37,12 @@ from support import (
 
 pytestmark = pytest.mark.usefixtures('export')
 
-OPTIONS: dict[str, Any] = {'system': 's', 'fingerprint': 'f', 'max_output_tokens': 1}
+OPTIONS: dict[str, Any] = {
+    'api': 'openai-chat-completions',
+    'system': 's',
+    'fingerprint': 'f',
+    'max_output_tokens': 1,
+}
 
 
 def run_agent(
@@ -48,6 +54,7 @@ def run_agent(
 ) -> tuple[AgentContext, Path]:
     logs_dir.mkdir(parents=True, exist_ok=True)
     defaults: dict[str, Any] = {
+        'api': 'openai-chat-completions',
         'system': 'acme-large',
         'fingerprint': 'f1',
         'max_output_tokens': 64,
@@ -372,23 +379,38 @@ class TestGenerate:
                 'stop_details': recorded,
             }
 
-        def test_never_publishes_a_clean_early_eof_as_an_answer(
+        def test_neither_publishes_nor_counts_a_clean_early_eof(
             self, endpoint: StubEndpoint, tmp_path: Path
         ) -> None:
             endpoint.stream = message_stream(message())[:-1]
+            kwargs: dict[str, Any] = OPTIONS | {
+                'api': 'anthropic-messages',
+                'effort': 'high',
+                'thinking_mode': 'anthropic-adaptive',
+            }
+            agent = Generate(
+                logs_dir=tmp_path,
+                model_name='acme/large',
+                extra_env=endpoint.env,
+                **kwargs,
+            )
+            context = AgentContext()
 
             with pytest.raises(MessageStreamError, match='message_stop'):
-                run_agent(
-                    endpoint,
-                    tmp_path,
-                    api='anthropic-messages',
-                    effort='high',
-                    thinking_mode='anthropic-adaptive',
+                asyncio.run(
+                    agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context)
                 )
 
             assert not (tmp_path / OUTPUT_FILE).exists()
             assert (tmp_path / 'message.json').exists()
             assert len(endpoint.requests) == 1
+            assert context.metadata is not None
+            assert context.metadata['input_tokens'] == 130
+            assert (
+                context.n_input_tokens,
+                context.n_cache_tokens,
+                context.n_output_tokens,
+            ) == (None, None, None)
 
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
@@ -404,15 +426,17 @@ class TestGenerate:
             api: str,
         ) -> None:
             gate = endpoint.response_gate = threading.Event()
+            kwargs: dict[str, Any] = OPTIONS | {
+                'api': api,
+                'thinking_mode': 'anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
+            }
             agent = Generate(
                 logs_dir=tmp_path,
                 model_name='acme/large',
                 extra_env=endpoint.env,
-                api=api,
-                thinking_mode='anthropic-adaptive'
-                if api == 'anthropic-messages'
-                else None,
-                **OPTIONS,
+                **kwargs,
             )
             context = AgentContext()
 
@@ -675,7 +699,7 @@ class TestGenerate:
             context = AgentContext()
 
             with pytest.raises(
-                openai.APIError, match='did not return a finished response'
+                NativeCompletionError, match='did not return a finished response'
             ):
                 asyncio.run(
                     agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context)
@@ -729,14 +753,6 @@ class TestGenerate:
             first, first_output = run_agent(
                 endpoint, tmp_path / 'bounded', **agent_kwargs(bounded)
             )
-
-            assert first_output.read_text() == ''
-            assert first.n_output_tokens == 16000
-            assert first.metadata is not None
-            assert first.metadata['finish_reason'] == 'length'
-            assert first.metadata['reasoning_tokens'] == 16000
-            assert len(endpoint.requests) == 1
-
             generous = bounded.model_copy(
                 update={'max_output_tokens': 65536, 'context_window': 262144}
             )
@@ -750,11 +766,14 @@ class TestGenerate:
                 request.body['max_completion_tokens'] for request in endpoint.requests
             ] == [16000, 65536]
             assert fingerprint(generous) != fingerprint(bounded)
+            assert first_output.read_text() == ''
+            assert first.n_output_tokens == 16000
+            assert first.metadata is not None
+            assert first.metadata['finish_reason'] == 'length'
+            assert first.metadata['reasoning_tokens'] == 16000
             assert second_output.read_text() == 'A complete answer.'
             assert second.metadata is not None
             assert second.metadata['finish_reason'] == 'stop'
-            assert first_output.read_text() == ''
-            assert first.metadata['finish_reason'] == 'length'
 
         def test_uses_the_same_agent_export_for_preflight_and_metadata(
             self,

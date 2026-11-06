@@ -65,9 +65,7 @@ class Endpoint(BaseModel):
     )
 
     @classmethod
-    def read(
-        cls, env: Callable[[str], str | None], api: Api = 'openai-chat-completions'
-    ) -> Endpoint:
+    def read(cls, env: Callable[[str], str | None], api: Api) -> Endpoint:
         """Validate the value `env` returns for each endpoint variable."""
         names = (
             _base_var(api),
@@ -116,7 +114,6 @@ class Endpoint(BaseModel):
         )
 
     def messages_client(self) -> AsyncAnthropic:
-        _check_messages_environment(os.environ.get)
         return AsyncAnthropic(
             base_url=str(self.base_url),
             api_key=self.api_key(),
@@ -131,9 +128,7 @@ class Endpoint(BaseModel):
         )
 
 
-def preflight(
-    env: Mapping[str, str] | None = None, api: Api = 'openai-chat-completions'
-) -> None:
+def preflight(env: Mapping[str, str] | None, api: Api) -> None:
     """Raise unless the endpoint variables and the nixos-config export are set.
 
     The endpoint must also resolve to a usable one. `env` overrides the process
@@ -144,8 +139,11 @@ def preflight(
     def lookup(var: str) -> str | None:
         return overrides.get(var, os.environ.get(var))
 
-    if api == 'anthropic-messages':
-        _check_messages_environment(lookup)
+    if api == 'anthropic-messages' and lookup(SDK_HEADERS_VAR):
+        raise ValueError(
+            f'Unset `{SDK_HEADERS_VAR}`. Configure native endpoint headers '
+            f'with `{HEADERS_VAR}`.'
+        )
 
     required = (_base_var(api), KEY_FILE_VAR, EXPORT_VAR)
     missing = [var for var in required if not lookup(var)]
@@ -159,11 +157,3 @@ def preflight(
 
 def _base_var(api: Api) -> str:
     return ANTHROPIC_BASE_URL_VAR if api == 'anthropic-messages' else BASE_URL_VAR
-
-
-def _check_messages_environment(env: Callable[[str], str | None]) -> None:
-    if env(SDK_HEADERS_VAR):
-        raise ValueError(
-            f'Unset `{SDK_HEADERS_VAR}`. Configure native endpoint headers '
-            f'with `{HEADERS_VAR}`.'
-        )

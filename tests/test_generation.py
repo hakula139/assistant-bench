@@ -60,19 +60,6 @@ class TestGeneration:
             assert versions.version(harness, 'openai-responses') == base
             assert versions.version(harness, 'openai-chat-completions') == base
 
-        @pytest.mark.parametrize(
-            ('harness', 'expected'),
-            [('generate', '2'), ('terminus-2', '0.24.0+bench.2')],
-        )
-        def test_binds_native_agent_behavior_to_the_locked_harbor_version(
-            self, harness: str, expected: str
-        ) -> None:
-            versions = make_generation(protocol=2, harbor='0.24.0')
-
-            version = versions.version(harness)
-
-            assert version == expected
-
 
 class TestParseGeneration:
     def test_uses_the_declared_protocol_and_the_named_packages(self) -> None:
