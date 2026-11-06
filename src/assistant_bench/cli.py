@@ -192,7 +192,7 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
         try:
             _run(job)
         finally:
-            _collect(family, systems, export)
+            _echo_conflicts(family, _collect(family, systems, export))
 
 
 @app.command()
@@ -224,7 +224,8 @@ def collect(families: FamilyArguments = None) -> None:
 
     export, systems = _catalog()
     for name in names:
-        _collect(load_family(name), systems, export)
+        selected = load_family(name)
+        _echo_conflicts(selected, _collect(selected, systems, export))
 
 
 @app.command()
@@ -565,7 +566,7 @@ def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
 
 def _collect(
     family: Family, systems: dict[str, System], export: NixosConfigExport
-) -> None:
+) -> list[Output]:
     collected = collection.collect(family, systems)
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
@@ -599,9 +600,6 @@ def _collect(
     if unsolved := sorted(graded - solved):
         typer.echo(f'No system solved {code(unsolved)}.')
 
-    for conflict in pool_conflicts(family, outputs):
-        typer.echo(conflict)
-
     if family.source == 'tasks' and family.settings.systems:
         _author_rates(family, outputs, _family_systems(family, systems), export)
 
@@ -610,6 +608,13 @@ def _collect(
     )
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
+
+    return outputs
+
+
+def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
+    for conflict in pool_conflicts(family, outputs):
+        typer.echo(conflict)
 
 
 def _spend_line(entry: Spend) -> str:

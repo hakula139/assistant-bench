@@ -302,6 +302,20 @@ class TestPrepare:
         with pytest.raises(ValueError, match=message):
             prepare(make_votes_family(), [make_case('c')], outputs)
 
+    def test_checks_only_the_outputs_it_publishes_for_several_models(self) -> None:
+        cases = [make_case('c'), make_case('secret', 'held-out')]
+        outputs = [
+            make_trial('c', 'acme-large', response_models=('large-2026',)),
+            make_trial('c', 'acme-small'),
+            make_trial('secret', 'acme-large', response_models=('other-2026',)),
+        ]
+
+        production = prepare(make_votes_family(), cases, outputs)
+
+        assert [case.key for case in production.cases] == [
+            publication.case_key(cases[0])
+        ]
+
     def test_refuses_cases_a_voter_could_not_tell_apart(self) -> None:
         twin = make_case('first').model_copy(update={'id': 'twin'})
 

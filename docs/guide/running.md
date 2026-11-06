@@ -114,9 +114,9 @@ A terminal agent's trajectory `final_metrics` counts only responses with valid u
 
 ### Model Swaps
 
-A fingerprint hashes a system's route, so an endpoint that starts serving another model under an unchanged route keeps the fingerprint. The summary names each system whose outputs under one fingerprint report more than one model, with the first job that reported each, and, in a case family, where every sample of a case sends one request, each system whose outputs of one case differ by more than `max(2, 2%)` input tokens. `bench arena prepare` and `bench close` on a `tests` family refuse such a family, since publishing would start votes on the mixed pool and closing would freeze it.
+A fingerprint hashes a system's route, so an endpoint that starts serving another model under an unchanged route keeps the fingerprint. The summary names each system whose pool shows a swap by the signals [Systems](../design/systems.md#model-swaps) defines, with the jobs behind each signal. `bench arena prepare` and `bench close` on a `tests` family refuse such a family, since publishing would start votes on the mixed pool and closing would freeze it.
 
-When the route serves another model, delete the minority job's trials of that system under `jobs/<family>/` and rerun them, or give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes. [Systems](../design/systems.md#model-swaps) states what these signals cannot see.
+When the route serves another model, delete the minority job's trials of that system under `jobs/<family>/` and rerun them, or give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
 
 ## Voting
 

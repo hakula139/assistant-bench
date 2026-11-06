@@ -1037,11 +1037,11 @@ class TestCollect:
     def test_lists_each_model_a_terminal_agents_calls_reported(
         self, data_dir: Path
     ) -> None:
+        models = [f'model-{index}' for index in range(8)]
         calls = [
-            {'response_model': 'other-2026'},
-            {'response_model': 'large-2026'},
+            *({'response_model': model} for model in reversed(models)),
             {'response_model': None},
-            {'response_model': 'other-2026'},
+            {'response_model': models[-1]},
         ]
         record_trial(
             data_dir / 'jobs' / 'f' / 'job-1',
@@ -1053,7 +1053,7 @@ class TestCollect:
 
         (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
 
-        assert output.response_models == ('large-2026', 'other-2026')
+        assert output.response_models == tuple(models)
 
     def test_names_an_unknown_harness(self, families_dir: Path) -> None:
         family = with_settings(voted_tasks(families_dir), harness='claude-code')

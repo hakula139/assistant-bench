@@ -1,14 +1,14 @@
 """Output records of a family's trials, collected into the data directory."""
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from assistant_bench.families import Family, Gate
-from assistant_bench.messages import InputError, count_of
+from assistant_bench.messages import InputError, count_of, error_lines
 from assistant_bench.paths import data_dir, write_atomically
 
 
@@ -117,27 +117,31 @@ def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
 
     conflicts: list[str] = []
     for (system, _), pool in sorted(pools.items()):
-        first_jobs: dict[str, str] = {}
-        for output in sorted(pool, key=lambda output: output.job):
+        jobs: defaultdict[str, Counter[str]] = defaultdict(Counter)
+        for output in pool:
             for model in output.response_models:
-                first_jobs.setdefault(model, output.job)
-        if len(first_jobs) > 1:
+                jobs[model][output.job] += 1
+        if len(jobs) > 1:
             models = ', '.join(
-                f'`{model}` from job `{job}`'
-                for model, job in sorted(first_jobs.items())
+                f'`{model}` from '
+                + ' and '.join(
+                    f'job `{job}` ({count_of(count, "output")})'
+                    for job, count in sorted(counts.items())
+                )
+                for model, counts in sorted(jobs.items())
             )
             conflicts.append(f'System `{system}` reported several models: {models}.')
 
         if family.source == 'cases' and (spreads := _token_spreads(pool)):
-            case, low, high = spreads[0]
+            case, (low, low_job), (high, high_job) = spreads[0]
             others = (
                 f', one of {count_of(len(spreads), "case")} whose counts differ'
                 if len(spreads) > 1
                 else ''
             )
             conflicts.append(
-                f'System `{system}` sent case `{case}` with {low:,} and {high:,} '
-                f'input tokens{others}.'
+                f'System `{system}` sent case `{case}` with {low:,} input tokens in '
+                f'job `{low_job}` and {high:,} in job `{high_job}`{others}.'
             )
 
     return conflicts
@@ -167,25 +171,42 @@ def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
         )
 
 
-def _token_spreads(pool: Iterable[Output]) -> list[tuple[str, int, int]]:
-    """Return each case whose input tokens differ beyond the tolerance, with both."""
-    counts: defaultdict[str, list[int]] = defaultdict(list)
+def _token_spreads(
+    pool: Iterable[Output],
+) -> list[tuple[str, tuple[int, str], tuple[int, str]]]:
+    """Return each case whose input tokens spread past the tolerance, with extremes."""
+    counts: defaultdict[str, list[tuple[int, str]]] = defaultdict(list)
     for output in pool:
         if output.input_tokens is not None:
-            counts[output.case].append(output.input_tokens)
+            counts[output.case].append((output.input_tokens, output.job))
     return [
-        (case, min(values), max(values))
+        (case, low, high)
         for case, values in sorted(counts.items())
-        if max(values) - min(values) > max(2, 0.02 * min(values))
+        if (high := max(values))[0] - (low := min(values))[0] > max(2, 0.02 * low[0])
     ]
 
 
 def read_outputs(family: str) -> list[Output]:
-    """Return the family's outputs, or none before its first collection."""
+    """Return the family's outputs, or none before its first collection.
+
+    Raises
+    ------
+    InputError
+        A line does not validate as an output, as a file an older collection
+        wrote does not.
+    """
     path = _outputs_file(family)
     if not path.exists():
         return []
-    return [Output.model_validate_json(line) for line in path.read_text().splitlines()]
+    try:
+        return [
+            Output.model_validate_json(line) for line in path.read_text().splitlines()
+        ]
+    except ValidationError as error:
+        raise InputError(
+            f'{error_lines(error, f"Outputs `{path}`")}\n'
+            f'Run `uv run bench collect {family}` to rewrite it.'
+        ) from error
 
 
 def write_outputs(family: str, outputs: list[Output]) -> None:

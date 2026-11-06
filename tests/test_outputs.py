@@ -1,9 +1,12 @@
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from assistant_bench.families import Family
-from assistant_bench.outputs import pool_conflicts
+from assistant_bench.messages import InputError
+from assistant_bench.outputs import pool_conflicts, read_outputs
 from support import VOTES, make_output
 
 
@@ -27,13 +30,14 @@ class TestPoolConflicts:
                 [
                     {'job': 'job-2', 'response_models': ('large-2026',)},
                     {'job': 'job-1', 'response_models': ('large-2026',)},
+                    {'job': 'job-2', 'response_models': ('large-2026',)},
                     {'job': 'job-3', 'response_models': ('other-2026',)},
-                    {'job': 'job-4', 'response_models': ('other-2026',)},
                 ],
                 TASKS,
                 [
                     'System `s` reported several models: `large-2026` from job '
-                    '`job-1`, `other-2026` from job `job-3`.'
+                    '`job-1` (1 output) and job `job-2` (2 outputs), `other-2026` from '
+                    'job `job-3` (1 output).'
                 ],
                 id='two-models',
             ),
@@ -52,8 +56,9 @@ class TestPoolConflicts:
             ),
             pytest.param(
                 [
-                    {'case': 'a', 'input_tokens': 1_000},
-                    {'case': 'a', 'input_tokens': 1_050},
+                    {'case': 'a', 'input_tokens': 1_030, 'job': 'job-1'},
+                    {'case': 'a', 'input_tokens': 1_050, 'job': 'job-3'},
+                    {'case': 'a', 'input_tokens': 1_000, 'job': 'job-2'},
                     {'case': 'b', 'input_tokens': 300},
                     {'case': 'b', 'input_tokens': 310},
                     {'case': 'c', 'input_tokens': 50},
@@ -61,10 +66,22 @@ class TestPoolConflicts:
                 ],
                 VOTES,
                 [
-                    'System `s` sent case `a` with 1,000 and 1,050 input tokens, one '
-                    'of 3 cases whose counts differ.'
+                    'System `s` sent case `a` with 1,000 input tokens in job `job-2` '
+                    'and 1,050 in job `job-3`, one of 3 cases whose counts differ.'
                 ],
                 id='beyond-tolerance',
+            ),
+            pytest.param(
+                [
+                    {'input_tokens': 5_000, 'job': 'job-1'},
+                    {'input_tokens': 5_101, 'job': 'job-2'},
+                ],
+                VOTES,
+                [
+                    'System `s` sent case `c` with 5,000 input tokens in job `job-1` '
+                    'and 5,101 in job `job-2`.'
+                ],
+                id='past-tolerance',
             ),
             pytest.param(
                 [{'input_tokens': 300}, {'input_tokens': 400}],
@@ -97,3 +114,20 @@ class TestPoolConflicts:
         conflicts = pool_conflicts(family, records)
 
         assert conflicts == expected
+
+
+class TestReadOutputs:
+    def test_names_a_file_an_older_collection_wrote(self, data_dir: Path) -> None:
+        record = json.loads(make_output().model_dump_json())
+        del record['response_models']
+        path = data_dir / 'outputs' / 'f.jsonl'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(record) + '\n')
+
+        with pytest.raises(InputError) as raised:
+            read_outputs('f')
+
+        assert str(raised.value) == (
+            f'Outputs `{path}`: `response_models`: Field required.\n'
+            'Run `uv run bench collect f` to rewrite it.'
+        )

@@ -18,6 +18,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
@@ -1557,8 +1558,8 @@ class TestCollect:
 
         assert result.exit_code == 0, result.output
         assert (
-            'System `large` reported several models: `large-2026` from job `job-1`, '
-            '`other-2026` from job `job-2`.\n'
+            'System `large` reported several models: `large-2026` from job `job-1` '
+            '(1 output), `other-2026` from job `job-2` (1 output).\n'
         ) in result.stdout
 
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(
@@ -1979,6 +1980,41 @@ class TestClose:
         assert closed.systems['opus-5.5-high'].display_name == system.display_name
         assert closed.systems['opus-5.5-high'].fingerprint == fingerprint(run)
         assert 'Family `f`: 1 output, 0 errored.' in result.output
+
+    def test_names_each_conflict_once_when_it_refuses_the_close(
+        self, families_dir: Path
+    ) -> None:
+        write_task_family(families_dir, 'echo', samples=2)
+        settings = families_dir / 'f/family.toml'
+        settings.write_text(
+            settings.read_text()
+            + 'systems = ["opus-5.5-high"]\nharness = "terminus-2"\n'
+        )
+        task = families_dir / 'f/tasks/echo'
+        config = TaskConfig.model_validate_toml((task / 'task.toml').read_text())
+        config.metadata['author'] = 'opus-5.5-high'
+        config.metadata['author_vendor'] = 'anthropic'
+        (task / 'task.toml').write_text(config.model_dump_toml())
+        family = load_family('f')
+        system = load_systems(load_export())['opus-5.5-high']
+        job_dir = finish_job(
+            jobs.job(
+                family,
+                jobs.family_systems(family, [system]),
+                [task],
+            )
+        )
+        models = ('large-2026', 'other-2026')
+        trials = sorted(job_dir.glob('*/result.json'))
+        for path, model in zip(trials, models, strict=True):
+            result = TrialResult.model_validate_json(path.read_text())
+            result.agent_result = AgentContext(metadata={'response_model': model})
+            path.write_text(result.model_dump_json())
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 1
+        assert result.output.count('reported several models') == 1, result.output
 
 
 class TestFingerprints:
