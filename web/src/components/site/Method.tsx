@@ -36,40 +36,39 @@ const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConic
 
 const aspectIcons: Record<Aspect, LucideIcon> = { writing: PenLine, coding: SquareTerminal };
 
-export function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string }) {
-  const Icon = aspectIcons[aspect];
+function Glyph({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
   return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;
 }
 
 export function AspectTitle({ aspect }: { aspect: Aspect }) {
   return (
     <>
-      <AspectIcon aspect={aspect} className="size-[0.8em]" />
+      <Glyph icon={aspectIcons[aspect]} className="size-[0.8em]" />
       {aspects[aspect].title}
     </>
   );
 }
 
-export function ScorerIcon({ scorer, className }: { scorer: Scorer; className?: string }) {
-  const Icon = scorerIcons[scorer];
-  return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;
+export function ScorerIcon({ scorer }: { scorer: Scorer }) {
+  return <Glyph icon={scorerIcons[scorer]} />;
 }
 
+/** `of` gives a family's config, whose steps open hints, or a scorer alone. */
 export function MethodStrip({
-  scorer,
-  config,
+  of,
   links = {},
 }: {
-  scorer: Scorer;
-  config?: FamilyConfig;
+  of: Scorer | FamilyConfig;
   links?: Partial<Record<MethodStep['step'], string>>;
 }) {
+  const scorer = typeof of === 'string' ? of : of.scorer;
+
   return (
     <ol
       aria-label={`${scorers[scorer].title} scoring steps`}
       className="flex flex-wrap items-center gap-x-2 gap-y-3 text-sm max-md:flex-col max-md:items-start max-md:gap-y-2"
     >
-      {methodSteps(scorer, config).map(({ step, title, detail, hint }, i) => {
+      {methodSteps(of).map(({ step, title, detail, hint }, i) => {
         const Icon = stepIcons[step];
         const href = links[step];
 

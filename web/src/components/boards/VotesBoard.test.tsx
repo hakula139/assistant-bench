@@ -2,38 +2,21 @@
 import { cleanup, render as renderInDom, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToString } from 'react-dom/server';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { VotesBoard } from '@/components/boards/VotesBoard';
 import { Forest } from '@/components/site/Forest';
 import { forestDomain, roundRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
-import { reportSchema, type PassRate } from '@/lib/report';
+import type { PassRate } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
-import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
+import { FIXTURE_NAMES, readReport, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 import { trackDrawing, type TrackDrawing } from '@/test/track';
 
-const search = vi.hoisted(() => new URLSearchParams());
-vi.mock('@/lib/use-search-param', () => ({
-  useSearchParam: (name: string, fallback: string | null) => [
-    search.get(name) ?? fallback,
-    (value: string | null) => {
-      if (value === null) {
-        search.delete(name);
-      } else {
-        search.set(name, value);
-      }
-    },
-  ],
-}));
-
 async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRound> {
-  const report = reportSchema.parse(await readFixture(name));
-  if (report.results.scorer !== 'votes') {
-    throw new Error('the fixture is a votes report');
-  }
+  const report = await readReport(name, 'votes');
   return {
     family: report.family,
     round: report.round,
@@ -79,12 +62,17 @@ function render(round: VotesRound, names?: Record<string, string>, labels = CASE
         ]),
       )
     : round.systems;
-  return renderToString(
+  const { container, unmount } = renderInDom(
     <VotesBoard base={BOARD} round={{ ...round, systems, results: reversed }} labels={labels} />,
   );
+  const html = container.innerHTML;
+  unmount();
+  return html;
 }
 
-const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+// A tag, whose quoted attribute values may hold `>`.
+const text = (html: string) =>
+  html.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, ' ').replace(/\s+/g, ' ');
 
 const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
 
@@ -112,10 +100,11 @@ const legend = (html: string) =>
   text(/<ul aria-label="Legend"[^>]*>([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '').trim();
 
 describe('VotesBoard', () => {
-  afterEach(() => {
-    search.delete('category');
-    cleanup();
+  beforeEach(() => {
+    stubPlotFrame();
+    window.history.replaceState(null, '', '/');
   });
+  afterEach(cleanup);
 
   test('draws the labels, coverage marks, and copy of the round it shows', async () => {
     const earlier = await load('report-early');
@@ -166,7 +155,6 @@ describe('VotesBoard', () => {
   test('starts in score order and sorts systems in both directions', async () => {
     const round = await load();
     round.results.standings.reverse();
-    stubPlotFrame();
     const user = userEvent.setup();
 
     const { container } = renderInDom(<VotesBoard base={BOARD} round={round} labels={CASES} />);
@@ -306,7 +294,6 @@ describe('VotesBoard', () => {
     const { family, round, results, systems, closed_at } = await load();
     results.reference = 'acme-new';
     systems['acme-new'] = { display_name: 'Acme New', fingerprint: null };
-    stubPlotFrame();
     renderInDom(
       <VotesBoard
         base={BOARD}
@@ -356,7 +343,7 @@ describe('VotesBoard', () => {
     async (category) => {
       const round = await load();
       Object.assign(round.results.standings[0], { mean_cost_usd: null, cost_gap: 'unpriced' });
-      search.set('category', category);
+      window.history.replaceState(null, '', `/?category=${category}`);
 
       const html = render(round);
 
@@ -393,7 +380,7 @@ describe('VotesBoard', () => {
   });
 
   test('drops the rank column in a category and marks the columns that stay family-wide', async () => {
-    search.set('category', 'message');
+    window.history.replaceState(null, '', '/?category=message');
 
     const header = parse(render(await load())).querySelector('thead');
     for (const axis of header?.querySelectorAll('[aria-hidden="true"]') ?? []) {
@@ -406,7 +393,7 @@ describe('VotesBoard', () => {
   });
 
   test('replaces the gate column with a family-wide pass rate for a tested family', async () => {
-    search.set('category', 'message');
+    window.history.replaceState(null, '', '/?category=message');
 
     const header = parse(render(await loadTested(), undefined, DIFFS)).querySelector('thead');
     for (const axis of header?.querySelectorAll('[aria-hidden="true"]') ?? []) {
@@ -419,7 +406,6 @@ describe('VotesBoard', () => {
   });
 
   test('sorts a tested family by pass rate with its interval, highest first and missing last', async () => {
-    stubPlotFrame();
     const { container } = renderInDom(
       <VotesBoard base={BOARD} round={await loadTested()} labels={DIFFS} />,
     );
@@ -442,7 +428,7 @@ describe('VotesBoard', () => {
   });
 
   test('shows the family board for a category the round does not have', async () => {
-    search.set('category', 'missing');
+    window.history.replaceState(null, '', '/?category=missing');
 
     const html = render(await load());
 
@@ -486,7 +472,6 @@ describe('VotesBoard', () => {
     }
     categoryBoard.standings = [{ ...categoryBoard.standings[0], score: 1100 }];
     const { family, round, results, systems, closed_at } = report;
-    stubPlotFrame();
     const user = userEvent.setup();
     renderInDom(
       <VotesBoard
@@ -497,9 +482,9 @@ describe('VotesBoard', () => {
     );
     const select = screen.getByLabelText<HTMLSelectElement>('Category');
 
-    await user.selectOptions(select, 'category:message');
+    await user.selectOptions(select, 'message');
 
-    expect(search.get('category')).toBe('message');
+    expect(new URLSearchParams(window.location.search).get('category')).toBe('message');
     const selected = render(report);
     expect(text(head(selected))).toMatch(/^ System /);
     expect(text(parse(selected).querySelector('tbody')?.innerHTML ?? '')).toContain('1,100');
@@ -507,7 +492,7 @@ describe('VotesBoard', () => {
     const aggregate = screen.getByRole<HTMLOptionElement>('option', { name: 'All categories' });
     await user.selectOptions(select, aggregate.value);
 
-    expect(search.has('category')).toBe(false);
+    expect(window.location.search).toBe('');
     expect(text(head(render(report)))).toMatch(/^ Rank What Rank means System /);
   });
 
@@ -547,7 +532,7 @@ describe('VotesBoard', () => {
     ]);
 
     expect(legends).toEqual([
-      ['max-lg:hidden', null, legend(render(await load()))],
+      ['max-lg:hidden', null, 'Point score Score below the axis Anchor, 1,000'],
       [undefined, 'Categories', expect.stringContaining('Preliminary')],
     ]);
   });
@@ -574,8 +559,7 @@ describe('VotesBoard', () => {
   ] as const)(
     "opens a system's votes and rates from its score on the %s board of a %s family",
     async (category, _family, output, score, loadRound, details) => {
-      search.set('category', category);
-      stubPlotFrame();
+      window.history.replaceState(null, '', `/?category=${category}`);
       renderInDom(
         <VotesBoard
           base={BOARD}
@@ -643,21 +627,6 @@ describe('VotesBoard', () => {
     },
   );
 
-  test('draws no anchor rule in a category that leaves the anchor out', async () => {
-    const round = await load();
-    const message = round.results.categories.find((board) => board.category === 'message');
-    if (!message) {
-      throw new Error('the fixture has a message category');
-    }
-    message.standings = message.standings.filter((refit) => refit.system !== round.results.anchor);
-    search.set('category', 'message');
-
-    const drawn = Object.values(tracks(render(round)));
-
-    expect(drawn).toHaveLength(message.standings.length);
-    expect(drawn.map(({ ruleAt }) => ruleAt)).toEqual(drawn.map(() => null));
-  });
-
   test('keeps every category row and the systems only the category ranks', async () => {
     const round = await load();
     const message = round.results.categories.find((board) => board.category === 'message');
@@ -667,7 +636,7 @@ describe('VotesBoard', () => {
     }
     refit.system = 'acme-edge';
     message.unranked = ['acme-nano'];
-    search.set('category', 'message');
+    window.history.replaceState(null, '', '/?category=message');
 
     const html = render(round);
 

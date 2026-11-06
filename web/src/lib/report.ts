@@ -123,7 +123,7 @@ const testsStanding = z.strictObject({
 });
 
 const testsCategory = z.strictObject({
-  category: z.string(),
+  category: z.enum(categories),
   standings: z.array(
     z.strictObject({ system: z.string(), tasks: z.int().min(1), pass_rate: passRate }),
   ),

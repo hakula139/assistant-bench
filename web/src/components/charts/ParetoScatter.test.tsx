@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import {
   paretoFrontier,
@@ -8,7 +8,7 @@ import {
   placeLabels,
   type ScatterPoint,
 } from '@/components/charts/ParetoScatter';
-import { stubPlotFrame } from '@/test/plot';
+import { drawnSvg, stubPlotFrame } from '@/test/plot';
 
 const point = (system: string, x: number, score: number): ScatterPoint => ({
   system,
@@ -42,145 +42,120 @@ describe('paretoFrontier', () => {
 });
 
 describe('placeLabels', () => {
-  test('moves a label off another point', () => {
-    const leader = point('leader', 100, 100);
-    const below = point('below', 60, 89);
+  const open = { left: 0, right: 300, top: 0, bottom: 300 };
 
+  test.each([
+    {
+      title: 'moves a label off another point',
+      labelled: point('leader', 100, 100),
+      others: [point('below', 60, 89)],
+      width: 50,
+      bounds: open,
+      expected: { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
+    },
+    {
+      title: 'moves a label off a spot nearer another dot, though it clears that dot',
+      labelled: point('small', 100, 100),
+      others: [point('pro', 98, 89)],
+      width: 50,
+      bounds: open,
+      expected: { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
+    },
+    {
+      title: 'takes the centered spot above where every corner sits nearer another dot',
+      labelled: point('crowded', 100, 100),
+      others: [
+        point('upper-left', 68, 89),
+        point('upper-right', 132, 89),
+        point('lower-right', 132, 113),
+        point('lower-left', 68, 113),
+      ],
+      width: 50,
+      bounds: open,
+      expected: { placement: { dx: 0, dy: -13, textAnchor: 'middle' } },
+    },
+    {
+      title: 'ties a label on the far ring to its dot with a leader that passes no other dot',
+      labelled: point('boxed', 100, 100),
+      others: [
+        point('left', 82, 100),
+        point('right', 118, 100),
+        point('above', 100, 84),
+        point('below', 100, 118),
+        point('on-the-way', 89.5, 91),
+      ],
+      width: 20,
+      bounds: open,
+      expected: { placement: { dx: 21, dy: -25, textAnchor: 'start' }, leader: [121, 82] },
+    },
+    {
+      title: 'leaves a label off where no spot on either ring fits',
+      labelled: point('cornered', 10, 10),
+      others: [],
+      width: 50,
+      bounds: { left: 0, right: 20, top: 0, bottom: 20 },
+      expected: undefined,
+    },
+  ])('$title', ({ labelled, others, width, bounds, expected }) => {
     const placements = placeLabels(
-      [leader],
-      [leader, below],
+      [labelled],
+      [labelled, ...others],
       (x, score) => [x, score],
-      () => 50,
-      { left: 0, right: 300, top: 0, bottom: 300 },
+      () => width,
+      bounds,
     );
 
-    expect(placements.get(leader)).toEqual({ placement: { dx: 7, dy: -11, textAnchor: 'start' } });
+    expect(placements.get(labelled)).toEqual(expected);
   });
 
-  test('moves a label off a spot nearer another dot, though it clears that dot', () => {
-    const small = point('small', 100, 100);
-    const pro = point('pro', 98, 89);
-
-    const placements = placeLabels(
-      [small],
-      [small, pro],
-      (x, score) => [x, score],
-      () => 50,
-      { left: 0, right: 300, top: 0, bottom: 300 },
-    );
-
-    expect(placements.get(small)).toEqual({ placement: { dx: 7, dy: -11, textAnchor: 'start' } });
-  });
-
-  test('takes the centered spot above where every corner sits nearer another dot', () => {
-    const crowded = point('crowded', 100, 100);
-    const neighbors = [
-      point('upper-left', 68, 89),
-      point('upper-right', 132, 89),
-      point('lower-right', 132, 113),
-      point('lower-left', 68, 113),
-    ];
-
-    const placements = placeLabels(
-      [crowded],
-      [crowded, ...neighbors],
-      (x, score) => [x, score],
-      () => 50,
-      { left: 0, right: 300, top: 0, bottom: 300 },
-    );
-
-    expect(placements.get(crowded)).toEqual({
-      placement: { dx: 0, dy: -13, textAnchor: 'middle' },
-    });
-  });
-
-  test('ties a label on the far ring to its dot with a leader that passes no other dot', () => {
-    const boxed = point('boxed', 100, 100);
-    const neighbors = [
-      point('left', 82, 100),
-      point('right', 118, 100),
-      point('above', 100, 84),
-      point('below', 100, 118),
-      point('on-the-way', 89.5, 91),
-    ];
-
-    const placements = placeLabels(
-      [boxed],
-      [boxed, ...neighbors],
-      (x, score) => [x, score],
-      () => 20,
-      { left: 0, right: 300, top: 0, bottom: 300 },
-    );
-
-    expect(placements.get(boxed)).toEqual({
-      placement: { dx: 21, dy: -25, textAnchor: 'start' },
-      leader: [121, 82],
-    });
-  });
-
-  test('leaves a label off where no spot on either ring fits', () => {
-    const cornered = point('cornered', 10, 10);
-
-    const placements = placeLabels(
-      [cornered],
-      [cornered],
-      (x, score) => [x, score],
-      () => 50,
-      { left: 0, right: 20, top: 0, bottom: 20 },
-    );
-
-    expect(placements.has(cornered)).toBe(false);
-  });
-
-  // Dot positions and label widths from the latest synthetic round's scatters at a 390 px viewport.
   test.each([
     {
       chart: 'cost',
       frontier: [
-        point('DeepSeek V4.1 Flash 1017 · High', 61, 262.7),
-        point('Gemini 3.8 Flash · High', 119.4, 152),
-        point('Kimi K3 · High', 154.7, 50.6),
-        point('Gemini 4 Argon · High', 239.6, 48),
+        point('Acme Edge 2.1 Flash 1017 · High', 61, 262.7),
+        point('Acme Flash · High', 119.4, 152),
+        point('Acme Mini · High', 154.7, 50.6),
+        point('Acme Large · High', 239.6, 48),
       ],
       others: [
-        point('Claude Opus 5.5 · High', 326, 48.5),
+        point('Acme Pro · High', 326, 48.5),
         point('a', 305.1, 164.2),
         point('b', 267.6, 252.5),
       ],
       expected: {
-        'DeepSeek V4.1 Flash 1017 · High': { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
-        'Gemini 3.8 Flash · High': { placement: { dx: 7, dy: 13, textAnchor: 'start' } },
-        'Kimi K3 · High': { placement: { dx: -7, dy: -11, textAnchor: 'end' } },
-        'Gemini 4 Argon · High': { placement: { dx: 0, dy: -13, textAnchor: 'middle' } },
+        'Acme Edge 2.1 Flash 1017 · High': { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
+        'Acme Flash · High': { placement: { dx: 7, dy: 13, textAnchor: 'start' } },
+        'Acme Mini · High': { placement: { dx: -7, dy: -11, textAnchor: 'end' } },
+        'Acme Large · High': { placement: { dx: 0, dy: -13, textAnchor: 'middle' } },
       },
     },
     {
       chart: 'latency',
       frontier: [
-        point('Gemini 3.8 Flash · High', 61, 152),
-        point('Kimi K3 · High', 75.2, 50.6),
-        point('Gemini 4 Argon · High', 188.3, 48),
+        point('Acme Flash · High', 61, 152),
+        point('Acme Mini · High', 75.2, 50.6),
+        point('Acme Large · High', 188.3, 48),
       ],
       others: [
-        point('Claude Opus 5.5 · High', 256.9, 48.5),
+        point('Acme Pro · High', 256.9, 48.5),
         point('a', 326, 164.2),
         point('b', 102, 252.5),
         point('c', 154.9, 262.7),
       ],
       expected: {
-        'Gemini 3.8 Flash · High': { placement: { dx: 7, dy: 13, textAnchor: 'start' } },
-        'Kimi K3 · High': { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
-        'Gemini 4 Argon · High': { placement: { dx: 0, dy: 15, textAnchor: 'middle' } },
+        'Acme Flash · High': { placement: { dx: 7, dy: 13, textAnchor: 'start' } },
+        'Acme Mini · High': { placement: { dx: 7, dy: -11, textAnchor: 'start' } },
+        'Acme Large · High': { placement: { dx: 0, dy: 15, textAnchor: 'middle' } },
       },
     },
   ])(
     'keeps every label beside its own dot on the narrow $chart scatter',
     ({ frontier, others, expected }) => {
       const widths: Record<string, number> = {
-        'DeepSeek V4.1 Flash 1017 · High': 180.2,
-        'Gemini 3.8 Flash · High': 124.8,
-        'Kimi K3 · High': 75.9,
-        'Gemini 4 Argon · High': 116.9,
+        'Acme Edge 2.1 Flash 1017 · High': 180.2,
+        'Acme Flash · High': 124.8,
+        'Acme Mini · High': 75.9,
+        'Acme Large · High': 116.9,
       };
       const placements = placeLabels(
         frontier,
@@ -212,11 +187,7 @@ describe('ParetoScatter', () => {
       <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
     );
 
-    const svg = await vi.waitFor(() => {
-      const found = container.querySelector('svg');
-      expect(found).not.toBeNull();
-      return found as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
     const positions = [...svg.querySelectorAll('g[aria-label="dot"] circle')].map((dot) => [
       Number(dot.getAttribute('cx')),
       Number(dot.getAttribute('cy')),
@@ -246,11 +217,7 @@ describe('ParetoScatter', () => {
       const { container } = render(
         <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
       );
-      const svg = await vi.waitFor(() => {
-        const found = container.querySelector('svg');
-        expect(found).not.toBeNull();
-        return found as SVGSVGElement;
-      });
+      const svg = await drawnSvg(container);
 
       const group = svg.querySelector('g[aria-label="y-axis tick label"]');
       const offset = (element: Element | null) =>
@@ -278,11 +245,7 @@ describe('ParetoScatter', () => {
     const { container } = render(
       <ParetoScatter points={points} label="Latency" format={(value) => `${value} seconds`} />,
     );
-    const svg = await vi.waitFor(() => {
-      const found = container.querySelector('svg');
-      expect(found).not.toBeNull();
-      return found as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
 
     const ticks = [...svg.querySelectorAll('g[aria-label="x-axis tick label"] text')].map(
       (node) => node.textContent,
@@ -306,11 +269,7 @@ describe('ParetoScatter', () => {
     const { container } = render(
       <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
     );
-    const svg = await vi.waitFor(() => {
-      const found = container.querySelector('svg');
-      expect(found).not.toBeNull();
-      return found as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
 
     const dot = svg.querySelectorAll('g[aria-label="dot"] circle')[points.indexOf(boxed)];
     const [cx, cy] = [Number(dot.getAttribute('cx')), Number(dot.getAttribute('cy'))];
@@ -336,11 +295,7 @@ describe('ParetoScatter', () => {
     const { container } = render(
       <ParetoScatter points={points} label="Price" format={(value) => `$${value}`} />,
     );
-    const svg = await vi.waitFor(() => {
-      const found = container.querySelector('svg');
-      expect(found).not.toBeNull();
-      return found as SVGSVGElement;
-    });
+    const svg = await drawnSvg(container);
     const cheap = svg.querySelector('g[aria-label="dot"] circle');
 
     svg.dispatchEvent(

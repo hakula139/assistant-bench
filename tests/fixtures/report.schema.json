@@ -497,8 +497,7 @@
       "additionalProperties": false,
       "properties": {
         "category": {
-          "title": "Category",
-          "type": "string"
+          "$ref": "#/$defs/Category"
         },
         "standings": {
           "items": {

@@ -56,8 +56,10 @@ interface LeaderboardProps {
   rows: LeaderboardRow[];
   /** Whether the rows are the family board's, with its ranks, or a category's refits. */
   ranked: boolean;
-  /** The system the scores are relative to, marked by name and ruled on the axis at its score. */
+  /** The system the scores are relative to, marked by name. */
   anchorSystem: string;
+  /** The anchor's fixed score, ruled on the axis. */
+  anchorScore: number;
   /** The mark's definition, which names the reference when the anchor stands in for it. */
   anchorTerm: Term;
   preliminaryTerm: Term;
@@ -85,16 +87,16 @@ const helper = createColumnHelper<typeof features, LeaderboardRow>();
 function ScoreCell({
   row,
   domain,
-  anchor,
+  anchorScore,
 }: {
   row: LeaderboardRow;
   domain: [number, number];
-  anchor: number | undefined;
+  anchorScore: number;
 }) {
   const summary = `${row.name}: ${formatScore(row.score)}`;
   return (
     <div role="img" aria-label={summary} title={summary} className="absolute inset-x-4 inset-y-0">
-      <ScoreTrack domain={domain} anchorScore={anchor} estimate={row} />
+      <ScoreTrack domain={domain} anchorScore={anchorScore} estimate={row} />
     </div>
   );
 }
@@ -144,11 +146,8 @@ function PassRateCell({ rate }: { rate: PassRate | null }) {
   );
 }
 
-const anchorScore = (rows: LeaderboardRow[], anchorSystem: string) =>
-  rows.find((row) => row.system === anchorSystem)?.score;
-
 /** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
-export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): LegendMark[] {
+export function leaderboardMarks(rows: LeaderboardRow[], anchorScore: number): LegendMark[] {
   return legendMarks(
     rows.map((row) => ({
       system: row.system,
@@ -157,7 +156,7 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorSystem: string): 
       preliminary: row.preliminary,
     })),
     forestDomain(rows),
-    anchorScore(rows, anchorSystem),
+    anchorScore,
   );
 }
 
@@ -166,12 +165,12 @@ export function Leaderboard({
   rows,
   ranked,
   anchorSystem,
+  anchorScore,
   anchorTerm,
   preliminaryTerm,
   gateFailures,
 }: LeaderboardProps) {
   const domain = useMemo(() => forestDomain(rows), [rows]);
-  const anchor = anchorScore(rows, anchorSystem);
   const tested = rows.some((row) => (row.standing?.pass_rate ?? null) !== null);
 
   const columns = useMemo(() => {
@@ -218,8 +217,10 @@ export function Leaderboard({
       }),
       helper.display({
         id: 'point',
-        header: () => <TrackAxis domain={domain} anchorScore={anchor} />,
-        cell: ({ row }) => <ScoreCell row={row.original} domain={domain} anchor={anchor} />,
+        header: () => <TrackAxis domain={domain} anchorScore={anchorScore} />,
+        cell: ({ row }) => (
+          <ScoreCell row={row.original} domain={domain} anchorScore={anchorScore} />
+        ),
         meta: { forest: true },
       }),
       helper.accessor('score', {
@@ -292,7 +293,16 @@ export function Leaderboard({
             },
           }),
     ]);
-  }, [ranked, tested, domain, anchor, anchorSystem, anchorTerm, preliminaryTerm, gateFailures]);
+  }, [
+    ranked,
+    tested,
+    domain,
+    anchorScore,
+    anchorSystem,
+    anchorTerm,
+    preliminaryTerm,
+    gateFailures,
+  ]);
 
   const table = useTable({
     features,

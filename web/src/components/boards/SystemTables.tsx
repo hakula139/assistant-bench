@@ -151,7 +151,7 @@ export function DistributionTable({
   );
 }
 
-/** Counts each defect the standing's family lists, in the family's order, as the report keys them. */
+/** Counts each defect the family lists, in the family's order, as the report keys them. */
 export function DefectsTable({ standing }: { standing: Standing }) {
   const tagged = Object.entries(standing.defects) as [Defect, number][];
 
@@ -215,18 +215,14 @@ export function RoundsTable({
               <TableRow key={round}>
                 <TableCell>
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    {identity.fingerprint === null ? (
-                      <span title={identity.display_name}>{round}</span>
-                    ) : (
-                      <Hint
-                        term={{
-                          ...fingerprintTerm(identity.fingerprint),
-                          term: identity.display_name,
-                        }}
-                      >
-                        {round}
-                      </Hint>
-                    )}
+                    <Hint
+                      term={{
+                        ...fingerprintTerm(identity.fingerprint),
+                        term: identity.display_name,
+                      }}
+                    >
+                      {round}
+                    </Hint>
                     {anchor !== reference && (
                       <StatusMark
                         status="anchor"

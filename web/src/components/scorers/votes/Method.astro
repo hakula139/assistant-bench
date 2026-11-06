@@ -1,11 +1,11 @@
 ---
 import { partId } from '@/components/scorers/parts';
 import { votesParts } from '@/components/scorers/votes/parts';
-import { drawnMarks, Forest, ForestLegend } from '@/components/site/Forest';
+import { Forest, ForestLegend } from '@/components/site/Forest';
 import { Glossary, type GlossaryEntry } from '@/components/site/Glossary';
 import { MethodStrip } from '@/components/site/Method';
 import { note, Part } from '@/components/site/PageParts';
-import { AXIS_SPAN_BELOW_TOP, EMPTY_DOMAIN, type ForestRow } from '@/lib/forest';
+import { AXIS_SPAN_BELOW_TOP, EMPTY_DOMAIN, legendMarks, type ForestRow } from '@/lib/forest';
 import { formatCount } from '@/lib/format';
 import { gates, inferenceNote, terms } from '@/lib/glossary';
 
@@ -29,7 +29,7 @@ const columns: GlossaryEntry[] = [
 const diagnostics = [terms.splitHalf, terms.leftOut, terms.lengthBias];
 ---
 
-<MethodStrip scorer="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
+<MethodStrip of="votes" links={{ gates: `#${id('gates')}`, scores: `#${id('scores')}` }} />
 <p>
   With sides counterbalanced, the rater picks the better output of each pair, a tie, or both bad.
 </p>
@@ -65,7 +65,7 @@ const diagnostics = [terms.splitHalf, terms.leftOut, terms.lengthBias];
       rows={rows}
     />
     <figcaption class="flex flex-col gap-2">
-      <ForestLegend marks={drawnMarks(rows, EMPTY_DOMAIN)} />
+      <ForestLegend marks={legendMarks(rows, EMPTY_DOMAIN)} />
       <p class={note}>
         The axis starts at most {formatCount(AXIS_SPAN_BELOW_TOP)} points below the top score.
       </p>

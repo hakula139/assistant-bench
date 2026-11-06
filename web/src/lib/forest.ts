@@ -141,14 +141,13 @@ export function clip({ score }: Estimate, [start]: [number, number]): Clipped {
 }
 
 /**
- * Why a row has no estimate: the pre-round anchor, a system whose votes do not yet connect it to
- * the anchor, or a system with no votes.
+ * Why a row has no estimate: a system whose votes do not yet connect it to the anchor, or a system
+ * with no votes.
  */
-type Unplaced = 'anchor' | 'unranked' | 'no-votes';
+type Unplaced = 'unranked' | 'no-votes';
 
 /** What a forest prints in the row of a system it cannot place. */
 export const unplacedText: Record<Unplaced, string> = {
-  'anchor': 'no votes',
   'unranked': 'unranked',
   'no-votes': 'no votes',
 };
@@ -162,11 +161,11 @@ const byName = (names: SystemNames) => (a: string, b: string) =>
   systemName(names, a).localeCompare(systemName(names, b));
 
 /** Rows for a family before its first round closes, in display name order. */
-export function unmeasuredRows(systems: string[], anchor: string, names: SystemNames): ForestRow[] {
+export function unmeasuredRows(systems: string[], names: SystemNames): ForestRow[] {
   return systems.toSorted(byName(names)).map((system) => ({
     system,
     name: systemName(names, system),
-    unplaced: system === anchor ? 'anchor' : 'no-votes',
+    unplaced: 'no-votes',
   }));
 }
 

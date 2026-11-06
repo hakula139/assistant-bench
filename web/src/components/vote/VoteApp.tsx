@@ -21,7 +21,7 @@ import type { Choice, FamilyView, PairView, TaggedDefects } from '@/lib/arena';
 import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
 import { formatCountOf } from '@/lib/format';
-import { categoryTerm } from '@/lib/glossary';
+import { categoryTerms } from '@/lib/glossary';
 import { writeDraft } from '@/lib/vote-flow';
 
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
@@ -194,7 +194,7 @@ function Brief({
               stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
-            <Hint term={categoryTerm(pair.category)} side="bottom" />
+            <Hint term={categoryTerms[pair.category]} side="bottom" />
             <Markdown text={pair.instruction} />
             {pair.checklist.length > 0 && (
               <section

@@ -21,7 +21,7 @@ export function tickCount(
   return Math.max(2, Math.floor(span / (widest + 24)));
 }
 
-/** Text options that ring a label in the page color, so that lines drawn before it do not cross it. */
+/** Text options that ring a label in the page color, so lines drawn before it do not cross it. */
 export const HALO = { stroke: 'var(--background)', strokeWidth: 4 };
 
 export function grid(axis: 'x' | 'y', ticks: number | number[]): Plot.Markish {

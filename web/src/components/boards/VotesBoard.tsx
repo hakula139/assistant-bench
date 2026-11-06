@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Category } from '@/lib/categories';
 import { unplacedText } from '@/lib/forest';
 import {
   formatCost,
@@ -37,7 +38,7 @@ import {
   MISSING,
 } from '@/lib/format';
 import {
-  categoryTerm,
+  categoryTerms,
   effectiveVotesTerm,
   fallbackAnchor,
   preliminaryTerm,
@@ -58,7 +59,7 @@ import type {
 } from '@/lib/report';
 import type { VotesRound } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
-import { useSearchParam } from '@/lib/use-search-param';
+import { useCategory } from '@/lib/use-category';
 
 interface VotesBoardProps {
   /** The board's path, which each system's page extends. */
@@ -69,13 +70,10 @@ interface VotesBoardProps {
   labels: BoardLabels;
 }
 
-const ALL = 'aggregate';
-const categoryOption = (category: string) => `category:${category}`;
-
 function leaderboardRows(
   base: string,
   results: VotesResults,
-  category: string | null,
+  category: Category | null,
   names: SystemNames,
 ): LeaderboardRow[] {
   const row = (fit: CategoryStanding, standing: Standing | undefined): LeaderboardRow => ({
@@ -197,21 +195,18 @@ const costGapText: Record<CostGap, string> = {
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
 export function VotesBoard({ base, round, labels }: VotesBoardProps) {
-  const [category, setCategory] = useSearchParam('category', null);
-
   const { systems, results } = round;
   const names = useMemo(() => reportNames(systems), [systems]);
   const boards = results.categories;
-  const activeCategory =
-    category !== null && boards.some((board) => board.category === category) ? category : null;
+  const [category, filter] = useCategory(boards.map((board) => board.category));
   const unranked =
-    activeCategory === null
+    category === null
       ? results.unranked
-      : (boards.find((board) => board.category === activeCategory)?.unranked ?? []);
+      : (boards.find((board) => board.category === category)?.unranked ?? []);
 
   const rows = useMemo(
-    () => leaderboardRows(base, results, activeCategory, names),
-    [base, results, activeCategory, names],
+    () => leaderboardRows(base, results, category, names),
+    [base, results, category, names],
   );
   const order = useMemo(() => categorySystems(results), [results]);
 
@@ -251,30 +246,16 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
   return (
     <div className={stack}>
-      {boards.length > 0 && (
-        <Filter
-          label="Category"
-          value={activeCategory === null ? ALL : categoryOption(activeCategory)}
-          onChange={(value) => {
-            setCategory(value === ALL ? null : value.slice('category:'.length));
-          }}
-          options={[
-            { value: ALL, label: 'All categories' },
-            ...boards.map((board) => ({
-              value: categoryOption(board.category),
-              label: categoryTerm(board.category).term,
-            })),
-          ]}
-        />
-      )}
+      {filter && <Filter {...filter} />}
 
       <RoundSummary round={round} lengthBias={labels.lengthBias} />
 
       <div className="flex flex-col gap-4">
         <Leaderboard
           rows={rows}
-          ranked={activeCategory === null}
+          ranked={category === null}
           anchorSystem={results.anchor}
+          anchorScore={results.method.anchor_score}
           anchorTerm={anchorTerm}
           preliminaryTerm={preliminaryTerm(results.rules)}
           gateFailures={labels.gateFailures}
@@ -290,7 +271,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
         )}
         <ForestLegend
           className="max-lg:hidden"
-          marks={leaderboardMarks(rows, results.anchor)}
+          marks={leaderboardMarks(rows, results.method.anchor_score)}
           anchorScore={results.method.anchor_score}
         />
       </div>
@@ -315,7 +296,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                   <TableHead>System</TableHead>
                   {boards.map((board) => (
                     <TableHead key={board.category} numeric>
-                      {categoryTerm(board.category).term}
+                      {categoryTerms[board.category].term}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -354,7 +335,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                 <figcaption className="text-sm text-muted-foreground">
                   Mean cost per {labels.unit}
                   {costGaps.length > 0 && `, leaving out ${costGaps.join(', ')}`}
-                  {activeCategory !== null && ', over all categories'}
+                  {category !== null && ', over all categories'}
                 </figcaption>
                 <ParetoScatter
                   points={costPoints}
@@ -366,7 +347,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
             {latencyPoints.length > 0 && (
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-sm text-muted-foreground">
-                  Median latency{activeCategory !== null && ', over all categories'}
+                  Median latency{category !== null && ', over all categories'}
                 </figcaption>
                 <ParetoScatter points={latencyPoints} label="p50 latency" format={formatSeconds} />
               </figure>

@@ -66,7 +66,7 @@ export function Hint({ term, side, children }: { term: Term; side?: Side; childr
   );
 }
 
-/** `compact` keeps the preliminary mark to its icon, as the anchor's always is, where space is short. */
+/** `compact` keeps the preliminary mark to its icon, like the anchor's, where space is short. */
 export function StatusMark({
   status,
   term = terms[status],

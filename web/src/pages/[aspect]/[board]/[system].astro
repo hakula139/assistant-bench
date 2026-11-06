@@ -26,7 +26,7 @@ import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
-import { categoryTerm, preliminaryTerm } from '@/lib/glossary';
+import { categoryTerms, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
 import { isPreliminary } from '@/lib/ranking';
 import type { Distribution, Standing } from '@/lib/report';
@@ -58,15 +58,18 @@ const rounds = votesRounds(family);
 const { usage } = boardLabels(configOf(family, 'votes'));
 const appearances = rounds.flatMap(({ round, systems, results }) => {
   const standing = results.standings.find((item) => item.system === system);
-  return standing
-    ? [{ round, systems, reference: results.reference, anchor: results.anchor, results, standing }]
-    : [];
+  const { reference, anchor, method, rules } = results;
+  return standing ? [{ round, systems, reference, anchor, method, rules, standing }] : [];
 });
+const latest = rounds.findLast(({ results }) =>
+  results.standings.some((item) => item.system === system),
+);
 const last = appearances.at(-1);
-if (last === undefined) {
+if (latest === undefined || last === undefined) {
   throw new Error(`${system} has no standing on ${family.config.display_name}`);
 }
-const { round, systems, results, standing } = last;
+const { round, systems, results } = latest;
+const { standing } = last;
 const names = reportNames(systems);
 const name = (item: string) => systemName(names, item);
 const standings = results.standings;
@@ -77,7 +80,7 @@ const headToHead = results.head_to_head
 const categoryRows = results.categories.flatMap(
   ({ category, standings: refits }): ForestPlotRow[] => {
     const refit = refits.find((item) => item.system === system);
-    return refit ? [{ label: categoryTerm(category).term, refit }] : [];
+    return refit ? [{ label: categoryTerms[category].term, refit }] : [];
   },
 );
 const categoryDomain = sharedDomain(results.categories.map((board) => board.standings));
@@ -97,15 +100,6 @@ const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   });
 const tokenRows = distributionRows((item) => item.output_tokens);
 const latencyRows = distributionRows((item) => item.latency_sec);
-const roundRows = appearances.map(({ round, systems, reference, anchor, results, standing }) => ({
-  round,
-  systems,
-  reference,
-  anchor,
-  method: results.method,
-  rules: results.rules,
-  standing,
-}));
 ---
 
 <Base title={`${name(system)} on ${family.title}`} section="leaderboards">
@@ -201,7 +195,7 @@ const roundRows = appearances.map(({ round, systems, reference, anchor, results,
     )}
 
     <Section title="Rounds">
-      <RoundsTable client:visible appearances={roundRows} />
+      <RoundsTable client:visible appearances={appearances} />
     </Section>
   </div>
 </Base>

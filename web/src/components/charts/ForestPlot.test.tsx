@@ -17,7 +17,6 @@ const rules = { preliminary_decisive_votes: 40 };
 const refit = (system: string, score: number, decisive = 40) => ({
   system,
   score,
-  interval: null,
   votes: 40,
   effective_votes: 40,
   decisive_votes: decisive,
@@ -39,7 +38,7 @@ function draw(
 }
 
 describe('forestPlotOptions', () => {
-  test('draws preliminary coverage as a hollow point without interval marks', () => {
+  test('draws preliminary coverage as a hollow point', () => {
     const svg = draw(
       [
         { label: 'settled', refit: refit('settled', 1000) },
@@ -54,7 +53,6 @@ describe('forestPlotOptions', () => {
       'var(--chart-series)',
       'var(--background)',
     ]);
-    expect(svg.querySelector('[aria-description="95% interval"]')).toBeNull();
   });
 
   test('draws a score below the axis start as an arrowhead on the start gridline, with its score past the arrowhead', () => {

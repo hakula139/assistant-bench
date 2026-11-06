@@ -11,7 +11,7 @@ interface TrackScore {
 
 const middle = 'absolute top-1/2 -translate-y-1/2';
 
-/** The track's extent within its cell, inset by a dot's radius so a dot at either end stays whole. */
+/** The track's extent within its cell, inset by a dot's radius so an end dot stays whole. */
 const extent = 'absolute inset-x-2 inset-y-0';
 
 const rule = 'absolute inset-y-0 w-px';

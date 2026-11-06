@@ -6,9 +6,8 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { Forest, ForestLegend } from '@/components/site/Forest';
 import { forestDomain, forestTicks, roundRows } from '@/lib/forest';
 import { formatScore } from '@/lib/format';
-import { reportSchema } from '@/lib/report';
 import { reportNames } from '@/lib/systems';
-import { readFixture } from '@/test/fixture';
+import { readReport } from '@/test/fixture';
 import { trackDrawing } from '@/test/track';
 
 const estimate = (score: number) => ({ score });
@@ -54,10 +53,7 @@ describe('Forest', () => {
   });
 
   test('labels near-tied scores at their displayed precision', async () => {
-    const report = reportSchema.parse(await readFixture());
-    if (report.results.scorer !== 'votes') {
-      throw new Error('the fixture is a votes report');
-    }
+    const report = await readReport('report', 'votes');
     report.results.standings.forEach((standing, index) => {
       standing.score = 1000 + index / 100;
     });
