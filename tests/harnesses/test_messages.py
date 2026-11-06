@@ -268,7 +268,7 @@ class TestRequestMessages:
         assert result.request_id == 'req-1'
         assert result.details['response_id'] == 'msg-1'
         assert result.details['response_model'] == 'large-2026'
-        assert result.details['anthropic_sdk_version'] == '2.3.0'
+        assert result.details['anthropic_sdk_version'] == anthropic.__version__
         assert result.details['anthropic_api_version'] == '2023-06-01'
         (outgoing,) = model_requests
         assert outgoing.extensions['timeout'] == {
