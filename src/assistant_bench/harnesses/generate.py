@@ -18,7 +18,7 @@ from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
-from assistant_bench.harnesses.usage import measured_usage, usage_payload
+from assistant_bench.harnesses.usage import MeasuredUsage, measure
 
 
 OUTPUT_FILE = 'output.txt'
@@ -124,10 +124,9 @@ class Generate(BaseAgent):
             (self.logs_dir / OUTPUT_FILE).write_text(result.text)
         finally:
             context.metadata = result.details
-            if result.complete and 'input_tokens' in result.details:
-                context.n_input_tokens = result.details['input_tokens']
-                context.n_cache_tokens = result.details['cache_tokens']
-                context.n_output_tokens = result.details['output_tokens']
+            usage = MeasuredUsage.from_details(context.metadata)
+            if result.complete and usage is not None:
+                usage.record(context)
 
     async def _chat(
         self, client: AsyncOpenAI, instruction: str, context: AgentContext
@@ -148,18 +147,13 @@ class Generate(BaseAgent):
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
-        reported = usage_payload(completion.usage)
-        usage = measured_usage('openai-chat-completions', reported)
+        details = measure('openai-chat-completions', completion.usage)
+        usage = MeasuredUsage.from_details(details)
         if usage is not None:
-            context.n_input_tokens = usage.input_tokens
-            context.n_cache_tokens = usage.cache_tokens
-            context.n_output_tokens = usage.output_tokens
+            usage.record(context)
 
         return {
-            **(usage.details if usage else {}),
-            'reasoning_tokens': usage.reasoning_tokens if usage else None,
-            'reported_usage': reported,
-            'usage_invalid': reported is not None and usage is None,
+            **details,
             'finish_reason': 'refusal'
             if choice.message.refusal
             else choice.finish_reason,
@@ -191,15 +185,14 @@ class Generate(BaseAgent):
         response = result.response
         (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
 
-        usage = result.usage
+        details = result.details
+        usage = MeasuredUsage.from_details(details)
         if usage is not None:
-            context.n_input_tokens = usage.input_tokens
-            context.n_cache_tokens = usage.cache_tokens
-            context.n_output_tokens = usage.output_tokens
+            usage.record(context)
 
-        context.metadata = result.details
+        context.metadata = details
         result.check(complete=False)
-        return result.details
+        return details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:
         assert isinstance(self.options, GenerateOptions)

@@ -112,7 +112,7 @@ class TestMessageResult:
                 )
                 == expected
             )
-            assert details['native_usage'] == usage
+            assert details['reported_usage'] == usage
 
     class TestCheck:
         @pytest.mark.parametrize(
@@ -204,7 +204,7 @@ class TestRequestMessages:
 
         assert len(endpoint.requests) == 1
         assert not result.complete
-        assert result.details['native_usage'] is None
+        assert result.details['reported_usage'] is None
         assert 'input_tokens' not in result.details
         assert not artifact.exists()
         (client,) = messages_clients

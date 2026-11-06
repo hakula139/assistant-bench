@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from assistant_bench import jobs
+from assistant_bench import collection, jobs
 from assistant_bench.arena import publication, votes
 from assistant_bench.arena.d1 import Database, TargetName, connect
 from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
@@ -53,7 +53,7 @@ def prepare(family: FamilyArgument) -> None:
     selected = load_family(family)
     systems = load_systems(load_export())
     listed = jobs.listed_systems(selected, systems)
-    outputs = jobs.collect(selected, systems)
+    outputs = collection.collect(selected, systems).outputs
     prepared = publication.prepare(
         selected,
         load_cases(selected),

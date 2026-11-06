@@ -6,16 +6,17 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner, Result
 
-from assistant_bench import cli, jobs
+from assistant_bench import cli, collection
 from assistant_bench.arena import commands, publication
 from assistant_bench.arena.d1 import D1Error
 from assistant_bench.catalog import System
+from assistant_bench.collection import Collection
 from assistant_bench.families import Family, load_cases, load_family
 from assistant_bench.outputs import Output
 from support import (
     SQLiteDatabase,
     make_system,
-    passing_outputs,
+    make_trial,
     record_vote,
     write_votes_family,
 )
@@ -35,13 +36,22 @@ def invoke(*args: str) -> Result:
 
 
 def collected() -> list[Output]:
-    return list(passing_outputs(CATEGORIES, SYSTEMS).values())
+    return [
+        make_trial(case, system, finish_reason='stop')
+        for case in CATEGORIES
+        for system in SYSTEMS
+    ]
 
 
 @pytest.fixture
 def family(families_dir: Path) -> Family:
     write_votes_family(
-        families_dir, 'writing-f', list(SYSTEMS), CATEGORIES, public_voting=True
+        families_dir,
+        list(SYSTEMS),
+        CATEGORIES,
+        name='writing-f',
+        samples=2,
+        public_voting=True,
     )
     return load_family('writing-f')
 
@@ -111,14 +121,14 @@ def collections(monkeypatch: pytest.MonkeyPatch) -> list[Family]:
     def load_systems(export: object) -> dict[str, System]:
         return SYSTEMS
 
-    def collect(family: Family, systems: dict[str, System]) -> list[Output]:
+    def collect(family: Family, systems: dict[str, System]) -> Collection:
         assert systems == SYSTEMS
         families.append(family)
-        return collected()
+        return Collection(collected(), [])
 
     monkeypatch.setattr(commands, 'load_export', lambda: None)
     monkeypatch.setattr(commands, 'load_systems', load_systems)
-    monkeypatch.setattr(jobs, 'collect', collect)
+    monkeypatch.setattr(collection, 'collect', collect)
     return families
 
 
@@ -163,7 +173,9 @@ class TestPrepare:
     def test_refuses_a_family_without_public_voting(
         self, families_dir: Path, collections: list[Family]
     ) -> None:
-        write_votes_family(families_dir, 'writing-f', list(SYSTEMS), CATEGORIES)
+        write_votes_family(
+            families_dir, list(SYSTEMS), CATEGORIES, name='writing-f', samples=2
+        )
 
         result = invoke('prepare', 'writing-f')
 

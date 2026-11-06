@@ -29,7 +29,8 @@ def workspace_diff(base: Path, workspace: Path) -> str:
     `LEFT_OUT` directory are left out, since history and tool caches record how
     the agent worked, which the vote page must not show. A symlink compares by
     its target and is never followed, so a link the agent planted cannot read a
-    file outside the workspace. Each file shows its mode as git does, and a file
+    file outside the workspace. Each file shows its mode as git does, a symlink
+    swapped for a file or back shows as a deletion and an addition, and a file
     that holds a NUL byte or is not UTF-8 on either side shows its content hashes
     and a `Binary files` line. Paths with control characters, quotes, or
     backslashes are quoted.
@@ -69,6 +70,9 @@ def _entries(root: Path) -> dict[str, Entry]:
 
 
 def _file_diff(path: str, before: Entry | None, after: Entry | None) -> str:
+    if before and after and (before[0] == SYMLINK_MODE) != (after[0] == SYMLINK_MODE):
+        return _file_diff(path, before, None) + _file_diff(path, None, after)
+
     old_path = _quote_path(f'a/{path}')
     new_path = _quote_path(f'b/{path}')
     header = f'diff --git {old_path} {new_path}\n'

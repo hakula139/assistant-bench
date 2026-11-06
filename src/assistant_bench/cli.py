@@ -15,7 +15,7 @@ from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 from typer.core import TyperGroup
 
-from assistant_bench import jobs, manifest, report
+from assistant_bench import collection, jobs, report
 from assistant_bench.arena import votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import D1Error, connect
@@ -41,6 +41,12 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, read_outputs, tests_pass
+from assistant_bench.tasks import (
+    author_vendors,
+    changed_tasks,
+    check_tasks,
+    render_tasks,
+)
 
 
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
@@ -131,7 +137,7 @@ def check(
 
     failed = False
     for family, tasks in task_families:
-        outputs = jobs.read_trials(family, _run(jobs.check_job(family, tasks)), {})
+        outputs = collection.read_trials(family, _run(jobs.check_job(family, tasks)))
         problems = _check_problems(tasks, outputs)
         for problem in problems:
             typer.echo(f'Family `{family.name}`: {problem}.', err=True)
@@ -292,7 +298,7 @@ def fingerprints() -> None:
     _, systems = _catalog()
     moved = [
         _moved_line(family, *change)
-        for family, members in manifest.runnable_systems(systems).items()
+        for family, members in jobs.runnable_systems(systems).items()
         for change in _moved(report.reported_fingerprints(family), members)
     ]
     if moved:
@@ -310,8 +316,8 @@ def _catalog() -> tuple[NixosConfigExport, dict[str, System]]:
 
 def _render_tasks(family: Family) -> list[Path]:
     """Render a case family's tasks, refusing any that would abort its job."""
-    tasks = jobs.render_tasks(family, load_cases(family))
-    changed = jobs.changed_tasks(family, tasks)
+    tasks = render_tasks(family, load_cases(family))
+    changed = changed_tasks(family, tasks)
     if changed:
         raise InputError(
             f'Family `{family.name}` has cases whose rendered task changed under a '
@@ -326,11 +332,11 @@ def _render_tasks(family: Family) -> list[Path]:
 def _task_dirs(family: Family, export: NixosConfigExport) -> list[Path]:
     """Return a task family's task directories once each is fit to run."""
     tasks = [case_task(family, case.id) for case in load_cases(family)]
-    jobs.check_tasks(family, tasks)
+    check_tasks(family, tasks)
     if family.settings.systems:
-        jobs.author_vendors(family, tasks, export)
+        author_vendors(family, tasks, export)
 
-    changed = jobs.changed_tasks(family, tasks)
+    changed = changed_tasks(family, tasks)
     if changed:
         detail = '\n'.join(
             f'Task `{task}` changed since a trial ran it at version `{version}`.'
@@ -517,7 +523,8 @@ def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
 def _collect(
     family: Family, systems: dict[str, System], export: NixosConfigExport
 ) -> None:
-    outputs = jobs.collect(family, systems)
+    collected = collection.collect(family, systems)
+    outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(
         f'Family `{family.name}`: {count_of(len(outputs), "output")}, '
@@ -526,7 +533,7 @@ def _collect(
     for error, count in errors.most_common():
         typer.echo(f'  Error `{error}`: {count_of(count, "output")}.')
 
-    for gap in jobs.usage_gaps(family, outputs, systems):
+    for gap in collected.usage_gaps:
         typer.echo(
             f'System `{gap.system}` has unknown usage. Outputs affected: '
             f'{gap.outputs}. Responses without valid usage: {gap.unreported}. '
@@ -571,7 +578,7 @@ def _author_rates(
     export: NixosConfigExport,
 ) -> None:
     tasks = [case_task(family, case.id) for case in load_cases(family)]
-    vendors = jobs.author_vendors(family, tasks, export)
+    vendors = author_vendors(family, tasks, export)
 
     for system in systems:
         rates: list[str] = []

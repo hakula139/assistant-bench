@@ -17,7 +17,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Modules
 
-- Import Harbor's same-named models through their modules, as `jobs.py` does with `task_config.TaskConfig` and `trial_config.TaskConfig`, so each name shows which schema it belongs to.
+- Import Harbor's same-named models through their modules, as `tasks.py` does with `task_config.AgentConfig` and `trial_config.AgentConfig`, so each name shows which schema it belongs to.
 - Separate groups of items in a module with `# ── Section Name ──` banners using U+2500, as `catalog.py` and `jobs.py` do.
 
 ## Dependencies

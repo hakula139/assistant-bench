@@ -21,7 +21,7 @@ from harbor.models.trial.config import AgentConfig
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
-from assistant_bench import catalog, cli, jobs, manifest, report
+from assistant_bench import catalog, cli, collection, jobs, report
 from assistant_bench.arena import publication, votes
 from assistant_bench.catalog import (
     EXPORT_VAR,
@@ -31,21 +31,23 @@ from assistant_bench.catalog import (
     load_systems,
 )
 from assistant_bench.cli import app
+from assistant_bench.collection import Collection
 from assistant_bench.families import Family, Gate, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.tasks import render_task_config
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
     SQLiteDatabase,
+    current_fingerprints,
     finish_job,
     make_output,
     make_system,
-    passing_outputs,
+    make_trial,
     record_vote,
-    write_case_family,
     write_task_family,
     write_trial,
     write_votes_family,
@@ -138,12 +140,10 @@ def check_trials(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Output]]:
     """Serve each family's check job the trials stored under the family's name."""
     outputs: dict[str, list[Output]] = {}
 
-    def read_trials(
-        family: Family, job_dir: Path, systems: dict[str, System]
-    ) -> list[Output]:
+    def read_trials(family: Family, job_dir: Path) -> list[Output]:
         return outputs[family.name]
 
-    monkeypatch.setattr(jobs, 'read_trials', read_trials)
+    monkeypatch.setattr(collection, 'read_trials', read_trials)
     return outputs
 
 
@@ -216,8 +216,8 @@ class TestCheck:
     def test_checks_every_family_without_a_name(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        write_case_family(families_dir, ['opus-5.5-high'], name='g')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='g')
 
         result = invoke('check')
         assert result.exit_code == 0, result.output
@@ -228,7 +228,7 @@ class TestCheck:
         assert submitted == []
 
     def test_checks_a_named_family_once(self, families_dir: Path) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'])
+        write_votes_family(families_dir, ['opus-5.5-high'])
 
         result = invoke('check', 'f', 'f')
         assert result.exit_code == 0, result.output
@@ -303,7 +303,7 @@ class TestCheck:
     ) -> None:
         write_task_family(families_dir, 'a', name='f')
         write_task_family(families_dir, 'a', name='g')
-        write_case_family(families_dir, ['opus-5.5-high'], name='cases')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='cases')
 
         result = invoke('check', *arguments)
         assert result.exit_code == exit_code, result.output
@@ -498,7 +498,7 @@ class TestCheck:
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
         write_task_family(families_dir, 'a', name='f')
-        write_case_family(families_dir, ['ghost'], name='g')
+        write_votes_family(families_dir, ['ghost'], name='g')
 
         result = invoke('check')
 
@@ -590,10 +590,10 @@ class TestCheck:
         stderr: str,
         escapes: bool,
     ) -> None:
-        def read_trials(family: Any, job_dir: Path, systems: Any) -> list[Output]:
+        def read_trials(family: Any, job_dir: Path) -> list[Output]:
             raise error('Trial `echo__1` failed.')
 
-        monkeypatch.setattr(jobs, 'read_trials', read_trials)
+        monkeypatch.setattr(collection, 'read_trials', read_trials)
 
         result = invoke('check', 'smoke')
 
@@ -621,7 +621,7 @@ class TestCheck:
     def test_names_the_file_and_field_of_an_invalid_family(
         self, families_dir: Path
     ) -> None:
-        config = write_case_family(families_dir, ['opus-5.5-high']).with_name(
+        config = write_votes_family(families_dir, ['opus-5.5-high']).with_name(
             'family.toml'
         )
         config.write_text(config.read_text().replace('samples = 1', 'samples = 0'))
@@ -708,7 +708,7 @@ class TestCheck:
     def test_rejects_a_family_listing_an_unknown_system(
         self, families_dir: Path
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high', 'ghost'])
+        write_votes_family(families_dir, ['opus-5.5-high', 'ghost'])
 
         result = invoke('check', 'f')
 
@@ -754,7 +754,7 @@ class TestRun:
     def test_rejects_repeated_systems_before_submitting_a_job(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high', 'opus-5.5-high'])
+        write_votes_family(families_dir, ['opus-5.5-high', 'opus-5.5-high'])
 
         result = invoke('run', 'f')
 
@@ -797,7 +797,7 @@ class TestRun:
     def test_rejects_a_named_system_the_family_does_not_list(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'])
+        write_votes_family(families_dir, ['opus-5.5-high'])
 
         result = invoke(
             'run', 'f', '--system', 'gpt-6-astra-high', '--system', 'opus-5.5-high'
@@ -898,8 +898,8 @@ class TestRun:
     def test_generates_every_family_that_lists_systems(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        write_case_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
         write_task_family(families_dir, name='z')
 
         result = invoke('run')
@@ -911,7 +911,7 @@ class TestRun:
     def test_generates_a_named_family_once(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'])
+        write_votes_family(families_dir, ['opus-5.5-high'])
 
         result = invoke('run', 'f', 'f')
         assert result.exit_code == 0, result.output
@@ -922,8 +922,8 @@ class TestRun:
     def test_generates_a_named_system_on_every_family_that_lists_it(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        write_case_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
 
         result = invoke('run', '--system', 'kimi-k3-high')
         assert result.exit_code == 0, result.output
@@ -943,7 +943,7 @@ class TestRun:
     def test_rejects_a_named_system_no_family_lists(
         self, families_dir: Path, submitted: list[JobConfig], name: str, hint: str
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
 
         result = invoke('run', '--system', name)
 
@@ -985,8 +985,8 @@ class TestRun:
         data_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        write_case_family(families_dir, ['opus-5.5-high'], name='g')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='g')
         submitted: list[JobConfig] = []
 
         def run_job(job: JobConfig) -> Path:
@@ -1090,7 +1090,7 @@ class TestRun:
         trial: bool,
         expected: list[str],
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         current = fingerprint(load_systems(load_export())['opus-5.5-high'])
         if reported:
             write_closed_report(
@@ -1119,8 +1119,8 @@ class TestRun:
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
-        cases = write_case_family(families_dir, ['opus-5.5-high'], name='g')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        cases = write_votes_family(families_dir, ['opus-5.5-high'], name='g')
         cases.write_text(
             tomli_w.dumps(
                 {
@@ -1155,7 +1155,7 @@ class TestRun:
     def test_refuses_a_task_edited_without_a_bump_before_running_any(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         write_task_family(
             families_dir,
             'echo',
@@ -1189,14 +1189,16 @@ class TestRun:
         result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
         finish_job(submitted.pop())
-        render = jobs.render_task_config
+        render = render_task_config
 
         def with_new_default(name: str, instruction: str) -> TaskConfig:
             config = render(name, instruction)
             verifier = config.verifier.model_copy(update={'timeout_sec': 1.0})
             return config.model_copy(update={'verifier': verifier})
 
-        monkeypatch.setattr(jobs, 'render_task_config', with_new_default)
+        monkeypatch.setattr(
+            'assistant_bench.tasks.render_task_config', with_new_default
+        )
 
         result = invoke('run', 'smoke-text')
 
@@ -1215,7 +1217,7 @@ class TestRun:
     def test_rejects_an_unreadable_trial_record(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         job = data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00'
         write_trial(
             job,
@@ -1236,7 +1238,7 @@ class TestCollect:
     def test_reports_unknown_usage_and_its_cost_lower_bound(
         self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
     ) -> None:
-        cases = write_case_family(families_dir, ['large'], name='f')
+        cases = write_votes_family(families_dir, ['large'], name='f')
         cases.write_text(
             textwrap.dedent(
                 """\
@@ -1296,10 +1298,10 @@ class TestCollect:
             families_dir, 'echo', systems=('opus-5.5-high',), author_vendor='unknown'
         )
 
-        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
-            return []
+        def collect(family: Family, systems: dict[str, System]) -> Collection:
+            return Collection([], [])
 
-        monkeypatch.setattr(jobs, 'collect', collect)
+        monkeypatch.setattr(collection, 'collect', collect)
 
         result = invoke('collect', 'f')
 
@@ -1340,10 +1342,10 @@ class TestCollect:
             for system in ('opus-5.5-high', 'gpt-6-astra-high')
         ]
 
-        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
-            return outputs
+        def collect(family: Family, systems: dict[str, System]) -> Collection:
+            return Collection(outputs, [])
 
-        monkeypatch.setattr(jobs, 'collect', collect)
+        monkeypatch.setattr(collection, 'collect', collect)
 
         result = invoke('collect', 'f')
         assert result.exit_code == 0, result.output
@@ -1368,18 +1370,21 @@ class TestCollect:
             families_dir, 'one', systems=('opus-5.5-high',), author_vendor='anthropic'
         )
 
-        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
-            return [
-                make_output(
-                    case='one',
-                    system='opus-5.5-high',
-                    reward=reward,
-                    input_tokens=10,
-                    output_tokens=20,
-                )
-            ]
+        def collect(family: Family, systems: dict[str, System]) -> Collection:
+            return Collection(
+                [
+                    make_output(
+                        case='one',
+                        system='opus-5.5-high',
+                        reward=reward,
+                        input_tokens=10,
+                        output_tokens=20,
+                    )
+                ],
+                [],
+            )
 
-        monkeypatch.setattr(jobs, 'collect', collect)
+        monkeypatch.setattr(collection, 'collect', collect)
 
         result = invoke('collect', 'f')
         assert result.exit_code == 0, result.output
@@ -1447,10 +1452,10 @@ class TestCollect:
         outputs: list[Output],
         summary: str,
     ) -> None:
-        def collect(family: Family, systems: dict[str, System]) -> list[Output]:
-            return outputs
+        def collect(family: Family, systems: dict[str, System]) -> Collection:
+            return Collection(outputs, [])
 
-        monkeypatch.setattr(jobs, 'collect', collect)
+        monkeypatch.setattr(collection, 'collect', collect)
 
         result = invoke('collect', name)
         assert result.exit_code == 0, result.output
@@ -1461,7 +1466,7 @@ class TestCollect:
         self, families_dir: Path, data_dir: Path
     ) -> None:
         for name in ('f', 'g', 'h'):
-            write_case_family(families_dir, ['opus-5.5-high'], name=name)
+            write_votes_family(families_dir, ['opus-5.5-high'], name=name)
         for name in ('f', 'g'):
             write_job(data_dir / 'jobs' / name / 'job-1')
 
@@ -1486,7 +1491,7 @@ class TestCollect:
     def test_reports_an_unreadable_trial_without_a_traceback(
         self, families_dir: Path, data_dir: Path
     ) -> None:
-        write_case_family(families_dir, ['opus-5.5-high'])
+        write_votes_family(families_dir, ['opus-5.5-high'])
         trial = data_dir / 'jobs' / 'f' / 'job-1' / 'c1__1'
         write_trial(
             trial.parent,
@@ -1515,12 +1520,14 @@ class TestClose:
     ) -> Store:
         """Publish family `f` to a store that serves every target."""
         write_votes_family(
-            families_dir, 'f', ['large', 'small'], CLOSE_CASES, public_voting=True
+            families_dir, ['large', 'small'], CLOSE_CASES, samples=2, public_voting=True
         )
         family = load_family('f')
-        outputs = list(
-            passing_outputs(CLOSE_CASES, ['large', 'small'], cost_usd=0.5).values()
-        )
+        outputs = [
+            make_trial(case, system, cost_usd=0.5, finish_reason='stop')
+            for case in CLOSE_CASES
+            for system in ['large', 'small']
+        ]
         write_outputs('f', outputs)
         published = publication.prepare(
             family,
@@ -1617,7 +1624,7 @@ class TestClose:
     def test_refuses_votes_of_a_family_without_public_voting(
         self, families_dir: Path
     ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], CLOSE_CASES)
+        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
 
         result = invoke('close', 'f')
 
@@ -1629,7 +1636,7 @@ class TestClose:
     def test_rejects_a_missing_snapshot_as_its_option(
         self, families_dir: Path, tmp_path: Path
     ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], CLOSE_CASES)
+        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
         snapshot = tmp_path / 'snapshot.json'
 
         result = invoke('close', 'f', '--snapshot', str(snapshot))
@@ -1643,7 +1650,7 @@ class TestClose:
     def test_names_a_malformed_snapshot_and_its_error(
         self, families_dir: Path, tmp_path: Path
     ) -> None:
-        write_votes_family(families_dir, 'f', ['large', 'small'], CLOSE_CASES)
+        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
         snapshot = tmp_path / 'snapshot.json'
         snapshot.write_text('{')
 
@@ -1708,7 +1715,7 @@ class TestFingerprints:
     def test_names_an_undefined_family_system_without_a_traceback(
         self, families_dir: Path
     ) -> None:
-        write_case_family(families_dir, ['missing'])
+        write_votes_family(families_dir, ['missing'])
 
         result = invoke('fingerprints')
 
@@ -1741,7 +1748,7 @@ class TestFingerprints:
         frozen: str | None,
         failure: str | None,
     ) -> None:
-        head = manifest.current_fingerprints(load_systems(load_export()))
+        head = current_fingerprints(load_systems(load_export()))
         recorded = None if frozen is None else head.get(frozen, frozen)
         if family is not None:
             write_closed_report(family, recorded)

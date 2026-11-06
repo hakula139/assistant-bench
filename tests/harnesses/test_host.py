@@ -13,10 +13,11 @@ from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from openai import AsyncOpenAI
 
-from assistant_bench import jobs
+from assistant_bench import collection, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.host import HostEnvironment
+from assistant_bench.tasks import render_tasks
 from support import StubEndpoint, make_system, response
 
 
@@ -51,14 +52,14 @@ class TestHostEnvironment:
     ) -> None:
         for name, value in endpoint.env.items():
             monkeypatch.setenv(name, value)
-        monkeypatch.setattr(jobs, 'AGENT_TIMEOUT_SEC', 1.0)
+        monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 1.0)
         family = load_family('smoke-text')
         system = make_system(api=api)
         gate = endpoint.response_gate = threading.Event()
         config = jobs.job(
             family,
             [system],
-            jobs.render_tasks(family, load_cases(family)[:1]),
+            render_tasks(family, load_cases(family)[:1]),
         ).model_copy(update={'job_name': 'deadline'})
 
         async def expire() -> None:
@@ -131,9 +132,9 @@ class TestHostEnvironment:
             }
         )
 
-        first = jobs.job(family, [system], jobs.render_tasks(family, cases))
+        first = jobs.job(family, [system], render_tasks(family, cases))
         asyncio.run(run_in_process(first))
-        rerun = jobs.job(family, [system], jobs.render_tasks(family, cases))
+        rerun = jobs.job(family, [system], render_tasks(family, cases))
         jobs.run_job(rerun)
 
         logs = [
@@ -142,7 +143,7 @@ class TestHostEnvironment:
         ]
         assert logs
         assert not any('starts no container' in log for log in logs)
-        outputs = jobs.collect(family, {system.name: system})
+        outputs = collection.collect(family, {system.name: system}).outputs
         assert [
             (output.case, output.error, output.text, output.output_tokens)
             for output in outputs

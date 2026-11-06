@@ -13,7 +13,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from openai.types.responses import Response
 
-from assistant_bench import jobs
+from assistant_bench import collection, jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
 from assistant_bench.families import Gate, VotesSettings, load_cases, load_family
 from assistant_bench.generation import load_generation
@@ -24,6 +24,7 @@ from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.gates import failed_gates
+from assistant_bench.tasks import render_tasks
 from support import (
     StubEndpoint,
     completion,
@@ -82,7 +83,7 @@ def collect_reply(
             )
         }
     )
-    (task,) = jobs.render_tasks(family, load_cases(family)[:1])
+    (task,) = render_tasks(family, load_cases(family)[:1])
     config = jobs.job(family, jobs.family_systems(family, [system]), [task])
     context, output = run_agent(endpoint, logs_dir, **agent_kwargs(system))
     write_trial(
@@ -96,7 +97,7 @@ def collect_reply(
         environment=config.environment,
         verifier_disabled=config.verifier.disable,
     )
-    (collected,) = jobs.collect(family, {system.name: system})
+    (collected,) = collection.collect(family, {system.name: system}).outputs
     return context, collected
 
 
@@ -489,7 +490,7 @@ class TestGenerate:
             assert context.metadata['nixos_config_rev'] == export.rev
             if api == 'anthropic-messages':
                 assert context.metadata['response_status'] == 'incomplete'
-                assert context.metadata['native_usage'] is None
+                assert context.metadata['reported_usage'] is None
             else:
                 assert context.metadata == {
                     'latency_sec': context.metadata['latency_sec'],

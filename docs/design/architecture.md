@@ -14,9 +14,10 @@ src/assistant_bench/
 │   ├── d1.py                               # The D1 REST client and each target's database
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
-├── manifest.py                             # The committed manifest of every runnable system's fingerprint
-├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
+├── collection.py                           # Collection of a family's trials into output records
 ├── arguments.py                            # The family arguments and name refusals the commands share
+├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
+├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
@@ -50,15 +51,17 @@ src/assistant_bench/
 Imports point downward through these layers, so a module never imports one above it:
 
 1. `cli`, `ci`, and `task_assets`
-2. `arena.commands` and `manifest`
-3. `jobs` and `arguments`
-4. The remaining `arena` modules
-5. `report`
-6. `outputs`, `harnesses`, and `scoring`
-7. `families` and `catalog`
-8. `generation`, `messages`, `paths`, and `diffs`
+2. `arena.commands`
+3. `collection` and `arguments`
+4. `tasks`
+5. `jobs`
+6. The remaining `arena` modules
+7. `report`
+8. `outputs`, `harnesses`, and `scoring`
+9. `families` and `catalog`
+10. `generation`, `messages`, `paths`, and `diffs`
 
-`families` and `outputs` are separated from `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 
@@ -90,7 +93,7 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 
 Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config. Adding a system therefore generates only its trials.
 
-Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `jobs.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. Collection derives the expected version from current case source and render settings without writing tasks, so an old installed task cannot make stale outputs current.
+Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `tasks.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. Collection derives the expected version from current case source and render settings without writing tasks, so an old installed task cannot make stale outputs current.
 
 The diff also compares each trial's environment, which follows the job's harnesses as [Systems](systems.md#harnesses) describes, so changing it reruns every trial of the jobs it applies to. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
 

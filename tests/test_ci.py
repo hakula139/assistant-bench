@@ -6,28 +6,23 @@ from typing import Any
 import pytest
 
 from assistant_bench import ci
-
-
-def git(*args: str) -> str:
-    return subprocess.run(
-        ['git', *args], check=True, stdout=subprocess.PIPE, text=True
-    ).stdout.strip()
+from support import commit_all, new_repository
 
 
 @pytest.fixture
 def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.chdir(tmp_path)
-    git('init', '--quiet')
-    git('config', 'user.email', 'test@example.com')
-    git('config', 'user.name', 'Test')
-    for task in ('a', 'b'):
-        directory = Path('families/coding-repo/tasks') / task
-        directory.mkdir(parents=True)
-        (directory / 'instruction.md').write_text(f'Task {task}.')
-        (directory / 'task.toml').write_text('version = "1.0.0"')
-    git('add', '.')
-    git('commit', '--quiet', '-m', 'Initial tasks')
-    return git('rev-parse', 'HEAD')
+    return new_repository(
+        tmp_path,
+        {
+            f'families/coding-repo/tasks/{task}/{name}': content
+            for task in ('a', 'b')
+            for name, content in (
+                ('instruction.md', f'Task {task}.'),
+                ('task.toml', 'version = "1.0.0"'),
+            )
+        },
+    )
 
 
 class TestSelectedTasks:
@@ -81,68 +76,10 @@ class TestSelectedTasks:
                 [],
                 id='another-family',
             ),
-            pytest.param({'src/assistant_bench/jobs.py': 'Job'}, None, id='jobs'),
-            pytest.param(
-                {'src/assistant_bench/families.py': 'Validation'},
-                None,
-                id='family-validation',
-            ),
-            pytest.param(
-                {'src/assistant_bench/harnesses/terminus.py': 'Harness'},
-                None,
-                id='harness',
-            ),
-            pytest.param(
-                {'src/assistant_bench/task_assets.py': 'Generator'},
-                None,
-                id='shared-file-generator',
-            ),
-            pytest.param(
-                {'src/assistant_bench/ci.py': 'Selector'}, None, id='selector'
-            ),
-            pytest.param(
-                {'families/coding-repo/shared/tests/verify.py': 'Verifier'},
-                None,
-                id='shared-verifier',
-            ),
-            pytest.param(
-                {'families/coding-repo/shared/environment/Dockerfile': 'Image'},
-                None,
-                id='shared-image',
-            ),
-            pytest.param(
-                {'families/coding-repo/shared/tests/test.sh': 'Runner'},
-                None,
-                id='shared-runner',
-            ),
-            pytest.param(
-                {'families/coding-repo/shared/tests/new_probe.py': 'New asset'},
-                None,
-                id='new-shared-asset',
-            ),
             pytest.param(
                 {'families/coding-repo/shared-notes/README.md': 'Notes'},
                 [],
                 id='neighboring-directory',
-            ),
-            pytest.param({'uv.lock': 'Harbor dependency'}, None, id='harbor'),
-            pytest.param(
-                {'pyproject.toml': 'Runtime dependencies'}, None, id='dependencies'
-            ),
-            pytest.param({'.python-version': 'Python'}, None, id='python'),
-            pytest.param({'flake.nix': 'Dev shell'}, None, id='dev-shell'),
-            pytest.param({'flake.lock': 'Pinned inputs'}, None, id='nix-inputs'),
-            pytest.param({'systems.toml': 'Catalog'}, None, id='systems'),
-            pytest.param(
-                {'families/coding-repo/family.toml': 'Family settings'},
-                None,
-                id='family-settings',
-            ),
-            pytest.param({'.github/workflows/ci.yml': 'Workflow'}, None, id='workflow'),
-            pytest.param(
-                {'.github/actions/setup-nix/action.yml': 'Setup'},
-                None,
-                id='setup-action',
             ),
         ],
     )
@@ -150,7 +87,7 @@ class TestSelectedTasks:
         self,
         repository: str,
         changes: dict[str, str | None],
-        expected: list[str] | None,
+        expected: list[str],
     ) -> None:
         for name, content in changes.items():
             path = Path(name)
@@ -161,12 +98,46 @@ class TestSelectedTasks:
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
-        git('add', '.')
-        git('commit', '--quiet', '-m', 'Change inputs')
+        commit_all(Path(), 'Change inputs')
 
         selected = ci.selected_tasks(repository)
 
         assert selected == expected
+
+    @pytest.mark.parametrize(
+        'path',
+        [
+            'src/assistant_bench/jobs.py',
+            'src/assistant_bench/families.py',
+            'src/assistant_bench/harnesses/terminus.py',
+            'src/assistant_bench/task_assets.py',
+            'src/assistant_bench/ci.py',
+            'families/coding-repo/shared/tests/verify.py',
+            'families/coding-repo/shared/environment/Dockerfile',
+            'families/coding-repo/shared/tests/test.sh',
+            'families/coding-repo/shared/tests/new_probe.py',
+            'uv.lock',
+            'pyproject.toml',
+            '.python-version',
+            'flake.nix',
+            'flake.lock',
+            'systems.toml',
+            'families/coding-repo/family.toml',
+            '.github/workflows/ci.yml',
+            '.github/actions/setup-nix/action.yml',
+        ],
+    )
+    def test_checks_every_task_after_a_runtime_change(
+        self, repository: str, path: str
+    ) -> None:
+        changed = Path(path)
+        changed.parent.mkdir(parents=True, exist_ok=True)
+        changed.write_text('Changed')
+        commit_all(Path(), 'Change a runtime input')
+
+        selected = ci.selected_tasks(repository)
+
+        assert selected is None
 
     def test_checks_every_task_without_a_base(self) -> None:
         assert ci.selected_tasks(None) is None

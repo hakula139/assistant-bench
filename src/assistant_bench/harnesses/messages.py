@@ -20,7 +20,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
+from assistant_bench.harnesses.usage import measure
 
 
 _input = TypeAdapter(list[MessageParam])
@@ -37,12 +37,6 @@ class MessageResult:
     request_id: str | None = None
     complete: bool = False
     latency_sec: float | None = None
-
-    @property
-    def usage(self) -> MeasuredUsage | None:
-        return measured_usage(
-            'anthropic-messages', getattr(self.message, 'usage', None)
-        )
 
     @property
     def text(self) -> str:
@@ -66,22 +60,26 @@ class MessageResult:
         )
 
     @property
-    def details(self) -> dict[str, Any]:
+    def finish_reason(self) -> str | None:
         message = self.message
-        stop = message.stop_reason if message else None
-        finish = {'end_turn': 'stop', 'max_tokens': 'length', 'refusal': 'refusal'}.get(
-            stop or '', stop
-        )
-        if message and any(
+        if not self.complete or message is None:
+            return None
+        if any(
             block.type not in ('text', 'thinking', 'redacted_thinking')
             for block in message.content
         ):
-            finish = 'unexpected_content'
-        usage = self.usage
-        reported = usage_payload(getattr(message, 'usage', None))
-        details: dict[str, Any] = {
-            'finish_reason': finish if self.complete else None,
-            'native_stop_reason': stop,
+            return 'unexpected_content'
+        stop = message.stop_reason
+        return {'end_turn': 'stop', 'max_tokens': 'length', 'refusal': 'refusal'}.get(
+            stop or '', stop
+        )
+
+    @property
+    def details(self) -> dict[str, Any]:
+        message = self.message
+        return {
+            'finish_reason': self.finish_reason,
+            'native_stop_reason': message.stop_reason if message else None,
             'stop_details': message.stop_details.model_dump(
                 mode='json', include={'type', 'category', 'explanation'}
             )
@@ -94,23 +92,19 @@ class MessageResult:
             'latency_sec': self.latency_sec,
             'anthropic_sdk_version': metadata.version('anthropic'),
             'anthropic_api_version': load_generation().anthropic_api_version,
-            'native_usage': reported,
-            'reasoning_tokens': usage.reasoning_tokens if usage else None,
-            'usage_invalid': reported is not None and usage is None,
+            **measure('anthropic-messages', getattr(message, 'usage', None)),
         }
-        if usage is not None:
-            details |= usage.details
-        return details
 
     def check(self, *, complete: bool) -> None:
         if not self.complete:
             raise MessageStreamError('The Messages API ended before `message_stop`.')
         if complete:
-            if self.details['finish_reason'] == 'length':
+            finish = self.finish_reason
+            if finish == 'length':
                 raise NativeLengthExceededError(
                     'The Messages API exhausted its completion allowance.', self
                 )
-            if self.details['finish_reason'] != 'stop':
+            if finish != 'stop':
                 raise NativeCompletionError(
                     'The Messages API did not return a complete answer.'
                 )

@@ -17,7 +17,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
+from assistant_bench.harnesses.usage import measure
 
 
 _input = TypeAdapter(ResponseInputParam)
@@ -34,47 +34,48 @@ class ResponseResult:
         return self.response.output_text
 
     @property
-    def usage(self) -> MeasuredUsage | None:
-        return measured_usage('openai-responses', self.response.usage)
-
-    @property
-    def details(self) -> dict[str, Any]:
-        response = self.response
-        usage = self.usage
-        reported = usage_payload(response.usage)
-        refusals = [
+    def refusals(self) -> list[str]:
+        return [
             content.refusal
-            for item in response.output
+            for item in self.response.output
             if item.type == 'message'
             for content in item.content
             if content.type == 'refusal'
         ]
-        incomplete = (
-            response.incomplete_details.reason if response.incomplete_details else None
-        )
-        finish = (
+
+    @property
+    def incomplete_reason(self) -> str | None:
+        details = self.response.incomplete_details
+        return details.reason if details else None
+
+    @property
+    def finish_reason(self) -> str:
+        response = self.response
+        incomplete = self.incomplete_reason
+        return (
             'error'
             if response.error is not None
             else 'unexpected_content'
             if response.status in ('completed', 'incomplete')
             and any(item.type == 'function_call' for item in response.output)
             else 'refusal'
-            if refusals
+            if self.refusals
             else 'stop'
             if response.status == 'completed'
             else 'length'
             if incomplete == 'max_output_tokens'
             else incomplete or response.status or 'unknown'
         )
+
+    @property
+    def details(self) -> dict[str, Any]:
+        response = self.response
         return {
-            **(usage.details if usage else {}),
-            'reasoning_tokens': usage.reasoning_tokens if usage else None,
-            'reported_usage': reported,
-            'usage_invalid': reported is not None and usage is None,
-            'finish_reason': finish,
+            **measure('openai-responses', response.usage),
+            'finish_reason': self.finish_reason,
             'response_status': response.status,
-            'incomplete_reason': incomplete,
-            'refusals': refusals,
+            'incomplete_reason': self.incomplete_reason,
+            'refusals': self.refusals,
             'response_model': response.model,
             'response_id': response.id,
             'request_id': self.request_id,
@@ -100,16 +101,17 @@ class ResponseResult:
             raise NativeCompletionError(
                 'The Responses API did not return a finished response.'
             )
-        if self.details['finish_reason'] == 'unexpected_content':
+        finish = self.finish_reason
+        if finish == 'unexpected_content':
             raise NativeCompletionError(
                 'The Responses API returned an unexpected function call.'
             )
         if complete:
-            if self.details['finish_reason'] == 'length':
+            if finish == 'length':
                 raise NativeLengthExceededError(
                     'The Responses API exhausted its completion allowance.', self
                 )
-            if self.details['finish_reason'] != 'stop':
+            if finish != 'stop':
                 raise NativeCompletionError(
                     'The Responses API did not return a complete answer.'
                 )

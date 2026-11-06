@@ -22,12 +22,6 @@ class NativeResult(Protocol):
     @property
     def items(self) -> list[dict[str, Any]]: ...
 
-    @property
-    def details(self) -> dict[str, Any]: ...
-
-    @property
-    def usage(self) -> MeasuredUsage | None: ...
-
     def check(self, *, complete: bool) -> None: ...
 
 
@@ -115,10 +109,10 @@ class NativeLLM(BaseLLM):
         attempt: dict[str, Any] = {}
         self.attempts.append(attempt)
         result = await self._request(prompt, message_history or [], attempt, **kwargs)
-        details = result.details
+        details = dict(attempt)
         self.calls.append(details)
         result.check(complete=True)
-        usage = result.usage
+        usage = MeasuredUsage.from_details(details)
         return LLMResponse(
             content=result.text,
             model_name=details['response_model'],

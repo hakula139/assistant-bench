@@ -17,7 +17,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
-from support import CODE_DEFECTS, PROSE_DEFECTS, write_case_family, write_task_family
+from support import CODE_DEFECTS, PROSE_DEFECTS, write_task_family, write_votes_family
 
 
 class TaskOptions(TypedDict, total=False):
@@ -619,7 +619,7 @@ class TestLoadCases:
     def test_keeps_document_order_verbatim_text_and_the_checklist_default(
         self, families_dir: Path
     ) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         instruction = '\n  Keep these edges.  \n'
         checklist = ['  Keep this edge.  ']
         path.write_text(
@@ -680,7 +680,7 @@ class TestLoadCases:
     def test_rejects_a_case_document_that_breaks_its_contract(
         self, families_dir: Path, text: str, field: str, message: str
     ) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         path.write_text(text)
 
         with pytest.raises(ValueError) as error:
@@ -691,7 +691,7 @@ class TestLoadCases:
     def test_names_the_file_and_location_of_malformed_toml(
         self, families_dir: Path
     ) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         path.write_text('[[cases]\n')
 
         with pytest.raises(ValueError) as error:
@@ -750,7 +750,7 @@ class TestLoadCases:
         assert [case.id for case in cases] == ['echo']
 
     def test_rejects_a_repeated_id_within_one_file(self, families_dir: Path) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         path.write_text(case_entry('a') + '\n' + case_entry('a'))
 
         with pytest.raises(ValueError) as error:
@@ -763,7 +763,7 @@ class TestLoadCases:
     def test_names_the_entry_and_field_of_an_invalid_case(
         self, families_dir: Path
     ) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         path.write_text(case_entry('a') + case_entry('B'))
 
         with pytest.raises(ValueError) as error:
@@ -777,7 +777,7 @@ class TestLoadCases:
     def test_rejects_a_category_the_family_does_not_list(
         self, families_dir: Path
     ) -> None:
-        path = write_case_family(families_dir, ['large'])
+        path = write_votes_family(families_dir, ['large'])
         path.write_text(case_entry('a') + case_entry('b', category='docs'))
 
         with pytest.raises(ValueError) as error:

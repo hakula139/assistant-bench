@@ -1,9 +1,10 @@
 """Validate reported token counters before they enter trial accounting."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Annotated, Any, assert_never
+from dataclasses import dataclass, fields
+from typing import Annotated, Any, Self, assert_never
 
+from harbor.models.agent.context import AgentContext
 from harbor.models.metric import UsageInfo
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
@@ -22,6 +23,13 @@ class MeasuredUsage:
     output_tokens: int
     reasoning_tokens: int | None
     cache_write_unpriced: bool = False
+
+    @classmethod
+    def from_details(cls, details: Mapping[str, Any]) -> Self | None:
+        """Return the details' usage, `None` when they hold no valid usage."""
+        if 'input_tokens' not in details:
+            return None
+        return cls(**{field.name: details[field.name] for field in fields(cls)})
 
     @property
     def details(self) -> dict[str, Any]:
@@ -43,11 +51,33 @@ class MeasuredUsage:
             cost_usd=0,
         )
 
+    def record(self, context: AgentContext) -> None:
+        """Set the trial's token counts, which Harbor reports and collection prices."""
+        context.n_input_tokens = self.input_tokens
+        context.n_cache_tokens = self.cache_tokens
+        context.n_output_tokens = self.output_tokens
+
+
+def measure(api: Api, reported: object) -> dict[str, Any]:
+    """Return the details a call records about its usage.
+
+    The details hold the payload as `reported_usage`, whether it was reported but
+    inconsistent, and the measured counters, which `MeasuredUsage.from_details`
+    reads back.
+    """
+    payload = _payload(reported)
+    usage = measured_usage(api, payload)
+    return {
+        **(usage.details if usage else {'reasoning_tokens': None}),
+        'reported_usage': payload,
+        'usage_invalid': payload is not None and usage is None,
+    }
+
 
 def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
     """Return inclusive counters only when every reported count is consistent."""
     try:
-        reported = _reported.validate_python(usage_payload(reported), strict=True)
+        reported = _reported.validate_python(_payload(reported), strict=True)
         write_value: object
         cache_write_unpriced = False
         match api:
@@ -128,7 +158,7 @@ def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
         return None
 
 
-def usage_payload(reported: object) -> object:
+def _payload(reported: object) -> object:
     return (
         reported.model_dump(mode='json', exclude_unset=True)
         if isinstance(reported, BaseModel)
