@@ -131,7 +131,8 @@ class RangeTest(ServerCase):
                     self.assertEqual(length, len(BINARY), content_range)
                     self.assertEqual(data, BINARY[first : last + 1], content_range)
                     covered.update(range(first, last + 1))
-                # RFC 9110 section 15.3.7.2 lets a server send some of the ranges.
+                # RFC 9110 sections 15.3.7 and 15.3.7.2 let a server send some of
+                # the ranges and coalesce the gaps between them.
                 self.assertLessEqual(
                     covered - selected, coalescable_gaps(covered & selected)
                 )
