@@ -24,7 +24,12 @@ class CacheTest(unittest.TestCase):
         identities = [
             identity
             for joiner in joiners
-            for identity in ([f'a{joiner}b', 'c'], ['a', f'b{joiner}c'])
+            for identity in (
+                [f'a{joiner}b', 'c'],
+                ['a', f'b{joiner}c'],
+                [f'a{joiner}', 'b'],
+                ['a', f'{joiner}b'],
+            )
         ]
 
         seen = sandbox.observe(
