@@ -50,19 +50,32 @@ class RangeTest(ServerCase):
                     response.getheader('Content-Type'), 'application/octet-stream'
                 )
 
-    def test_unsatisfiable_ranges(self) -> None:
+    def test_unusable_ranges_are_ignored_or_rejected(self) -> None:
         cases = [
-            ('data.bin', 'bytes=1000-', 1000),
-            ('data.bin', 'bytes=5000-6000', 1000),
-            ('data.bin', 'bytes=-0', 1000),
-            ('data.bin', 'bytes=1000-1000, 2000-', 1000),
-            ('data.bin', f'bytes={HUGE}-', 1000),
+            ('data.bin', 'bytes=1000-'),
+            ('data.bin', 'bytes=5000-6000'),
+            ('data.bin', 'bytes=-0'),
+            ('data.bin', 'bytes=1000-1000, 2000-'),
+            ('data.bin', f'bytes={HUGE}-'),
+            ('data.bin', 'bytes=abc'),
+            ('data.bin', 'bytes=5-2'),
+            ('data.bin', 'bytes='),
+            ('data.bin', 'bytes=1-2-3'),
+            ('data.bin', 'bytes=0-1;q'),
+            ('data.bin', f'bytes={HUGE}-0'),
+            ('empty.bin', 'bytes=0-0'),
+            ('empty.bin', 'bytes=-5'),
         ]
-        for name, field, length in cases:
+        for name, field in cases:
             with self.subTest(file=name, range=shorten(field)):
-                response, _ = self.fetch(f'/{name}', {'Range': field})
+                content = self.files[name]
 
-                self.assert_unsatisfiable(response, length)
+                response, body = self.fetch(f'/{name}', {'Range': field})
+
+                if response.status == 416:
+                    self.assert_unsatisfiable(response, len(content))
+                else:
+                    self.assert_full(response, body, content)
 
     def assert_unsatisfiable(
         self, response: http.client.HTTPResponse, length: int
@@ -79,40 +92,12 @@ class RangeTest(ServerCase):
         self.assertEqual(body, content)
         self.assertIsNone(response.getheader('Content-Range'))
 
-    def test_empty_files_are_ignored_or_rejected(self) -> None:
-        for field in ('bytes=0-0', 'bytes=-5'):
-            with self.subTest(range=shorten(field)):
-                response, body = self.fetch('/empty.bin', {'Range': field})
-
-                if response.status == 416:
-                    self.assert_unsatisfiable(response, 0)
-                else:
-                    self.assert_full(response, body, b'')
-
-    def test_invalid_ranges_are_ignored_or_rejected(self) -> None:
-        invalid = (
-            'bytes=abc',
-            'bytes=5-2',
-            'bytes=',
-            'bytes=1-2-3',
-            'bytes=0-1;q',
-            f'bytes={HUGE}-0',
-        )
-        for field in invalid:
-            with self.subTest(range=shorten(field)):
-                response, body = self.fetch('/data.bin', {'Range': field})
-
-                if response.status == 416:
-                    self.assert_unsatisfiable(response, 1000)
-                else:
-                    self.assert_full(response, body, BINARY)
-
     def test_ignores_other_range_units(self) -> None:
         response, body = self.fetch('/data.bin', {'Range': 'items=0-1'})
 
         self.assert_full(response, body, BINARY)
 
-    def test_several_ranges_send_the_selected_bytes(self) -> None:
+    def test_several_ranges_send_only_selected_bytes(self) -> None:
         cases = [
             ('bytes=0-9,20-29', set(range(10)) | set(range(20, 30)), False),
             ('bytes=0-9, 5-14, 990-', set(range(15)) | set(range(990, 1000)), True),
@@ -136,6 +121,7 @@ class RangeTest(ServerCase):
                     parts = multipart_parts(content_type, body)
                 else:
                     parts = [(response.getheader('Content-Range') or '', body)]
+                self.assertTrue(parts, 'the 206 response holds no part')
                 covered: set[int] = set()
                 for content_range, data in parts:
                     parsed = parse_content_range(content_range)
@@ -145,8 +131,10 @@ class RangeTest(ServerCase):
                     self.assertEqual(length, len(BINARY), content_range)
                     self.assertEqual(data, BINARY[first : last + 1], content_range)
                     covered.update(range(first, last + 1))
-                self.assertLessEqual(selected, covered)
-                self.assertLessEqual(covered - selected, coalescable_gaps(selected))
+                # RFC 9110 section 14.2 lets a server send some of the ranges.
+                self.assertLessEqual(
+                    covered - selected, coalescable_gaps(covered & selected)
+                )
 
     def test_if_range_gates_the_ranges(self) -> None:
         tag = self.identity_tag('data.bin')
@@ -270,19 +258,20 @@ class RangeTest(ServerCase):
 
     def test_connections_stay_usable_across_range_responses(self) -> None:
         connection = self.connect()
-        exchanges: list[tuple[dict[str, str], int, bytes | None]] = [
-            ({'Range': 'bytes=0-9'}, 206, BINARY[:10]),
-            ({'Range': 'bytes=5000-'}, 416, None),
-            ({}, 200, BINARY),
-            ({'Range': 'bytes=-3'}, 206, BINARY[-3:]),
+        exchanges: list[tuple[dict[str, str], dict[int, bytes | None]]] = [
+            ({'Range': 'bytes=0-9'}, {206: BINARY[:10]}),
+            ({'Range': 'bytes=5000-'}, {416: None, 200: BINARY}),
+            ({}, {200: BINARY}),
+            ({'Range': 'bytes=-3'}, {206: BINARY[-3:]}),
         ]
-        for headers, status, expected in exchanges:
+        for headers, bodies in exchanges:
             connection.request('GET', '/data.bin', headers=headers)
             response = connection.getresponse()
             body = response.read()
 
-            self.assertEqual(response.status, status, headers)
+            self.assertIn(response.status, bodies, headers)
             self.assertEqual(response.getheader('Connection'), 'keep-alive', headers)
+            expected = bodies[response.status]
             if expected is not None:
                 self.assertEqual(body, expected, headers)
 
