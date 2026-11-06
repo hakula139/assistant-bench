@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -17,6 +17,7 @@ from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.environment_type import EnvironmentType
+from harbor.models.job import config as job_config
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
@@ -574,6 +575,26 @@ class TestJob:
             SourceJobConfig(action='diff', type='local', path=jobs_dir / name)
             for name in ('job-1', 'job-3')
         ]
+
+    def test_names_jobs_in_start_order_within_one_second(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        starts = iter(START + timedelta(milliseconds=ms) for ms in range(3))
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz: tzinfo | None = None) -> Clock:
+                return cls.fromtimestamp(next(starts).timestamp())
+
+        monkeypatch.setattr(jobs, 'datetime', Clock)
+        monkeypatch.setattr(job_config, 'datetime', Clock)
+
+        names = [
+            JobConfig().job_name,
+            *(jobs.job(VOTES, [make_system()], []).job_name for _ in range(2)),
+        ]
+
+        assert names[0] < names[1] < names[2]
 
 
 class TestChangedTasks:
