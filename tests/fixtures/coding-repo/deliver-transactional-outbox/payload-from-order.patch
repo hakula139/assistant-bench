@@ -1,0 +1,36 @@
+--- a/dispatchbox/store.py
++++ b/dispatchbox/store.py
+@@ -1,5 +1,6 @@
+ """SQLite storage for orders and notification attempts."""
+
++import json
+ import sqlite3
+ from pathlib import Path
+ from types import TracebackType
+@@ -34,11 +35,23 @@
+
+     def pending(self, limit: int) -> list[Notification]:
+         rows = self.connection.execute(
+-            'SELECT id, order_id, idempotency_key, payload FROM outbox '
+-            'WHERE delivered = 0 ORDER BY id LIMIT ?',
++            'SELECT outbox.id, order_id, amount_cents, idempotency_key '
++            'FROM outbox JOIN orders USING (order_id) '
++            'WHERE delivered = 0 ORDER BY outbox.id LIMIT ?',
+             (min(limit, 2**63 - 1),),
+         )
+-        return [Notification(row[0], row[1], row[2], row[3]) for row in rows]
++        notifications: list[Notification] = []
++
++        for identifier, order_id, amount_cents, key in rows:
++            payload = json.dumps(
++                {'order_id': order_id, 'amount_cents': amount_cents},
++                ensure_ascii=False,
++                separators=(',', ':'),
++                sort_keys=True,
++            ).encode()
++            notifications.append(Notification(identifier, order_id, key, payload))
++
++        return notifications
+
+     def mark_delivered(self, notification_id: int) -> None:
+         with self.connection:
