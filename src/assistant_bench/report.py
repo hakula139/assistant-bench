@@ -76,6 +76,13 @@ type Share = Annotated[float, Field(ge=0, le=1)]
 type CostGap = Literal['unpriced', 'unreported']
 
 
+class Decision(_Model):
+    """The top standing and the systems its scorer's test cannot separate from it."""
+
+    leader: str
+    tied: list[str]
+
+
 class PassRate(_Model):
     """A mean of per-task shares with its 95% Clopper-Pearson interval over tasks."""
 
@@ -96,10 +103,14 @@ class VotesMethod(_Model):
     actor_cap: Annotated[int, Field(strict=True, gt=0)]
     """Each of an actor's `n` eligible choices weighs `min(1, actor_cap / n)`."""
 
+    interval_level: Annotated[float, Field(gt=0, lt=1)]
+    """Coverage of the case-clustered score intervals and the leader test's
+    complement."""
+
 
 class VotesRules(_Model):
-    preliminary_decisive_votes: Annotated[int, Field(strict=True, gt=0)]
-    """Raw decisive votes below which a standing is preliminary."""
+    preliminary_half_width: Annotated[float, Field(gt=0)]
+    """Score interval half-width above which a standing is preliminary."""
 
 
 METHOD = VotesMethod(
@@ -107,9 +118,10 @@ METHOD = VotesMethod(
     points_per_logit=ranking.ELO_PER_LOGIT,
     anchor_score=ranking.ANCHOR,
     actor_cap=weighting.CAP,
+    interval_level=ranking.INTERVAL_LEVEL,
 )
 
-RULES = VotesRules(preliminary_decisive_votes=40)
+RULES = VotesRules(preliminary_half_width=50.0)
 
 
 # ── Votes Schema ──
@@ -130,10 +142,18 @@ class Cutoffs(_Model):
     production: Cutoff
 
 
+class ScoreInterval(_Model):
+    lower: float
+    upper: float
+
+
 class Standing(_Model):
     system: str
     score: float
     """Point estimate on the round's recorded score scale."""
+
+    interval: ScoreInterval | None
+    """The case-clustered interval at `method.interval_level`, null below two cases."""
 
     rank: int
     """Competition rank of the point score."""
@@ -212,6 +232,10 @@ class VotesResults(_Model):
     anchor: str
     """Ranked system fixed at the recorded anchor score."""
 
+    cases: Annotated[int, Field(ge=0)]
+    """Cases with a weighted comparison in the ranked component, which cluster the
+    intervals."""
+
     votes: Annotated[int, Field(ge=0)]
     """Eligible human choices across every component."""
     effective_votes: Annotated[float, Field(ge=0)]
@@ -224,6 +248,10 @@ class VotesResults(_Model):
     standings: list[Standing]
     unranked: list[str]
     """Entrants in the frozen evaluation outside the comparison component."""
+    decision: Decision | None
+    """The top score and the systems a clustered Wald test cannot separate from it,
+    null without intervals."""
+
     head_to_head: list[HeadToHead]
     categories: list[CategoryBoard]
 
@@ -231,6 +259,18 @@ class VotesResults(_Model):
     """Score points per length-difference standard deviation, if identifiable."""
     split_half_tau: float | None
     """Order agreement between alternating eligible votes, when measurable."""
+
+    @model_validator(mode='after')
+    def validate_decision(self) -> VotesResults:
+        if (self.decision is None) != any(
+            row.interval is None for row in self.standings
+        ):
+            raise ValueError(
+                'A decision is present exactly when every standing has an interval.'
+            )
+        if self.decision is not None:
+            _validate_decision(self.decision, self.standings)
+        return self
 
 
 # ── Tests Schema ──
@@ -276,13 +316,6 @@ class TestsCategory(_Model):
     standings: list[TestsCategoryStanding]
 
 
-class TestsDecision(_Model):
-    """The top pass rate and the systems a paired sign test cannot separate from it."""
-
-    leader: str
-    tied: list[str]
-
-
 class TestsResults(_Model):
     """Pass rates on Harbor task tests, where every system ran every task."""
 
@@ -292,7 +325,8 @@ class TestsResults(_Model):
 
     standings: Annotated[list[TestsStanding], Field(min_length=1)]
     categories: list[TestsCategory]
-    decision: TestsDecision
+    decision: Decision
+    """The top pass rate and the systems a paired sign test cannot separate from it."""
 
     @model_validator(mode='after')
     def validate_rates(self) -> TestsResults:
@@ -301,15 +335,9 @@ class TestsResults(_Model):
         ):
             raise ValueError('pass^k is present exactly when tasks run several times.')
 
-        systems = {row.system for row in self.standings}
-        leader, tied = self.decision.leader, self.decision.tied
-        if (
-            leader not in systems
-            or len(set(tied)) != len(tied)
-            or not set(tied) <= systems - {leader}
-        ):
-            raise ValueError('The decision must name standing systems once.')
+        _validate_decision(self.decision, self.standings)
 
+        systems = {row.system for row in self.standings}
         names = [board.category for board in self.categories]
         if len(set(names)) != len(names) or any(
             not {row.system for row in board.standings} <= systems
@@ -367,6 +395,19 @@ class Report(_Model):
         _validate_memberships([row.system for row in self.results.standings], unranked)
 
         return self
+
+
+def _validate_decision(
+    decision: Decision, standings: Sequence[Standing | TestsStanding]
+) -> None:
+    systems = {row.system for row in standings}
+    leader, tied = decision.leader, decision.tied
+    if (
+        leader not in systems
+        or len(set(tied)) != len(tied)
+        or not set(tied) <= systems - {leader}
+    ):
+        raise ValueError('The decision must name standing systems once.')
 
 
 def _validate_memberships(ranked: list[str], unranked: list[str]) -> None:
@@ -599,10 +640,13 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         ).covariate
     )
 
+    uncertainty = board.uncertainty
+    widths = None if uncertainty is None else uncertainty.half_widths()
     standings = [
         _standing(
             system,
             float(ratings.score[i]),
+            None if widths is None else float(widths[i]),
             int((ratings.score > ratings.score[i]).sum()) + 1,
             [vote for vote in votes if system in vote.systems],
             [output for output in outputs if output.system == system],
@@ -611,6 +655,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         for i, system in enumerate(ratings.systems)
     ]
     standings.sort(key=lambda standing: (standing.rank, standing.system))
+    leader = standings[0].system
     return VotesResults(
         scorer='votes',
         method=METHOD,
@@ -618,12 +663,25 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         cutoffs=analysis.cutoffs,
         reference=analysis.reference,
         anchor=board.anchor,
+        cases=board.cases,
         votes=len(votes),
         effective_votes=sum(row.comparison.weight for row in votes),
         dropped_votes=analysis.dropped,
         voters=len({row.actor for row in votes}),
         standings=standings,
         unranked=sorted({output.system for output in outputs} - ranked),
+        decision=(
+            None
+            if uncertainty is None
+            else Decision(
+                leader=leader,
+                tied=[
+                    row.system
+                    for row in standings[1:]
+                    if not uncertainty.separates(ratings, leader, row.system)
+                ],
+            )
+        ),
         head_to_head=_head_to_head(votes),
         categories=_categories(
             dict(analysis.categories),
@@ -643,6 +701,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
 def _standing(
     system: str,
     score: float,
+    half_width: float | None,
     rank: int,
     votes: list[HumanEvidence],
     outputs: list[OutputMeasurement],
@@ -666,6 +725,11 @@ def _standing(
     return Standing(
         system=system,
         score=score,
+        interval=(
+            None
+            if half_width is None
+            else ScoreInterval(lower=score - half_width, upper=score + half_width)
+        ),
         rank=rank,
         votes=len(votes),
         decisive_votes=choices['a'] + choices['b'],
@@ -834,7 +898,7 @@ def _tests_results(
         samples=samples,
         standings=standings,
         categories=_tests_categories(standings, shares, categories, declared),
-        decision=TestsDecision(
+        decision=Decision(
             leader=leader,
             tied=[
                 row.system

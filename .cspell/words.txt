@@ -75,6 +75,7 @@ numpy
 numtide
 nvmrc
 Orchidarium
+pinv
 pkgs
 Priya
 pvalue

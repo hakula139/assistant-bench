@@ -42,10 +42,11 @@
       "l2_penalty": 0.01,
       "points_per_logit": 173.71779276130073,
       "anchor_score": 1000.0,
-      "actor_cap": 100
+      "actor_cap": 100,
+      "interval_level": 0.95
     },
     "rules": {
-      "preliminary_decisive_votes": 40
+      "preliminary_half_width": 50.0
     },
     "cutoffs": {
       "production": {
@@ -55,6 +56,7 @@
     },
     "reference": "acme-large",
     "anchor": "acme-large",
+    "cases": 30,
     "votes": 33,
     "effective_votes": 33.0,
     "dropped_votes": 2,
@@ -63,6 +65,10 @@
       {
         "system": "acme-pro",
         "score": 1183.0751151967304,
+        "interval": {
+          "lower": 1037.071767839439,
+          "upper": 1329.0784625540218
+        },
         "rank": 1,
         "votes": 11,
         "decisive_votes": 8,
@@ -94,6 +100,10 @@
       {
         "system": "acme-small",
         "score": 1068.052185161281,
+        "interval": {
+          "lower": 951.0755312319202,
+          "upper": 1185.0288390906417
+        },
         "rank": 2,
         "votes": 12,
         "decisive_votes": 6,
@@ -125,6 +135,10 @@
       {
         "system": "acme-flash",
         "score": 1054.235938163578,
+        "interval": {
+          "lower": 905.2660037832325,
+          "upper": 1203.2058725439238
+        },
         "rank": 3,
         "votes": 13,
         "decisive_votes": 9,
@@ -156,6 +170,10 @@
       {
         "system": "acme-large",
         "score": 1000.0,
+        "interval": {
+          "lower": 833.8432916241951,
+          "upper": 1166.1567083758048
+        },
         "rank": 4,
         "votes": 6,
         "decisive_votes": 5,
@@ -187,6 +205,10 @@
       {
         "system": "acme-mini",
         "score": 990.000674529062,
+        "interval": {
+          "lower": 855.2061626837807,
+          "upper": 1124.7951863743433
+        },
         "rank": 5,
         "votes": 16,
         "decisive_votes": 14,
@@ -218,6 +240,10 @@
       {
         "system": "acme-tiny",
         "score": 432.0795850773063,
+        "interval": {
+          "lower": 337.64763661092627,
+          "upper": 526.5115335436864
+        },
         "rank": 6,
         "votes": 0,
         "decisive_votes": 0,
@@ -251,6 +277,15 @@
       "acme-edge",
       "acme-nano"
     ],
+    "decision": {
+      "leader": "acme-pro",
+      "tied": [
+        "acme-small",
+        "acme-flash",
+        "acme-large",
+        "acme-mini"
+      ]
+    },
     "head_to_head": [
       {
         "system": "acme-edge",
