@@ -1230,6 +1230,64 @@ class TestRun:
         )
         assert len(submitted) == 1
 
+    def test_leaves_ceiling_costs_out_of_the_budget(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 51\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'large', (None,) * 8)
+
+        result = invoke('run', 'f', '--system', 'small')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
+
+    def test_runs_an_unpriced_system_in_a_family_over_its_budget(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small', price=None)
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+
+        result = invoke('run', 'f', '--system', 'small')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
+
+    def test_runs_a_family_over_its_budget_with_nothing_pending(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        assert invoke('run', 'f').exit_code == 0
+        finish_job(submitted.pop())
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-spent')
+
+        result = invoke('run', 'f')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
+
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
@@ -1394,45 +1452,65 @@ class TestSpend:
             'output tokens, besides 1 unmeasured response.\n'
             'System `large`: 1 pending trial with no usage to estimate a cost from, '
             'so this run can exceed the budget.\n'
-            'System `small`: 1 pending trial with no usage to estimate a cost from, '
-            'so this run can exceed the budget.\n'
+            'System `small`: 1 pending trial with no usage to estimate a cost from.\n'
             'Family `f`: $0.00 spent and projected, against a budget of $100.00.\n'
         )
         assert submitted == []
 
+    @pytest.mark.parametrize(
+        ('attempts', 'expected'),
+        [
+            pytest.param(
+                [('job-1', 'large', (None,)), ('job-2', 'small', (None, None))],
+                [
+                    'System `large`: 1 trial and 1 response cost $0.00, besides 1 '
+                    'response without a known cost or usage to impute from, $7.00 at '
+                    'its ceiling, which the budget leaves out.',
+                    'System `small`: 1 trial and 2 responses cost $0.00, besides 2 '
+                    'responses without a known cost or usage to impute from, $14.00 '
+                    'at their ceilings, which the budget leaves out.',
+                ],
+                id='ceilings',
+            ),
+            pytest.param(
+                [
+                    (
+                        'job-1',
+                        'large',
+                        (MeasuredUsage(1_000_000, 0, 0, 100_000, None),),
+                    ),
+                    ('job-2', 'small', (None, None)),
+                ],
+                [
+                    'System `small`: 1 trial and 2 responses cost $0.00, plus $6.00 '
+                    'for 2 responses without a known cost, imputed from another '
+                    "system's usage."
+                ],
+                id='borrowed',
+            ),
+        ],
+    )
     def test_names_borrowed_and_ceiling_costs(
         self,
         families_dir: Path,
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        attempts: list[tuple[str, str, tuple[MeasuredUsage | None, ...]]],
+        expected: list[str],
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         resolved['large'] = SPENDER
         resolved['small'] = make_system(
             name='small', context_window=2_000_000, max_output_tokens=200_000
         )
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'large', (None,))
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-2', 'small', (None, None))
-        before = invoke('spend', 'f')
-        write_spent_attempt(
-            data_dir / 'jobs' / 'f' / 'job-3',
-            'large',
-            (MeasuredUsage(1_000_000, 0, 0, 100_000, None),),
-        )
+        for job, system, responses in attempts:
+            write_spent_attempt(data_dir / 'jobs' / 'f' / job, system, responses)
 
-        after = invoke('spend', 'f')
+        result = invoke('spend', 'f')
 
-        assert before.stdout.splitlines()[:2] == [
-            'System `large`: 1 trial and 1 response cost $0.00, plus $7.00 for 1 '
-            'response without a known cost, counted at its ceiling.',
-            'System `small`: 1 trial and 2 responses cost $0.00, plus $14.00 for 2 '
-            'responses without a known cost, counted at their ceilings.',
-        ]
-        assert after.stdout.splitlines()[1] == (
-            'System `small`: 1 trial and 2 responses cost $0.00, plus $6.00 for 2 '
-            "responses without a known cost, imputed from another system's usage."
-        )
+        assert result.exit_code == 0, result.output
+        assert set(expected) <= set(result.stdout.splitlines()), result.stdout
         assert submitted == []
 
 

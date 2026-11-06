@@ -10,7 +10,6 @@ from assistant_bench.catalog import Price, System
 from assistant_bench.families import Family
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.jobs import jobs_dir
-from assistant_bench.messages import count_of
 from assistant_bench.paths import data_dir
 
 
@@ -150,8 +149,8 @@ class Share:
     responses: int = 0
     usd: float = 0.0
 
-    def add(self, usd: float) -> Share:
-        return Share(self.responses + 1, self.usd + usd)
+    def add(self, responses: int, usd_each: float) -> Share:
+        return Share(self.responses + responses, self.usd + responses * usd_each)
 
 
 @dataclass(frozen=True)
@@ -182,7 +181,8 @@ class Spend:
 
     ceiling: Share
     """Priced responses without a known cost and no usage to impute from, at a
-    full context window and completion allowance each."""
+    full context window and completion allowance each, which `spent_usd` leaves
+    out."""
 
     @property
     def unknown(self) -> int:
@@ -191,11 +191,7 @@ class Spend:
 
     @property
     def spent_usd(self) -> float:
-        return (
-            self.known_usd
-            + sum(share.usd for share in self.imputed.values())
-            + self.ceiling.usd
-        )
+        return self.known_usd + sum(share.usd for share in self.imputed.values())
 
     @property
     def profile(self) -> Tokens | None:
@@ -212,7 +208,8 @@ def summarize(entries: Iterable[Entry]) -> list[Spend]:
     cost it, as when its cache write has no declared price. Such a response costs
     the system's own mean tokens per measured response at its entry's price, or
     else the costliest other system's, with their cache reads and writes priced as
-    plain input, or else its ceiling.
+    plain input. With no measured usage anywhere, it is counted at its ceiling,
+    which the spend leaves out until a later run measures usage to impute from.
     """
     by_system: defaultdict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
@@ -265,14 +262,14 @@ def _spend(
         costs = _measured(attempt)
         measured += [usage for usage, _ in costs]
         known_usd += sum(cost for _, cost in costs)
-        if attempt.price is None or attempt.ceiling_usd is None:
+        missing = len(attempt.responses) - len(costs)
+        if not missing or attempt.price is None or attempt.ceiling_usd is None:
             continue
-        for _ in range(len(attempt.responses) - len(costs)):
-            match _imputed(own, others, attempt.price):
-                case (basis, cost):
-                    imputed[basis] = imputed.get(basis, Share()).add(cost)
-                case None:
-                    ceiling = ceiling.add(attempt.ceiling_usd)
+        match _imputed(own, others, attempt.price):
+            case (basis, cost):
+                imputed[basis] = imputed.get(basis, Share()).add(missing, cost)
+            case None:
+                ceiling = ceiling.add(missing, attempt.ceiling_usd)
 
     return Spend(
         name,
@@ -293,7 +290,7 @@ def _spend(
 def _imputed(
     own: Tokens | None, others: list[Tokens], price: Price
 ) -> tuple[Basis, float] | None:
-    """Return the basis and cost of one response without a known cost, if any."""
+    """Return the basis and cost of each response without a known cost, if any."""
     if own is not None and (cost := own.cost(price)) is not None:
         return 'own', cost
     costs = [cost for rate in others if (cost := rate.uncached.cost(price)) is not None]
@@ -333,9 +330,10 @@ def project(
     """Estimate each system's pending trials from the family's ledger.
 
     A system with valid usage of its own uses its mean tokens per answered trial,
-    so its retries enter the estimate. Any other system borrows the tokens per
-    trial that cost the most at its prices, or, when unpriced, the most tokens,
-    with the lender's cache reads and writes counted as plain input.
+    so its retries enter the estimate, with its cache reads and writes counted as
+    plain input when its current price cannot cost them. Any other system borrows
+    the tokens per trial that cost the most at its prices, or, when unpriced, the
+    most tokens, with the lender's cache reads and writes counted as plain input.
     """
     own = {entry.system: entry.profile for entry in spend}
     lenders = [profile.uncached for profile in own.values() if profile is not None]
@@ -347,6 +345,11 @@ def project(
             basis = 'own'
         elif lenders:
             basis, profile = 'borrowed', max(lenders, key=_rank(system.price))
+        per_trial_usd = None
+        if profile is not None and system.price is not None:
+            per_trial_usd = profile.cost(system.price)
+            if per_trial_usd is None:
+                per_trial_usd = profile.uncached.cost(system.price)
         count = pending[system.name]
         projections.append(
             Projection(
@@ -354,9 +357,7 @@ def project(
                 priced=system.price is not None,
                 pending=count,
                 basis=basis,
-                per_trial_usd=profile.cost(system.price)
-                if profile is not None and system.price is not None
-                else None,
+                per_trial_usd=per_trial_usd,
                 tokens=profile.scaled(count) if profile is not None else None,
             )
         )
@@ -379,64 +380,43 @@ def _rank(price: Price | None) -> Callable[[Tokens], float]:
 
 
 def total_usd(spend: list[Spend], projections: list[Projection]) -> float:
-    """Return the ledger's spend plus the projection's cost."""
+    """Return the ledger's spend plus the projections that have an estimate."""
     return sum(entry.spent_usd for entry in spend) + sum(
         projection.usd or 0 for projection in projections
     )
 
 
-def budget_problems(
+def budget_problem(
     family: Family, spend: list[Spend], projections: list[Projection]
-) -> list[str]:
+) -> str | None:
     """Return why the run would exceed the family's `budget_usd`, if it would.
 
-    The total that `total_usd` returns must stay within the budget, and the
-    refusal names each system's share counted at ceilings. Unpriced systems
-    count no dollars. A selected priced system whose pending trials have no
-    estimate runs while the total stays under the budget, since only a run can
-    give it usage to estimate from, and refuses once the total reaches it.
+    Only a run with priced pending trials can exceed it, when the total that
+    `total_usd` returns is over the budget. Unpriced systems count no dollars, and
+    a priced system without an estimate counts none until its usage is measured.
     """
     budget = family.settings.budget_usd
-    if budget is None:
-        return []
+    if budget is None or not any(
+        projection.priced and projection.pending for projection in projections
+    ):
+        return None
 
     total = total_usd(spend, projections)
-    problems = (
-        [
-            f'System `{projection.system}` has '
-            f'{count_of(projection.pending, "pending trial")} and no usage to '
-            f'estimate a cost from, and family `{family.name}` has already reached '
-            f'its `budget_usd` of ${budget:.2f}.'
-            for projection in projections
-            if projection.priced and projection.usd is None
-        ]
-        if total >= budget
-        else []
+    if total <= budget:
+        return None
+
+    spent = {entry.system: entry.spent_usd for entry in spend if entry.priced}
+    projected = {
+        projection.system: usd
+        for projection in projections
+        if projection.priced and (usd := projection.usd)
+    }
+    shares = ', '.join(
+        f'`{name}` ${spent.get(name, 0):.2f} spent and '
+        f'${projected.get(name, 0):.2f} projected'
+        for name in sorted(spent.keys() | projected.keys())
     )
-    if total > budget:
-        spent = {entry.system: entry for entry in spend if entry.priced}
-        projected = {
-            projection.system: usd
-            for projection in projections
-            if projection.priced and (usd := projection.usd)
-        }
-        shares = ', '.join(
-            f'`{name}` {_spent_share(spent.get(name))} and '
-            f'${projected.get(name, 0):.2f} projected'
-            for name in sorted(spent.keys() | projected.keys())
-        )
-        problems.append(
-            f'Family `{family.name}` would reach ${total:.2f}, over its `budget_usd` '
-            f'of ${budget:.2f}: {shares}.'
-        )
-
-    return problems
-
-
-def _spent_share(entry: Spend | None) -> str:
-    if entry is None:
-        return '$0.00 spent'
-    share = f'${entry.spent_usd:.2f} spent'
-    if entry.ceiling.responses:
-        share += f', ${entry.ceiling.usd:.2f} of it counted at ceilings,'
-    return share
+    return (
+        f'Family `{family.name}` would reach ${total:.2f}, over its `budget_usd` '
+        f'of ${budget:.2f}: {shares}.'
+    )

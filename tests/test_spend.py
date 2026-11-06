@@ -19,7 +19,7 @@ from assistant_bench.spend import (
     Share,
     Spend,
     Tokens,
-    budget_problems,
+    budget_problem,
     project,
     summarize,
     update_ledger,
@@ -301,6 +301,19 @@ class TestProject:
         assert (projection.basis, projection.usd) == ('borrowed', expected)
         assert projection.tokens is not None
 
+    def test_prices_its_own_cache_as_plain_input_when_its_price_cannot(
+        self,
+    ) -> None:
+        spend = [
+            spend_of(
+                entry(responses=(MeasuredUsage(1_000_000, 0, 500_000, 100_000, None),))
+            )
+        ]
+
+        (projection,) = project(Counter({LARGE.name: 2}), spend, [NO_WRITE_PRICE])
+
+        assert (projection.basis, projection.usd) == ('own', 6.0)
+
     def test_has_no_estimate_without_usage(self) -> None:
         (projection,) = project(Counter({LARGE.name: 3}), [], [LARGE])
 
@@ -311,66 +324,43 @@ class TestProject:
         )
 
 
-class TestBudgetProblems:
+class TestBudgetProblem:
     @pytest.mark.parametrize(
-        ('budget', 'pending', 'expected'),
+        ('budget', 'responses', 'pending', 'expected'),
         [
-            pytest.param(None, 100, [], id='no-budget'),
-            pytest.param(10.0, 2, [], id='within'),
-            pytest.param(9.0, 2, [], id='exactly-met'),
+            pytest.param(None, (USAGE,), {LARGE.name: 100}, None, id='no-budget'),
+            pytest.param(10.0, (USAGE,), {LARGE.name: 2}, None, id='within'),
+            pytest.param(9.0, (USAGE,), {LARGE.name: 2}, None, id='exactly-met'),
             pytest.param(
                 5.0,
-                2,
-                [
-                    'Family `f` would reach $9.00, over its `budget_usd` of $5.00: '
-                    '`acme-large` $3.00 spent and $6.00 projected.'
-                ],
+                (USAGE,),
+                {LARGE.name: 2},
+                'Family `f` would reach $9.00, over its `budget_usd` of $5.00: '
+                '`acme-large` $3.00 spent and $6.00 projected.',
                 id='over',
             ),
-        ],
-    )
-    def test_adds_the_projection_to_the_ledger(
-        self, budget: float | None, pending: int, expected: list[str]
-    ) -> None:
-        family = with_settings(VOTES, budget_usd=budget)
-        spend = [spend_of(entry())]
-        projections = project(Counter({LARGE.name: pending}), spend, [LARGE])
-
-        assert budget_problems(family, spend, projections) == expected
-
-    def test_names_the_share_counted_at_ceilings(self) -> None:
-        family = with_settings(VOTES, budget_usd=0.5)
-        spend = [spend_of(entry(responses=(None, None)))]
-
-        problems = budget_problems(family, spend, [])
-
-        assert problems == [
-            'Family `f` would reach $0.70, over its `budget_usd` of $0.50: '
-            '`acme-large` $0.70 spent, $0.70 of it counted at ceilings, and $0.00 '
-            'projected.'
-        ]
-
-    @pytest.mark.parametrize(
-        ('budget', 'expected'),
-        [
-            pytest.param(3.5, [], id='under-budget'),
             pytest.param(
-                3.0,
-                [
-                    'System `new` has 1 pending trial and no usage to estimate a cost '
-                    'from, and family `f` has already reached its `budget_usd` of '
-                    '$3.00.'
-                ],
-                id='budget-reached',
+                2.0,
+                (USAGE,),
+                {LARGE.name: 0, UNPRICED.name: 3},
+                None,
+                id='over-with-unpriced-pending',
             ),
+            pytest.param(2.0, (USAGE,), {}, None, id='over-with-nothing-pending'),
+            pytest.param(0.5, (None, None), {LARGE.name: 1}, None, id='ceiling-only'),
         ],
     )
-    def test_runs_a_system_without_an_estimate_until_the_budget_is_reached(
-        self, budget: float, expected: list[str]
+    def test_refuses_only_priced_trials_that_take_the_spend_past_the_budget(
+        self,
+        budget: float | None,
+        responses: tuple[MeasuredUsage | None, ...],
+        pending: dict[str, int],
+        expected: str | None,
     ) -> None:
         family = with_settings(VOTES, budget_usd=budget)
-        new = make_system(name='new')
-        spend = [spend_of(entry(responses=(USAGE,)))]
-        projections = project(Counter({new.name: 1}), [], [new, UNPRICED])
+        spend = [spend_of(entry(responses=responses))]
+        projections = project(Counter(pending), spend, [LARGE, UNPRICED])
 
-        assert budget_problems(family, spend, projections) == expected
+        problem = budget_problem(family, spend, projections)
+
+        assert problem == expected

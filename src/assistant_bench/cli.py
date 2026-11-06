@@ -50,7 +50,7 @@ from assistant_bench.spend import (
     Basis,
     Projection,
     Spend,
-    budget_problems,
+    budget_problem,
     project,
     summarize,
     total_usd,
@@ -183,7 +183,8 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     for family, selected, job in prepared:
         spent, projections = _projection(family, selected, job, systems)
         _echo_projection(family, spent, projections)
-        problems += budget_problems(family, spent, projections)
+        if (problem := budget_problem(family, spent, projections)) is not None:
+            problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
 
@@ -206,7 +207,7 @@ def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None
         for entry in spent:
             typer.echo(_spend_line(entry))
         _echo_projection(family, spent, projections)
-        for problem in budget_problems(family, spent, projections):
+        if (problem := budget_problem(family, spent, projections)) is not None:
             typer.echo(problem)
 
 
@@ -631,9 +632,9 @@ def _spend_line(entry: Spend) -> str:
     if entry.ceiling.responses:
         ceiling = 'its ceiling' if entry.ceiling.responses == 1 else 'their ceilings'
         line += (
-            f', plus ${entry.ceiling.usd:.2f} for '
-            f'{count_of(entry.ceiling.responses, "response")} without a known cost, '
-            f'counted at {ceiling}'
+            f', besides {count_of(entry.ceiling.responses, "response")} without a '
+            f'known cost or usage to impute from, ${entry.ceiling.usd:.2f} at '
+            f'{ceiling}, which the budget leaves out'
         )
     return f'{line}.'
 
@@ -668,7 +669,7 @@ def _echo_projection(
                 f'{projection.tokens.input_tokens:,.0f} input and '
                 f'{projection.tokens.output_tokens:,.0f} output tokens.'
             )
-        elif family.settings.budget_usd is not None:
+        elif projection.priced and family.settings.budget_usd is not None:
             typer.echo(
                 f'{name}: {trials} with no usage to estimate a cost from, so this '
                 'run can exceed the budget.'
