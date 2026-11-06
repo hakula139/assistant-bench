@@ -106,7 +106,8 @@
           deadnix.enable = true;
           statix.enable = true;
 
-          # Formatting flags disable shfmt's EditorConfig settings.
+          # shfmt reads `.editorconfig` only without formatting flags, and indents shell files that
+          # its `[*.sh]` section misses with tabs.
           shfmt = {
             enable = true;
             settings = {

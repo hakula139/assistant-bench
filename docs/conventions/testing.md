@@ -4,11 +4,11 @@ Where tests live, when they merge or go, how they reach models and Harbor, and w
 
 ## Placement
 
-- Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`, such as `tests/harnesses/test_generate.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
+- Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
 - The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. Checks that need the built site go in `site.test.ts` there, which builds it once, because concurrent `astro build` runs of one root race on its cache. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom, and `web/src/test/track.ts` reads how a row's `ScoreTrack` draws its system.
 - `test_repository.py` checks committed data, lockfiles, and dependency stubs, and `test_harbor_smoke.py` holds the trials that need Docker.
-- Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders such as `make_system`, `write_trial`, `write_task_family`, and the stub endpoint in `tests/support.py`, which tests import as `support`.
-- Each function's tests sit in a class named after it, as in `TestResolveSystem`, with the classes in the module's function order. A method's class nests in a class named after its type, as in `TestSystem.TestFingerprint`.
+- Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders and the stub endpoint in `tests/support.py`, which tests import as `support`.
+- Each function's tests sit in a class named after it, with the classes in the module's function order. A method's class nests in a class named after its type.
 
 ## Merging and Dropping Tests
 
@@ -18,7 +18,7 @@ Drop a test once another covers everything it checks.
 
 ## Models and Harbor
 
-- Fixtures use generic names such as `acme/large` and `example.com`. Real model names appear only where the code matches on them, as in the test of the committed `systems.toml`.
+- Fixtures use generic, invented names. Real model names appear only where the code matches on them, as in the test of the committed `systems.toml`.
 - `conftest.py` sets the environment `bench` gives Harbor before any test module imports LiteLLM, so no import, fixture, or test loads a local `.env`. An autouse fixture points `BENCH_DATA_DIR` at a scratch directory, runs each test from it, and clears the endpoint and proxy variables the shell exports, so no test reads the real data directory or endpoint. Another points the reports directory there too, so no test reads or writes the committed `reports/`.
 - Tests reach models only through the `endpoint` fixture or its variants: a Chat Completions, Responses, and native Messages server on 127.0.0.1 that records each request and returns a configurable response, `tls_endpoint`, the same server behind a test CA, and `ipv6_endpoint`, the same server on `::1`. The network guard covers both HTTPX transports before SDK requests run, and HTTPX's synchronous transport too, so the D1 client's tests answer through `httpx.MockTransport`.
 - The `export` fixture points `BENCH_NIXOS_CONFIG` at `tests/fixtures/nixos-config.json`. The CLI tests and the test of the committed `systems.toml` read the dev shell's real export, so the suite runs inside `nix develop`.
@@ -37,7 +37,7 @@ Drop a test once another covers everything it checks.
 
 ## Accessibility
 
-`site.test.ts` serves the built site's files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Development](development.md#dev-shell) gives the command that installs the browser.
+`site.test.ts` serves the built site's files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) gives the command that installs the browser.
 
 ## Docker Trials
 

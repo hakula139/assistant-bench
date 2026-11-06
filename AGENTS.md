@@ -1,6 +1,6 @@
 # AGENTS.md: assistant-bench
 
-assistant-bench publishes leaderboards for AI models and agents, ranked through public blind pairwise voting or automated tests. Every system in a family receives the same instruction. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials. Real votes from every device use one production D1 database. Staging uses a separate D1 database for validation.
+assistant-bench publishes leaderboards for AI models and agents, ranked through public blind pairwise voting or automated tests. Every system in a family receives the same instruction. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
 
 This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
 
@@ -30,19 +30,19 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Read Before You Edit
 
-| When the change touches                             | Read                                                                                                           |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Python code                                         | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)              |
-| The site under `web/`                               | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                                   |
-| Tests or fixtures                                   | [Testing](docs/conventions/testing.md)                                                                         |
-| A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page, such as [Writing](docs/design/families/writing.md) |
-| Case sources, outputs, or the data directory        | [Data](docs/conventions/data.md)                                                                               |
-| Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                              |
-| The voting Worker, the vote store, or the vote API  | [Arena](docs/design/arena.md)                                                                                  |
-| Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                        |
-| PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                           |
-| The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                                 |
-| A workflow, a failing check, or the deploy          | [CI](docs/conventions/ci.md)                                                                                   |
+| When the change touches                             | Read                                                                                                              |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Python code                                         | [Python](docs/conventions/python.md) and the [module map](docs/design/architecture.md#module-map)                 |
+| The site under `web/`                               | [TypeScript](docs/conventions/typescript.md) and [Site](docs/design/site.md)                                      |
+| Tests or fixtures                                   | [Testing](docs/conventions/testing.md)                                                                            |
+| A case, a family, or `systems.toml`                 | [Authoring](docs/guide/authoring.md) and the family's page under [`docs/design/families/`](docs/design/families/) |
+| Case sources, outputs, or the data directory        | [Data](docs/conventions/data.md)                                                                                  |
+| Fingerprints, harnesses, or the nixos-config export | [Systems](docs/design/systems.md)                                                                                 |
+| The voting Worker, the vote store, or the vote API  | [Arena](docs/design/arena.md)                                                                                     |
+| Ranking or the report schema                        | [Ranking](docs/design/ranking.md) and [Reports](docs/design/reports.md)                                           |
+| PRs or issues                                       | [GitHub](docs/conventions/github.md)                                                                              |
+| The dev shell, hooks, toolchain, or config files    | [Development](docs/conventions/development.md)                                                                    |
+| A workflow, a failing check, or the deploy          | [CI](docs/conventions/ci.md)                                                                                      |
 
 ## Rules for Every Change
 

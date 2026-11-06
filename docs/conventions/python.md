@@ -6,13 +6,13 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 - The [module map](../design/architecture.md#module-map) gives each module's responsibility, and imports stay within the [import layers](../design/architecture.md#import-layers).
 - For anything Harbor reads or writes, build on Harbor's own models so a schema change surfaces as a validation error. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory, the parts of Harbor's API least likely to churn. `Terminus` needs the private `Terminus2._init_llm` hook to inject the endpoint client, and `HostEnvironment` implements `BaseEnvironment`'s changing abstract interface. Keep both integrations covered by real Harbor trials when upgrading Harbor.
-- Model each input file the bench owns, such as `systems.toml`, `family.toml`, and `cases.toml`, with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
+- Model each input file the bench owns with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
 - Branch on a family's scorer with a `match` over its settings model that ends in `case _: assert_never(...)`, so mypy reports each `match` a new scorer misses.
 - Reach the data directory only through `paths.data_dir()`.
 
 ## Errors
 
-- Raise `ValueError` for input an author can fix, naming the item and the accepted values, as in ``System `x`: effort `medium` is not one of `low`, `high`.`` Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. The CLI prints the `ValueError` of an invalid family, case, task, or system to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family or system.
+- Raise `ValueError` for input an author can fix, naming the item and the accepted values. Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. The CLI prints the `ValueError` of an invalid family, case, task, or system to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family or system.
 - Let HTTP and Harbor errors propagate. Harbor records them on the trial, and its retry policy decides what reruns.
 
 ## Modules
@@ -22,8 +22,8 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Dependencies
 
-- The host and authored tasks share the strict policy in the root `pyproject.toml`. `uv sync` installs the checker used by CI in the root `.venv`. Fix first-party contracts behind diagnostics. Missing library typing metadata is permitted, while missing imports and unknown or incompatible API types remain errors.
+- Code follows the strict typing policy in [Development](development.md#dev-shell). Fix a diagnostic at the first-party contract behind it.
 - Pin Harbor to an exact release, since it ships daily dev builds. Give every other dependency a lower bound at the version first locked, and let `uv.lock` pin the rest.
-- Prefer packages already in Harbor's tree, such as pydantic, httpx, Typer, and the `openai` SDK.
+- Prefer packages already in Harbor's tree.
 
 The development-only package under `typings/` supplies partial contracts for dependencies without typing metadata, covering only what the bench uses. `tests/test_repository.py` runs `mypy.stubtest` over every stub against the installed versions, checking each declared signature while allowing undeclared APIs.
