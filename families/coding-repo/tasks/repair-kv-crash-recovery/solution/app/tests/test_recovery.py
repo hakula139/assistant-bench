@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tinykv import CorruptSegment, Store
+from tinykv import CorruptSegment, Store, StoreClosed
 from tinykv.codec import Op, Record, encode
 
 
@@ -48,6 +48,14 @@ class RecoveryTest(unittest.TestCase):
 
         with self.assertRaises(CorruptSegment):
             Store.open(self.directory, segment_bytes=64)
+
+    def test_closed_stores_refuse_every_write(self) -> None:
+        store = Store.open(self.directory)
+        store.close()
+
+        for key, value in ((b'key', b'value'), (b'', b'value')):
+            with self.subTest(key=key), self.assertRaises(StoreClosed):
+                store.put(key, value)
 
     def test_segments_replay_in_numeric_order(self) -> None:
         with Store.open(self.directory, segment_bytes=64) as store:

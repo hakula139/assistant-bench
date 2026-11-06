@@ -102,6 +102,7 @@ class Store:
         return len(self._data)
 
     def put(self, key: bytes, value: bytes) -> None:
+        self._active()
         if not 1 <= len(key) <= MAX_KEY_BYTES:
             raise ValueError(f'Keys must hold 1 to {MAX_KEY_BYTES} bytes.')
         if len(value) > MAX_VALUE_BYTES:
