@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { TurnstileProps } from '@marsidev/react-turnstile';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from 'vitest';
@@ -512,6 +512,25 @@ describe('VoteApp', () => {
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
   });
 
+  test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    let attempts = 0;
+    override(api, '/api/votes', () =>
+      ++attempts === 1
+        ? Promise.reject(new TypeError('The vote response was lost'))
+        : Promise.resolve(Response.json({ error: 'rate_limited' }, { status: 429 })),
+    );
+    await user.keyboard('a{Enter}');
+    await screen.findByRole('button', { name: 'Retry vote' });
+
+    await user.click(screen.getByRole('button', { name: 'Retry vote' }));
+
+    expect(await screen.findByText('Too many requests. Wait a moment, then retry.')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Retry vote' })).toBeDefined();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', true);
+  });
+
   test('unlocks the ballot when a retried vote finds its pair gone', async () => {
     const api = stubApi();
     const user = await startVoting();
@@ -553,18 +572,78 @@ describe('VoteApp', () => {
     });
   });
 
-  test('tells a network at its daily cap when it can vote again', async () => {
+  test.each([
+    [
+      'a lost response',
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      'The voting service is unavailable. Try again.',
+      true,
+    ],
+    ['unavailable', 500, 'The voting service is unavailable. Try again.', true],
+    ['daily_limit', 429, 'This network has reached its daily limit. Try again tomorrow.', false],
+    ['invalid_request', 400, 'The request could not be processed. Reload and try again.', false],
+    ['forbidden', 403, 'The request could not be processed. Reload and try again.', false],
+    ['too_large', 413, 'The request could not be processed. Reload and try again.', false],
+  ] as const)(
+    'locks the ballot for a retry after %s only when the outcome is unknown',
+    async (error, answer, alert, locked) => {
+      const api = stubApi();
+      const user = await startVoting();
+      override(api, '/api/votes', () =>
+        typeof answer === 'function'
+          ? answer()
+          : Promise.resolve(Response.json({ error }, { status: answer })),
+      );
+
+      await user.keyboard('a{Enter}');
+
+      expect((await screen.findByRole('alert')).textContent).toBe(alert);
+      expect(screen.queryByRole('button', { name: 'Retry vote' }) !== null).toBe(locked);
+      expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', locked);
+      expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty(
+        'disabled',
+        locked,
+      );
+    },
+  );
+
+  test('keeps the choice for a fresh submit after a vote refused for admission', async () => {
     const api = stubApi();
     const user = await startVoting();
-    override(api, '/api/votes', () =>
-      Promise.resolve(Response.json({ error: 'daily_limit' }, { status: 429 })),
-    );
-
+    const fetch = api.fetch.getMockImplementation();
+    let refused = false;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && !refused) {
+        refused = true;
+        return Promise.resolve(
+          Response.json({ error: 'admission_required', sitekey: SITEKEY }, { status: 401 }),
+        );
+      }
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
+    });
     await user.keyboard('a{Enter}');
+    await screen.findByTestId('turnstile');
 
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'This network has reached its daily limit. Try again tomorrow.',
+    act(() => {
+      widget().onSuccess?.('proof');
+    });
+    await waitFor(() => {
+      expect(api.pairRequests).toHaveLength(2);
+      expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', false);
+    });
+
+    expect(screen.getByText('Output A1')).toBeDefined();
+    expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty(
+      'ariaChecked',
+      'true',
     );
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', false);
+
+    await user.keyboard('{Enter}');
+    await screen.findByText('Output A2');
+
+    expect(api.casts).toEqual([{ pair: pairId(1), choice: 'a', defects: { a: [], b: [] } }]);
   });
 
   test('loads the current pair with a notice when another tab has voted on this one', async () => {
@@ -925,15 +1004,16 @@ describe('VoteApp', () => {
     expect(point.querySelector('code')?.textContent).toBe('make test');
   });
 
-  test('labels the pair category above the instruction, outside the prompt band', async () => {
+  test('labels the pair category before the instruction, collapsing with the prompt', async () => {
     stubApi();
+    const user = await startVoting();
 
-    await startVoting();
+    const label = screen.getByRole('button', { name: 'Message' });
+    const order = label.compareDocumentPosition(screen.getByText('Instruction 1'));
+    await user.click(screen.getByRole('button', { name: 'Prompt' }));
 
-    const trigger = screen.getByRole('button', { name: 'Message' });
-    const band = screen.getByRole('button', { name: 'Prompt' }).parentElement;
-    expect(band?.contains(trigger)).toBe(false);
-    expect(trigger.nextElementSibling?.contains(screen.getByText('Instruction 1'))).toBe(true);
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(screen.queryByRole('button', { name: 'Message' })).toBeNull();
     expect(screen.queryByText('message')).toBeNull();
   });
 
@@ -950,64 +1030,88 @@ describe('VoteApp', () => {
     expect(pane('A')).not.toBe(firstPane);
   });
 
-  test.each([
-    ['A', '12345', ['1', '2', '3', '4', '5', null, null]],
-    ['B', '67890', ['6', '7', '8', '9', '0', null, null]],
-  ] as const)(
-    'orders and submits all seven output %s issues with digit keys on the first five',
-    async (side, digits, keys) => {
-      const api = stubApi();
+  const digitSides = [
+    ['A', '12345'],
+    ['B', '67890'],
+  ] as const;
+
+  test.each(digitSides)(
+    'tags output %s issues in order with digit keys on the first five',
+    async (side, digits) => {
+      stubApi();
       const user = await startVoting();
 
       await user.keyboard(digits);
       await user.click(within(pane(side)).getByRole('button', { name: 'Issues 5' }));
-      const popup = screen.getByRole('dialog', { name: `Issues in output ${side}` });
-      const boxes = within(popup).getAllByRole('checkbox');
 
+      const boxes = within(
+        screen.getByRole('dialog', { name: `Issues in output ${side}` }),
+      ).getAllByRole('checkbox');
       expect(
-        boxes.map((box) => document.querySelector(`label[for="${box.id}"]`)?.textContent),
+        boxes.map((box) => [
+          document.querySelector(`label[for="${box.id}"]`)?.textContent,
+          box.getAttribute('aria-keyshortcuts'),
+          box.ariaChecked,
+        ]),
       ).toEqual([
-        'Misses the brief',
-        'Wrong facts',
-        'Hard to follow',
-        'Wrong tone',
-        'Language errors',
-        'Formulaic',
-        'Too long',
+        ['Misses the brief', digits[0], 'true'],
+        ['Wrong facts', digits[1], 'true'],
+        ['Hard to follow', digits[2], 'true'],
+        ['Wrong tone', digits[3], 'true'],
+        ['Language errors', digits[4], 'true'],
+        ['Formulaic', null, 'false'],
+        ['Too long', null, 'false'],
       ]);
-      expect(boxes.map((box) => box.getAttribute('aria-keyshortcuts'))).toEqual(keys);
-      expect(boxes.map((box) => box.ariaChecked)).toEqual([
-        'true',
-        'true',
-        'true',
-        'true',
-        'true',
-        'false',
-        'false',
-      ]);
-      expect(popup.textContent).not.toContain('undefined');
-      expect(
-        boxes.map(
-          (box) => document.getElementById(box.getAttribute('aria-describedby') ?? '')?.textContent,
-        ),
-      ).toEqual(WRITING_DEFECTS.map((defect) => defectTerms[defect].definition));
+    },
+  );
 
-      within(popup).getByRole('checkbox', { name: 'Formulaic' }).focus();
-      await user.keyboard(' {Tab} ');
+  test('describes each issue in the Issues popover', async () => {
+    stubApi();
+    const user = await startVoting();
 
-      expect(within(popup).getByRole('checkbox', { name: 'Formulaic' }).ariaChecked).toBe('true');
-      expect(within(popup).getByRole('checkbox', { name: 'Too long' }).ariaChecked).toBe('true');
-      await user.keyboard('{Escape}');
-      expect(within(pane(side)).getByRole('button', { name: 'Issues 7' })).toBeDefined();
-      screen.getByRole('group', { name: 'Pair 1' }).focus();
+    await user.click(within(pane('A')).getByRole('button', { name: 'Issues' }));
 
-      await user.keyboard('a{Enter}');
+    const boxes = within(screen.getByRole('dialog', { name: 'Issues in output A' })).getAllByRole(
+      'checkbox',
+    );
+    expect(
+      boxes.map(
+        (box) => document.getElementById(box.getAttribute('aria-describedby') ?? '')?.textContent,
+      ),
+    ).toEqual(WRITING_DEFECTS.map((defect) => defectTerms[defect].definition));
+  });
+
+  test('toggles issues in the popover by keyboard and counts them on its button', async () => {
+    stubApi();
+    const user = await startVoting();
+    await user.click(within(pane('A')).getByRole('button', { name: 'Issues' }));
+    const popup = screen.getByRole('dialog', { name: 'Issues in output A' });
+    within(popup).getByRole('checkbox', { name: 'Formulaic' }).focus();
+
+    await user.keyboard(' {Tab} ');
+
+    expect(within(popup).getByRole('checkbox', { name: 'Formulaic' }).ariaChecked).toBe('true');
+    expect(within(popup).getByRole('checkbox', { name: 'Too long' }).ariaChecked).toBe('true');
+
+    await user.keyboard('{Escape}');
+
+    expect(within(pane('A')).getByRole('button', { name: 'Issues 2' })).toBeDefined();
+  });
+
+  test.each(digitSides)(
+    'submits the tagged output %s issues and clears them for the next pair',
+    async (side, digits) => {
+      const api = stubApi();
+      const user = await startVoting();
+      const tagged = WRITING_DEFECTS.slice(0, 5);
+
+      await user.keyboard(`${digits}a{Enter}`);
       await screen.findByText('Output A2');
       await user.keyboard('b{Enter}');
       await screen.findByText('Output A3');
 
       expect(api.casts.map((cast) => cast.defects)).toEqual([
-        { a: side === 'A' ? WRITING_DEFECTS : [], b: side === 'B' ? WRITING_DEFECTS : [] },
+        { a: side === 'A' ? tagged : [], b: side === 'B' ? tagged : [] },
         { a: [], b: [] },
       ]);
     },
