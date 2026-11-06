@@ -477,6 +477,32 @@ def test_lockfiles_name_only_their_public_registry(lockfile: Path) -> None:
     assert hosts(lockfile) <= registry(lockfile.name)
 
 
+def stub_modules() -> list[str]:
+    """Return the module that each stub under `typings/src` declares."""
+    root = REPO_ROOT / 'typings' / 'src'
+    modules: list[str] = []
+    for stub in sorted(root.glob('*-stubs/**/*.pyi')):
+        package, *parts = stub.relative_to(root).with_suffix('').parts
+        if parts[-1] == '__init__':
+            parts.pop()
+        modules.append('.'.join([package.removesuffix('-stubs'), *parts]))
+    return modules
+
+
+def test_dependency_stubs_match_the_installed_packages() -> None:
+    result = subprocess.run(
+        [
+            *(sys.executable, '-m', 'mypy.stubtest'),
+            *('--mypy-config-file', str(REPO_ROOT / 'pyproject.toml')),
+            '--ignore-missing-stub',
+            *stub_modules(),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def run_pytest(
     directory: Path, test: str, *args: str, env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
