@@ -1,14 +1,11 @@
 """A sample project that the hidden tests build through the command line."""
 
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
+import dataclasses
 import textwrap
-import tomllib
 import unittest
-from pathlib import Path
+from typing import Any
+
+from sandbox import observe, scratch
 
 
 STEPS = textwrap.dedent(
@@ -106,83 +103,56 @@ SOURCES = {
 }
 
 
+@dataclasses.dataclass(frozen=True)
+class Completed:
+    """A command-line run, with the steps it ran in order."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    runs: list[str]
+
+
 class ProjectCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.workspace = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.root = self.workspace / 'project'
-        self.write_project(self.root)
+        self.root = str(scratch() / 'project')
+        self.write_project()
 
-    def write_project(self, root: Path) -> None:
-        root.mkdir()
-        (root / 'steps.py').write_text(STEPS)
-        (root / 'pipeline.toml').write_text(CONFIG)
-        for name, content in SOURCES.items():
-            self.write(name, content, root)
+    def write_project(self) -> None:
+        files = {'steps.py': STEPS, 'pipeline.toml': CONFIG, **SOURCES}
+        self.project('write', files=files)
 
-    def write(self, name: str, content: str, root: Path | None = None) -> None:
-        path = (root or self.root) / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+    def project(self, function: str, /, **args: Any) -> Any:
+        """Edit or build this test's project through `scenarios.project`."""
+        return observe('project', function, root=self.root, **args)
 
-    def cli(
-        self, *args: str, env: dict[str, str] | None = None
-    ) -> subprocess.CompletedProcess[str]:
+    def api(self, function: str, /, **args: Any) -> Any:
+        """Build this test's project through `scenarios.api`."""
+        return observe('api', function, root=self.root, **args)
+
+    def write(self, name: str, content: str) -> None:
+        self.project('write', files={name: content})
+
+    def read(self, name: str) -> str:
+        return self.project('read', name=name)
+
+    def cli(self, *args: str, env: dict[str, str] | None = None) -> Completed:
         """Run the command line, starting a new `runs.log`."""
-        (self.root / 'runs.log').unlink(missing_ok=True)
-        return subprocess.run(
-            [sys.executable, '-m', 'pipeline', '--project', str(self.root), *args],
-            capture_output=True,
-            text=True,
-            env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **(env or {})},
-            timeout=60,
-        )
+        return Completed(**self.project('cli', args=args, env=env or {}))
 
     def build(self, *args: str, env: dict[str, str] | None = None) -> list[str]:
         """Build successfully and return the steps that ran, in order."""
         result = self.cli('build', *args, env=env)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        return self.runs()
-
-    def runs(self) -> list[str]:
-        log = self.root / 'runs.log'
-        return log.read_text().split() if log.exists() else []
-
-    def outputs(self, root: Path) -> dict[str, bytes]:
-        """Read every declared output that exists."""
-        steps = tomllib.loads((root / 'pipeline.toml').read_text())['steps']
-        return {
-            output: (root / output).read_bytes()
-            for step in steps.values()
-            for output in step['outputs']
-            if (root / output).is_file()
-        }
+        return result.runs
 
     def edit(self, name: str, old: str, new: str) -> None:
-        path = self.root / name
-        content = path.read_text()
-        self.assertIn(old, content)
-        path.write_text(content.replace(old, new))
+        self.assertIn(old, self.project('edit', name=name, old=old, new=new))
 
     def assert_matches_clean_build(self) -> None:
         """Compare the outputs with those of a fresh copy of the current sources."""
-        fresh = self.workspace / f'fresh-{len(list(self.workspace.iterdir()))}'
-        shutil.copytree(
-            self.root,
-            fresh,
-            ignore=lambda directory, names: [
-                name
-                for name in names
-                if Path(directory) == self.root
-                and (name.startswith('.') or name in {'build', 'site', 'runs.log'})
-            ],
-        )
-        result = subprocess.run(
-            [sys.executable, '-m', 'pipeline', '--project', str(fresh), 'build'],
-            capture_output=True,
-            text=True,
-            env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'},
-            timeout=60,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.outputs(self.root), self.outputs(fresh))
+        build = self.project('clean_build')
+
+        self.assertEqual(build['returncode'], 0, build['stderr'])
+        self.assertEqual(build['outputs'], build['fresh'])
