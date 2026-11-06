@@ -4,7 +4,8 @@ import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import { systemPagePath } from '@/lib/paths';
 import type { Report, TestsResults, VotesResults } from '@/lib/report';
-import { resolveSystemNames, type SystemNames } from '@/lib/systems';
+import { sitePath } from '@/lib/site';
+import type { SystemNames } from '@/lib/systems';
 
 export interface VotesRound {
   family: string;
@@ -33,7 +34,7 @@ export interface Family {
    * first round closes.
    */
   rounds: Report[];
-  /** Current catalog labels for families without a closed round. */
+  /** Current display names for families without a closed round. */
   systemNames: SystemNames;
 }
 
@@ -59,7 +60,7 @@ function boardParams(family: Family): { aspect: Aspect; board: string } {
 
 export function boardPath(family: Family): string {
   const { aspect, board } = boardParams(family);
-  return `/${aspect}/${board}/`;
+  return sitePath(`/${aspect}/${board}/`);
 }
 
 export function roundPath(family: Family, round: string): string {
@@ -121,17 +122,16 @@ export function publicFamilies(
 }
 
 export async function getFamilies(): Promise<Family[]> {
-  const [configs, reports, systems, models] = await Promise.all([
+  const [configs, reports, systems] = await Promise.all([
     getCollection('families'),
     getCollection('reports'),
     getCollection('systems'),
-    getCollection('models'),
   ]);
 
   return publicFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
-    resolveSystemNames(systems, new Map(models.map((entry) => [entry.id, entry.data.name]))),
+    Object.fromEntries(systems.map(({ id, data }) => [id, data.display_name])),
   );
 }
 

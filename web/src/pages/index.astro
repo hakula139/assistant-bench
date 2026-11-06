@@ -8,7 +8,7 @@ import Base from '@/layouts/Base.astro';
 import { groupByAspect } from '@/lib/aspects';
 import { unionMarks } from '@/lib/forest';
 import { getFamilies } from '@/lib/reports';
-import { SITE_DESCRIPTION } from '@/lib/site';
+import { SITE_DESCRIPTION, sitePath } from '@/lib/site';
 
 const families = await getFamilies();
 const marks = unionMarks(families.map((family) => scorerViews[family.config.scorer].marks(family)));
@@ -20,7 +20,8 @@ const marks = unionMarks(families.map((family) => scorerViews[family.config.scor
       AI models and agents ranked on everyday work
     </h1>
     <p class={intro}>
-      {SITE_DESCRIPTION} The <a href="/methodology/">methodology</a> explains how to read them.
+      {SITE_DESCRIPTION} The <a href={sitePath('/methodology/')}>methodology</a> explains how to
+      read them.
     </p>
   </section>
 

@@ -40,6 +40,7 @@ import {
   type BoardLink,
   type Family,
 } from '@/lib/reports';
+import { sitePath } from '@/lib/site';
 import { reportNames, systemName } from '@/lib/systems';
 
 export const getStaticPaths = (async () =>
@@ -113,7 +114,7 @@ const roundRows = appearances.map(({ round, systems, reference, anchor, results,
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
-            <BreadcrumbLink href={`/#${family.aspect}`}>
+            <BreadcrumbLink href={sitePath(`/#${family.aspect}`)}>
               {aspects[family.aspect].title}
             </BreadcrumbLink>
           </BreadcrumbItem>

@@ -2,7 +2,7 @@ import { getContainerRenderer } from '@astrojs/react/container-renderer';
 import { loadRenderers } from 'astro:container';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { JSDOM } from 'jsdom';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import Header from '@/components/site/Header.astro';
@@ -20,10 +20,11 @@ import {
   systemPaths,
   type Family,
 } from '@/lib/reports';
-import { REPOSITORY } from '@/lib/site';
+import { SOURCE } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
 import FamilyPage from '@/pages/[aspect]/[board]/index.astro';
 import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
+import NotFoundPage from '@/pages/404.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
 import { FIXTURE_NAMES, readFixture, shownSlugs } from '@/test/fixture';
@@ -300,7 +301,7 @@ describe('family page', () => {
       const html = await render(FamilyPage, { family: loaded, boards: [] });
 
       const document = new JSDOM(html).window.document;
-      const href = `${REPOSITORY}/tree/main/families/${loaded.name}`;
+      const href = `${SOURCE}/tree/main/families/${loaded.name}`;
       expect(guide(html)).toBe(section);
       expect(methodology).toContain(`id="${section}"`);
       expect(document.querySelector(`a[href="${href}"]`)?.textContent.trim()).toBe(inputs);
@@ -1066,5 +1067,60 @@ describe('round pages', () => {
     const href = new JSDOM(html).window.document.querySelector('header dl a')?.getAttribute('href');
     expect(href).toBe('/writing/arena/rounds/2026-10-07/');
     expect(islandRounds(pages.get(href ?? '') ?? '')).toEqual(['2026-10-07']);
+  });
+});
+
+describe('deployment base', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.doUnmock('astro:env/client');
+    vi.resetModules();
+  });
+
+  test('keeps every root-relative link and source of every page under the base', async () => {
+    const base = '/team/project/';
+    vi.stubEnv('BASE_URL', base);
+    const loaded = await family();
+    listed.families = [loaded];
+    const [board] = familyPaths([loaded]);
+    const [round] = roundPaths([loaded]);
+    const [system] = systemPaths([loaded]);
+
+    const pages = await Promise.all([
+      render(HomePage, {}),
+      render(MethodologyPage, {}),
+      render(NotFoundPage, {}),
+      render(FamilyPage, board.props),
+      render(RoundPage, round.props),
+      render(SystemPage, system.props),
+    ]);
+
+    // Vite prefixes the assets it emits at build time, which the built site's test covers.
+    const urls = pages.flatMap((html) =>
+      [...new JSDOM(html).window.document.querySelectorAll('a[href^="/"], link[rel="icon"]')].map(
+        (element) => element.getAttribute('href') ?? '',
+      ),
+    );
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.filter((url) => !url.startsWith(base))).toEqual([]);
+  });
+
+  test("links the forge's repository and leaves out the vote page on Pages", async () => {
+    const url = 'https://forge.example.com/team/project';
+    vi.resetModules();
+    vi.doMock(import('astro:env/client'), () => ({
+      CI_PAGES_URL: 'https://site.example/team/project',
+      CI_PROJECT_URL: url,
+    }));
+
+    const site = await import('@/lib/site');
+    const { default: PagesHeader } = await import('@/components/site/Header.astro');
+    const html = await render(PagesHeader, {});
+
+    expect([site.REPOSITORY, site.SOURCE, site.VOTING]).toEqual([url, `${url}/-`, false]);
+    expect(navLinks(html, 'Main').map(([, label]) => label)).toEqual([
+      'Leaderboards',
+      'Methodology',
+    ]);
   });
 });

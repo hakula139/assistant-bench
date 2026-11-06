@@ -5,9 +5,9 @@ import { intro, list, PageHeader, Section, stack } from '@/components/site/PageP
 import Base from '@/layouts/Base.astro';
 import type { Scorer } from '@/lib/family';
 import { scorers } from '@/lib/method';
-import { REPOSITORY } from '@/lib/site';
+import { SOURCE } from '@/lib/site';
 
-const docs = `${REPOSITORY}/blob/main/docs/design`;
+const docs = `${SOURCE}/blob/main/docs/design`;
 const sections = [
   ...Object.entries(scorerViews).map(([scorer, { Method, parts }]) => ({
     id: scorer,
@@ -104,7 +104,7 @@ const contents = [
         <p class="text-muted-foreground">
           The design notes on <a href={`${docs}/ranking.md`}>ranking</a>, the{' '}
           <a href={`${docs}/arena.md`}>vote arena</a>, and each{' '}
-          <a href={`${REPOSITORY}/tree/main/docs/design/families`}>family</a> cover the math.
+          <a href={`${SOURCE}/tree/main/docs/design/families`}>family</a> cover the math.
         </p>
       </Section>
     </article>

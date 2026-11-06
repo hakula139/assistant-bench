@@ -10,7 +10,7 @@ import Base from '@/layouts/Base.astro';
 import { boardGuide } from '@/lib/method';
 import type { Report } from '@/lib/report';
 import { boardPath, latest, roundLinks, type BoardLink, type Family } from '@/lib/reports';
-import { REPOSITORY } from '@/lib/site';
+import { sitePath, SOURCE } from '@/lib/site';
 
 interface Props {
   family: Family;
@@ -37,12 +37,12 @@ const round = named ?? newest;
     <BoardSwitcher aspect={family.aspect} boards={boards} />
     <MethodStrip client:load scorer={config.scorer} config={config} />
     <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-      <a href={`/methodology/#${guide.section}`} class="inline-flex items-center gap-2">
+      <a href={sitePath(`/methodology/#${guide.section}`)} class="inline-flex items-center gap-2">
         <BookOpen className="size-4" aria-hidden="true" />
         How to read this board
       </a>
       <a
-        href={`${REPOSITORY}/tree/main/families/${family.name}`}
+        href={`${SOURCE}/tree/main/families/${family.name}`}
         class="inline-flex items-center gap-2"
       >
         <FileText className="size-4" aria-hidden="true" />

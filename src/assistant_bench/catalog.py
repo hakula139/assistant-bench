@@ -48,7 +48,6 @@ class Thinking(BaseModel):
 class CatalogModel(BaseModel):
     """One model of nixos-config's `data/llm-models.nix`, with the fields used here."""
 
-    name: str
     apis: list[str]
     vendor: str | None = Field(default=None, min_length=1)
     max_output_tokens: int = Field(alias='maxTokens', gt=0)
@@ -137,8 +136,8 @@ class SystemConfig(BaseModel):
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
 
-    display_name: str | None = Field(default=None, min_length=1)
-    """Overrides the catalog model's name. Required for a bare route."""
+    display_name: str = Field(min_length=1)
+    """Public label the site and reports show."""
 
     @model_validator(mode='after')
     def _check_source(self) -> Self:
@@ -159,8 +158,6 @@ class SystemConfig(BaseModel):
         limits = (self.max_output_tokens, self.context_window)
         if self.model is not None and any(value is not None for value in limits):
             raise ValueError('capacity settings apply only to a `route`')
-        if self.route is not None and self.display_name is None:
-            raise ValueError('a `route` needs a `display_name`')
         if self.route is not None and any(value is None for value in limits):
             raise ValueError('a `route` needs `max_output_tokens` and `context_window`')
         return self
@@ -284,16 +281,14 @@ def resolve_system(
         channel = next(iter(entry.channel_id))
         price = _price(entry.channel_cost.get(channel))
         vendor = entry.vendor
-        display_name = config.display_name or entry.name
     else:
-        assert config.display_name is not None
-        price, vendor, display_name = config.price, config.vendor, config.display_name
+        price, vendor = config.price, config.vendor
     return System(
         **identity.model_dump(),
         name=name,
         price=price,
         vendor=vendor,
-        display_name=display_name,
+        display_name=config.display_name,
     )
 
 

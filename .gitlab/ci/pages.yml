@@ -1,0 +1,37 @@
+variables:
+  BENCH_NODE_IMAGE: node:26-bookworm
+  BENCH_PNPM_VERSION: 11.27.0
+
+pages:
+  image: $BENCH_NODE_IMAGE
+  stage: deploy
+  variables:
+    PAGES_ENVIRONMENT: pages/production
+    PAGES_EXPIRE_IN: never
+    PAGES_PREFIX: ''
+    PNPM_CONFIG_STORE_DIR: $CI_PROJECT_DIR/node_modules/.pnpm-store
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - node_modules/.pnpm-store
+  before_script:
+    - npm install --global "pnpm@$BENCH_PNPM_VERSION"
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm build
+  pages:
+    publish: web/dist
+    path_prefix: $PAGES_PREFIX
+    expire_in: $PAGES_EXPIRE_IN
+  environment:
+    name: $PAGES_ENVIRONMENT
+    url: $CI_PAGES_URL
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      variables:
+        PAGES_ENVIRONMENT: pages/mr-$CI_MERGE_REQUEST_IID
+        PAGES_EXPIRE_IN: 1 week
+        PAGES_PREFIX: mr-$CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
