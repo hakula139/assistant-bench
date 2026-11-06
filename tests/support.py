@@ -54,7 +54,7 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
-from assistant_bench.catalog import Price, System
+from assistant_bench.catalog import Price, System, SystemConfig
 from assistant_bench.families import (
     Case,
     CaseSource,
@@ -206,6 +206,11 @@ def make_generation(protocol: int = 2, harbor: str = '0.24.0') -> Generation:
 
 
 GENERATION = make_generation()
+
+
+def make_config(**overrides: Any) -> SystemConfig:
+    fields: dict[str, Any] = {'model': 'acme-large', 'display_name': 'Acme Large'}
+    return SystemConfig(**(fields | overrides))
 
 
 def make_system(**overrides: Any) -> System:
