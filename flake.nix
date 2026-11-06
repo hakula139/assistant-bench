@@ -107,7 +107,7 @@
           statix.enable = true;
 
           # shfmt reads `.editorconfig` only without formatting flags, and indents shell files that
-          # its `[*.sh]` section misses with tabs.
+          # `.editorconfig`'s `[*.sh]` section misses with tabs.
           shfmt = {
             enable = true;
             settings = {

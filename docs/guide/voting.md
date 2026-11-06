@@ -10,7 +10,7 @@ Each pair compares two systems' different, passing outputs on one case, and you 
 
 The server holds your current pair, so a reload or a second tab shows the same one. A reload also keeps your unsent choice, issues, Markdown toggle, collapsed prompt and scroll position, and never sends a vote. If the pair changed meanwhile, the page shows the new one and says so when it cleared an unsent choice.
 
-If a vote fails to send, Retry sends the same vote again, and the server records it once. If another tab already voted on the pair, the page shows the current pair. Skip shows another case for the same two systems, and says so when no other case is left. Undo withdraws your last vote within the [undo window](../design/arena.md#vote-api) and shows its pair again, and each further Undo goes one vote further back.
+If a vote fails to send, Retry sends the same vote again, and the server records it once. If another tab already voted on the pair, the page shows the current pair. Skip shows another case for the same two systems, and says so when no other case is left. Undo withdraws your last vote within 10 minutes of casting it and shows its pair again, and each further Undo goes one vote further back.
 
 ## Casting a Vote
 

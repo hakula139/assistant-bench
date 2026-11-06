@@ -6,24 +6,15 @@ Have new or edited cases and tasks reviewed before any paid run over them, even 
 
 ## Families
 
-A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are. [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml) reads:
+A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are. A minimal votes family reads:
 
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = [
-  "opus-5.5-high",
-  "gpt-6-astra-high",
-  "gpt-6.1-sol-high",
-  "gemini-4-argon-high",
-  "gemini-3.8-flash-high",
-  "deepseek-v4.1-flash-1017-high",
-  "kimi-k3-high",
-]
+systems = ["opus-5.5-high", "gemini-3.8-flash-high"]
 reference = "gemini-3.8-flash-high"
 samples = 1
 categories = ["message"]
-defects = ["facts", "mechanics", "tone", "formulaic", "length"]
 ```
 
 A `family.toml` lists its fields in this order:
