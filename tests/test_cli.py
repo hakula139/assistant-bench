@@ -1209,6 +1209,27 @@ class TestRun:
         )
         assert len(submitted) == 1
 
+    def test_runs_a_system_without_an_estimate_from_an_empty_ledger(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small')
+
+        result = invoke('run', 'f', '--system', 'large')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert result.stdout.startswith(
+            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'so this run can exceed the budget.\n'
+        )
+        assert len(submitted) == 1
+
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
@@ -1344,7 +1365,7 @@ class TestSpend:
         assert result.exit_code == 0, result.output
         assert result.stdout == (
             'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
-            'response without a known cost, imputed at its own cost per response.\n'
+            'response without a known cost, imputed from its own usage.\n'
             'System `large`: 1 pending trial at $6.00 each from its own usage, '
             '$6.00 in all.\n'
             'Family `f`: $12.00 spent and projected.\n'
@@ -1371,10 +1392,46 @@ class TestSpend:
         assert result.stdout == (
             'System `small` is unpriced: 1 trial and 1 response used 0 input and 0 '
             'output tokens, besides 1 unmeasured response.\n'
-            'System `large`: 1 pending trial with no usage to estimate a cost from.\n'
-            'System `small`: 1 pending trial with no usage to estimate a cost from.\n'
+            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'so this run can exceed the budget.\n'
+            'System `small`: 1 pending trial with no usage to estimate a cost from, '
+            'so this run can exceed the budget.\n'
             'Family `f`: $0.00 spent and projected, against a budget of $100.00.\n'
-            'System `large` has 1 pending trial and no usage to estimate a cost from.\n'
+        )
+        assert submitted == []
+
+    def test_names_borrowed_and_ceiling_costs(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(
+            name='small', context_window=2_000_000, max_output_tokens=200_000
+        )
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'large', (None,))
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-2', 'small', (None, None))
+        before = invoke('spend', 'f')
+        write_spent_attempt(
+            data_dir / 'jobs' / 'f' / 'job-3',
+            'large',
+            (MeasuredUsage(1_000_000, 0, 0, 100_000, None),),
+        )
+
+        after = invoke('spend', 'f')
+
+        assert before.stdout.splitlines()[:2] == [
+            'System `large`: 1 trial and 1 response cost $0.00, plus $7.00 for 1 '
+            'response without a known cost, counted at its ceiling.',
+            'System `small`: 1 trial and 2 responses cost $0.00, plus $14.00 for 2 '
+            'responses without a known cost, counted at their ceilings.',
+        ]
+        assert after.stdout.splitlines()[1] == (
+            'System `small`: 1 trial and 2 responses cost $0.00, plus $6.00 for 2 '
+            "responses without a known cost, imputed from another system's usage."
         )
         assert submitted == []
 
@@ -1392,7 +1449,7 @@ class TestCollect:
         assert result.exit_code == 0, result.output
         assert (
             'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
-            'response without a known cost, imputed at its own cost per response.\n'
+            'response without a known cost, imputed from its own usage.\n'
         ) in result.output
 
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(

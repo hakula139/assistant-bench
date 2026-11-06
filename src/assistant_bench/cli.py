@@ -47,6 +47,7 @@ from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, read_outputs, tests_pass
 from assistant_bench.spend import (
+    Basis,
     Projection,
     Spend,
     budget_problems,
@@ -69,6 +70,7 @@ SYSTEM_RENAME_GUIDE = (
     'Give a changed system a new name and keep the old name only in closed '
     f'reports, as `{SYSTEMS_DOC}` describes.'
 )
+USAGE_SOURCES: dict[Basis, str] = {'own': 'its own', 'borrowed': "another system's"}
 
 
 class _Group(TyperGroup):
@@ -621,18 +623,17 @@ def _spend_line(entry: Spend) -> str:
         return f'{line}.'
 
     line = f'System `{entry.system}`: {attempts} cost ${entry.known_usd:.2f}'
-    if entry.imputed:
-        source = 'its own' if entry.imputation == 'own' else "another system's"
+    for basis, share in sorted(entry.imputed.items()):
         line += (
-            f', plus ${entry.imputed_usd:.2f} for '
-            f'{count_of(entry.imputed, "response")} without a known cost, imputed '
-            f'at {source} cost per response'
+            f', plus ${share.usd:.2f} for {count_of(share.responses, "response")} '
+            f'without a known cost, imputed from {USAGE_SOURCES[basis]} usage'
         )
-    if entry.ceiling:
+    if entry.ceiling.responses:
+        ceiling = 'its ceiling' if entry.ceiling.responses == 1 else 'their ceilings'
         line += (
-            f', plus ${entry.ceiling_usd:.2f} for '
-            f'{count_of(entry.ceiling, "response")} without a known cost, counted at '
-            'their ceiling'
+            f', plus ${entry.ceiling.usd:.2f} for '
+            f'{count_of(entry.ceiling.responses, "response")} without a known cost, '
+            f'counted at {ceiling}'
         )
     return f'{line}.'
 
@@ -655,17 +656,22 @@ def _echo_projection(
             continue
         name = f'System `{projection.system}`'
         trials = count_of(projection.pending, 'pending trial')
-        if projection.per_trial_usd is not None:
-            source = 'its own' if projection.basis == 'own' else "another system's"
+        if projection.per_trial_usd is not None and projection.basis is not None:
             typer.echo(
                 f'{name}: {trials} at ${projection.per_trial_usd:.2f} each from '
-                f'{source} usage, ${projection.usd:.2f} in all.'
+                f'{USAGE_SOURCES[projection.basis]} usage, '
+                f'${projection.usd:.2f} in all.'
             )
         elif not projection.priced and projection.tokens is not None:
             typer.echo(
                 f'{name} is unpriced: {trials} of about '
                 f'{projection.tokens.input_tokens:,.0f} input and '
                 f'{projection.tokens.output_tokens:,.0f} output tokens.'
+            )
+        elif family.settings.budget_usd is not None:
+            typer.echo(
+                f'{name}: {trials} with no usage to estimate a cost from, so this '
+                'run can exceed the budget.'
             )
         else:
             typer.echo(f'{name}: {trials} with no usage to estimate a cost from.')

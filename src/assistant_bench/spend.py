@@ -126,6 +126,11 @@ class Tokens:
             self.output_tokens * factor,
         )
 
+    @property
+    def uncached(self) -> Tokens:
+        """Return the tokens with cache reads and writes counted as plain input."""
+        return Tokens(self.input_tokens, 0, 0, self.output_tokens)
+
     def cost(self, price: Price) -> float | None:
         return price.cost(
             input_tokens=self.input_tokens,
@@ -135,7 +140,18 @@ class Tokens:
         )
 
 
-type Imputation = Literal['own', 'borrowed']
+type Basis = Literal['own', 'borrowed']
+
+
+@dataclass(frozen=True)
+class Share:
+    """Responses without a known cost and the cost that stands in for them."""
+
+    responses: int = 0
+    usd: float = 0.0
+
+    def add(self, usd: float) -> Share:
+        return Share(self.responses + 1, self.usd + usd)
 
 
 @dataclass(frozen=True)
@@ -160,19 +176,13 @@ class Spend:
     """The tokens of the measured responses."""
 
     known_usd: float
-    imputed: int
-    """Priced responses without a known cost that another cost stands in for."""
+    imputed: Mapping[Basis, Share]
+    """Priced responses without a known cost, at the system's own mean tokens per
+    measured response or else another system's, at the entry's price."""
 
-    imputed_usd: float
-    imputation: Imputation | None
-    """Whether the imputed cost is the system's own mean known cost per response or
-    the family's costliest other usage per response at the system's prices."""
-
-    ceiling: int
-    """Priced responses without a known cost and nothing to impute from, counted
-    at a full context window and completion allowance each."""
-
-    ceiling_usd: float
+    ceiling: Share
+    """Priced responses without a known cost and no usage to impute from, at a
+    full context window and completion allowance each."""
 
     @property
     def unknown(self) -> int:
@@ -181,7 +191,11 @@ class Spend:
 
     @property
     def spent_usd(self) -> float:
-        return self.known_usd + self.imputed_usd + self.ceiling_usd
+        return (
+            self.known_usd
+            + sum(share.usd for share in self.imputed.values())
+            + self.ceiling.usd
+        )
 
     @property
     def profile(self) -> Tokens | None:
@@ -194,72 +208,71 @@ class Spend:
 def summarize(entries: Iterable[Entry]) -> list[Spend]:
     """Price each system's ledger entries at the prices they keep.
 
-    A response has no known cost when its usage is invalid or its cache write has
-    no declared price. Such a response costs the system's mean known cost per
-    response, or else the family's costliest usage per response from another
-    system at its own entry's price, or else its ceiling.
+    A response has no known cost when its usage is invalid or its price cannot
+    cost it, as when its cache write has no declared price. Such a response costs
+    the system's own mean tokens per measured response at its entry's price, or
+    else the costliest other system's, with their cache reads and writes priced as
+    plain input, or else its ceiling.
     """
     by_system: defaultdict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
         by_system[entry.system].append(entry)
 
-    rates = {
-        name: rate
-        for name, attempts in by_system.items()
-        if (rate := _response_tokens(attempts)) is not None
-    }
+    rates = {name: _rate(attempts) for name, attempts in by_system.items()}
     return [
         _spend(
             name,
             attempts,
-            [rate for other, rate in rates.items() if other != name],
+            rates[name],
+            [rate for other, rate in rates.items() if other != name and rate],
         )
         for name, attempts in sorted(by_system.items())
     ]
 
 
-def _measured(entry: Entry) -> list[MeasuredUsage]:
+def _measured(entry: Entry) -> list[tuple[MeasuredUsage, float]]:
+    """Return each measured response with its cost, zero when unpriced."""
     price = entry.price
+    if price is None:
+        return [
+            (usage, 0.0)
+            for usage in entry.responses
+            if usage is not None and not usage.cache_write_unpriced
+        ]
     return [
-        usage
+        (usage, cost)
         for usage in entry.responses
-        if usage is not None
-        and (
-            not usage.cache_write_unpriced
-            if price is None
-            else usage.cost(price) is not None
-        )
+        if usage is not None and (cost := usage.cost(price)) is not None
     ]
 
 
-def _response_tokens(attempts: list[Entry]) -> Tokens | None:
-    measured = [usage for attempt in attempts for usage in _measured(attempt)]
+def _rate(attempts: list[Entry]) -> Tokens | None:
+    """Return the mean tokens per measured response, `None` without one."""
+    measured = [usage for attempt in attempts for usage, _ in _measured(attempt)]
     if not measured:
         return None
     return Tokens.total(measured).scaled(1 / len(measured))
 
 
-def _spend(name: str, attempts: list[Entry], borrowed: list[Tokens]) -> Spend:
-    measured = [usage for attempt in attempts for usage in _measured(attempt)]
-    known = [
-        cost
-        for attempt in attempts
-        if attempt.price is not None
-        for usage in _measured(attempt)
-        if (cost := usage.cost(attempt.price)) is not None
-    ]
-    own = sum(known) / len(known) if known else None
-    imputed: list[float] = []
-    ceilings: list[float] = []
+def _spend(
+    name: str, attempts: list[Entry], own: Tokens | None, others: list[Tokens]
+) -> Spend:
+    measured: list[MeasuredUsage] = []
+    known_usd = 0.0
+    imputed: dict[Basis, Share] = {}
+    ceiling = Share()
     for attempt in attempts:
+        costs = _measured(attempt)
+        measured += [usage for usage, _ in costs]
+        known_usd += sum(cost for _, cost in costs)
         if attempt.price is None or attempt.ceiling_usd is None:
             continue
-        for _ in range(len(attempt.responses) - len(_measured(attempt))):
-            rate = own if own is not None else _borrowed_cost(borrowed, attempt.price)
-            if rate is None:
-                ceilings.append(attempt.ceiling_usd)
-            else:
-                imputed.append(rate)
+        for _ in range(len(attempt.responses) - len(costs)):
+            match _imputed(own, others, attempt.price):
+                case (basis, cost):
+                    imputed[basis] = imputed.get(basis, Share()).add(cost)
+                case None:
+                    ceiling = ceiling.add(attempt.ceiling_usd)
 
     return Spend(
         name,
@@ -271,24 +284,23 @@ def _spend(name: str, attempts: list[Entry], borrowed: list[Tokens]) -> Spend:
         responses=sum(len(attempt.responses) for attempt in attempts),
         measured=len(measured),
         tokens=Tokens.total(measured),
-        known_usd=sum(known),
-        imputed=len(imputed),
-        imputed_usd=sum(imputed),
-        imputation=('own' if own is not None else 'borrowed') if imputed else None,
-        ceiling=len(ceilings),
-        ceiling_usd=sum(ceilings),
+        known_usd=known_usd,
+        imputed=imputed,
+        ceiling=ceiling,
     )
 
 
-def _borrowed_cost(rates: list[Tokens], price: Price) -> float | None:
-    costs = [cost for rate in rates if (cost := rate.cost(price)) is not None]
-    return max(costs, default=None)
+def _imputed(
+    own: Tokens | None, others: list[Tokens], price: Price
+) -> tuple[Basis, float] | None:
+    """Return the basis and cost of one response without a known cost, if any."""
+    if own is not None and (cost := own.cost(price)) is not None:
+        return 'own', cost
+    costs = [cost for rate in others if (cost := rate.uncached.cost(price)) is not None]
+    return ('borrowed', max(costs)) if costs else None
 
 
 # ── Projection ──
-
-
-type Basis = Literal['own', 'borrowed']
 
 
 @dataclass(frozen=True)
@@ -322,19 +334,15 @@ def project(
 
     A system with valid usage of its own uses its mean tokens per answered trial,
     so its retries enter the estimate. Any other system borrows the tokens per
-    trial that cost the most at its prices, or, when unpriced, the most tokens.
+    trial that cost the most at its prices, or, when unpriced, the most tokens,
+    with the lender's cache reads and writes counted as plain input.
     """
     own = {entry.system: entry.profile for entry in spend}
-    profiles = [profile for profile in own.values() if profile is not None]
+    lenders = [profile.uncached for profile in own.values() if profile is not None]
     projections: list[Projection] = []
     for system in systems:
         basis: Basis | None = None
         profile = own.get(system.name)
-        lenders = [
-            lender
-            for lender in profiles
-            if system.price is None or lender.cost(system.price) is not None
-        ]
         if profile is not None:
             basis = 'own'
         elif lenders:
@@ -384,21 +392,27 @@ def budget_problems(
 
     The total that `total_usd` returns must stay within the budget, and the
     refusal names each system's share counted at ceilings. Unpriced systems
-    count no dollars, while a selected priced system refuses when its pending
-    trials have no estimate.
+    count no dollars. A selected priced system whose pending trials have no
+    estimate runs while the total stays under the budget, since only a run can
+    give it usage to estimate from, and refuses once the total reaches it.
     """
     budget = family.settings.budget_usd
     if budget is None:
         return []
 
-    problems = [
-        f'System `{projection.system}` has '
-        f'{count_of(projection.pending, "pending trial")} and no usage to estimate '
-        'a cost from.'
-        for projection in projections
-        if projection.priced and projection.usd is None
-    ]
     total = total_usd(spend, projections)
+    problems = (
+        [
+            f'System `{projection.system}` has '
+            f'{count_of(projection.pending, "pending trial")} and no usage to '
+            f'estimate a cost from, and family `{family.name}` has already reached '
+            f'its `budget_usd` of ${budget:.2f}.'
+            for projection in projections
+            if projection.priced and projection.usd is None
+        ]
+        if total >= budget
+        else []
+    )
     if total > budget:
         spent = {entry.system: entry for entry in spend if entry.priced}
         projected = {
@@ -423,6 +437,6 @@ def _spent_share(entry: Spend | None) -> str:
     if entry is None:
         return '$0.00 spent'
     share = f'${entry.spent_usd:.2f} spent'
-    if entry.ceiling:
-        share += f', ${entry.ceiling_usd:.2f} of it counted at ceilings,'
+    if entry.ceiling.responses:
+        share += f', ${entry.ceiling.usd:.2f} of it counted at ceilings,'
     return share

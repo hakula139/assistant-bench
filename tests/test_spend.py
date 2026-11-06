@@ -16,6 +16,7 @@ from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsag
 from assistant_bench.spend import (
     Entry,
     Projection,
+    Share,
     Spend,
     Tokens,
     budget_problems,
@@ -162,23 +163,55 @@ class TestSummarize:
             spend.priced,
             spend.unknown,
             spend.known_usd,
-            spend.imputed_usd,
-            pytest.approx(spend.ceiling_usd),
+            sum(share.usd for share in spend.imputed.values()),
+            pytest.approx(spend.ceiling.usd),
         ) == expected
 
-    def test_imputes_from_the_costliest_other_system_before_any_ceiling(
+    def test_imputes_from_its_own_usage_then_the_costliest_other_system(
         self,
     ) -> None:
         entries = [
-            entry(system='cheap', responses=(MeasuredUsage(1_000_000, 0, 0, 0, None),)),
+            entry(
+                system='cheap',
+                responses=(MeasuredUsage(1_000_000, 0, 0, 0, None), None),
+            ),
             entry(system='dear', responses=(USAGE,)),
             entry(system='new', responses=(None, None, None)),
         ]
 
-        *_, spend = summarize(entries)
+        cheap, _, new = summarize(entries)
 
-        assert (spend.system, spend.imputation, spend.imputed) == ('new', 'borrowed', 3)
-        assert (spend.imputed_usd, spend.ceiling_usd) == (9.0, 0.0)
+        assert cheap.imputed == {'own': Share(1, 2.0)}
+        assert (new.imputed, new.ceiling) == ({'borrowed': Share(3, 9.0)}, Share())
+
+    def test_imputes_its_own_usage_at_the_price_of_each_entry(self) -> None:
+        dearer = make_system(price=Price(input=20.0, output=100.0, cache_read=2.0))
+        entries = [
+            entry(responses=(USAGE,)),
+            entry(
+                priced_as=dearer,
+                responses=(None,),
+                started_at=START + timedelta(minutes=1),
+            ),
+        ]
+
+        spend = spend_of(*entries)
+
+        assert spend.imputed == {'own': Share(1, 30.0)}
+
+    def test_prices_a_lenders_cache_as_plain_input(self) -> None:
+        cached = MeasuredUsage(1_000_000, 900_000, 100_000, 0, None)
+        spend = summarize(
+            [
+                entry(system='lender', responses=(cached,)),
+                entry(system='new', responses=(None,)),
+            ]
+        )
+
+        (projection,) = project(Counter({LARGE.name: 1}), spend, [LARGE])
+
+        assert spend[1].imputed == {'borrowed': Share(1, 2.0)}
+        assert (projection.basis, projection.usd) == ('borrowed', 2.0)
 
     @pytest.mark.parametrize(
         'later',
@@ -268,28 +301,6 @@ class TestProject:
         assert (projection.basis, projection.usd) == ('borrowed', expected)
         assert projection.tokens is not None
 
-    @pytest.mark.parametrize(
-        ('lenders', 'expected'),
-        [(('writer', 'reader'), ('borrowed', 3.0)), (('writer',), (None, None))],
-        ids=['costable-lender', 'no-costable-lender'],
-    )
-    def test_borrows_only_usage_its_own_price_can_cost(
-        self, lenders: tuple[str, ...], expected: tuple[object, object]
-    ) -> None:
-        usage = {
-            'writer': MeasuredUsage(2_000_000, 0, 1_000_000, 0, None),
-            'reader': USAGE,
-        }
-        spend = summarize(
-            [entry(system=name, responses=(usage[name],)) for name in lenders]
-        )
-
-        (projection,) = project(
-            Counter({NO_WRITE_PRICE.name: 1}), spend, [NO_WRITE_PRICE]
-        )
-
-        assert (projection.basis, projection.usd) == expected
-
     def test_has_no_estimate_without_usage(self) -> None:
         (projection,) = project(Counter({LARGE.name: 3}), [], [LARGE])
 
@@ -339,11 +350,27 @@ class TestBudgetProblems:
             'projected.'
         ]
 
-    def test_refuses_a_priced_system_without_an_estimate(self) -> None:
-        family = with_settings(VOTES, budget_usd=100.0)
-        projections = project(Counter({LARGE.name: 1}), [], [LARGE, UNPRICED])
+    @pytest.mark.parametrize(
+        ('budget', 'expected'),
+        [
+            pytest.param(3.5, [], id='under-budget'),
+            pytest.param(
+                3.0,
+                [
+                    'System `new` has 1 pending trial and no usage to estimate a cost '
+                    'from, and family `f` has already reached its `budget_usd` of '
+                    '$3.00.'
+                ],
+                id='budget-reached',
+            ),
+        ],
+    )
+    def test_runs_a_system_without_an_estimate_until_the_budget_is_reached(
+        self, budget: float, expected: list[str]
+    ) -> None:
+        family = with_settings(VOTES, budget_usd=budget)
+        new = make_system(name='new')
+        spend = [spend_of(entry(responses=(USAGE,)))]
+        projections = project(Counter({new.name: 1}), [], [new, UNPRICED])
 
-        assert budget_problems(family, [], projections) == [
-            'System `acme-large` has 1 pending trial and no usage to estimate a '
-            'cost from.'
-        ]
+        assert budget_problems(family, spend, projections) == expected
