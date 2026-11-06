@@ -638,7 +638,7 @@ describe('VotesBoard', () => {
       'Acme Small': { dot: 'filled', arrows: [], interval: true },
       'Acme Flash': { dot: 'filled', arrows: [], interval: true },
       'Acme Mini': { dot: 'filled', arrows: [], interval: true },
-      'Acme Tiny': { dot: 'none', arrows: ['start'], interval: false },
+      'Acme Tiny': { dot: 'none', arrows: ['start'], interval: true },
     });
     const [left, width] = (drawn['Acme Pro'].interval ?? []).map(Number.parseFloat);
     expect(left + width / 2).toBeCloseTo(Number.parseFloat(drawn['Acme Pro'].dotAt ?? ''));

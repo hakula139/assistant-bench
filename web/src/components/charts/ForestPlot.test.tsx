@@ -13,12 +13,7 @@ import type { Category } from '@/lib/categories';
 import type { CategoryBoard, CategoryStanding } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
-const refit = (system: string, score: number) => ({
-  system,
-  score,
-  votes: 40,
-  decisive_votes: 40,
-});
+const refit = (system: string, score: number) => ({ system, score, votes: 40 });
 
 const frame = { width: 600, measure: (text: string) => text.length * 7 };
 

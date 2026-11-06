@@ -1,6 +1,6 @@
 import type { PassRate, ScoreInterval, VotesRules } from '@/lib/report';
 
-/** Whether a score has no interval, as a category refit does, or one wider than the rule allows. */
+/** Whether a score has no interval or one wider than the rule allows. */
 export function isPreliminary(interval: ScoreInterval | null, rules: VotesRules): boolean {
   return interval === null || (interval.upper - interval.lower) / 2 > rules.preliminary_half_width;
 }

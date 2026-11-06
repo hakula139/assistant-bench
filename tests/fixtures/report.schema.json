@@ -72,18 +72,12 @@
           "minimum": 0,
           "title": "Votes",
           "type": "integer"
-        },
-        "decisive_votes": {
-          "minimum": 0,
-          "title": "Decisive Votes",
-          "type": "integer"
         }
       },
       "required": [
         "system",
         "score",
-        "votes",
-        "decisive_votes"
+        "votes"
       ],
       "title": "CategoryStanding",
       "type": "object"
@@ -324,6 +318,7 @@
     },
     "ScoreInterval": {
       "additionalProperties": false,
+      "description": "A score interval's bounds on the round's recorded score scale.",
       "properties": {
         "lower": {
           "title": "Lower",
@@ -367,7 +362,7 @@
               "type": "null"
             }
           ],
-          "description": "The case-clustered interval at `method.interval_level`, null below two cases."
+          "description": "The case-clustered interval at `method.interval_level`, null below two cases\nor when the round's comparisons are separated."
         },
         "rank": {
           "description": "Competition rank of the point score.",
@@ -692,7 +687,7 @@
           "type": "integer"
         },
         "interval_level": {
-          "description": "Coverage of the case-clustered score intervals and the leader test's\ncomplement.",
+          "description": "Coverage of the case-clustered score intervals, whose complement is the\nleader test's size.",
           "exclusiveMaximum": 1,
           "exclusiveMinimum": 0,
           "title": "Interval Level",
@@ -711,7 +706,7 @@
     },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "Point estimates and descriptive diagnostics on eligible comparisons.",
+      "description": "Point estimates, their intervals and leader decision, and diagnostics.",
       "properties": {
         "scorer": {
           "const": "votes",

@@ -142,6 +142,24 @@ describe('clip', () => {
       [500, 1300],
       { score: 666, offScale: false },
     ],
+    [
+      "an interval's lower bound to the axis start",
+      { score: 450, interval: { lower: 350, upper: 550 } },
+      [400, 1100],
+      { score: 450, offScale: false, range: [400, 550] },
+    ],
+    [
+      'the interval of a score below the axis to its part on the axis',
+      { score: 380, interval: { lower: 300, upper: 460 } },
+      [400, 1100],
+      { score: 400, offScale: true, range: [400, 460] },
+    ],
+    [
+      'away an interval wholly below the axis',
+      { score: 233, interval: { lower: 200, upper: 266 } },
+      [400, 1100],
+      { score: 400, offScale: true },
+    ],
   ])('clips %s', (_, value, domain, expected) => {
     const clipped = clip(value, domain);
 

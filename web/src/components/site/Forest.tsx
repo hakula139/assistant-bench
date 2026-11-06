@@ -19,7 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ARROWHEAD, unplacedText, type ForestRow, type LegendMark } from '@/lib/forest';
-import { formatScore, formatScoreRange } from '@/lib/format';
+import { formatScore, formatScoreWithRange } from '@/lib/format';
 import type { Term } from '@/lib/glossary';
 
 interface ForestProps {
@@ -36,7 +36,7 @@ function scoreText(row: ForestRow): string {
   }
 
   const { score, interval } = row.estimate;
-  return `${formatScore(score)}${interval ? ` (${formatScoreRange(interval)})` : ''}${row.preliminary ? ', preliminary' : ''}`;
+  return `${formatScoreWithRange(score, interval)}${row.preliminary ? ', preliminary' : ''}`;
 }
 
 function details(row: ForestRow): Term {

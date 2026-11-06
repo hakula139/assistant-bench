@@ -137,7 +137,7 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
           detail={
             <>
               from {formatCountOf(results.voters, 'voter')} on{' '}
-              {formatCountOf(results.cases, 'case')}
+              <span className="whitespace-nowrap">{formatCountOf(results.cases, 'case')}</span>
               {results.dropped_votes > 0 && (
                 <>
                   , <Hint term={terms.leftOut}>{formatCount(results.dropped_votes)} left out</Hint>

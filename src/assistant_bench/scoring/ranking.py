@@ -21,6 +21,8 @@ ANCHOR = 1000.0
 # Keeps the strength of a system that wins every vote finite.
 L2_PENALTY = 0.01
 INTERVAL_LEVEL = 0.95
+# The linear program's optimum above which a round counts as separated.
+SEPARATION_TOLERANCE = 1e-7
 LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 
 
@@ -176,7 +178,8 @@ class Component:
     cases: int
     """Cases with a weighted comparison, the clusters behind `uncertainty`."""
     uncertainty: Uncertainty | None
-    """Null below two cases, where no clustered variance exists."""
+    """Null below two cases, where no clustered variance exists, or when the
+    comparisons are separated, where the variance collapses toward zero."""
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
@@ -230,19 +233,49 @@ def rate_root(
         _point_ratings(component.systems, point, anchor),
         cases,
         None
-        if cases < 2
+        if cases < 2 or _separated(component)
         else Uncertainty(
-            covariance(component, point),
+            _covariance(component, point),
             float(stats.t.ppf((1 + INTERVAL_LEVEL) / 2, cases - 1)),
         ),
     )
 
 
-def covariance(matchups: Matchups, point: Fit) -> Floats:
-    """Return the CR1 sandwich covariance of the centered strengths, by case.
+def _separated(matchups: Matchups) -> bool:
+    """Whether some strengths and left-side advantage order every decided row.
+
+    Such a direction fits every win and loss at least as well as a tie, with the
+    half scores tied, and strictly fits some. Without the penalty the fit would
+    then diverge, so the sandwich collapses toward zero.
+    """
+    weighted = matchups.weight > 0
+    x = _design(
+        matchups.left, matchups.right, matchups.sided, len(matchups.systems), []
+    )[weighted]
+    score = matchups.score[weighted]
+    sign = np.sign(score - 0.5)
+    decided = x[sign != 0] * sign[sign != 0, None]
+    tied = x[sign == 0]
+    result = optimize.linprog(
+        -decided.sum(axis=0),
+        A_ub=-decided,
+        b_ub=np.zeros(len(decided)),
+        A_eq=tied if len(tied) else None,
+        b_eq=np.zeros(len(tied)) if len(tied) else None,
+        bounds=(-1, 1),
+    )
+    if result.fun is None:
+        raise RuntimeError(f'the separation check did not solve: {result.message}')
+    return bool(-result.fun > SEPARATION_TOLERANCE)
+
+
+def _covariance(matchups: Matchups, point: Fit) -> Floats:
+    """Return the CR1 sandwich covariance of the strengths, by case.
 
     The score sums of each case form the meat, scaled by G / (G − 1) over the G
     cases with a weighted comparison, so votes on one case count as one draw.
+    Each design row sums to zero over the strengths, and the penalty is equal
+    across them, so the covariance already lies on the centered strengths.
     """
     k = len(matchups.systems)
     x = _design(matchups.left, matchups.right, matchups.sided, k, [])
@@ -259,12 +292,9 @@ def covariance(matchups: Matchups, point: Fit) -> Floats:
     # The left-side column is empty when no comparison is sided, which leaves the
     # Hessian singular in that direction alone.
     bread = np.linalg.pinv(hessian)
-    full = bread @ sums.T @ sums @ bread * clusters / (clusters - 1)
-    center = np.eye(k) - 1 / k
-    centered: Floats = center @ full[:k, :k] @ center
-    # A sandwich that collapses under separation can round a variance below zero.
-    np.fill_diagonal(centered, np.maximum(np.diag(centered), 0))
-    return centered
+    meat = sums @ bread[:, :k] * math.sqrt(clusters / (clusters - 1))
+    covariance: Floats = meat.T @ meat
+    return covariance
 
 
 def length_feature(

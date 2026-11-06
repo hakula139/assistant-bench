@@ -121,7 +121,7 @@ export interface Clipped {
   score: number;
   /** Whether the score itself lies below the axis start. */
   offScale: boolean;
-  /** The interval's bounds, the lower one raised to the axis start, for a score on the axis. */
+  /** The interval's bounds, the lower one raised to the axis start, where it reaches the axis. */
   range?: [number, number];
 }
 
@@ -141,7 +141,8 @@ export function clip({ score, interval }: Estimate, [start]: [number, number]): 
   return {
     score: Math.max(score, start),
     offScale,
-    ...(interval && !offScale && { range: [Math.max(interval.lower, start), interval.upper] }),
+    ...(interval &&
+      interval.upper > start && { range: [Math.max(interval.lower, start), interval.upper] }),
   };
 }
 

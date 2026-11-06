@@ -491,7 +491,7 @@ describe('system page', () => {
 
     expect(text(html)).toContain('Writing Arena Writing Acme Pro Preliminary Score');
     expect(headerStats(html)).toEqual([
-      'Score 1,068 1,002–1,134',
+      'Score 1,068 (1,002–1,134)',
       'Rank 1',
       'Votes 98 (82 decisive)',
       'Round 2026-10-21',
@@ -622,7 +622,7 @@ describe('system page', () => {
     });
 
     expect(headerStats(html).slice(0, 3)).toEqual([
-      'Score 346 249–443',
+      'Score 346 (249–443)',
       'Rank 6',
       'Votes 0 (0 decisive)',
     ]);

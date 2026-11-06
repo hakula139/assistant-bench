@@ -61,7 +61,6 @@ const categoryStanding = z.strictObject({
   system: z.string(),
   score: z.number(),
   votes: z.int().nonnegative(),
-  decisive_votes: z.int().nonnegative(),
 });
 
 const categoryBoard = z.strictObject({

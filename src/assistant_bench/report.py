@@ -104,8 +104,8 @@ class VotesMethod(_Model):
     """Each of an actor's `n` eligible choices weighs `min(1, actor_cap / n)`."""
 
     interval_level: Annotated[float, Field(gt=0, lt=1)]
-    """Coverage of the case-clustered score intervals and the leader test's
-    complement."""
+    """Coverage of the case-clustered score intervals, whose complement is the
+    leader test's size."""
 
 
 class VotesRules(_Model):
@@ -143,6 +143,8 @@ class Cutoffs(_Model):
 
 
 class ScoreInterval(_Model):
+    """A score interval's bounds on the round's recorded score scale."""
+
     lower: float
     upper: float
 
@@ -153,7 +155,8 @@ class Standing(_Model):
     """Point estimate on the round's recorded score scale."""
 
     interval: ScoreInterval | None
-    """The case-clustered interval at `method.interval_level`, null below two cases."""
+    """The case-clustered interval at `method.interval_level`, null below two cases
+    or when the round's comparisons are separated."""
 
     rank: int
     """Competition rank of the point score."""
@@ -206,7 +209,6 @@ class CategoryStanding(_Model):
     system: str
     score: float
     votes: Annotated[int, Field(ge=0)]
-    decisive_votes: Annotated[int, Field(ge=0)]
 
 
 class CategoryBoard(_Model):
@@ -220,7 +222,7 @@ class CategoryBoard(_Model):
 
 
 class VotesResults(_Model):
-    """Point estimates and descriptive diagnostics on eligible comparisons."""
+    """Point estimates, their intervals and leader decision, and diagnostics."""
 
     scorer: Literal['votes']
     method: VotesMethod
@@ -819,13 +821,9 @@ def _categories(
         standings: list[CategoryStanding] = []
         for i, system in enumerate(ratings.systems):
             mine = [row for row in category_votes[name] if system in row.systems]
-            decisive = sum(vote.choice in ('a', 'b') for vote in mine)
             standings.append(
                 CategoryStanding(
-                    system=system,
-                    score=float(ratings.score[i]),
-                    votes=len(mine),
-                    decisive_votes=decisive,
+                    system=system, score=float(ratings.score[i]), votes=len(mine)
                 )
             )
 

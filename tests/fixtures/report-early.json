@@ -66,8 +66,8 @@
         "system": "acme-pro",
         "score": 1183.0751151967304,
         "interval": {
-          "lower": 1037.071767839439,
-          "upper": 1329.0784625540218
+          "lower": 1037.0717678393912,
+          "upper": 1329.0784625540696
         },
         "rank": 1,
         "votes": 11,
@@ -101,8 +101,8 @@
         "system": "acme-small",
         "score": 1068.052185161281,
         "interval": {
-          "lower": 951.0755312319202,
-          "upper": 1185.0288390906417
+          "lower": 951.0755312319418,
+          "upper": 1185.02883909062
         },
         "rank": 2,
         "votes": 12,
@@ -136,8 +136,8 @@
         "system": "acme-flash",
         "score": 1054.235938163578,
         "interval": {
-          "lower": 905.2660037832325,
-          "upper": 1203.2058725439238
+          "lower": 905.2660037833102,
+          "upper": 1203.205872543846
         },
         "rank": 3,
         "votes": 13,
@@ -171,8 +171,8 @@
         "system": "acme-large",
         "score": 1000.0,
         "interval": {
-          "lower": 833.8432916241951,
-          "upper": 1166.1567083758048
+          "lower": 833.8432916242189,
+          "upper": 1166.1567083757811
         },
         "rank": 4,
         "votes": 6,
@@ -206,8 +206,8 @@
         "system": "acme-mini",
         "score": 990.000674529062,
         "interval": {
-          "lower": 855.2061626837807,
-          "upper": 1124.7951863743433
+          "lower": 855.2061626837129,
+          "upper": 1124.795186374411
         },
         "rank": 5,
         "votes": 16,
@@ -241,8 +241,8 @@
         "system": "acme-tiny",
         "score": 432.0795850773063,
         "interval": {
-          "lower": 337.64763661092627,
-          "upper": 526.5115335436864
+          "lower": 337.6476366108999,
+          "upper": 526.5115335437127
         },
         "rank": 6,
         "votes": 0,
@@ -497,38 +497,32 @@
           {
             "system": "acme-flash",
             "score": 867.7465347178716,
-            "votes": 3,
-            "decisive_votes": 1
+            "votes": 3
           },
           {
             "system": "acme-large",
             "score": 1000.0,
-            "votes": 1,
-            "decisive_votes": 0
+            "votes": 1
           },
           {
             "system": "acme-mini",
             "score": 587.3725503648968,
-            "votes": 6,
-            "decisive_votes": 6
+            "votes": 6
           },
           {
             "system": "acme-pro",
             "score": 537.0317394291337,
-            "votes": 5,
-            "decisive_votes": 3
+            "votes": 5
           },
           {
             "system": "acme-small",
             "score": 499.9839714603507,
-            "votes": 5,
-            "decisive_votes": 2
+            "votes": 5
           },
           {
             "system": "acme-tiny",
             "score": -462.5721275674391,
-            "votes": 0,
-            "decisive_votes": 0
+            "votes": 0
           }
         ],
         "unranked": [
@@ -544,38 +538,32 @@
           {
             "system": "acme-flash",
             "score": 877.2080073531394,
-            "votes": 6,
-            "decisive_votes": 4
+            "votes": 6
           },
           {
             "system": "acme-large",
             "score": 1000.0,
-            "votes": 4,
-            "decisive_votes": 4
+            "votes": 4
           },
           {
             "system": "acme-mini",
             "score": 931.9471383905855,
-            "votes": 4,
-            "decisive_votes": 3
+            "votes": 4
           },
           {
             "system": "acme-pro",
             "score": 1089.923509464595,
-            "votes": 3,
-            "decisive_votes": 3
+            "votes": 3
           },
           {
             "system": "acme-small",
             "score": 857.5420048505097,
-            "votes": 3,
-            "decisive_votes": 2
+            "votes": 3
           },
           {
             "system": "acme-tiny",
             "score": 434.98523778648735,
-            "votes": 0,
-            "decisive_votes": 0
+            "votes": 0
           }
         ],
         "unranked": []
@@ -588,38 +576,32 @@
           {
             "system": "acme-flash",
             "score": 1254.056836391901,
-            "votes": 4,
-            "decisive_votes": 4
+            "votes": 4
           },
           {
             "system": "acme-large",
             "score": 1000.0,
-            "votes": 1,
-            "decisive_votes": 1
+            "votes": 1
           },
           {
             "system": "acme-mini",
             "score": 1033.0937648771785,
-            "votes": 6,
-            "decisive_votes": 5
+            "votes": 6
           },
           {
             "system": "acme-pro",
             "score": 1506.5814892695057,
-            "votes": 3,
-            "decisive_votes": 2
+            "votes": 3
           },
           {
             "system": "acme-small",
             "score": 1668.631568772847,
-            "votes": 4,
-            "decisive_votes": 2
+            "votes": 4
           },
           {
             "system": "acme-tiny",
             "score": 540.0584521155648,
-            "votes": 0,
-            "decisive_votes": 0
+            "votes": 0
           }
         ],
         "unranked": []

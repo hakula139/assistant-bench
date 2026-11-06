@@ -23,7 +23,12 @@ const rows: ForestRow[] = [
     estimate: { score: 930, interval: { lower: 840, upper: 1020 } },
     preliminary: true,
   },
-  { system: 'far-behind', name: 'Far behind', estimate: { score: 380 }, preliminary: false },
+  {
+    system: 'far-behind',
+    name: 'Far behind',
+    estimate: { score: 380, interval: { lower: 345, upper: 415 } },
+    preliminary: false,
+  },
   { system: 'no-votes', name: 'No votes yet', unplaced: 'no-votes' },
 ];
 const columns: GlossaryEntry[] = [
@@ -97,13 +102,14 @@ const diagnostics = [terms.splitHalf, terms.leftOut, terms.lengthBias];
     The interval comes from a sandwich variance of the fit that treats all votes on one case as one
     draw, since a case can favor one system for reasons the next case does not share. It narrows as
     cases grow, while more votes on the same cases narrow it less. Round settings record the
-    interval level, and the summary gives the voters and cases behind it. A voter population
-    dominated by a few people stays the same voters on new cases, so the interval makes no claim
-    about new voters.
+    interval level, and the summary gives the voters and cases behind it.
   </p>
   <p>
-    The note under the board names the leader and the systems that a test of the score gap, using
-    the same variance, cannot separate from it. Categories hold too few cases for an interval and
+    Each interval measures a score against the field's average, so a bar that clears another
+    system's point does not by itself separate the two. The note under the board names the leader
+    and the systems that a test of the score gap, using the same variance, cannot separate from it.
+    A round whose votes all favor one pane, or where one system wins every comparison, has no
+    intervals, since the variance collapses there. Categories hold too few cases for an interval and
     show points only.
   </p>
 </Part>

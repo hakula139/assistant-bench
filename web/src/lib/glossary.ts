@@ -26,12 +26,12 @@ export const terms = {
   preliminary: {
     term: 'Preliminary',
     definition:
-      "A score whose interval is wider than the round's recorded threshold, or that has no interval, as category scores do.",
+      "A score whose interval is wider than the round's recorded threshold, or that has no interval.",
   },
   scoreInterval: {
     term: 'Score interval',
     definition:
-      "The range of scores that new cases like the round's support at the recorded level, from a sandwich variance that treats the votes on one case as one draw.",
+      "The range of scores that new cases like the round's support at the recorded level, measured against the field's average. The note below the board tests the gaps between systems.",
   },
   decisive: {
     term: 'Decisive',
@@ -223,7 +223,7 @@ export function effectiveVotesTerm(method: VotesMethod): Term {
 export function preliminaryTerm(rules: VotesRules): Term {
   return {
     ...terms.preliminary,
-    definition: `A score interval wider than ±${formatScore(rules.preliminary_half_width)} points, or no interval, as category scores have none.`,
+    definition: `A score interval wider than ±${formatScore(rules.preliminary_half_width)} points, or no interval.`,
   };
 }
 

@@ -8,12 +8,7 @@ import { ForestPlot } from '@/components/charts/ForestPlot';
 import { ParetoScatter } from '@/components/charts/ParetoScatter';
 import { drawnSvg, stubPlotFrame } from '@/test/plot';
 
-const refit = (system: string, score: number) => ({
-  system,
-  score,
-  votes: 40,
-  decisive_votes: 40,
-});
+const refit = (system: string, score: number) => ({ system, score, votes: 40 });
 
 const charts: [string, ReactElement, number][] = [
   [

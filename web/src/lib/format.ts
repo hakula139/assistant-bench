@@ -30,6 +30,12 @@ export const formatScore = (value: number) => minus(whole.format(value));
 export const formatScoreRange = ({ lower, upper }: { lower: number; upper: number }) =>
   `${formatScore(lower)}–${formatScore(upper)}`;
 
+/** Prints a score with its interval, when it has one, as in "1,068 (1,002–1,134)". */
+export const formatScoreWithRange = (
+  score: number,
+  interval?: { lower: number; upper: number } | null,
+) => (interval ? `${formatScore(score)} (${formatScoreRange(interval)})` : formatScore(score));
+
 export const formatTau = (value: number | null) =>
   value === null ? MISSING : minus(tau.format(value));
 export const formatCount = (value: number) => whole.format(value);

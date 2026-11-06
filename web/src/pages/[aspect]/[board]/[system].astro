@@ -126,7 +126,7 @@ const latencyRows = distributionRows((item) => item.latency_sec);
     <dl class={statList}>
       <Stat
         label="Score"
-        detail={standing.interval ? formatScoreRange(standing.interval) : undefined}
+        detail={standing.interval ? `(${formatScoreRange(standing.interval)})` : undefined}
       >
         {formatScore(standing.score)}
       </Stat>

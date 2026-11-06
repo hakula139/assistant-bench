@@ -364,12 +364,32 @@ class TestUncertainty:
         assert widths[independent.ratings.systems.index('medium')] > 0
         assert np.all(shared.uncertainty.half_widths() > 2 * widths)
 
-    def test_has_no_uncertainty_on_one_case(self) -> None:
-        votes = [vote._replace(case='case') for vote in simulate(100)]
-
+    @pytest.mark.parametrize(
+        'votes',
+        [
+            pytest.param(
+                [vote._replace(case='case') for vote in simulate(100)], id='one-case'
+            ),
+            pytest.param(
+                [vote._replace(score=1.0) for vote in simulate(200)], id='one-pane'
+            ),
+            pytest.param(
+                [
+                    vote._replace(score=float(vote.left == 'large'))
+                    if 'large' in (vote.left, vote.right)
+                    else vote
+                    for vote in simulate(200)
+                ],
+                id='all-wins-entrant',
+            ),
+        ],
+    )
+    def test_has_no_uncertainty_without_a_clustered_variance(
+        self, votes: list[Comparison]
+    ) -> None:
         component = rate_root(votes, (), 'medium')
 
-        assert (component.cases, component.uncertainty) == (1, None)
+        assert component.uncertainty is None
 
     @pytest.mark.parametrize(
         ('other', 'separated'),

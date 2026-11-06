@@ -31,6 +31,7 @@ import {
   formatPercentRange,
   formatScore,
   formatScoreRange,
+  formatScoreWithRange,
   MISSING,
 } from '@/lib/format';
 import { terms, type Term } from '@/lib/glossary';
@@ -96,7 +97,7 @@ function ScoreCell({
   domain: [number, number];
   anchorScore: number;
 }) {
-  const summary = `${row.name}: ${formatScore(row.score)}${row.interval ? ` (${formatScoreRange(row.interval)})` : ''}`;
+  const summary = `${row.name}: ${formatScoreWithRange(row.score, row.interval)}`;
   return (
     <div role="img" aria-label={summary} title={summary} className="absolute inset-x-4 inset-y-0">
       <ScoreTrack domain={domain} anchorScore={anchorScore} estimate={row} />
@@ -249,7 +250,7 @@ export function Leaderboard({
             )}
           </span>
         ),
-        meta: { numeric: true },
+        meta: { numeric: true, term: ranked ? terms.scoreInterval : undefined },
       }),
       helper.accessor('votes', {
         header: terms.votes.term,
