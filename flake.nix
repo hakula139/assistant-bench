@@ -64,6 +64,17 @@
         );
 
         # ------------------------------------------------------------------------------------------
+        # Node Toolchain
+        # ------------------------------------------------------------------------------------------
+        nodeMajor = "26";
+        nodejs = pkgs."nodejs_${nodeMajor}";
+        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs."nodejs-slim_${nodeMajor}"; };
+        nodeTools = [
+          nodejs
+          pnpm
+        ];
+
+        # ------------------------------------------------------------------------------------------
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
@@ -119,13 +130,6 @@
             };
           };
         };
-
-        nodejs = pkgs.nodejs_26;
-        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs.nodejs-slim_26; };
-        nodeTools = [
-          nodejs
-          pnpm
-        ];
 
         # CI runs Node and Ruff with local dependencies absent from the check's store source.
         nodeHook =
@@ -213,20 +217,18 @@
         # ------------------------------------------------------------------------------------------
         # GitLab Pages Toolchain
         # ------------------------------------------------------------------------------------------
-        # The Pages job builds outside the dev shell, so its pins must follow the dev shell's tools.
+        pagesVariable = name: ".pages.variables.${name} // .variables.${name}";
         pagesCheck =
-          variable: pattern: expected:
-          pkgs.runCommand "pages-${variable}" { } ''
-            value=$(sed -n 's/^  ${variable}: //p' ${./.gitlab/ci/pages.yml})
+          name: label: query: pattern: expected:
+          pkgs.runCommand name { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+            value=$(yq '${query}' ${./.gitlab/ci/pages.yml})
             if [[ "$value" != ${pattern} ]]; then
-              echo "${variable} in .gitlab/ci/pages.yml is $value, but the dev shell has" \
+              echo "${label} in .gitlab/ci/pages.yml is $value, but the dev shell has" \
                 "${expected}." >&2
               exit 1
             fi
             touch "$out"
           '';
-
-        nodeMajor = pkgs.lib.versions.major nodejs.version;
       in
       {
         # ------------------------------------------------------------------------------------------
@@ -268,8 +270,14 @@
         # ------------------------------------------------------------------------------------------
         checks = {
           pre-commit = preCommitCheck;
-          pages-pnpm = pagesCheck "BENCH_PNPM_VERSION" pnpm.version "pnpm ${pnpm.version}";
-          pages-node = pagesCheck "BENCH_NODE_IMAGE" "node:${nodeMajor}-*" "Node.js ${nodeMajor}";
+          pages-pnpm =
+            pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
+              "pnpm ${pnpm.version}";
+          pages-node =
+            pagesCheck "pages-node" "The pages job's image"
+              "(${pagesVariable "BENCH_NODE_IMAGE"}) as $v | (.pages.image // .image) | sub(\"\\$BENCH_NODE_IMAGE\"; $v)"
+              "node:${nodeMajor}-*"
+              "Node.js ${nodeMajor}";
         };
 
         # ------------------------------------------------------------------------------------------
