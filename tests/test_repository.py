@@ -312,13 +312,14 @@ def test_coding_verifiers_reject_bypasses_and_planted_rewards(
 
 
 def load_coding_verifier() -> ModuleType:
-    """Load `verify.py` beside the `sandbox` module it imports."""
+    """Load `verify.py` beside the `sandbox` module it imports, caching no bytecode."""
     tests = CODING / 'shared' / 'tests'
     spec = importlib.util.spec_from_file_location('coding_verify', tests / 'verify.py')
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     with (
         mock.patch.object(sys, 'path', [str(tests), *sys.path]),
+        mock.patch.object(sys, 'dont_write_bytecode', True),
         mock.patch.dict(sys.modules),
     ):
         spec.loader.exec_module(module)

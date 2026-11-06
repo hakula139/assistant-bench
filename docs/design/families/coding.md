@@ -51,7 +51,7 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
   A scenario runs in the application's process, so the boundary cannot stop a solution written against the public scenarios, whether it memorizes their observations or disables their instrumentation. The held-out split under the data directory's `cases/coding-repo/` addresses that contamination.
 
-- **Shared files:** author `environment/Dockerfile`, `solution/solve.sh`, `tests/test.sh`, `tests/verify.py`, `tests/runner.py`, `tests/sandbox.py`, and `tests/host.py` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to copy every file there into each task. Each affected task needs a version bump after it has run.
+- **Shared files:** author `environment/Dockerfile`, `solution/solve.sh`, `tests/test.sh`, `tests/verify.py`, `tests/runner.py`, `tests/sandbox.py`, and `tests/host.py` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to copy every file there that git does not ignore into each task. It also removes each task's copy of a file that `HEAD` holds under `shared/` and the working tree no longer does. Each affected task needs a version bump after it has run.
 
 - **Reference:** `solve.sh` copies `solution/app/` over `/app`. It holds the files the reference changes or adds, plus the unchanged modules of each application package it changes, since basedpyright resolves a regular package from one search path. A starter edit to one of those modules needs the same edit in its copy.
 
