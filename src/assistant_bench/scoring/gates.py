@@ -16,7 +16,7 @@ from assistant_bench.families import Gate, Language, VotesSettings
 _TRADITIONAL_ONLY = frozenset(TRADITIONAL) - frozenset(SIMPLIFIED)
 
 _MARKDOWN = MarkdownIt('commonmark')
-# Fence info strings whose block holds Markdown or prose, such as a commit message.
+# Fence info strings whose block holds Markdown or prose.
 _PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
 # A URL, which ends at whitespace, Han characters, or Chinese punctuation.
 _URL = re.compile(f'https?://[^\\s{hanzi.characters}{re.escape(hanzi.punctuation)}]+')
@@ -123,16 +123,10 @@ def failed_gates(
 def detect_language(text: str) -> Language | None:
     """Return `zh` or `en`, whichever dominates the text's natural language.
 
-    The text is parsed as CommonMark. Natural language includes inline text and
-    visible HTML prose, excluding inline code, closed HTML code/pre and
-    script/style elements, attributes, markup comments, and URLs. An element left
-    open contributes its content, so a stray raw tag hides no later prose. Each
-    fence tagged `markdown`, `md`, `text`, or `txt` is parsed the same way. Other
-    code blocks contribute only their comments: those opened by `#` and whitespace
-    or by `//` at a line's start or after whitespace, `/* */` blocks, and
-    triple-quoted strings, so code-only outputs are judged by their comments. Han
-    characters count against Latin words, and a tie, including text with neither,
-    returns `None`.
+    Natural language is the CommonMark prose a reader sees, prose fences included,
+    plus the comments of code blocks, without code, markup, or URLs. Han characters
+    count against Latin words, and a tie, including text with neither, returns
+    `None`.
     """
     natural = _URL.sub('', '\n'.join(_natural_language(text)))
 
@@ -183,8 +177,7 @@ def traditional_characters(text: str, source: str) -> list[str]:
     """Return the Traditional-only characters of `text` that `source` lacks.
 
     A character counts when CC-CEDICT lists it as Traditional and never as
-    Simplified, so the check misses a dual-use character in a Traditional word,
-    such as the 於 of 於是, and never flags a character it also lists as Simplified.
+    Simplified, so a dual-use character never counts.
     """
     allowed = set(source)
     return list(

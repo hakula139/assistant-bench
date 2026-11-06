@@ -9,10 +9,9 @@ import pytest
 
 from assistant_bench.arena import publication
 from assistant_bench.arena.d1 import Param, Result
-from assistant_bench.arena.publication import Publication, VotingTarget
+from assistant_bench.arena.publication import Publication
 from assistant_bench.families import (
     Case,
-    CaseSource,
     Family,
     Gate,
 )
@@ -34,12 +33,9 @@ NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 
 
 def prepare(
-    family: Family,
-    cases: Sequence[Case],
-    outputs: Sequence[Output],
-    target: VotingTarget = 'production',
+    family: Family, cases: Sequence[Case], outputs: Sequence[Output]
 ) -> Publication:
-    return publication.prepare(family, cases, outputs, ARENA_NAMES, target)
+    return publication.prepare(family, cases, outputs, ARENA_NAMES)
 
 
 def text_publication() -> Publication:
@@ -96,30 +92,8 @@ class RecordingDatabase:
         return self.database.execute(sql, params)
 
 
-class TestVotingTarget:
-    @pytest.mark.parametrize(
-        ('public_voting', 'source', 'target'),
-        [
-            (True, 'synthetic', 'production'),
-            (True, 'public', 'production'),
-            (True, 'transcript', 'local'),
-            (True, 'held-out', 'local'),
-            (False, 'synthetic', 'local'),
-            (False, 'public', 'local'),
-        ],
-    )
-    def test_votes_only_public_cases_of_public_families_in_production(
-        self, public_voting: bool, source: CaseSource, target: VotingTarget
-    ) -> None:
-        family = make_votes_family(public_voting=public_voting)
-
-        assert publication.voting_target(family, make_case('c', source)) == target
-
-
 class TestPrepare:
-    def test_partitions_the_cases_between_production_and_the_local_store(
-        self,
-    ) -> None:
+    def test_publishes_only_the_public_and_synthetic_cases(self) -> None:
         family = make_votes_family()
         cases = [
             make_case('open', 'synthetic'),
@@ -132,35 +106,23 @@ class TestPrepare:
         ]
         by_key = {publication.case_key(case): case.id for case in cases}
 
-        production = prepare(family, cases, outputs, 'production')
-        local = prepare(family, cases, outputs, 'local')
+        production = prepare(family, cases, outputs)
 
         assert sorted(by_key[case.key] for case in production.cases) == [
             'open',
             'quoted',
         ]
-        assert sorted(by_key[case.key] for case in local.cases) == [
-            'private',
-            'secret',
-        ]
         assert {output.case_key for output in production.outputs} == {
             case.key for case in production.cases
         }
 
-    def test_publishes_every_case_of_a_family_without_public_voting_locally(
-        self,
-    ) -> None:
+    def test_refuses_a_family_without_public_voting(self) -> None:
         family = make_votes_family(public_voting=False)
-        cases = [make_case('open'), make_case('private', 'transcript')]
-        outputs = [
-            make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS
-        ]
+        cases = [make_case('open')]
+        outputs = [make_trial('open', system) for system in ARENA_SYSTEMS]
 
-        local = prepare(family, cases, outputs, 'local')
-
-        assert len(local.cases) == 2
         with pytest.raises(ValueError, match='sets no `public_voting`'):
-            prepare(family, cases, outputs, 'production')
+            prepare(family, cases, outputs)
 
     def test_publishes_task_diffs_with_verdicts_from_the_tests_gate(self) -> None:
         published = diff_publication()
@@ -422,17 +384,15 @@ class TestPublish:
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
-        family = make_votes_family(public_voting=False)
-        cases = [make_case('private', 'transcript')]
-        local = prepare(
-            family,
-            cases,
-            [make_trial('private', system) for system in ARENA_SYSTEMS],
-            'local',
+        published = text_publication()
+        cases = tuple(
+            case.model_copy(update={'source': 'transcript'}) for case in published.cases
         )
+        draft = published.model_copy(update={'cases': cases})
+        private = draft.model_copy(update={'id': draft.identity()})
 
         with pytest.raises(ValueError, match='cannot leave this machine'):
-            publication.publish(database, local, NOW)
+            publication.publish(database, private, NOW)
 
         assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
 

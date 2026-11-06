@@ -70,4 +70,9 @@ class TestSeparates:
     def test_requires_an_exact_sign_test_in_the_leaders_favor(
         self, leader: list[float], other: list[float], expected: bool
     ) -> None:
-        assert separates(leader, other) is expected
+        leading, trailing = (
+            {f'task-{index}': share for index, share in enumerate(shares)}
+            for shares in (leader, other)
+        )
+
+        assert separates(leading, trailing) is expected

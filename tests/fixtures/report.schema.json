@@ -73,11 +73,6 @@
           "title": "Votes",
           "type": "integer"
         },
-        "effective_votes": {
-          "minimum": 0,
-          "title": "Effective Votes",
-          "type": "number"
-        },
         "decisive_votes": {
           "minimum": 0,
           "title": "Decisive Votes",
@@ -88,7 +83,6 @@
         "system",
         "score",
         "votes",
-        "effective_votes",
         "decisive_votes"
       ],
       "title": "CategoryStanding",
@@ -127,32 +121,14 @@
     },
     "Cutoffs": {
       "additionalProperties": false,
-      "description": "Each store's cutoff at closing, null for a store closing did not read.",
+      "description": "Production's cutoff at closing.",
       "properties": {
         "production": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Cutoff"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "local": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Cutoff"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Cutoff"
         }
       },
       "required": [
-        "production",
-        "local"
+        "production"
       ],
       "title": "Cutoffs",
       "type": "object"
@@ -203,7 +179,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Human choices between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `effective_votes` and `win_rate` use\nthe actors' weights.",
+      "description": "Human choices between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `win_rate` uses the actors' weights.",
       "properties": {
         "system": {
           "title": "System",
@@ -217,11 +193,6 @@
           "minimum": 0,
           "title": "Votes",
           "type": "integer"
-        },
-        "effective_votes": {
-          "minimum": 0,
-          "title": "Effective Votes",
-          "type": "number"
         },
         "wins": {
           "title": "Wins",
@@ -248,7 +219,6 @@
         "system",
         "opponent",
         "votes",
-        "effective_votes",
         "wins",
         "losses",
         "ties",
@@ -356,12 +326,6 @@
           "title": "Votes",
           "type": "integer"
         },
-        "effective_votes": {
-          "description": "Eligible human row weight, excluding settled comparisons.",
-          "minimum": 0,
-          "title": "Effective Votes",
-          "type": "number"
-        },
         "decisive_votes": {
           "minimum": 0,
           "title": "Decisive Votes",
@@ -377,11 +341,6 @@
             }
           ],
           "title": "Both Bad Rate"
-        },
-        "outputs": {
-          "description": "Outputs that finished without an error.",
-          "title": "Outputs",
-          "type": "integer"
         },
         "gate_failure_rate": {
           "anyOf": [
@@ -415,7 +374,7 @@
               "type": "null"
             }
           ],
-          "description": "Null unless every finished output's cost is known, like the other aggregates.",
+          "description": "Null unless every output that finished without an error reports a cost.",
           "title": "Mean Cost Usd"
         },
         "cost_gap": {
@@ -428,17 +387,6 @@
             }
           ],
           "description": "Why finished outputs lack a mean cost: `unpriced` when an output with known\nusage has no cost, and `unreported` when only outputs without usage do."
-        },
-        "p50_latency_sec": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "P50 Latency Sec"
         },
         "output_tokens": {
           "anyOf": [
@@ -477,15 +425,12 @@
         "score",
         "rank",
         "votes",
-        "effective_votes",
         "decisive_votes",
         "both_bad_rate",
-        "outputs",
         "gate_failure_rate",
         "pass_rate",
         "mean_cost_usd",
         "cost_gap",
-        "p50_latency_sec",
         "output_tokens",
         "latency_sec",
         "defects"
@@ -651,7 +596,7 @@
               "type": "null"
             }
           ],
-          "description": "Null unless every finished trial's cost is known, like the median latency.",
+          "description": "Null unless every trial that finished without an error reports a cost.",
           "title": "Mean Cost Usd"
         },
         "cost_gap": {
@@ -665,16 +610,15 @@
           ],
           "description": "Why finished trials lack a mean cost: `unpriced` when a trial with known\nusage has no cost, and `unreported` when only trials without usage do."
         },
-        "p50_latency_sec": {
+        "latency_sec": {
           "anyOf": [
             {
-              "type": "number"
+              "$ref": "#/$defs/Distribution"
             },
             {
               "type": "null"
             }
-          ],
-          "title": "P50 Latency Sec"
+          ]
         }
       },
       "required": [
@@ -686,7 +630,7 @@
         "pass_hat_k",
         "mean_cost_usd",
         "cost_gap",
-        "p50_latency_sec"
+        "latency_sec"
       ],
       "title": "TestsStanding",
       "type": "object"
@@ -766,7 +710,7 @@
           "type": "number"
         },
         "dropped_votes": {
-          "description": "Excluded votes plus votes on outputs the publications no longer admit.",
+          "description": "Excluded votes plus votes on outputs the publication no longer admits.",
           "title": "Dropped Votes",
           "type": "integer"
         },
@@ -803,18 +747,6 @@
           },
           "title": "Categories",
           "type": "array"
-        },
-        "position": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Left-pane advantage in score points, null without ranked human rows.",
-          "title": "Position"
         },
         "length": {
           "anyOf": [
@@ -856,7 +788,6 @@
         "unranked",
         "head_to_head",
         "categories",
-        "position",
         "length",
         "split_half_tau"
       ],

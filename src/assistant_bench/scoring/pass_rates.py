@@ -1,6 +1,7 @@
-"""Task-clustered pass rates, their 95% intervals, and paired leader separation."""
+"""Task-clustered pass rates, their 95% intervals, pass^k, and leader separation."""
 
-from collections.abc import Sequence
+import statistics
+from collections.abc import Iterable, Mapping
 
 from scipy import stats
 
@@ -25,14 +26,20 @@ def clopper_pearson(rate: float, tasks: int) -> tuple[float, float]:
     return float(lower), float(upper)
 
 
-def separates(leader: Sequence[float], other: Sequence[float]) -> bool:
+def pass_hat_k(shares: Iterable[float]) -> float:
+    """Return the share of tasks whose trials all passed, given each task's share."""
+    return statistics.fmean(share == 1 for share in shares)
+
+
+def separates(leader: Mapping[str, float], other: Mapping[str, float]) -> bool:
     """Whether an exact two-sided sign test favors `leader` at the 5% level.
 
-    The sequences pair each shared task's pass share, and tasks where they agree
-    carry no sign. The level is `1 - CONFIDENCE`.
+    The mappings give each task's pass share. The test pairs their shared tasks,
+    and tasks where they agree carry no sign. The level is `1 - CONFIDENCE`.
     """
-    wins = sum(a > b for a, b in zip(leader, other, strict=True))
-    losses = sum(a < b for a, b in zip(leader, other, strict=True))
+    shared = leader.keys() & other.keys()
+    wins = sum(leader[task] > other[task] for task in shared)
+    losses = sum(leader[task] < other[task] for task in shared)
     if wins <= losses:
         return False
 

@@ -23,13 +23,10 @@ from assistant_bench.families import (
     VotesSettings,
 )
 from assistant_bench.messages import code
-from assistant_bench.outputs import Output, system_fingerprints
+from assistant_bench.outputs import Output, Verdict, system_fingerprints
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.scoring.length import text_length
 
-
-type VotingTarget = Literal['production', 'local']
-type Verdict = Literal['pass', 'fail', 'ungraded']
 
 PUBLIC_SOURCES: tuple[CaseSource, ...] = ('public', 'synthetic')
 MAX_PARAMS = 100
@@ -116,22 +113,6 @@ class Publication(_Model):
 # ── Preparation ──
 
 
-def voting_target(family: Family, case: Case) -> VotingTarget:
-    """Return the one store that votes on the case.
-
-    Production votes only on public and synthetic cases of a family that sets
-    `public_voting`, and every other case is voted locally.
-    """
-    settings = family.settings
-    if (
-        isinstance(settings, VotesSettings)
-        and settings.public_voting
-        and case.source in PUBLIC_SOURCES
-    ):
-        return 'production'
-    return 'local'
-
-
 def case_key(case: Case) -> str:
     """Digest what the voter reads, so an unchanged case keeps its key."""
     checklist: list[JsonValue] = list(case.checklist)
@@ -148,22 +129,23 @@ def prepare(
     cases: Sequence[Case],
     outputs: Sequence[Output],
     system_names: Mapping[str, str],
-    target: VotingTarget,
 ) -> Publication:
-    """Build the publication of the family's listed systems on the target's cases.
+    """Build the production publication of the family's listed systems.
+
+    It holds only the public and synthetic cases, the ones production votes on.
 
     Raises
     ------
     ValueError
-        The family is not scored by votes, it sets no `public_voting` for a
-        production publication, two cases read the same, a kept output lacks a
-        fingerprint, a system has several, or no case can form a pair.
+        The family is not scored by votes or sets no `public_voting`, two cases
+        read the same, a kept output lacks a fingerprint, a system has several,
+        or no case can form a pair.
     """
     settings = family.settings
     if not isinstance(settings, VotesSettings):
         raise ValueError(f'Family `{family.name}` is not scored by votes.')
 
-    if target == 'production' and not settings.public_voting:
+    if not settings.public_voting:
         raise ValueError(
             f'Family `{family.name}` sets no `public_voting`, so production votes '
             'on none of its cases. Set `public_voting = true` in '
@@ -171,11 +153,7 @@ def prepare(
             'be shown to the public.'
         )
 
-    keys = {
-        case.id: case_key(case)
-        for case in cases
-        if voting_target(family, case) == target
-    }
+    keys = {case.id: case_key(case) for case in cases if case.source in PUBLIC_SOURCES}
     _refuse_repeated_cases(keys)
 
     kept = [
@@ -196,7 +174,7 @@ def prepare(
     )
     if not _pairable(published):
         raise ValueError(
-            f'Family `{family.name}` has no {target} case on which two systems '
+            f'Family `{family.name}` has no production case on which two systems '
             'have different passing outputs, so no pair can be voted on.'
         )
 

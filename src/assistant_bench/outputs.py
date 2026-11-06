@@ -11,6 +11,9 @@ from assistant_bench.families import Gate
 from assistant_bench.paths import data_dir, write_atomically
 
 
+type Verdict = Literal['pass', 'fail', 'ungraded']
+
+
 class StopDetails(BaseModel):
     """The Messages API's account of a refusal."""
 
@@ -18,7 +21,7 @@ class StopDetails(BaseModel):
 
     type: Literal['refusal']
     category: str | None
-    """The policy area, from an open set such as `cyber`, `bio`, and `general_harms`."""
+    """The policy area, from a set the API may extend."""
 
     explanation: str | None
     """Human-readable text that the API does not keep stable."""

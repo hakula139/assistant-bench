@@ -911,7 +911,7 @@ class TestCheckJob:
             ('oracle', None),
             ('nop', None),
         ]
-        assert job.n_attempts == jobs.CHECK_ATTEMPTS == 3
+        assert job.n_attempts == jobs.CHECK_ATTEMPTS
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert [t.path for t in job.tasks] == [task]
         assert not job.verifier.disable

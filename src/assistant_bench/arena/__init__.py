@@ -1,1 +1,1 @@
-"""The blind pairwise arena: pair scheduling, the vote store, and the vote API."""
+"""The arena's bench side: publications, vote cuts and moderation, and the D1 client."""

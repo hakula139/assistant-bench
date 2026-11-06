@@ -149,11 +149,12 @@ def write_task_family(
     """Write echo-task copies at version 1.0.0, replacing any case source.
 
     With `systems`, use votes with `defects` and terminus-2, otherwise tests.
-    `categories` maps every task ID to a category and defaults to `smoke`.
+    `categories` maps every task ID to a category and defaults to `smoke`. The
+    family declares the categories in their first-mapped order.
     """
     if categories is None:
         categories = dict.fromkeys(task_ids, 'smoke')
-    allowed = sorted(set(categories.values())) or ['smoke']
+    allowed = list(dict.fromkeys(categories.values())) or ['smoke']
     directory = families_dir / name
     (directory / 'cases.toml').unlink(missing_ok=True)
     (directory / 'tasks').mkdir(parents=True)
@@ -1129,5 +1130,5 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         votes=tuple(votes),
         excluded=2 * days,
     )
-    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
+    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut)
     return snapshot, outputs

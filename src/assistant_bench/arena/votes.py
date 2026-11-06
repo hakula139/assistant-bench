@@ -1,4 +1,4 @@
-"""A store's vote cuts and moderation, the snapshots that save cuts, and rounds."""
+"""A store's vote cuts and moderation, production's cut snapshots, and rounds."""
 
 import json
 from collections import defaultdict
@@ -18,8 +18,7 @@ from assistant_bench.arena.publication import (
     OutputFacts,
     output_key,
 )
-from assistant_bench.families import Choice, Defect, Family, FamilyName, VotesSettings
-from assistant_bench.messages import code
+from assistant_bench.families import Choice, Defect, Family, FamilyName
 from assistant_bench.outputs import Output
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
@@ -32,8 +31,6 @@ from assistant_bench.report import (
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.weighting import actor_weights
 
-
-type Store = Literal['production', 'local']
 
 UNDO_WINDOW_MS = 10 * 60_000
 """How long a vote stays undoable.
@@ -81,12 +78,11 @@ class Cut(_Model):
 
 
 class Snapshot(_Model):
-    """The cuts one `bench close` took, saved under `votes/<family>/`."""
+    """The cut one `bench close` took, saved under `votes/<family>/`."""
 
     family: FamilyName
     taken_at: AwareDatetime
-    production: Cut | None
-    local: Cut | None
+    production: Cut
 
 
 # ── Reading a Store ──
@@ -97,17 +93,6 @@ class _ActiveRow(BaseModel):
     reference: str
     systems: Json[dict[str, str]]
     defects: Json[tuple[Defect, ...]]
-
-
-class _OutputRow(BaseModel):
-    output_key: str
-    case_key: str
-    system: str
-    fingerprint: str
-    verdict: Literal['pass', 'fail', 'ungraded']
-    errored: bool
-    length: int
-    content_digest: str
 
 
 class _VoteRow(BaseModel):
@@ -144,8 +129,9 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
         [publication.id],
     ).rows
     outputs = database.execute(
-        'SELECT output_key, case_key, system, fingerprint, verdict, errored, length, '
-        'content_digest FROM outputs WHERE publication_id = ? ORDER BY output_key',
+        'SELECT output_key AS key, case_key, system, fingerprint, verdict, errored, '
+        'length, content_digest FROM outputs WHERE publication_id = ? '
+        'ORDER BY output_key',
         [publication.id],
     ).rows
     inventory = Inventory(
@@ -155,13 +141,7 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
         systems=publication.systems,
         defects=publication.defects,
         cases=tuple(CaseFacts.model_validate(row) for row in cases),
-        outputs=tuple(
-            OutputFacts(
-                key=row.output_key,
-                **row.model_dump(exclude={'output_key'}),
-            )
-            for row in map(_OutputRow.model_validate, outputs)
-        ),
+        outputs=tuple(OutputFacts.model_validate(row) for row in outputs),
     )
 
     window_start = int(now.timestamp() * 1000) - UNDO_WINDOW_MS
@@ -372,7 +352,6 @@ def groups(database: Database, family: str, by: Grouping) -> list[Group]:
 
 
 def check_reason(reason: str) -> None:
-    """Raise ValueError for a blank exclusion reason."""
     if not reason.strip():
         raise ValueError('Give a reason for the exclusion.')
 
@@ -430,56 +409,36 @@ def read_snapshot(path: Path) -> Snapshot:
 def voting_input(
     snapshot: Snapshot, family: Family, outputs: Sequence[Output]
 ) -> AnalysisInput:
-    """Build the round's input from the snapshot's cuts and the local outputs.
+    """Build the round's input from the snapshot's cut and the local outputs.
 
-    A vote counts when both its outputs passed in its store's publication, on the
-    vote's case under the vote's systems, with different content. Latency, tokens
-    and cost come from `outputs`, matched by output key, and an output missing
-    from them measures as null.
+    A vote counts when both its outputs passed in the cut's publication, on the
+    vote's case, with different content. Latency, tokens and cost come from
+    `outputs`, matched by output key, and an output missing from them measures as
+    null.
 
     Raises
     ------
     ValueError
-        The family is not scored by votes, the snapshot belongs to another
-        family or holds no cut, or two cuts name a system or the reference
-        differently.
+        The snapshot belongs to another family.
     """
-    settings = family.settings
-    if not isinstance(settings, VotesSettings):
-        raise ValueError(f'Family `{family.name}` is not scored by votes.')
     if snapshot.family != family.name:
         raise ValueError(
             f'The snapshot belongs to family `{snapshot.family}`, not `{family.name}`.'
         )
 
-    cuts = stored_cuts(snapshot)
-    if not cuts:
-        raise ValueError('The snapshot holds no cut from any store.')
-
-    counted: list[tuple[Store, Vote]] = []
-    dropped = 0
-    for store, cut in cuts:
-        published = {output.key: output for output in cut.inventory.outputs}
-        for vote in cut.votes:
-            if _counts(vote, published):
-                counted.append((store, vote))
-            else:
-                dropped += 1
-        dropped += cut.excluded
-
-    lengths = {
-        output.key: output.length for _, cut in cuts for output in cut.inventory.outputs
-    }
-    actors = [f'{store}:{vote.actor}' for store, vote in counted]
+    cut = snapshot.production
+    inventory = cut.inventory
+    published = {output.key: output for output in inventory.outputs}
+    counted = [vote for vote in cut.votes if _counts(vote, published)]
+    actors = [vote.actor for vote in counted]
     ordinary = tuple(
         HumanEvidence(
-            receipt=f'{store}:{vote.id}',
-            actor=actor,
+            actor=vote.actor,
             choice=vote.choice,
             defects_a=tuple(sorted(vote.defects.a)),
             defects_b=tuple(sorted(vote.defects.b)),
-            length_a=lengths[vote.a_output],
-            length_b=lengths[vote.b_output],
+            length_a=published[vote.a_output].length,
+            length_b=published[vote.b_output].length,
             comparison=ranking.Comparison(
                 vote.a_system,
                 vote.b_system,
@@ -488,87 +447,32 @@ def voting_input(
                 weight,
             ),
         )
-        for (store, vote), actor, weight in zip(
-            counted, actors, actor_weights(actors), strict=True
-        )
+        for vote, weight in zip(counted, actor_weights(actors), strict=True)
     )
 
-    inventory = [output for _, cut in cuts for output in cut.inventory.outputs]
     measured = {output_key(family.name, output): output for output in outputs}
     return AnalysisInput(
         family=family.name,
-        reference=reference(snapshot),
-        systems=tuple(system_names(snapshot)),
-        defects=cuts[0][1].inventory.defects,
-        cutoffs=Cutoffs(
-            production=_cutoff(snapshot.production), local=_cutoff(snapshot.local)
-        ),
-        declared_categories=tuple(settings.categories),
-        categories=tuple(
-            (case.key, case.category) for _, cut in cuts for case in cut.inventory.cases
-        ),
+        reference=inventory.reference,
+        systems=tuple(inventory.systems),
+        defects=inventory.defects,
+        cutoffs=Cutoffs(production=Cutoff(id=cut.cutoff, votes=len(cut.votes))),
+        declared_categories=tuple(family.settings.categories),
+        categories=tuple((case.key, case.category) for case in inventory.cases),
         ordinary=ordinary,
-        settlements=_settlements(inventory),
-        outputs=tuple(_measurement(row, measured.get(row.key)) for row in inventory),
-        dropped=dropped,
+        settlements=_settlements(inventory.outputs),
+        outputs=tuple(
+            _measurement(row, measured.get(row.key)) for row in inventory.outputs
+        ),
+        dropped=len(cut.votes) - len(counted) + cut.excluded,
     )
-
-
-def stored_cuts(snapshot: Snapshot) -> list[tuple[Store, Cut]]:
-    """Return the snapshot's cuts with their stores, production first."""
-    stores: tuple[tuple[Store, Cut | None], ...] = (
-        ('production', snapshot.production),
-        ('local', snapshot.local),
-    )
-    return [(store, cut) for store, cut in stores if cut is not None]
-
-
-def system_names(snapshot: Snapshot) -> dict[str, str]:
-    """Map every published system to its display name, in publication order.
-
-    Raises
-    ------
-    ValueError
-        Two cuts give a system different display names.
-    """
-    names: dict[str, str] = {}
-    for _, cut in stored_cuts(snapshot):
-        for system, name in cut.inventory.systems.items():
-            if names.setdefault(system, name) != name:
-                raise ValueError(
-                    f'The stores name system `{system}` both `{names[system]}` '
-                    f'and `{name}`.'
-                )
-    return names
-
-
-def reference(snapshot: Snapshot) -> str:
-    """Return the reference the cuts' publications froze.
-
-    Raises
-    ------
-    ValueError
-        The cuts froze different references, or the snapshot holds none.
-    """
-    references = {cut.inventory.reference for _, cut in stored_cuts(snapshot)}
-    if len(references) != 1:
-        raise ValueError(
-            f'The stores anchor on {code(sorted(references))}, so the round has no '
-            'single reference.'
-        )
-    return references.pop()
 
 
 def fingerprints(snapshot: Snapshot) -> dict[str, str]:
     return {
         output.system: output.fingerprint
-        for _, cut in stored_cuts(snapshot)
-        for output in cut.inventory.outputs
+        for output in snapshot.production.inventory.outputs
     }
-
-
-def _cutoff(cut: Cut | None) -> Cutoff | None:
-    return None if cut is None else Cutoff(id=cut.cutoff, votes=len(cut.votes))
 
 
 def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:
@@ -577,8 +481,6 @@ def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:
         a is not None
         and b is not None
         and a.case_key == b.case_key == vote.case_key
-        and (a.system, b.system) == (vote.a_system, vote.b_system)
-        and a.system != b.system
         and a.verdict == b.verdict == 'pass'
         and a.content_digest != b.content_digest
     )

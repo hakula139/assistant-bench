@@ -98,13 +98,14 @@ export const undoVote = (family: string) =>
 
 /**
  * Asks whether the family's counted production votes still match what a round closed at its
- * production cutoff read. A round that read no production votes sends no cutoff.
+ * production cutoff read.
  */
 export function checkFreshness(family: string, { production }: Cutoffs, signal: AbortSignal) {
-  const values: Record<string, string> =
-    production === null
-      ? { family }
-      : { family, production: String(production.id), production_votes: String(production.votes) };
+  const values: Record<string, string> = {
+    family,
+    production: String(production.id),
+    production_votes: String(production.votes),
+  };
   return request(freshnessView, 'GET', `/freshness?${query(values)}`, undefined, signal);
 }
 

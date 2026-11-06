@@ -54,7 +54,6 @@ def prepared(family: Family) -> Path:
             load_cases(family),
             collected(),
             {name: system.display_name for name, system in SYSTEMS.items()},
-            'production',
         ),
         collected(),
     )
@@ -121,6 +120,30 @@ def collections(monkeypatch: pytest.MonkeyPatch) -> list[Family]:
     monkeypatch.setattr(commands, 'load_systems', load_systems)
     monkeypatch.setattr(jobs, 'collect', collect)
     return families
+
+
+class TestKnownFamily:
+    @pytest.mark.parametrize(
+        'args',
+        [
+            ('votes', 'production', 'writing-x'),
+            ('exclude', 'production', 'writing-x', '--vote', '1', '--reason', 'bot'),
+            ('restore', 'production', 'writing-x', '--vote', '1'),
+            ('status', 'production', 'writing-x'),
+        ],
+        ids=['votes', 'exclude', 'restore', 'status'],
+    )
+    @pytest.mark.usefixtures('family')
+    def test_refuses_an_unknown_family_with_the_choices(
+        self, store: tuple[SQLiteDatabase, list[str]], args: tuple[str, ...]
+    ) -> None:
+        result = invoke(*args)
+
+        assert result.exit_code == 2
+        assert 'No family named `writing-x`. Choose among `writing-f`.' in (
+            result.stderr
+        )
+        assert store[1] == []
 
 
 class TestPrepare:
@@ -341,7 +364,7 @@ class TestRestore:
         ).rows == [{'excluded': 0}]
 
 
-class TestModerationRefusals:
+class TestSelector:
     @pytest.mark.parametrize(
         ('args', 'message'),
         [
@@ -392,6 +415,8 @@ class TestModerationRefusals:
         assert result.stderr == message
         assert store[1] == []
 
+
+class TestFail:
     @pytest.mark.parametrize(
         'args',
         [
@@ -414,25 +439,3 @@ class TestModerationRefusals:
 
         assert result.exit_code == 1
         assert result.stderr == 'D1 refused the statement with HTTP 403. Forbidden.\n'
-
-    @pytest.mark.parametrize(
-        'args',
-        [
-            ('votes', 'production', 'writing-x'),
-            ('exclude', 'production', 'writing-x', '--vote', '1', '--reason', 'bot'),
-            ('restore', 'production', 'writing-x', '--vote', '1'),
-            ('status', 'production', 'writing-x'),
-        ],
-        ids=['votes', 'exclude', 'restore', 'status'],
-    )
-    @pytest.mark.usefixtures('family')
-    def test_refuses_an_unknown_family_with_the_choices(
-        self, store: tuple[SQLiteDatabase, list[str]], args: tuple[str, ...]
-    ) -> None:
-        result = invoke(*args)
-
-        assert result.exit_code == 2
-        assert 'No family named `writing-x`. Choose among `writing-f`.' in (
-            result.stderr
-        )
-        assert store[1] == []

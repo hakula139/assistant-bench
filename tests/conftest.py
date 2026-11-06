@@ -11,7 +11,7 @@ import trustme
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from assistant_bench import families, jobs
+from assistant_bench import families, jobs, report
 from assistant_bench.arena.d1 import TOKEN_FILE_VAR
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
@@ -156,6 +156,14 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
     monkeypatch.setenv('NO_PROXY', '*')
+    return path
+
+
+@pytest.fixture(autouse=True)
+def reports_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Read and write closed reports outside the committed `reports/`."""
+    path = tmp_path / 'reports'
+    monkeypatch.setattr(report, 'REPORTS_DIR', path)
     return path
 
 

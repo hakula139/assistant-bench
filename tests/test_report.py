@@ -76,7 +76,6 @@ def make_evidence(
     length_b: int = 10,
 ) -> HumanEvidence:
     return HumanEvidence(
-        receipt=f'production:{index}',
         actor=actor,
         choice=choice,
         defects_a=(),
@@ -94,10 +93,10 @@ def make_analysis(
     *,
     settlements: tuple[ranking.Comparison, ...] = (),
     dropped: int = 0,
-    categories: tuple[tuple[str, Category | None], ...] | None = None,
+    categories: tuple[tuple[str, Category], ...] | None = None,
 ) -> AnalysisInput:
     comparisons = tuple(row.comparison for row in ordinary) + settlements
-    resolved: tuple[tuple[str, Category | None], ...] = (
+    resolved: tuple[tuple[str, Category], ...] = (
         tuple((row.case, 'docs') for row in comparisons)
         if categories is None
         else categories
@@ -125,12 +124,9 @@ def make_analysis(
         cutoffs=report.Cutoffs(
             production=report.Cutoff(
                 id=len(ordinary) + dropped, votes=len(ordinary) + dropped
-            ),
-            local=None,
+            )
         ),
-        declared_categories=tuple(
-            dict.fromkeys(category for _, category in resolved if category is not None)
-        ),
+        declared_categories=tuple(dict.fromkeys(category for _, category in resolved)),
         categories=resolved,
         ordinary=ordinary,
         settlements=settlements,
@@ -164,7 +160,7 @@ def make_capped_analysis() -> AnalysisInput:
         replace(row, comparison=row.comparison._replace(weight=weight))
         for row, weight in zip(ordinary, weights, strict=True)
     )
-    categories: tuple[tuple[str, Category | None], ...] = tuple(
+    categories: tuple[tuple[str, Category], ...] = tuple(
         (
             row.comparison.case,
             'review'
@@ -222,16 +218,20 @@ def close_tests_round(families_dir: Path) -> Report:
         ],
     )
 
-    return report.close(
+    return report.close_tests(
         load_family('coding-tasks'),
         AT,
-        samples=2,
         system_names={
             'acme-pro': 'Acme Pro',
             'acme-mini': 'Acme Mini',
             'acme-small': 'Acme Small',
         },
-        frozen_fingerprints={},
+    )
+
+
+def close_smoke(closed_at: datetime = AT) -> Report:
+    return report.close_tests(
+        load_family('smoke'), closed_at, system_names={'large': 'Public large'}
     )
 
 
@@ -273,8 +273,7 @@ class TestReport:
             votes.voting_input(snapshot, ROUND_FAMILY, outputs),
             closed_at,
             fingerprints=votes.fingerprints(snapshot),
-            system_names=votes.system_names(snapshot),
-            frozen_fingerprints={},
+            system_names=snapshot.production.inventory.systems,
         )
 
         written = closed.model_dump_json(indent=2) + '\n'
@@ -308,29 +307,22 @@ class TestReport:
 
         family = Tally(results.votes, results.effective_votes)
         boards = results.categories
-        standings = [Tally(row.votes, row.effective_votes) for row in results.standings]
-        heads = [Tally(row.votes, row.effective_votes) for row in results.head_to_head]
         categories = [Tally(row.votes, row.effective_votes) for row in boards]
         assert all(
-            within(row, Tally(row.votes, row.votes))
-            for row in [family, *standings, *heads, *categories]
+            within(row, Tally(row.votes, row.votes)) for row in [family, *categories]
         )
-        assert all(within(row, family) for row in [*standings, *heads, *categories])
-        assert all(
-            within(Tally(row.votes, row.effective_votes), category)
-            for board, category in zip(boards, categories, strict=True)
-            for row in board.standings
-        )
-        assert len({board.category for board in boards}) == len(boards)
+        assert all(within(row, family) for row in categories)
         assert within(tally(categories), family)
-        assert within(tally(standings), tally([family, family]))
+        assert len({board.category for board in boards}) == len(boards)
+        assert all(
+            row.votes <= board.votes for board in boards for row in board.standings
+        )
+        assert all(row.votes <= results.votes for row in results.standings)
+        assert sum(row.votes for row in results.standings) <= 2 * results.votes
 
         pairs = {(row.system, row.opponent): row for row in results.head_to_head}
         assert len(pairs) == len(results.head_to_head)
-        assert tally(heads).votes == 2 * results.votes
-        assert tally(heads).effective_votes == pytest.approx(
-            2 * results.effective_votes
-        )
+        assert sum(row.votes for row in results.head_to_head) == 2 * results.votes
         for (system, opponent), row in pairs.items():
             mirror = pairs[opponent, system]
             assert system != opponent
@@ -342,7 +334,6 @@ class TestReport:
                 mirror.both_bad,
             )
             assert row.wins + row.losses + row.ties + row.both_bad == row.votes
-            assert row.effective_votes == pytest.approx(mirror.effective_votes)
             assert row.win_rate + mirror.win_rate == pytest.approx(1)
 
     def test_requires_an_explicit_timezone_for_the_closing_timestamp(self) -> None:
@@ -355,10 +346,6 @@ class TestReport:
     @pytest.mark.parametrize(
         ('path', 'value'),
         [
-            (('standings', 0, 'fingerprint'), 'copied-fingerprint'),
-            (('standings', 0, 'interval'), {'lower': 900, 'upper': 1100}),
-            (('standings', 0, 'preliminary'), True),
-            (('categories', 0, 'standings', 0, 'preliminary'), False),
             (('reference',), 'unknown-reference'),
             (('anchor',), 'unknown-anchor'),
             (('anchor',), 'acme-edge'),
@@ -369,13 +356,8 @@ class TestReport:
             (('categories', 0, 'unranked'), ['unknown-category-system']),
             (('standings', 0, 'system'), ''),
             (('standings', 0, 'cost_gap'), 'unpriced'),
-            (('standings', 0, 'mean_cost_usd'), None),
         ],
         ids=[
-            'duplicate-fingerprint',
-            'interval',
-            'preliminary',
-            'category-preliminary',
             'reference',
             'anchor',
             'unranked-anchor',
@@ -386,7 +368,6 @@ class TestReport:
             'category-unranked',
             'empty-id',
             'cost-gap-beside-cost',
-            'unknown-cost-without-gap',
         ],
     )
     def test_rejects_inconsistent_result_contracts(
@@ -548,53 +529,42 @@ class TestReport:
             stale_fixture(TESTS_REPORT_FIXTURE, written)
 
 
-def close_frozen(frozen: dict[str, str | None]) -> Report:
+def close_frozen(frozen: str | None) -> Report:
+    """Close `large` under `fingerprint` after a round that froze `frozen`."""
+    write_outputs(
+        'smoke', [make_output(case='echo', system='large', fingerprint=frozen)]
+    )
+    write_report(close_smoke(AT - timedelta(days=1)))
     write_outputs(
         'smoke',
         [make_output(case='echo', system='large', fingerprint='fingerprint')],
     )
-    return report.close(
-        load_family('smoke'),
-        AT,
-        samples=1,
-        system_names={'large': 'Public large'},
-        frozen_fingerprints=frozen,
-    )
+    return close_smoke()
 
 
-class TestClose:
+class TestCloseTests:
     def test_normalizes_an_offset_closing_time_before_naming_the_round(self) -> None:
         write_outputs('smoke', [make_output(case='echo', system='large')])
         utc = AT.replace(hour=23)
         local = utc.astimezone(timezone(timedelta(hours=9)))
 
-        closed = report.close(
-            load_family('smoke'),
-            local,
-            samples=1,
-            system_names={'large': 'Public large'},
-            frozen_fingerprints={},
-        )
+        closed = close_smoke(local)
 
         assert closed.round == '2026-10-21'
         assert closed.closed_at == utc
         assert closed.closed_at.tzinfo == UTC
 
     @pytest.mark.parametrize(
-        'frozen',
-        [{'large': 'fingerprint'}, {'large': None}],
-        ids=['kept', 'unrecorded'],
+        'frozen', ['fingerprint', None], ids=['kept', 'unrecorded']
     )
-    def test_keeps_a_frozen_or_unrecorded_fingerprint(
-        self, frozen: dict[str, str | None]
-    ) -> None:
+    def test_keeps_a_frozen_or_unrecorded_fingerprint(self, frozen: str | None) -> None:
         closed = close_frozen(frozen)
 
         assert closed.systems['large'].fingerprint == 'fingerprint'
 
     def test_refuses_a_system_that_left_its_frozen_fingerprint(self) -> None:
         with pytest.raises(ValueError, match='`large` changed its published'):
-            close_frozen({'large': 'earlier'})
+            close_frozen('earlier')
 
     @pytest.mark.parametrize(
         ('trials', 'message'),
@@ -625,13 +595,7 @@ class TestClose:
         )
 
         with pytest.raises(ValueError, match=message):
-            report.close(
-                load_family('smoke'),
-                AT,
-                samples=1,
-                system_names={'large': 'Public large'},
-                frozen_fingerprints={},
-            )
+            close_smoke()
 
     def test_reports_pass_rates_for_a_tests_family(self) -> None:
         trials: list[dict[str, Any]] = [
@@ -656,13 +620,7 @@ class TestClose:
             ],
         )
 
-        closed = report.close(
-            load_family('smoke'),
-            AT,
-            samples=1,
-            system_names={'large': 'Public large'},
-            frozen_fingerprints={},
-        )
+        closed = close_smoke()
         results = closed.results
 
         assert results.scorer == 'tests'
@@ -671,9 +629,10 @@ class TestClose:
         assert standing.pass_rate.rate == pytest.approx(2 / 3)
         assert standing.pass_hat_k is None
         assert standing.mean_cost_usd == pytest.approx(0.01)
-        assert standing.p50_latency_sec == 3.0
+        assert standing.latency_sec is not None
+        latency = standing.latency_sec
+        assert (latency.p10, latency.p50, latency.p90) == pytest.approx((2.2, 3.0, 3.8))
         assert closed.systems['large'].display_name == 'Public large'
-        assert 'fingerprint' not in standing.model_dump()
 
     def test_leaves_the_mean_cost_unknown_when_a_finished_trial_lacks_usage(
         self,
@@ -693,13 +652,7 @@ class TestClose:
             ],
         )
 
-        closed = report.close(
-            load_family('smoke'),
-            AT,
-            samples=1,
-            system_names={'large': 'Public large'},
-            frozen_fingerprints={},
-        )
+        closed = close_smoke()
 
         assert closed.results.scorer == 'tests'
         (standing,) = closed.results.standings
@@ -759,6 +712,27 @@ class TestClose:
             }
         )
 
+    def test_orders_the_categories_as_the_family_declares_them(
+        self, families_dir: Path
+    ) -> None:
+        write_task_family(
+            families_dir, 'a', 'b', categories={'a': 'feature', 'b': 'bug-fix'}
+        )
+        write_outputs(
+            'f',
+            [make_output(case=case, system='large', reward=1.0) for case in 'ab'],
+        )
+
+        closed = report.close_tests(
+            load_family('f'), AT, system_names={'large': 'Public large'}
+        )
+
+        assert closed.results.scorer == 'tests'
+        assert [board.category for board in closed.results.categories] == [
+            'feature',
+            'bug-fix',
+        ]
+
     def test_refuses_a_round_until_every_system_has_every_trial(
         self, families_dir: Path
     ) -> None:
@@ -783,13 +757,82 @@ class TestClose:
             ValueError,
             match=r'lack some: `large` on `b`\. Run `uv run bench run --system <name>`',
         ):
-            report.close(
+            report.close_tests(
                 load_family('f'),
                 AT,
-                samples=2,
                 system_names={'large': 'Public large', 'small': 'Public small'},
-                frozen_fingerprints={},
             )
+
+
+class TestWriteReport:
+    def test_writes_reports_family_round_json(self, reports_dir: Path) -> None:
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+
+        path = write_report(closed)
+
+        assert path == reports_dir / 'arena' / '2026-10-21.json'
+        assert Report.model_validate_json(path.read_text()) == closed
+
+
+class TestReportedFingerprints:
+    @staticmethod
+    def write_rounds(early: str | None, late: str | None) -> Report:
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        for fixture, value in ((EARLY_REPORT_FIXTURE, early), (REPORT_FIXTURE, late)):
+            written = Report.model_validate_json(fixture.read_text())
+            systems = written.systems | {
+                'acme-large': written.systems['acme-large'].model_copy(
+                    update={'fingerprint': value}
+                )
+            }
+            write_report(written.model_copy(update={'systems': systems}))
+        return closed
+
+    @pytest.mark.parametrize(
+        ('early', 'late', 'expected'),
+        [
+            pytest.param('fp-a', 'fp-a', 'fp-a', id='kept'),
+            pytest.param(None, 'fp-a', 'fp-a', id='recorded-later'),
+            pytest.param('fp-a', None, 'fp-a', id='unrecorded-later'),
+            pytest.param(None, None, None, id='never-recorded'),
+        ],
+    )
+    def test_freezes_the_one_fingerprint_closed_reports_recorded(
+        self, early: str | None, late: str | None, expected: str | None
+    ) -> None:
+        closed = self.write_rounds(early, late)
+
+        frozen = report.reported_fingerprints(closed.family)
+
+        assert frozen == {
+            system: metadata.fingerprint for system, metadata in closed.systems.items()
+        } | {'acme-large': expected}
+
+    def test_rejects_reports_that_froze_two_fingerprints_under_one_system(
+        self,
+    ) -> None:
+        closed = self.write_rounds('fp-a', 'fp-b')
+
+        with pytest.raises(ValueError, match='`acme-large` reuses an identifier'):
+            report.reported_fingerprints(closed.family)
+
+    @pytest.mark.parametrize('invalid', ['family', 'round', 'payload', 'timezone'])
+    def test_rejects_invalid_history_before_using_its_metadata(
+        self, invalid: str
+    ) -> None:
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        path = write_report(closed)
+        payload = json.loads(path.read_text())
+        if invalid == 'payload':
+            del payload['systems']
+        elif invalid == 'timezone':
+            payload['closed_at'] = '2026-10-21T09:00:00'
+        else:
+            payload[invalid] = 'wrong'
+        path.write_text(json.dumps(payload))
+
+        with pytest.raises(ValueError):
+            report.reported_fingerprints(closed.family)
 
 
 class TestVotesResults:
@@ -835,10 +878,8 @@ class TestVotesResults:
             == results
         )
         assert standings['a'].both_bad_rate == 0.5
-        assert standings['a'].outputs == 1
         assert standings['a'].gate_failure_rate == 0.5
         assert standings['a'].mean_cost_usd == 0.01
-        assert standings['a'].p50_latency_sec == 2.0
         assert standings['a'].output_tokens is not None
         assert standings['a'].output_tokens.p50 == 20.0
         assert standings['b'].mean_cost_usd == pytest.approx(50.005)
@@ -865,7 +906,7 @@ class TestVotesResults:
             ),
             (
                 {'case-0': {'latency_sec': None}},
-                {'p50_latency_sec': None, 'latency_sec': None},
+                {'latency_sec': None},
             ),
         ],
         ids=['unpriced', 'unreported-usage', 'unpriced-beside-unreported', 'untimed'],
@@ -887,7 +928,6 @@ class TestVotesResults:
         known: dict[str, object] = {
             'mean_cost_usd': pytest.approx(0.01),
             'cost_gap': None,
-            'p50_latency_sec': 2.0,
             'output_tokens': report.Distribution(p10=20.0, p50=20.0, p90=20.0),
             'latency_sec': report.Distribution(p10=2.0, p50=2.0, p90=2.0),
         }
@@ -946,8 +986,14 @@ class TestVotesResults:
         assert results.anchor == 'a'
         assert results.standings[0].system == 'a'
         assert results.head_to_head == []
-        assert results.position is results.length is results.split_half_tau is None
+        assert results.length is results.split_half_tau is None
         assert all(row.votes == row.decisive_votes == 0 for row in results.standings)
+
+    def test_refuses_an_evaluation_without_comparisons(self) -> None:
+        with pytest.raises(
+            ValueError, match='^Family `f` has no eligible comparisons\\.$'
+        ):
+            report.votes_results(make_analysis())
 
     def test_falls_back_to_the_connected_root_when_the_reference_does_not_rank(
         self,
@@ -965,25 +1011,6 @@ class TestVotesResults:
         assert results.split_half_tau is None
         assert results.length is None
 
-    @pytest.mark.parametrize(
-        'missing', [False, True], ids=['uncategorized', 'missing-key']
-    )
-    def test_distinguishes_uncategorized_cases_from_incomplete_frozen_inventory(
-        self, missing: bool
-    ) -> None:
-        rows = (make_evidence(0),)
-        analysis = make_analysis(
-            rows, categories=() if missing else (('case-0', None),)
-        )
-
-        if missing:
-            with pytest.raises(KeyError, match='case-0'):
-                report.votes_results(analysis)
-        else:
-            results = report.votes_results(analysis)
-            assert results.categories == []
-            assert results.votes == 1
-
     def test_writes_category_boards_in_the_declared_order(self) -> None:
         rows = (make_evidence(0), make_evidence(1))
         analysis = make_analysis(
@@ -993,64 +1020,6 @@ class TestVotesResults:
         results = report.votes_results(analysis)
 
         assert [board.category for board in results.categories] == ['reply', 'docs']
-
-    @pytest.mark.parametrize(
-        ('scope', 'value'),
-        [
-            (scope, value)
-            for scope in (
-                'overall',
-                'standing',
-                'head-to-head',
-                'category',
-                'category-standing',
-            )
-            for value in (-1.0, float('inf'), float('nan'))
-        ],
-        ids=lambda value: str(value),
-    )
-    def test_rejects_invalid_effective_mass_at_every_aggregate(
-        self, capped_results: report.VotesResults, scope: str, value: float
-    ) -> None:
-        payload = capped_results.model_dump(mode='json')
-        match scope:
-            case 'overall':
-                target = payload
-            case 'standing':
-                target = payload['standings'][0]
-            case 'head-to-head':
-                target = payload['head_to_head'][0]
-            case 'category':
-                target = payload['categories'][0]
-            case 'category-standing':
-                target = payload['categories'][0]['standings'][0]
-            case _:
-                raise AssertionError(scope)
-
-        target['effective_votes'] = value
-
-        with pytest.raises(ValidationError):
-            report.VotesResults.model_validate_json(json.dumps(payload))
-
-    @pytest.mark.parametrize(
-        'change', ['missing-cutoffs', 'negative-cutoff', 'actor-id']
-    )
-    def test_requires_private_free_cutoffs(
-        self, capped_results: report.VotesResults, change: str
-    ) -> None:
-        payload = capped_results.model_dump(mode='json')
-        match change:
-            case 'missing-cutoffs':
-                del payload['cutoffs']
-            case 'negative-cutoff':
-                payload['cutoffs']['production']['votes'] = -1
-            case 'actor-id':
-                payload['cutoffs']['actor_id'] = 'private-actor'
-            case _:
-                raise AssertionError(change)
-
-        with pytest.raises(ValidationError):
-            report.VotesResults.model_validate_json(json.dumps(payload))
 
     def test_inherits_family_weights_in_categories_and_preference_summaries(
         self, capped_results: report.VotesResults
@@ -1068,11 +1037,8 @@ class TestVotesResults:
 
         standings = {row.system: row for row in results.standings}
         assert standings['a'].votes == 225
-        assert standings['a'].effective_votes == pytest.approx(105)
         assert standings['a'].both_bad_rate == pytest.approx(16 / 105)
-        assert standings['a'].outputs == 225
         assert standings['a'].mean_cost_usd == pytest.approx(0.01)
-        assert standings['a'].p50_latency_sec == 2.0
 
         pair = next(
             row
@@ -1080,7 +1046,6 @@ class TestVotesResults:
             if (row.system, row.opponent) == ('a', 'b')
         )
         assert (pair.wins, pair.losses, pair.ties, pair.both_bad) == (120, 25, 40, 40)
-        assert pair.effective_votes == pytest.approx(105)
         assert pair.win_rate == pytest.approx(64 / 105)
         assert pair.win_rate != pytest.approx((pair.wins + pair.ties / 2) / pair.votes)
 
@@ -1088,10 +1053,6 @@ class TestVotesResults:
         assert set(categories) == {'docs', 'message'}
         assert categories['docs'].votes == 15
         assert categories['docs'].effective_votes == pytest.approx(9)
-        assert all(
-            row.effective_votes == pytest.approx(9)
-            for row in categories['docs'].standings
-        )
 
     def test_scales_length_with_inherited_weights_in_the_ranked_component(self) -> None:
         analysis = make_capped_analysis()
@@ -1128,97 +1089,3 @@ class TestVotesResults:
         results = report.votes_results(make_analysis(rows))
 
         assert results.split_half_tau == pytest.approx(-1.0)
-
-
-class TestWriteReport:
-    def test_writes_reports_family_round_json(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
-
-        path = write_report(closed)
-
-        assert path == tmp_path / 'reports' / 'arena' / '2026-10-21.json'
-        assert Report.model_validate_json(path.read_text()) == closed
-
-
-class TestReportedFingerprints:
-    @staticmethod
-    def write_rounds(
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        early: str | None,
-        late: str | None,
-    ) -> Report:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
-        for fixture, value in ((EARLY_REPORT_FIXTURE, early), (REPORT_FIXTURE, late)):
-            written = Report.model_validate_json(fixture.read_text())
-            systems = written.systems | {
-                'acme-large': written.systems['acme-large'].model_copy(
-                    update={'fingerprint': value}
-                )
-            }
-            write_report(written.model_copy(update={'systems': systems}))
-        return closed
-
-    @pytest.mark.parametrize(
-        ('early', 'late', 'expected'),
-        [
-            pytest.param('fp-a', 'fp-a', 'fp-a', id='kept'),
-            pytest.param(None, 'fp-a', 'fp-a', id='recorded-later'),
-            pytest.param('fp-a', None, 'fp-a', id='unrecorded-later'),
-            pytest.param(None, None, None, id='never-recorded'),
-        ],
-    )
-    def test_freezes_the_one_fingerprint_closed_reports_recorded(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        early: str | None,
-        late: str | None,
-        expected: str | None,
-    ) -> None:
-        closed = self.write_rounds(monkeypatch, tmp_path, early, late)
-
-        frozen = report.reported_fingerprints(closed.family)
-
-        assert frozen == {
-            system: metadata.fingerprint for system, metadata in closed.systems.items()
-        } | {'acme-large': expected}
-
-    def test_rejects_reports_that_froze_two_fingerprints_under_one_system(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        closed = self.write_rounds(monkeypatch, tmp_path, 'fp-a', 'fp-b')
-
-        with pytest.raises(ValueError, match='`acme-large` reuses an identifier'):
-            report.reported_fingerprints(closed.family)
-
-    def test_rejects_an_invalid_family_before_reading_any_report(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'missing')
-
-        with pytest.raises(ValidationError):
-            report.reported_fingerprints('../outside')
-
-    @pytest.mark.parametrize('invalid', ['family', 'round', 'payload', 'timezone'])
-    def test_rejects_invalid_history_before_using_its_metadata(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
-    ) -> None:
-        monkeypatch.setattr(report, 'REPORTS_DIR', tmp_path / 'reports')
-        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
-        path = write_report(closed)
-        payload = json.loads(path.read_text())
-        if invalid == 'payload':
-            del payload['systems']
-        elif invalid == 'timezone':
-            payload['closed_at'] = '2026-10-21T09:00:00'
-        else:
-            payload[invalid] = 'wrong'
-        path.write_text(json.dumps(payload))
-
-        with pytest.raises(ValueError):
-            report.reported_fingerprints(closed.family)
