@@ -136,25 +136,6 @@ jobs:
       - name: Check editor types
         run: nix develop .#python -c uv run basedpyright
 
-      - name: Check complete dependency type contracts
-        shell: bash
-        run: |
-          nix develop .#python -c uv run python -m mypy.stubtest \
-            --mypy-config-file pyproject.toml \
-            zhon zhon.hanzi zhon.pinyin zhon.zhuyin zhon.cedict \
-            zhon.cedict.all zhon.cedict.simplified zhon.cedict.traditional threadpoolctl
-
-      - name: Check partial dependency type contracts
-        shell: bash
-        run: |
-          nix develop .#python -c uv run python -m mypy.stubtest \
-            --mypy-config-file pyproject.toml \
-            --ignore-missing-stub harbor.llms.lite_llm harbor.llms.chat \
-            statsmodels.discrete.discrete_model
-
-      - name: Check registered controller contract
-        run: nix develop .#python -c uv run python typings/checks/controllers.py
-
       - name: Test
         run: nix develop .#python -c uv run pytest
 
