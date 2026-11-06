@@ -121,7 +121,7 @@ export const defectTerms: Record<Defect, Term> = {
   },
   tone: {
     term: 'Wrong tone',
-    definition: 'Tone does not fit the reader.',
+    definition: 'Too formal or casual for the reader or brief.',
   },
   formulaic: {
     term: 'Formulaic',
@@ -133,7 +133,7 @@ export const defectTerms: Record<Defect, Term> = {
   },
   scope: {
     term: 'Misses the brief',
-    definition: 'Misses requirements or goes off topic.',
+    definition: 'Misses requirements or adds unrelated material.',
   },
   conventions: {
     term: 'Conventions',
