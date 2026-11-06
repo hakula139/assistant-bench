@@ -131,11 +131,10 @@ class TestHostEnvironment:
             }
         )
 
-        # Give the jobs distinct names despite Harbor's one-second default resolution.
         first = jobs.job(family, [system], jobs.render_tasks(family, cases))
-        asyncio.run(run_in_process(first.model_copy(update={'job_name': 'job-1'})))
+        asyncio.run(run_in_process(first))
         rerun = jobs.job(family, [system], jobs.render_tasks(family, cases))
-        jobs.run_job(rerun.model_copy(update={'job_name': 'job-2'}))
+        jobs.run_job(rerun)
 
         logs = [
             path.read_text()

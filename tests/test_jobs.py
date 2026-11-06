@@ -587,7 +587,7 @@ class TestJob:
     def test_names_jobs_in_start_order_within_one_second(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        starts = iter([START, START + timedelta(milliseconds=1)])
+        starts = iter(START + timedelta(milliseconds=ms) for ms in range(3))
 
         class Clock(datetime):
             @classmethod
@@ -597,10 +597,12 @@ class TestJob:
         monkeypatch.setattr(jobs, 'datetime', Clock)
         monkeypatch.setattr(job_config, 'datetime', Clock)
 
-        first = jobs.job(VOTES, [make_system()], [])
-        second = jobs.job(VOTES, [make_system()], [])
+        names = [
+            JobConfig().job_name,
+            *(jobs.job(VOTES, [make_system()], []).job_name for _ in range(2)),
+        ]
 
-        assert first.job_name < second.job_name
+        assert names[0] < names[1] < names[2]
 
 
 class TestChangedTasks:
