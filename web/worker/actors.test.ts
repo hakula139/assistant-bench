@@ -12,7 +12,6 @@ describe('network', () => {
     ['a compressed IPv6 address', '2001:db8::1', '2001:db8:0:0::/64'],
     ['a compressed prefix', '2001:db8:1:2:3::', '2001:db8:1:2::/64'],
     ['the unspecified address', '::', '0:0:0:0::/64'],
-    ['an embedded IPv4 address', '2001:db8:1:2::192.0.2.1', '2001:db8:1:2::/64'],
     ['upper-case digits', '2001:DB8:A::1', '2001:db8:a:0::/64'],
   ])('maps %s to its network', (_, address, expected) => {
     expect(network(address)).toBe(expected);

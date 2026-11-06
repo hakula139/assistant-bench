@@ -2,8 +2,8 @@ import type { PairState } from '@/lib/arena';
 import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
 
-import { hex, signer } from './actors';
 import { ApiError } from './api';
+import { hex, signer } from './hmac';
 import { UNDO_MS } from './limits';
 
 interface ActiveRow {
@@ -15,6 +15,9 @@ interface ActiveRow {
 interface PendingRow {
   id: string;
   publication_id: string;
+  case_key: string;
+  a_system: string;
+  b_system: string;
   instruction: string;
   checklist: string;
   category: Category;
@@ -37,15 +40,15 @@ export interface PassingOutput {
   content_digest: string;
 }
 
-/** A case and two systems the actor can still compare, with every sample pair that differs. */
+/** A case and two systems the actor can still compare, with each system's outputs on the case. */
 export interface Comparison {
   caseKey: string;
   systems: readonly [string, string];
-  samples: readonly (readonly [PassingOutput, PassingOutput])[];
+  outputs: readonly [readonly PassingOutput[], readonly PassingOutput[]];
 }
 
 /** A case and the outputs shown as A and B. */
-export interface Drawn {
+interface Drawn {
   caseKey: string;
   a: string;
   b: string;
@@ -59,8 +62,8 @@ const ACTIVE = `
   FROM active JOIN publications ON publications.id = active.publication_id
   WHERE active.family = ?`;
 const PENDING = `
-  SELECT pairs.id, pairs.publication_id, cases.instruction, cases.checklist, cases.category,
-    a.content AS a, b.content AS b
+  SELECT pairs.id, pairs.publication_id, pairs.case_key, a.system AS a_system, b.system AS b_system,
+    cases.instruction, cases.checklist, cases.category, a.content AS a, b.content AS b
   FROM pairs
   JOIN cases ON cases.publication_id = pairs.publication_id AND cases.case_key = pairs.case_key
   JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
@@ -75,7 +78,7 @@ const PASSING = `
 const COVERAGE = `
   SELECT min(a_system, b_system) AS low, max(a_system, b_system) AS high, count(*) AS votes
   FROM votes WHERE family = ? AND exclusion IS NULL GROUP BY low, high`;
-// Keeps a pair that another request issued on the same publication meanwhile.
+/** Keeps a pair that another request issued on the same publication meanwhile. */
 const ISSUE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -83,12 +86,9 @@ const ISSUE = `
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at
   WHERE pairs.publication_id <> excluded.publication_id`;
-const PENDING_BY_ID = `
-  SELECT pairs.family, pairs.case_key, a.system AS a_system, b.system AS b_system
-  FROM pairs
+const PAIR_FAMILY = `
+  SELECT pairs.family FROM pairs
   JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
-  JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
-  JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
   WHERE pairs.id = ? AND pairs.actor_id = ?`;
 const REPLACE = `
   UPDATE pairs SET id = ?, case_key = ?, a_output = ?, b_output = ?, issued_at = ?
@@ -117,14 +117,13 @@ export function candidates(
 
     return names.flatMap((low, index) =>
       names.slice(index + 1).flatMap((high) => {
-        const samples = (systems.get(low) ?? []).flatMap((a) =>
-          (systems.get(high) ?? [])
-            .filter((b) => a.content_digest !== b.content_digest)
-            .map((b) => [a, b] as const),
+        const sides = [systems.get(low) ?? [], systems.get(high) ?? []] as const;
+        const differ = sides[0].some((a) =>
+          sides[1].some((b) => a.content_digest !== b.content_digest),
         );
-        return samples.length === 0 || done.has(key(caseKey, low, high))
-          ? []
-          : [{ caseKey, systems: [low, high] as const, samples }];
+        return differ && !done.has(key(caseKey, low, high))
+          ? [{ caseKey, systems: [low, high] as const, outputs: sides }]
+          : [];
       }),
     );
   });
@@ -146,14 +145,15 @@ async function caseOrder(rank: Rank, comparisons: readonly Comparison[]) {
 }
 
 /** The lowest-ranked differing sample pair, with its rank's lowest bit choosing the sides. */
-async function place(rank: Rank, comparison: Comparison): Promise<Drawn> {
-  const [first] = await ordered(comparison.samples, ([a, b]) =>
-    rank('sample', a.output_key, b.output_key),
+async function place(rank: Rank, { caseKey, outputs: [lows, highs] }: Comparison): Promise<Drawn> {
+  const samples = lows.flatMap((a) =>
+    highs.filter((b) => a.content_digest !== b.content_digest).map((b) => [a, b] as const),
   );
+  const [first] = await ordered(samples, ([a, b]) => rank('sample', a.output_key, b.output_key));
   const [low, high] = first.item;
   const swap = Number.parseInt(first.rank.slice(-1), 16) & 1;
   return {
-    caseKey: comparison.caseKey,
+    caseKey,
     a: (swap ? high : low).output_key,
     b: (swap ? low : high).output_key,
   };
@@ -195,14 +195,17 @@ export async function next(
   return following === undefined || following.caseKey === current ? null : place(rank, following);
 }
 
-/** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
-export async function pairState(
-  db: D1Database,
-  actorKey: string,
-  actor: string,
-  family: string,
-  now: number,
-): Promise<PairState> {
+/** An actor's standing in a family, as one batch reads it. */
+interface Standing {
+  active: ActiveRow;
+  /** The pending pair, while it belongs to the active publication. */
+  pending: PendingRow | undefined;
+  voted: VoteRow[];
+  comparisons: Comparison[];
+}
+
+/** Reads the family's active publication, or 404 `no_round`, with the actor's standing in it. */
+async function read(db: D1Database, actor: string, family: string): Promise<Standing> {
   const [activeRows, pendingRows, voteRows, passingRows] = await db.batch([
     db.prepare(ACTIVE).bind(family),
     db.prepare(PENDING).bind(actor, family),
@@ -214,13 +217,21 @@ export async function pairState(
     throw new ApiError(404, 'no_round');
   }
 
+  const pending = (pendingRows.results as PendingRow[]).at(0);
   const voted = voteRows.results as VoteRow[];
-  const comparisons = candidates(passingRows.results as PassingOutput[], voted);
-  let pending = (pendingRows.results as PendingRow[]).at(0);
-  if (pending?.publication_id !== active.id) {
-    pending = await issue(db, actorKey, actor, family, active.id, comparisons, now);
-  }
+  return {
+    active,
+    pending: pending?.publication_id === active.id ? pending : undefined,
+    voted,
+    comparisons: candidates(passingRows.results as PassingOutput[], voted),
+  };
+}
 
+function view(
+  { active, voted, comparisons }: Standing,
+  pending: PendingRow | undefined,
+  now: number,
+): PairState {
   return {
     pair:
       pending === undefined
@@ -239,6 +250,21 @@ export async function pairState(
     remaining: comparisons.length,
     undo: voted.some((vote) => vote.counted && vote.recorded_at > now - UNDO_MS),
   };
+}
+
+/** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
+export async function pairState(
+  db: D1Database,
+  actorKey: string,
+  actor: string,
+  family: string,
+  now: number,
+): Promise<PairState> {
+  const standing = await read(db, actor, family);
+  const pending =
+    standing.pending ??
+    (await issue(db, actorKey, actor, family, standing.active.id, standing.comparisons, now));
+  return view(standing, pending, now);
 }
 
 async function issue(
@@ -283,35 +309,36 @@ export async function skip(
   pair: string,
   now: number,
 ): Promise<PairState> {
-  const pending = await db
-    .prepare(PENDING_BY_ID)
-    .bind(pair, actor)
-    .first<{ family: string; case_key: string; a_system: string; b_system: string }>();
-  if (pending === null) {
+  const owner = await db.prepare(PAIR_FAMILY).bind(pair, actor).first<{ family: string }>();
+  if (owner === null) {
     throw new ApiError(409, 'stale_pair');
   }
 
-  const { family } = pending;
-  const [voteRows, passingRows] = await db.batch([
-    db.prepare(ACTOR_VOTES).bind(actor, family),
-    db.prepare(PASSING).bind(family),
-  ]);
+  const { family } = owner;
+  const standing = await read(db, actor, family);
+  const { pending } = standing;
+  if (pending?.id !== pair) {
+    throw new ApiError(409, 'stale_pair');
+  }
+
   const systems = key(...sorted(pending.a_system, pending.b_system));
   const drawn = await next(
     ranker(actorKey, actor, family),
-    candidates(passingRows.results as PassingOutput[], voteRows.results as VoteRow[]).filter(
-      (comparison) => key(...comparison.systems) === systems,
-    ),
+    standing.comparisons.filter((comparison) => key(...comparison.systems) === systems),
     pending.case_key,
   );
-  if (drawn !== null) {
-    const { meta } = await db
-      .prepare(REPLACE)
-      .bind(crypto.randomUUID(), drawn.caseKey, drawn.a, drawn.b, now, pair, actor)
-      .run();
-    if (meta.changes === 0) {
-      throw new ApiError(409, 'stale_pair');
-    }
+  if (drawn === null) {
+    return view(standing, pending, now);
   }
-  return pairState(db, actorKey, actor, family, now);
+
+  const [replaced, current] = await db.batch([
+    db
+      .prepare(REPLACE)
+      .bind(crypto.randomUUID(), drawn.caseKey, drawn.a, drawn.b, now, pair, actor),
+    db.prepare(PENDING).bind(actor, family),
+  ]);
+  if (replaced.meta.changes === 0) {
+    throw new ApiError(409, 'stale_pair');
+  }
+  return view(standing, (current.results as PendingRow[]).at(0), now);
 }

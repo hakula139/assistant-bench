@@ -1,6 +1,6 @@
 import { PAIR_RETENTION_MS, TAG_RETENTION_MS } from './limits';
 
-/** Clears IP tags past their retention and deletes pending pairs left idle too long. */
+/** Clears IP tags and deletes pending pairs past their retention. */
 export async function retain(db: D1Database, now: number): Promise<void> {
   const tagged = now - TAG_RETENTION_MS;
   await db.batch([

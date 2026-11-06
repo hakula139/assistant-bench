@@ -3,6 +3,7 @@ import { getSignedCookie, setSignedCookie } from 'hono/cookie';
 import * as z from 'zod/mini';
 
 import { ApiError, type Api, type Bindings } from './api';
+import { hex, signer } from './hmac';
 import { ACTOR_MAX_AGE_MS, ACTORS_PER_TAG, WINDOW_MS } from './limits';
 
 /** Sent as `__Host-bench-actor`, which Hono's `host` prefix adds. */
@@ -12,24 +13,6 @@ const TAG_BYTES = 16;
 
 const siteverifyResult = z.object({ success: z.boolean(), hostname: z.optional(z.string()) });
 
-/** HMAC-SHA-256 under `key`, imported once for every message the signer signs. */
-export function signer(key: string): (message: string) => Promise<Uint8Array> {
-  const encoder = new TextEncoder();
-  const imported = crypto.subtle.importKey(
-    'raw',
-    encoder.encode(key),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  return async (message) =>
-    new Uint8Array(await crypto.subtle.sign('HMAC', await imported, encoder.encode(message)));
-}
-
-export function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 /** Keep IPv4 addresses and reduce IPv6 addresses to their /64 network. */
 export function network(address: string): string {
   const halves = address.toLowerCase().split('::');
@@ -37,11 +20,8 @@ export function network(address: string): string {
     return address;
   }
 
-  // An embedded IPv4 address fills the last two groups, which the prefix never reaches.
   const groups = (part: string | undefined) =>
-    part === undefined || part === ''
-      ? []
-      : part.split(':').flatMap((group) => (group.includes('.') ? ['0', '0'] : [group]));
+    part === undefined || part === '' ? [] : part.split(':');
   const head = groups(halves[0]);
   const tail = groups(halves[1]);
   const full =

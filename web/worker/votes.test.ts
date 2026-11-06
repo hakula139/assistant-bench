@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+
+import type { Freshness } from '@/lib/arena';
 
 import { ipTag } from './actors';
 import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
@@ -8,6 +10,7 @@ import {
   admitted,
   call,
   CODING,
+  ORIGIN,
   pairOf,
   pendingRow,
   publish,
@@ -15,7 +18,7 @@ import {
   vote,
   WRITING,
 } from './test/support';
-import { freshness } from './votes';
+import { cachedFreshness, freshness } from './votes';
 
 const TAG_IP = '198.51.100.9';
 
@@ -301,11 +304,11 @@ describe('freshness', () => {
   }
 
   test.each([
-    ['current while the counted votes match', 'local', 0, 'local', 'current'],
-    ['stale with a counted vote after the cutoff', 'local', 1, 'local', 'stale'],
-    ['unknown without its own cutoff', 'local', 0, 'production', 'unknown'],
-    ['unknown on staging', 'staging', 0, 'local', 'unknown'],
-  ] as const)('answers %s', async (_, store, later, closed, expected) => {
+    ['current while the counted votes match', 'production', 0, true, 'current'],
+    ['stale with a counted vote after the cutoff', 'production', 1, true, 'stale'],
+    ['unknown without a production cutoff', 'production', 0, false, 'unknown'],
+    ['unknown on staging', 'staging', 0, true, 'unknown'],
+  ] as const)('answers %s', async (_, store, later, cut, expected) => {
     await seedVote(WRITING, caseKey, systems);
     await seedVote(WRITING, caseKey, systems);
     const { ids } = await read();
@@ -313,8 +316,7 @@ describe('freshness', () => {
 
     const status = await freshness(env.DB, store, {
       family: WRITING,
-      [closed]: String(cutoff),
-      [`${closed}_votes`]: String(ids.length - later),
+      ...(cut ? { production: String(cutoff), production_votes: String(ids.length - later) } : {}),
     });
 
     expect(status).toBe(expected);
@@ -327,42 +329,49 @@ describe('freshness', () => {
     await seedVote(WRITING, caseKey, systems, { exclusion: before });
     await seedVote(WRITING, caseKey, systems);
     const { ids, counted } = await read();
-    const query = { family: WRITING, local: String(ids[1]), local_votes: String(counted.length) };
-    expect(await freshness(env.DB, 'local', query)).toBe('current');
+    const query = {
+      family: WRITING,
+      production: String(ids[1]),
+      production_votes: String(counted.length),
+    };
+    expect(await freshness(env.DB, 'production', query)).toBe('current');
 
     await env.DB.prepare('UPDATE votes SET exclusion = ? WHERE id = ?').bind(after, ids[0]).run();
 
-    expect(await freshness(env.DB, 'local', query)).toBe('stale');
+    expect(await freshness(env.DB, 'production', query)).toBe('stale');
   });
 
   test('leaves excluded votes after the cutoff out', async () => {
     await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
-    const from = await admitted();
 
-    const response = await call(from, 'GET', `/freshness?family=${WRITING}&local=0&local_votes=0`);
+    const status = await freshness(env.DB, 'production', {
+      family: WRITING,
+      production: '0',
+      production_votes: '0',
+    });
 
-    expect(await response.json()).toEqual({ status: 'current' });
+    expect(status).toBe('current');
   });
 
-  test('reuses an answer for the same parameters, in any order, for a minute', async () => {
-    await seedVote(WRITING, caseKey, systems);
-    const { ids } = await read();
-    const from = await admitted();
-    const ask = async (query: string) =>
-      (await (await call(from, 'GET', `/freshness?${query}`)).json<{ status: string }>()).status;
-    const cut = `local=${ids[0]}&local_votes=1`;
-    expect(await ask(`family=${WRITING}&${cut}`)).toBe('current');
+  test('reuses an answer for the same parameters in any order', async () => {
+    const answer = vi
+      .fn<() => Promise<Freshness>>()
+      .mockResolvedValueOnce('current')
+      .mockResolvedValueOnce('stale');
+    const ask = (query: string) => cachedFreshness(`${ORIGIN}/api/freshness?${query}`, answer);
 
-    await seedVote(WRITING, caseKey, systems);
+    const first = await ask(`family=${WRITING}&production=1&production_votes=1`);
+    const reordered = await ask(`production=1&production_votes=1&family=${WRITING}`);
+    const changed = await ask(`family=${WRITING}&production=1&production_votes=2`);
 
-    expect(await ask(`${cut}&family=${WRITING}`)).toBe('current');
-    expect(await ask(`family=${WRITING}&local=${ids[0]}&local_votes=2`)).toBe('stale');
+    expect([first, reordered, changed]).toEqual(['current', 'current', 'stale']);
+    expect(answer).toHaveBeenCalledTimes(2);
   });
 
   test('rejects a cutoff without its counted votes', async () => {
     const from = await admitted();
 
-    const response = await call(from, 'GET', `/freshness?family=${WRITING}&local=0`);
+    const response = await call(from, 'GET', `/freshness?family=${WRITING}&production=0`);
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid_request' });

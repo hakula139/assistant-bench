@@ -54,7 +54,7 @@ describe('SnapshotStatus', () => {
       expect(fetch).toHaveBeenCalledOnce();
       const [path, { signal, ...init } = {}] = fetch.mock.calls[0];
       expect(path).toBe('/api/freshness?family=writing-zh&production=337&production_votes=330');
-      expect(init).toEqual({ method: 'GET', credentials: 'same-origin' });
+      expect(init).toEqual({ method: 'GET' });
       expect(signal).toBeInstanceOf(AbortSignal);
     },
   );
@@ -62,15 +62,16 @@ describe('SnapshotStatus', () => {
   test.each([
     [
       { production: { id: 337, votes: 330 }, local: { id: 12, votes: 12 } },
-      'production=337&production_votes=330&local=12&local_votes=12',
+      '&production=337&production_votes=330',
     ],
-    [{ production: { id: 0, votes: 0 }, local: null }, 'production=0&production_votes=0'],
-  ])('sends the cutoff and counted votes of every store the round read in %j', (read, query) => {
+    [{ production: { id: 0, votes: 0 }, local: null }, '&production=0&production_votes=0'],
+    [{ production: null, local: { id: 12, votes: 12 } }, ''],
+  ])('sends only the production cutoff and its counted votes in %j', (read, query) => {
     const fetch = stubFetch(Promise.withResolvers<Response>().promise);
 
     render(<SnapshotStatus family="writing-zh" closedAt={closedAt} cutoffs={read} />);
 
-    expect(fetch.mock.calls[0][0]).toBe(`/api/freshness?family=writing-zh&${query}`);
+    expect(fetch.mock.calls[0][0]).toBe(`/api/freshness?family=writing-zh${query}`);
   });
 
   test.each([

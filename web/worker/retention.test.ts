@@ -12,7 +12,7 @@ import { admitted, pairOf, seedVote, WRITING } from './test/support';
 
 const FIRST = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
 
-test('the daily cron clears IP tags after 60 days and pending pairs idle for 30', async () => {
+test('the daily cron clears IP tags after 60 days and pairs 30 days after issue', async () => {
   const now = Date.now();
   await seedVote(WRITING, FIRST, ['acme-large', 'acme-small'], {
     actor: 'old',
@@ -32,10 +32,10 @@ test('the daily cron clears IP tags after 60 days and pending pairs idle for 30'
       "UPDATE actors SET ip_tag = 'recent-tag', created_at = ? WHERE id = 'recent'",
     ).bind(now - TAG_RETENTION_MS + 60_000),
   ]);
-  const idle = (await pairOf(await admitted('192.0.2.1'))).pair?.id;
-  const active = (await pairOf(await admitted('192.0.2.2'))).pair?.id;
+  const expired = (await pairOf(await admitted('192.0.2.1'))).pair?.id;
+  const fresh = (await pairOf(await admitted('192.0.2.2'))).pair?.id;
   await env.DB.prepare('UPDATE pairs SET issued_at = ? WHERE id = ?')
-    .bind(now - PAIR_RETENTION_MS - 60_000, idle)
+    .bind(now - PAIR_RETENTION_MS - 60_000, expired)
     .run();
 
   const ctx = createExecutionContext();
@@ -59,5 +59,5 @@ test('the daily cron clears IP tags after 60 days and pending pairs idle for 30'
     { kind: 'vote', id: 'recent', ip_tag: 'recent-tag' },
   ]);
   const pairs = await env.DB.prepare('SELECT id FROM pairs').all<{ id: string }>();
-  expect(pairs.results.map(({ id }) => id)).toEqual([active]);
+  expect(pairs.results.map(({ id }) => id)).toEqual([fresh]);
 });

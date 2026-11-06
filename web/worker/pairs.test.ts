@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import {
   candidates,
@@ -50,7 +50,7 @@ describe('candidates', () => {
       content_digest,
     }) satisfies PassingOutput;
 
-  test('pairs systems on a case only through samples that differ, skipping voted comparisons', () => {
+  test('pairs systems on a case with some differing samples, skipping voted comparisons', () => {
     const outputs = [
       output('first', 'large', 'x'),
       output('first', 'large', 'y', 1),
@@ -64,18 +64,22 @@ describe('candidates', () => {
     const found = candidates(outputs, [{ case_key: 'first', a_system: 'pro', b_system: 'large' }]);
 
     expect(
-      found.map(({ caseKey, systems, samples }) => ({
+      found.map(({ caseKey, systems, outputs }) => ({
         caseKey,
         systems,
-        samples: samples.map(([a, b]) => [a.output_key, b.output_key]),
+        outputs: outputs.map((side) => side.map(({ output_key }) => output_key)),
       })),
     ).toEqual([
       {
         caseKey: 'first',
         systems: ['large', 'small'],
-        samples: [['first/large/1', 'first/small/0']],
+        outputs: [['first/large/0', 'first/large/1'], ['first/small/0']],
       },
-      { caseKey: 'first', systems: ['pro', 'small'], samples: [['first/pro/0', 'first/small/0']] },
+      {
+        caseKey: 'first',
+        systems: ['pro', 'small'],
+        outputs: [['first/pro/0'], ['first/small/0']],
+      },
     ]);
   });
 });
@@ -84,11 +88,9 @@ describe('draw', () => {
   const comparison = (caseKey: string, low: string, high: string): Comparison => ({
     caseKey,
     systems: [low, high],
-    samples: [
-      [
-        { output_key: `${caseKey}/${low}`, case_key: caseKey, system: low, content_digest: low },
-        { output_key: `${caseKey}/${high}`, case_key: caseKey, system: high, content_digest: high },
-      ],
+    outputs: [
+      [{ output_key: `${caseKey}/${low}`, case_key: caseKey, system: low, content_digest: low }],
+      [{ output_key: `${caseKey}/${high}`, case_key: caseKey, system: high, content_digest: high }],
     ],
   });
 
@@ -113,6 +115,30 @@ describe('draw', () => {
     const drawn = await draw(rank, comparisons, coverage);
 
     expect(drawn).toEqual({ caseKey: 'first', a: 'first/large', b: 'first/small' });
+  });
+
+  test('draws only a sample pair whose contents differ', async () => {
+    const output = (system: string, index: number, content_digest: string) => ({
+      output_key: `first/${system}/${index}`,
+      case_key: 'first',
+      system,
+      content_digest,
+    });
+    const rank = fixed({ 'sample first/large/0 first/small/0': '00' });
+
+    const drawn = await draw(
+      rank,
+      [
+        {
+          caseKey: 'first',
+          systems: ['large', 'small'],
+          outputs: [[output('large', 0, 'x'), output('large', 1, 'y')], [output('small', 0, 'x')]],
+        },
+      ],
+      new Map(),
+    );
+
+    expect(drawn).toEqual({ caseKey: 'first', a: 'first/large/1', b: 'first/small/0' });
   });
 
   test.each([
@@ -302,6 +328,20 @@ describe('POST /api/pair/skip', () => {
     expect(new Set(cases.slice(0, 4)).size).toBe(4);
     expect(cases[4]).toBe(cases[0]);
     expect(await env.DB.prepare('SELECT count(*) AS n FROM votes').first('n')).toBe(0);
+  });
+
+  test('reads the passing outputs once', async () => {
+    await publish(SYNTHETIC, threeWay(4));
+    const from = await admitted();
+    const { pair } = await pairOf(from, SYNTHETIC);
+    const prepare = vi.spyOn(env.DB, 'prepare');
+
+    const response = await call(from, 'POST', '/pair/skip', { pair: pair?.id });
+
+    expect(response.status).toBe(200);
+    expect(prepare.mock.calls.filter(([query]) => query.includes("verdict = 'pass'"))).toHaveLength(
+      1,
+    );
   });
 
   test('keeps the pair when its system pair has no other case', async () => {
