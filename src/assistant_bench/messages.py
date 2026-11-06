@@ -15,6 +15,12 @@ def code(values: Iterable[object]) -> str:
     return ', '.join(f'`{value}`' for value in values)
 
 
+def series(items: Iterable[str]) -> str:
+    """Return the items joined with commas and a final `and`."""
+    *rest, last = items
+    return f'{", ".join(rest)} and {last}' if rest else last
+
+
 def count_of(value: int, noun: str) -> str:
     return f'{value} {noun}' if value == 1 else f'{value} {noun}s'
 

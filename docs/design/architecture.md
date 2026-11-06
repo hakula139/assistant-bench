@@ -20,7 +20,7 @@ src/assistant_bench/
 ├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
-├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
+├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, each system's one fingerprint, and pool conflicts
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
 │   ├── endpoint.py                         # Endpoint variables and native SDK transports

@@ -45,7 +45,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
-from assistant_bench.outputs import Output, read_outputs, tests_pass
+from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
 from assistant_bench.spend import (
     Basis,
     Projection,
@@ -192,7 +192,7 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
         try:
             _run(job)
         finally:
-            _collect(family, systems, export)
+            _echo_conflicts(family, _collect(family, systems, export))
 
 
 @app.command()
@@ -224,7 +224,8 @@ def collect(families: FamilyArguments = None) -> None:
 
     export, systems = _catalog()
     for name in names:
-        _collect(load_family(name), systems, export)
+        selected = load_family(name)
+        _echo_conflicts(selected, _collect(selected, systems, export))
 
 
 @app.command()
@@ -565,7 +566,7 @@ def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
 
 def _collect(
     family: Family, systems: dict[str, System], export: NixosConfigExport
-) -> None:
+) -> list[Output]:
     collected = collection.collect(family, systems)
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
@@ -607,6 +608,13 @@ def _collect(
     )
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
+
+    return outputs
+
+
+def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
+    for conflict in pool_conflicts(family, outputs):
+        typer.echo(conflict)
 
 
 def _spend_line(entry: Spend) -> str:

@@ -1,14 +1,14 @@
 """Output records of a family's trials, collected into the data directory."""
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from assistant_bench.families import Gate
-from assistant_bench.messages import InputError
+from assistant_bench.families import Family, Gate
+from assistant_bench.messages import InputError, count_of, error_lines, series
 from assistant_bench.paths import data_dir, write_atomically
 
 
@@ -66,7 +66,9 @@ class Output(BaseModel):
     cost_usd: float | None
     latency_sec: float | None
 
-    response_model: str | None
+    response_models: tuple[str, ...]
+    """The distinct models the trial's responses reported, sorted."""
+
     request_id: str | None
     nixos_config_rev: str | None
     harness_version: str | None
@@ -101,12 +103,124 @@ def system_fingerprints(outputs: Iterable[Output]) -> dict[str, str | None]:
     return {system: fingerprints.pop() for system, fingerprints in by_system.items()}
 
 
+def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
+    """Return a sentence for each sign that a system's outputs pool several models.
+
+    A system and fingerprint pools several models when its outputs report more
+    than one model or, in a case family, where every sample of a case sends one
+    request, when two outputs of a case differ in input tokens by more than the
+    larger of 2 and 2% of the lower count. Outputs that lack the value are skipped.
+    """
+    pools: defaultdict[tuple[str, str], list[Output]] = defaultdict(list)
+    for output in outputs:
+        pools[output.system, output.fingerprint or ''].append(output)
+
+    conflicts: list[str] = []
+    for (system, _), pool in sorted(pools.items()):
+        jobs: defaultdict[str, Counter[str]] = defaultdict(Counter)
+        for output in pool:
+            for model in output.response_models:
+                jobs[model][output.job] += 1
+        if len(jobs) > 1:
+            models = ', '.join(
+                f'`{model}` from '
+                + series(
+                    f'job `{job}` ({count_of(count, "output")})'
+                    for job, count in sorted(counts.items())
+                )
+                for model, counts in sorted(jobs.items())
+            )
+            conflicts.append(f'System `{system}` reported several models: {models}.')
+
+        if family.source == 'cases' and (spreads := _token_spreads(pool)):
+            spread = spreads[0]
+            tokens = (
+                f'{spread.low:,} and {spread.high:,} input tokens in job '
+                f'`{spread.low_job}`'
+                if spread.low_job == spread.high_job
+                else f'{spread.low:,} input tokens in job `{spread.low_job}` and '
+                f'{spread.high:,} in job `{spread.high_job}`'
+            )
+            others = (
+                f', one of {count_of(len(spreads), "case")} whose counts differ'
+                if len(spreads) > 1
+                else ''
+            )
+            conflicts.append(
+                f'System `{system}` sent case `{spread.case}` with {tokens}{others}.'
+            )
+
+    return conflicts
+
+
+def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
+    """Refuse a family whose outputs pool several models.
+
+    Raises
+    ------
+    InputError
+        `pool_conflicts` names a conflict.
+    """
+    conflicts = pool_conflicts(family, outputs)
+    if conflicts:
+        raise InputError(
+            '\n'.join(
+                [
+                    f'Family `{family.name}` pools outputs of several models:',
+                    *conflicts,
+                    "Delete the minority job's trials of each system under "
+                    f'`jobs/{family.name}/` in the data directory and rerun them, '
+                    'or give the system a new name once its route is fixed, as '
+                    '`docs/guide/running.md#model-swaps` describes.',
+                ]
+            )
+        )
+
+
+class _Spread(NamedTuple):
+    case: str
+    low: int
+    low_job: str
+    high: int
+    high_job: str
+
+
+def _token_spreads(pool: Iterable[Output]) -> list[_Spread]:
+    """Return each case whose input tokens spread past the tolerance."""
+    counts: defaultdict[str, list[tuple[int, str]]] = defaultdict(list)
+    for output in pool:
+        if output.input_tokens is not None:
+            counts[output.case].append((output.input_tokens, output.job))
+
+    spreads: list[_Spread] = []
+    for case, values in sorted(counts.items()):
+        (low, low_job), (high, high_job) = min(values), max(values)
+        if high - low > max(2, 0.02 * low):
+            spreads.append(_Spread(case, low, low_job, high, high_job))
+    return spreads
+
+
 def read_outputs(family: str) -> list[Output]:
-    """Return the family's outputs, or none before its first collection."""
+    """Return the family's outputs, or none before its first collection.
+
+    Raises
+    ------
+    InputError
+        A line does not validate as an output, for example one an older
+        collection wrote.
+    """
     path = _outputs_file(family)
     if not path.exists():
         return []
-    return [Output.model_validate_json(line) for line in path.read_text().splitlines()]
+    try:
+        return [
+            Output.model_validate_json(line) for line in path.read_text().splitlines()
+        ]
+    except ValidationError as error:
+        raise InputError(
+            f'{error_lines(error, f"Outputs `{path}`")}\n'
+            f'Run `uv run bench collect {family}` to rewrite it.'
+        ) from error
 
 
 def write_outputs(family: str, outputs: list[Output]) -> None:

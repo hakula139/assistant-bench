@@ -591,11 +591,18 @@ class TestCloseTests:
                 ],
                 'System `large` has outputs under several',
             ),
+            (
+                [
+                    {'trial': 'a', 'response_models': ('large-2026',)},
+                    {'trial': 'b', 'response_models': ('other-2026',)},
+                ],
+                'System `large` reported several models',
+            ),
         ],
-        ids=['only-retired-outputs', 'several-fingerprints'],
+        ids=['only-retired-outputs', 'several-fingerprints', 'several-models'],
     )
     def test_rejects_a_tests_family_it_cannot_aggregate(
-        self, trials: list[dict[str, str]], message: str
+        self, trials: list[dict[str, Any]], message: str
     ) -> None:
         write_outputs(
             'smoke',

@@ -23,7 +23,12 @@ from assistant_bench.families import (
     VotesSettings,
 )
 from assistant_bench.messages import InputError, code, error_lines
-from assistant_bench.outputs import Output, Verdict, system_fingerprints
+from assistant_bench.outputs import (
+    Output,
+    Verdict,
+    refuse_pool_conflicts,
+    system_fingerprints,
+)
 from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.scoring.length import text_length
 
@@ -138,8 +143,8 @@ def prepare(
     ------
     InputError
         The family is not scored by votes or sets no `public_voting`, two cases
-        read the same, a kept output lacks a fingerprint, a system has several,
-        or no case can form a pair.
+        read the same, a kept output lacks a fingerprint, a system has several or
+        pools several models, or no case can form a pair.
     """
     settings = family.settings
     if not isinstance(settings, VotesSettings):
@@ -168,6 +173,7 @@ def prepare(
         )
 
     fingerprints = system_fingerprints(kept)
+    refuse_pool_conflicts(family, kept)
     published = sorted(
         (_published_output(family.name, keys[o.case], o) for o in kept),
         key=lambda output: output.key,

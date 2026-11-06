@@ -93,7 +93,10 @@ class ChatCompletionsLLM(LiteLLM):
         if response.get('error') is not None and 'choices' not in response:
             return
 
-        call: dict[str, Any] = {'responded': True}
+        call: dict[str, Any] = {
+            'responded': True,
+            'response_model': response.get('model'),
+        }
         self.calls.append(call)
         if (
             response.get('object') == 'chat.completion'

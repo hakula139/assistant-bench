@@ -18,6 +18,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
@@ -38,7 +39,7 @@ from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output, write_outputs
-from assistant_bench.tasks import render_task_config
+from assistant_bench.tasks import render_task_config, render_tasks
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
@@ -1530,6 +1531,40 @@ class TestCollect:
             'response without a known cost, imputed from its own usage.\n'
         ) in result.output
 
+    @pytest.mark.parametrize('command', ['collect', 'run'])
+    def test_names_a_system_whose_outputs_report_several_models(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        command: str,
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
+        system = make_system(name='large')
+        resolved['large'] = system
+        family = load_family('f')
+        tasks = {task.name: task for task in render_tasks(family, load_cases(family))}
+        for job, case, model in (
+            ('job-1', 'c1', 'large-2026'),
+            ('job-2', 'c2', 'other-2026'),
+        ):
+            config = jobs.job(family, [system], [tasks[case]])
+            (path,) = finish_job(config.model_copy(update={'job_name': job})).glob(
+                '*/result.json'
+            )
+            trial = TrialResult.model_validate_json(path.read_text())
+            trial.agent_result = AgentContext(metadata={'response_model': model})
+            path.write_text(trial.model_dump_json())
+
+        result = invoke(command, 'f')
+
+        assert result.exit_code == 0, result.output
+        assert (
+            'System `large` reported several models: `large-2026` from job `job-1` '
+            '(1 output), `other-2026` from job `job-2` (1 output).\n'
+        ) in result.stdout
+
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1948,6 +1983,41 @@ class TestClose:
         assert closed.systems['opus-5.5-high'].display_name == system.display_name
         assert closed.systems['opus-5.5-high'].fingerprint == fingerprint(run)
         assert 'Family `f`: 1 output, 0 errored.' in result.output
+
+    def test_names_each_conflict_once_when_it_refuses_the_close(
+        self, families_dir: Path
+    ) -> None:
+        write_task_family(families_dir, 'echo', samples=2)
+        settings = families_dir / 'f/family.toml'
+        settings.write_text(
+            settings.read_text()
+            + 'systems = ["opus-5.5-high"]\nharness = "terminus-2"\n'
+        )
+        task = families_dir / 'f/tasks/echo'
+        config = TaskConfig.model_validate_toml((task / 'task.toml').read_text())
+        config.metadata['author'] = 'opus-5.5-high'
+        config.metadata['author_vendor'] = 'anthropic'
+        (task / 'task.toml').write_text(config.model_dump_toml())
+        family = load_family('f')
+        system = load_systems(load_export())['opus-5.5-high']
+        job_dir = finish_job(
+            jobs.job(
+                family,
+                jobs.family_systems(family, [system]),
+                [task],
+            )
+        )
+        models = ('large-2026', 'other-2026')
+        trials = sorted(job_dir.glob('*/result.json'))
+        for path, model in zip(trials, models, strict=True):
+            trial = TrialResult.model_validate_json(path.read_text())
+            trial.agent_result = AgentContext(metadata={'response_model': model})
+            path.write_text(trial.model_dump_json())
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 1
+        assert result.output.count('reported several models') == 1, result.output
 
 
 class TestFingerprints:

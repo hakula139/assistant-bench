@@ -1,6 +1,7 @@
 """Collection of a family's trials into output records."""
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
@@ -292,8 +293,22 @@ def _output(
         reasoning_tokens=metadata.get('reasoning_tokens'),
         cost_usd=_cost(system, context),
         latency_sec=_latency(result, metadata),
-        response_model=metadata.get('response_model'),
+        response_models=_response_models(metadata),
         request_id=metadata.get('request_id'),
+    )
+
+
+def _response_models(metadata: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the models of a terminal agent's calls or a single-call agent's reply."""
+    responses: list[Mapping[str, Any]] = metadata.get('calls', [metadata])
+    return tuple(
+        sorted(
+            {
+                model
+                for response in responses
+                if (model := response.get('response_model')) is not None
+            }
+        )
     )
 
 
