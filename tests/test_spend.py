@@ -14,6 +14,7 @@ from assistant_bench.catalog import Price, System
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.spend import (
+    Basis,
     Entry,
     Projection,
     Share,
@@ -36,6 +37,7 @@ LARGE = make_system(context_window=100_000, max_output_tokens=10_000)
 NO_WRITE_PRICE = make_system(price=Price(input=2.0, output=10.0, cache_read=0.2))
 UNPRICED = make_system(name='acme-small', price=None)
 SYSTEMS = {LARGE.name: LARGE}
+NOTHING_IMPUTED: dict[Basis, Share] = {}
 
 
 def attempt(
@@ -127,25 +129,35 @@ class TestSummarize:
     @pytest.mark.parametrize(
         ('system', 'responses', 'expected'),
         [
-            pytest.param(LARGE, (USAGE,), (True, 0, 3.0, 0.0, 0.0), id='known'),
             pytest.param(
-                LARGE, (USAGE, None), (True, 1, 3.0, 3.0, 0.0), id='invalid-usage'
+                LARGE, (USAGE,), (True, 0, 3.0, NOTHING_IMPUTED, 0.0), id='known'
+            ),
+            pytest.param(
+                LARGE,
+                (USAGE, None),
+                (True, 1, 3.0, {'own': Share(1, 3.0)}, 0.0),
+                id='invalid-usage',
             ),
             pytest.param(
                 LARGE,
                 (USAGE, UNPRICED_WRITE),
-                (True, 1, 3.0, 3.0, 0.0),
+                (True, 1, 3.0, {'own': Share(1, 3.0)}, 0.0),
                 id='unpriced-cache-write',
             ),
             pytest.param(
                 NO_WRITE_PRICE,
                 (USAGE, MeasuredUsage(10, 0, 10, 10, None)),
-                (True, 1, 3.0, 3.0, 0.0),
+                (True, 1, 3.0, {'own': Share(1, 3.0)}, 0.0),
                 id='undeclared-cache-write-price',
             ),
-            pytest.param(LARGE, (None, None), (True, 2, 0.0, 0.0, 0.7), id='ceiling'),
             pytest.param(
-                UNPRICED, (USAGE, None), (False, 1, 0.0, 0.0, 0.0), id='unpriced'
+                LARGE, (None, None), (True, 2, 0.0, NOTHING_IMPUTED, 0.7), id='ceiling'
+            ),
+            pytest.param(
+                UNPRICED,
+                (USAGE, None),
+                (False, 1, 0.0, NOTHING_IMPUTED, 0.0),
+                id='unpriced',
             ),
         ],
     )
@@ -163,7 +175,7 @@ class TestSummarize:
             spend.priced,
             spend.unknown,
             spend.known_usd,
-            sum(share.usd for share in spend.imputed.values()),
+            spend.imputed,
             pytest.approx(spend.ceiling.usd),
         ) == expected
 
@@ -184,12 +196,30 @@ class TestSummarize:
         assert cheap.imputed == {'own': Share(1, 2.0)}
         assert (new.imputed, new.ceiling) == ({'borrowed': Share(3, 9.0)}, Share())
 
-    def test_imputes_its_own_usage_at_the_price_of_each_entry(self) -> None:
-        dearer = make_system(price=Price(input=20.0, output=100.0, cache_read=2.0))
+    @pytest.mark.parametrize(
+        ('usage', 'repriced', 'expected'),
+        [
+            pytest.param(
+                USAGE,
+                make_system(price=Price(input=20.0, output=100.0, cache_read=2.0)),
+                Share(1, 30.0),
+                id='dearer',
+            ),
+            pytest.param(
+                MeasuredUsage(1_000_000, 0, 500_000, 100_000, None),
+                NO_WRITE_PRICE,
+                Share(1, 3.0),
+                id='without-cache-write-price',
+            ),
+        ],
+    )
+    def test_imputes_its_own_usage_at_the_price_of_each_entry(
+        self, usage: MeasuredUsage, repriced: System, expected: Share
+    ) -> None:
         entries = [
-            entry(responses=(USAGE,)),
+            entry(responses=(usage,)),
             entry(
-                priced_as=dearer,
+                priced_as=repriced,
                 responses=(None,),
                 started_at=START + timedelta(minutes=1),
             ),
@@ -197,7 +227,7 @@ class TestSummarize:
 
         spend = spend_of(*entries)
 
-        assert spend.imputed == {'own': Share(1, 30.0)}
+        assert (spend.imputed, spend.ceiling) == ({'own': expected}, Share())
 
     def test_prices_a_lenders_cache_as_plain_input(self) -> None:
         cached = MeasuredUsage(1_000_000, 900_000, 100_000, 0, None)
@@ -301,18 +331,31 @@ class TestProject:
         assert (projection.basis, projection.usd) == ('borrowed', expected)
         assert projection.tokens is not None
 
-    def test_prices_its_own_cache_as_plain_input_when_its_price_cannot(
-        self,
+    @pytest.mark.parametrize(
+        ('usage', 'priced_as', 'expected'),
+        [
+            pytest.param(
+                MeasuredUsage(1_000_000, 900_000, 0, 100_000, None),
+                LARGE,
+                2.76,
+                id='cache-rates',
+            ),
+            pytest.param(
+                MeasuredUsage(1_000_000, 0, 500_000, 100_000, None),
+                NO_WRITE_PRICE,
+                6.0,
+                id='plain-input-without-cache-write-price',
+            ),
+        ],
+    )
+    def test_projects_its_own_usage_at_its_current_price(
+        self, usage: MeasuredUsage, priced_as: System, expected: float
     ) -> None:
-        spend = [
-            spend_of(
-                entry(responses=(MeasuredUsage(1_000_000, 0, 500_000, 100_000, None),))
-            )
-        ]
+        spend = [spend_of(entry(responses=(usage,)))]
 
-        (projection,) = project(Counter({LARGE.name: 2}), spend, [NO_WRITE_PRICE])
+        (projection,) = project(Counter({LARGE.name: 2}), spend, [priced_as])
 
-        assert (projection.basis, projection.usd) == ('own', 6.0)
+        assert (projection.basis, projection.usd) == ('own', expected)
 
     def test_has_no_estimate_without_usage(self) -> None:
         (projection,) = project(Counter({LARGE.name: 3}), [], [LARGE])

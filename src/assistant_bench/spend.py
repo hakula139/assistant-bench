@@ -138,6 +138,14 @@ class Tokens:
             cache_write_tokens=self.cache_write_tokens,
         )
 
+    def estimate(self, price: Price) -> float:
+        """Return the cost at the price, with cache as plain input if it cannot."""
+        cost = self.cost(price)
+        if cost is None:
+            cost = self.uncached.cost(price)
+            assert cost is not None
+        return cost
+
 
 type Basis = Literal['own', 'borrowed']
 
@@ -206,10 +214,12 @@ def summarize(entries: Iterable[Entry]) -> list[Spend]:
 
     A response has no known cost when its usage is invalid or its price cannot
     cost it, as when its cache write has no declared price. Such a response costs
-    the system's own mean tokens per measured response at its entry's price, or
-    else the costliest other system's, with their cache reads and writes priced as
-    plain input. With no measured usage anywhere, it is counted at its ceiling,
-    which the spend leaves out until a later run measures usage to impute from.
+    the system's own mean tokens per measured response at its entry's price, with
+    their cache reads and writes as plain input when that price cannot cost them.
+    A system without measured usage of its own borrows the costliest other
+    system's, with the cache priced as plain input. With no measured usage
+    anywhere, it is counted at its ceiling, which the spend leaves out until a
+    later run measures usage to impute from.
     """
     by_system: defaultdict[str, list[Entry]] = defaultdict(list)
     for entry in entries:
@@ -291,10 +301,11 @@ def _imputed(
     own: Tokens | None, others: list[Tokens], price: Price
 ) -> tuple[Basis, float] | None:
     """Return the basis and cost of each response without a known cost, if any."""
-    if own is not None and (cost := own.cost(price)) is not None:
-        return 'own', cost
-    costs = [cost for rate in others if (cost := rate.uncached.cost(price)) is not None]
-    return ('borrowed', max(costs)) if costs else None
+    if own is not None:
+        return 'own', own.estimate(price)
+    if others:
+        return 'borrowed', max(rate.uncached.estimate(price) for rate in others)
+    return None
 
 
 # ── Projection ──
@@ -345,11 +356,11 @@ def project(
             basis = 'own'
         elif lenders:
             basis, profile = 'borrowed', max(lenders, key=_rank(system.price))
-        per_trial_usd = None
-        if profile is not None and system.price is not None:
-            per_trial_usd = profile.cost(system.price)
-            if per_trial_usd is None:
-                per_trial_usd = profile.uncached.cost(system.price)
+        per_trial_usd = (
+            profile.estimate(system.price)
+            if profile is not None and system.price is not None
+            else None
+        )
         count = pending[system.name]
         projections.append(
             Projection(
