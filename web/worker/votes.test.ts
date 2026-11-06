@@ -8,6 +8,7 @@ import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
 import {
   actorOf,
   admitted,
+  browser,
   call,
   CODING,
   ORIGIN,
@@ -369,9 +370,7 @@ describe('freshness', () => {
   });
 
   test('rejects a cutoff without its counted votes', async () => {
-    const from = await admitted();
-
-    const response = await call(from, 'GET', `/freshness?family=${WRITING}&production=0`);
+    const response = await call(browser(), 'GET', `/freshness?family=${WRITING}&production=0`);
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid_request' });
