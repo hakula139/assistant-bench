@@ -64,6 +64,17 @@
         );
 
         # ------------------------------------------------------------------------------------------
+        # Node Toolchain
+        # ------------------------------------------------------------------------------------------
+        nodeMajor = "26";
+        nodejs = pkgs."nodejs_${nodeMajor}";
+        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs."nodejs-slim_${nodeMajor}"; };
+        nodeTools = [
+          nodejs
+          pnpm
+        ];
+
+        # ------------------------------------------------------------------------------------------
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
@@ -119,11 +130,6 @@
             };
           };
         };
-
-        nodeTools = with pkgs; [
-          nodejs_26
-          (pnpm.override { nodejs-slim = nodejs-slim_26; })
-        ];
 
         # CI runs Node and Ruff with local dependencies absent from the check's store source.
         nodeHook =
@@ -207,6 +213,22 @@
         cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
         flock = pkgs.lib.getExe pkgs.flock;
         git = pkgs.lib.getExe pkgs.git;
+
+        # ------------------------------------------------------------------------------------------
+        # GitLab Pages Toolchain
+        # ------------------------------------------------------------------------------------------
+        pagesVariable = name: ".pages.variables.${name} // .variables.${name}";
+        pagesCheck =
+          name: label: query: pattern: expected:
+          pkgs.runCommand name { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+            value=$(yq '${query}' ${./.gitlab/ci/pages.yml})
+            if [[ "$value" != ${pattern} ]]; then
+              echo "${label} in .gitlab/ci/pages.yml is $value, but the dev shell has" \
+                "${expected}." >&2
+              exit 1
+            fi
+            touch "$out"
+          '';
       in
       {
         # ------------------------------------------------------------------------------------------
@@ -246,7 +268,17 @@
         # ------------------------------------------------------------------------------------------
         # Checks
         # ------------------------------------------------------------------------------------------
-        checks.pre-commit = preCommitCheck;
+        checks = {
+          pre-commit = preCommitCheck;
+          pages-pnpm =
+            pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
+              "pnpm ${pnpm.version}";
+          pages-node =
+            pagesCheck "pages-node" "The pages job's image"
+              "(${pagesVariable "BENCH_NODE_IMAGE"}) as $v | (.pages.image // .image) | sub(\"\\$BENCH_NODE_IMAGE\"; $v)"
+              "node:${nodeMajor}-*"
+              "Node.js ${nodeMajor}";
+        };
 
         # ------------------------------------------------------------------------------------------
         # Formatter
