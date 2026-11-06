@@ -3,25 +3,23 @@
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, override
 
-import httpx2
-from harbor.llms.base import (
-    BaseLLM,
-    ContextLengthExceededError,
-    LLMResponse,
-    OutputLengthExceededError,
-)
-from harbor.llms.chat import Chat
-from openai import APIError, AsyncOpenAI, BadRequestError
+from harbor.llms.base import ContextLengthExceededError
+from openai import AsyncOpenAI, BadRequestError
 from openai.types.responses import Response, ResponseInputParam
 from pydantic import TypeAdapter
 
+from assistant_bench.harnesses.native import (
+    ITEMS_KEY,
+    NativeCompletionError,
+    NativeLengthExceededError,
+    NativeLLM,
+    NativeSettings,
+)
 from assistant_bench.harnesses.usage import MeasuredUsage, measured_usage, usage_payload
 
 
-ITEMS_KEY = 'response_items'
 _input = TypeAdapter(ResponseInputParam)
 
 
@@ -29,6 +27,11 @@ _input = TypeAdapter(ResponseInputParam)
 class ResponseResult:
     response: Response
     request_id: str | None
+    latency_sec: float | None = None
+
+    @property
+    def text(self) -> str:
+        return self.response.output_text
 
     @property
     def usage(self) -> MeasuredUsage | None:
@@ -75,6 +78,7 @@ class ResponseResult:
             'response_model': response.model,
             'response_id': response.id,
             'request_id': self.request_id,
+            'latency_sec': self.latency_sec,
             'response_error': response.error.model_dump(exclude_unset=True)
             if response.error
             else None,
@@ -87,87 +91,28 @@ class ResponseResult:
             for item in self.response.output
         ]
 
-    def check(self, request: httpx2.Request, *, complete: bool) -> None:
+    def check(self, *, complete: bool) -> None:
         response = self.response
         if response.error is not None or response.status not in (
             'completed',
             'incomplete',
         ):
-            raise ResponseCompletionError(
-                'The Responses API did not return a finished response.',
-                request=request,
-                body=None,
+            raise NativeCompletionError(
+                'The Responses API did not return a finished response.'
             )
         if self.details['finish_reason'] == 'unexpected_content':
-            raise ResponseCompletionError(
-                'The Responses API returned an unexpected function call.',
-                request=request,
-                body=None,
+            raise NativeCompletionError(
+                'The Responses API returned an unexpected function call.'
             )
         if complete:
             if self.details['finish_reason'] == 'length':
-                error = ResponseLengthExceededError(self)
-                raise error
-            if self.details['finish_reason'] != 'stop':
-                raise ResponseCompletionError(
-                    'The Responses API did not return a complete answer.',
-                    request=request,
-                    body=None,
+                raise NativeLengthExceededError(
+                    'The Responses API exhausted its completion allowance.', self
                 )
-
-
-class ResponseCompletionError(APIError):
-    """An accepted request whose semantic result must not trigger regeneration."""
-
-
-class ResponseLengthExceededError(OutputLengthExceededError):
-    """A native budget failure whose items remain attached to its partial answer."""
-
-    def __init__(self, result: ResponseResult) -> None:
-        super().__init__(
-            'The Responses API exhausted its completion allowance.',
-            truncated_response=result.response.output_text,
-        )
-        self.result = result
-
-
-class ResponsesChat(Chat):
-    """Keep SDK output items on the native assistant message that owns them."""
-
-    _truncated: tuple[str, ResponseResult] | None = None
-
-    @override
-    async def chat(
-        self, prompt: str, logging_path: Path | None = None, **kwargs: Any
-    ) -> LLMResponse:
-        self._truncated = None
-
-        try:
-            response = await super().chat(prompt, logging_path, **kwargs)
-        except ResponseLengthExceededError as error:
-            self._truncated = (prompt, error.result)
-            raise
-        attach_items(self.messages[-1], response)
-        return response
-
-    @override
-    def reset_response_chain(self) -> None:
-        """Attach partial items after Harbor appends a budget failure outside `chat`."""
-        super().reset_response_chain()
-        if self._truncated is not None:
-            prompt, result = self._truncated
-            if (
-                len(self.messages) >= 2
-                and self.messages[-2]['content'] == prompt
-                and self.messages[-1]['content'] == result.response.output_text
-            ):
-                self.messages[-1][ITEMS_KEY] = result.items
-            self._truncated = None
-
-
-def attach_items(message: dict[str, Any], response: LLMResponse) -> None:
-    if response.extra is not None and ITEMS_KEY in response.extra:
-        message[ITEMS_KEY] = response.extra[ITEMS_KEY]
+            if self.details['finish_reason'] != 'stop':
+                raise NativeCompletionError(
+                    'The Responses API did not return a complete answer.'
+                )
 
 
 def response_input(
@@ -183,69 +128,34 @@ def response_input(
     return _input.validate_python(items)
 
 
-class ResponsesLLM(BaseLLM):
-    """Use SDK items while Harbor owns tool execution and conversation accounting."""
-
-    def __init__(
-        self,
-        client: AsyncOpenAI,
-        model_name: str,
-        context_limit: int,
-        output_limit: int,
-        effort: str | None,
-        temperature: float | None,
-        logs_dir: Path,
-    ) -> None:
+class ResponsesLLM(NativeLLM):
+    def __init__(self, client: AsyncOpenAI, settings: NativeSettings) -> None:
+        super().__init__(settings)
         self.client = client
-        self.model_name = model_name.removeprefix('openai/')
-        self.context_limit = context_limit
-        self.output_limit = output_limit
-        self.effort = effort
-        self.temperature = temperature
-        self.logs_dir = logs_dir
-        self.results: list[dict[str, Any]] = []
-        self.attempts: list[dict[str, Any]] = []
 
     @override
-    def get_model_context_limit(self) -> int:
-        return self.context_limit
-
-    @override
-    def get_model_output_limit(self) -> int:
-        return self.output_limit
-
-    @override
-    async def call(
+    async def _request(
         self,
         prompt: str,
-        message_history: list[dict[str, Any]] | None = None,
-        logging_path: Path | None = None,
+        history: Sequence[Mapping[str, Any]],
+        attempt: dict[str, Any],
         **kwargs: Any,
-    ) -> LLMResponse:
+    ) -> ResponseResult:
         started = time.monotonic()
-        attempt: dict[str, Any] = {'response_status': 'request_failed'}
-        self.attempts.append(attempt)
+        attempt['response_status'] = 'request_failed'
         try:
             raw = await self.client.responses.with_raw_response.create(
-                model=self.model_name,
-                input=response_input(message_history or [], prompt),
-                max_output_tokens=self.output_limit,
+                model=self.settings.model_name,
+                input=response_input(history, prompt),
+                max_output_tokens=self.settings.output_limit,
                 store=False,
                 extra_headers=kwargs.get('extra_headers'),
-                extra_body=(
-                    {'reasoning': {'effort': self.effort}} if self.effort else {}
-                )
-                | (
-                    {'temperature': self.temperature}
-                    if self.temperature is not None
-                    else {}
-                ),
+                extra_body={'reasoning': {'effort': self.settings.effort}}
+                if self.settings.effort
+                else {},
             )
-        except APIError as error:
-            if (
-                isinstance(error, BadRequestError)
-                and error.code == 'context_length_exceeded'
-            ):
+        except BadRequestError as error:
+            if error.code == 'context_length_exceeded':
                 raise ContextLengthExceededError(
                     'The Responses API exhausted its input context.'
                 ) from error
@@ -253,21 +163,11 @@ class ResponsesLLM(BaseLLM):
         finally:
             attempt['latency_sec'] = round(time.monotonic() - started, 3)
 
-        result = ResponseResult(raw.parse(), raw.headers.get('x-request-id'))
-        details = result.details | {'latency_sec': attempt['latency_sec']}
-        usage = result.usage
-        if usage is not None:
-            details |= usage.details
-        self.results.append(details)
-        attempt.update(details)
-        artifact = self.logs_dir / f'response-{len(self.results)}.json'
+        result = ResponseResult(
+            raw.parse(), raw.headers.get('x-request-id'), attempt['latency_sec']
+        )
+        attempt.update(result.details)
+        artifact = self.settings.logs_dir / f'response-{len(self.calls) + 1}.json'
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_text(result.response.model_dump_json(indent=2, by_alias=True))
-        result.check(raw.http_response.request, complete=True)
-        return LLMResponse(
-            content=result.response.output_text,
-            model_name=result.response.model,
-            response_id=result.response.id,
-            usage=usage.harbor if usage else None,
-            extra=details | {ITEMS_KEY: result.items},
-        )
+        return result

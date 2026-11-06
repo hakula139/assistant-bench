@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable, Iterator
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 from unittest.mock import MagicMock
 
 import anthropic
@@ -29,7 +29,7 @@ from harbor.models.task import config as task_config
 from harbor.models.trajectories import SubagentTrajectoryRef
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.paths import TrialPaths
-from litellm.exceptions import ServiceUnavailableError
+from litellm.exceptions import BadRequestError, ServiceUnavailableError
 from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
@@ -44,18 +44,14 @@ from assistant_bench.harnesses.endpoint import (
     LOCAL_ADDRESS_VAR,
 )
 from assistant_bench.harnesses.host import HostEnvironment
-from assistant_bench.harnesses.messages import (
-    MessageCompletionError,
-    MessagesChat,
-    MessagesLLM,
-    MessageStreamError,
+from assistant_bench.harnesses.messages import MessagesLLM, MessageStreamError
+from assistant_bench.harnesses.native import (
+    NativeChat,
+    NativeCompletionError,
+    NativeLLM,
 )
-from assistant_bench.harnesses.responses import (
-    ResponseCompletionError,
-    ResponsesChat,
-    ResponsesLLM,
-)
-from assistant_bench.harnesses.terminus import Terminus
+from assistant_bench.harnesses.responses import ResponsesLLM
+from assistant_bench.harnesses.terminus import ChatCompletionsLLM, Terminus
 from assistant_bench.outputs import Output, StopDetails
 from support import (
     StubEndpoint,
@@ -73,7 +69,7 @@ from support import (
 
 pytestmark = pytest.mark.usefixtures('export')
 
-OPTIONS = {'system': 's', 'fingerprint': 'f'}
+OPTIONS = {'api': 'openai-chat-completions', 'system': 's', 'fingerprint': 'f'}
 
 
 @pytest.fixture
@@ -108,29 +104,6 @@ def terminal_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TmuxSes
     return session
 
 
-@runtime_checkable
-class NativeClient(Protocol):
-    results: list[dict[str, Any]]
-
-    def get_model_context_limit(self) -> int: ...
-    def get_model_output_limit(self) -> int | None: ...
-    async def call(self, prompt: str, **kwargs: object) -> LLMResponse: ...
-
-
-@runtime_checkable
-class NativeConversation(Protocol):
-    @property
-    def total_input_tokens(self) -> int: ...
-    @property
-    def total_output_tokens(self) -> int: ...
-    @property
-    def total_cache_tokens(self) -> int: ...
-    @property
-    def messages(self) -> list[dict[str, Any]]: ...
-    async def chat(self, prompt: str, **kwargs: object) -> LLMResponse: ...
-    def reset_response_chain(self) -> None: ...
-
-
 class NativeProbe(Terminus):
     async def execute(self, session: TmuxSession, context: AgentContext) -> None:
         self._session = session
@@ -143,8 +116,8 @@ class NativeProbe(Terminus):
         await self._endpoint_client.close()
 
     @property
-    def client(self) -> NativeClient:
-        assert isinstance(self._llm, NativeClient)
+    def client(self) -> NativeLLM | ChatCompletionsLLM:
+        assert isinstance(self._llm, NativeLLM | ChatCompletionsLLM)
         return self._llm
 
     async def call(self, prompt: str) -> LLMResponse:
@@ -156,23 +129,16 @@ class NativeProbe(Terminus):
         finally:
             await self.close()
 
-    def conversation(self) -> NativeConversation:
+    def conversation(self) -> Chat:
         self._reset_per_run_state()
-        chat = (
-            MessagesChat(self._llm)
-            if isinstance(self._llm, MessagesLLM)
-            else ResponsesChat(self._llm)
-            if isinstance(self._llm, ResponsesLLM)
-            else Chat(self._llm)
-        )
-        assert isinstance(chat, NativeConversation)
-        return chat
+        if isinstance(self._llm, NativeLLM):
+            return NativeChat(self._llm)
+        return Chat(self._llm)
 
-    async def follow(self, chat: NativeConversation, prompt: str) -> LLMResponse:
+    async def follow(self, chat: Chat, prompt: str) -> LLMResponse:
         return await chat.chat(prompt, **self._llm_call_kwargs)
 
-    async def summarize(self, chat: NativeConversation, session: TmuxSession) -> str:
-        assert isinstance(chat, Chat)
+    async def summarize(self, chat: Chat, session: TmuxSession) -> str:
         handoff, _ = await self.summarize_result(chat, 'Greet me.', session)
         return handoff
 
@@ -193,7 +159,7 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
     )
     agent = NativeProbe(
         logs_dir=tmp_path,
-        model_name=f'openai/{system.route}',
+        model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
     )
@@ -215,7 +181,7 @@ def messages_agent(
     )
     agent = NativeProbe(
         logs_dir=tmp_path,
-        model_name=f'openai/{system.route}',
+        model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
     )
@@ -241,7 +207,7 @@ def run_and_collect(
     config = jobs.job(family, [system], [])
     agent = NativeProbe(
         logs_dir=tmp_path,
-        model_name=f'openai/{system.route}',
+        model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
     )
@@ -269,33 +235,6 @@ def run_and_collect(
 
 
 class TestTerminus:
-    @pytest.mark.parametrize(
-        ('change', 'message'),
-        [
-            ({'llm_backend': 'tinker'}, 'requires the LiteLLM backend'),
-            ({'model_info': None}, 'requires resolved model capacities'),
-        ],
-        ids=['unsupported-backend', 'missing-capacities'],
-    )
-    def test_rejects_an_incompatible_native_configuration(
-        self,
-        endpoint: StubEndpoint,
-        tmp_path: Path,
-        change: dict[str, Any],
-        message: str,
-    ) -> None:
-        kwargs = agent_kwargs(make_system(harness='terminus-2')) | change
-
-        with pytest.raises(ValueError, match=message):
-            NativeProbe(
-                logs_dir=tmp_path,
-                model_name='openai/acme/large',
-                extra_env=endpoint.env,
-                **kwargs,
-            )
-
-        assert endpoint.requests == []
-
     def test_keeps_each_systems_context_reserve_when_routes_are_shared(
         self, endpoint: StubEndpoint, tmp_path: Path
     ) -> None:
@@ -310,14 +249,14 @@ class TestTerminus:
         )
         first_agent = NativeProbe(
             logs_dir=tmp_path / 'first',
-            model_name=f'openai/{first.route}',
+            model_name=first.route,
             extra_env=endpoint.env,
             **agent_kwargs(first),
         )
 
         second_agent = NativeProbe(
             logs_dir=tmp_path / 'second',
-            model_name=f'openai/{second.route}',
+            model_name=second.route,
             extra_env=endpoint.env,
             **agent_kwargs(second),
         )
@@ -339,7 +278,7 @@ class TestTerminus:
         )
         agent = NativeProbe(
             logs_dir=tmp_path,
-            model_name=f'openai/{system.route}',
+            model_name=system.route,
             extra_env=endpoint.env,
             **agent_kwargs(system),
         )
@@ -381,7 +320,7 @@ class TestTerminus:
             )
             config = trial_config.AgentConfig(
                 import_path=HARNESSES['terminus-2'].import_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 kwargs=agent_kwargs(system),
                 env=endpoint.env,
             )
@@ -396,7 +335,7 @@ class TestTerminus:
             monkeypatch.delenv(EXPORT_VAR)
             config = trial_config.AgentConfig(
                 import_path=HARNESSES['terminus-2'].import_path,
-                model_name='openai/acme/large',
+                model_name='acme/large',
                 kwargs=OPTIONS,
             )
 
@@ -424,7 +363,7 @@ class TestTerminus:
                 monkeypatch.setenv(name, value)
             config = trial_config.AgentConfig(
                 import_path=HARNESSES['terminus-2'].import_path,
-                model_name='openai/acme/large',
+                model_name='acme/large',
                 kwargs=OPTIONS,
                 env={KEY_FILE_VAR: key_file},
             )
@@ -507,7 +446,7 @@ class TestTerminus:
             ) == (390, 300, 120)
             assert isinstance(messages_agent.client, MessagesLLM)
             assert (
-                sum(result['input_tokens'] for result in messages_agent.client.results)
+                sum(result['input_tokens'] for result in messages_agent.client.calls)
                 == 780
             )
 
@@ -594,7 +533,7 @@ class TestTerminus:
 
             async def summarize() -> str:
                 await responses_agent.follow(chat, 'Read the greeting.')
-                with pytest.raises(openai.APIError):
+                with pytest.raises(NativeCompletionError):
                     await responses_agent.summarize(chat, terminal_session)
                 handoff = await responses_agent.summarize(chat, terminal_session)
                 await responses_agent.follow(chat, handoff)
@@ -664,7 +603,7 @@ class TestTerminus:
             assert collected.finish_reason is None
             assert context.metadata is not None
             assert [
-                result['cache_write_tokens'] for result in context.metadata['responses']
+                result['cache_write_tokens'] for result in context.metadata['calls']
             ] == [10, 10]
             assert len(endpoint.requests) == 2
 
@@ -738,7 +677,7 @@ class TestTerminus:
                 attempt['response_status'] for attempt in messages_agent.client.attempts
             ] == ['incomplete', 'completed']
             assert [
-                recorded['response_id'] for recorded in messages_agent.client.results
+                recorded['response_id'] for recorded in messages_agent.client.calls
             ] == ['recovered']
 
         @pytest.mark.parametrize(
@@ -782,7 +721,7 @@ class TestTerminus:
 
             assert len(endpoint.requests) == 1
             assert isinstance(messages_agent.client, MessagesLLM)
-            assert messages_agent.client.results == []
+            assert messages_agent.client.calls == []
             (attempt,) = messages_agent.client.attempts
             assert attempt['response_status'] == 'incomplete'
             assert 'input_tokens' not in attempt
@@ -832,7 +771,7 @@ class TestTerminus:
             )
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -842,7 +781,7 @@ class TestTerminus:
             assert result.content == 'Hello there.'
             assert result.usage is None
             assert len(endpoint.requests) == 1
-            (recorded,) = agent.client.results
+            (recorded,) = agent.client.calls
             assert 'input_tokens' not in recorded
             assert recorded['usage_invalid'] is True
 
@@ -903,11 +842,11 @@ class TestTerminus:
                 tmp_path,
                 families_dir,
                 data_dir,
-                MessageCompletionError,
+                NativeCompletionError,
             )
 
             assert len(endpoint.requests) == 1
-            assert collected.error == 'MessageCompletionError'
+            assert collected.error == 'NativeCompletionError'
             assert collected.finish_reason == finish
             assert collected.stop_details == (
                 StopDetails.model_validate(details) if details else None
@@ -1030,11 +969,11 @@ class TestTerminus:
                 pytest.approx(cost) if cost is not None else None
             )
             assert context.metadata is not None
+            assert [call['response_status'] for call in context.metadata['calls']] == [
+                'completed'
+            ]
             assert [
-                call['response_status'] for call in context.metadata['responses']
-            ] == ['completed']
-            assert [
-                call['response_status'] for call in context.metadata['message_attempts']
+                call['response_status'] for call in context.metadata['attempts']
             ] == ['completed', 'incomplete']
             (client,) = messages_clients
             assert client.is_closed()
@@ -1079,9 +1018,11 @@ class TestTerminus:
             ) == (390, 300, 120)
             assert context.metadata is not None
             assert context.metadata['cache_write_tokens'] == 30
-            assert [
-                call['finish_reason'] for call in context.metadata['responses']
-            ] == ['length', 'stop', 'stop']
+            assert [call['finish_reason'] for call in context.metadata['calls']] == [
+                'length',
+                'stop',
+                'stop',
+            ]
             assert all(
                 request.body['output_config'] == {'effort': 'high'}
                 for request in endpoint.requests
@@ -1111,7 +1052,7 @@ class TestTerminus:
             kwargs['llm_call_kwargs']['logging_path'] = api_log
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **kwargs,
             )
@@ -1156,13 +1097,31 @@ class TestTerminus:
                     result[key]
                     for key in ('input_tokens', 'cache_tokens', 'output_tokens')
                 )
-                for result in context.metadata['responses']
+                for result in context.metadata['calls']
             ] == [(120, 100, 40)] * 6
             logged = json.loads(api_log.read_text())
             assert logged['log_event_type'] == 'post_api_call'
             assert ChatCompletion.model_validate_json(
                 logged['original_response']
             ) == ChatCompletion.model_validate(terminus_completion())
+
+        def test_records_no_chat_call_for_an_error_body_without_choices(
+            self, endpoint: StubEndpoint, tmp_path: Path
+        ) -> None:
+            endpoint.response = {'error': {'message': 'Unavailable.'}}
+            system = make_system(harness='terminus-2')
+            agent = NativeProbe(
+                logs_dir=tmp_path,
+                model_name=system.route,
+                extra_env=endpoint.env,
+                **agent_kwargs(system),
+            )
+
+            with pytest.raises(BadRequestError):
+                asyncio.run(agent.request('Greet me.'))
+
+            assert len(endpoint.requests) == 3
+            assert agent.client.calls == []
 
         def test_retryable_chat_errors_keep_native_attempts_without_sdk_retries(
             self,
@@ -1175,7 +1134,7 @@ class TestTerminus:
             system = make_system(harness='terminus-2')
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1266,7 +1225,7 @@ class TestTerminus:
             config = jobs.job(family, [system], [])
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1340,8 +1299,7 @@ class TestTerminus:
             ) == tokens
             if api == 'openai-responses':
                 assert [
-                    result['response_status']
-                    for result in context.metadata['responses']
+                    result['response_status'] for result in context.metadata['calls']
                 ] == ([] if prior_usage is None else ['completed'])
                 assert sorted(
                     path.name for path in tmp_path.glob('response-*.json')
@@ -1378,10 +1336,9 @@ class TestTerminus:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
-            assert context.metadata['responses'] == []
+            assert context.metadata['calls'] == []
             assert [
-                call['response_status']
-                for call in context.metadata['response_attempts']
+                call['response_status'] for call in context.metadata['attempts']
             ] == ['request_failed'] * 3
 
         def test_counts_usage_from_completed_requests_after_a_retry(
@@ -1408,12 +1365,12 @@ class TestTerminus:
                 context.cost_usd,
             ) == (240, 200, 80, None)
             assert context.metadata is not None
+            assert [call['response_status'] for call in context.metadata['calls']] == [
+                'completed',
+                'completed',
+            ]
             assert [
-                call['response_status'] for call in context.metadata['responses']
-            ] == ['completed', 'completed']
-            assert [
-                call['response_status']
-                for call in context.metadata['response_attempts']
+                call['response_status'] for call in context.metadata['attempts']
             ] == ['request_failed', 'completed', 'completed']
 
         def test_maps_the_provider_context_error_to_native_context_management(
@@ -1460,9 +1417,7 @@ class TestTerminus:
                 'request_failed',
                 'completed',
             ]
-            assert [result['response_status'] for result in llm.results] == [
-                'completed'
-            ]
+            assert [result['response_status'] for result in llm.calls] == ['completed']
 
         def test_native_budget_reissue_preserves_partial_items_and_all_reported_usage(
             self,
@@ -1501,9 +1456,7 @@ class TestTerminus:
                 context.n_output_tokens,
             ) == (360, 300, 120)
             assert context.metadata is not None
-            assert [
-                call['finish_reason'] for call in context.metadata['responses']
-            ] == [
+            assert [call['finish_reason'] for call in context.metadata['calls']] == [
                 'length',
                 'stop',
                 'stop',
@@ -1529,7 +1482,7 @@ class TestTerminus:
             )
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1556,7 +1509,7 @@ class TestTerminus:
             ) == ((None, None, None) if missing_usage else (360, 300, 120))
             assert context.cost_usd is None
             assert context.metadata is not None
-            recorded, reissued_usage, confirmed_usage = context.metadata['responses']
+            recorded, reissued_usage, confirmed_usage = context.metadata['calls']
             assert ('input_tokens' not in recorded) == missing_usage
             if not missing_usage:
                 assert tuple(
@@ -1592,7 +1545,7 @@ class TestTerminus:
             )
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1608,7 +1561,7 @@ class TestTerminus:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
-            first, second = context.metadata['responses']
+            first, second = context.metadata['calls']
             assert tuple(
                 first[key] for key in ('input_tokens', 'cache_tokens', 'output_tokens')
             ) == (120, 100, 40)
@@ -1664,7 +1617,7 @@ class TestTerminus:
             )
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1680,7 +1633,7 @@ class TestTerminus:
                 context.cost_usd,
             ) == (None, None, None, None)
             assert context.metadata is not None
-            calls = context.metadata['responses']
+            calls = context.metadata['calls']
             assert 'input_tokens' not in calls[unknown]
             assert calls[1 - unknown]['input_tokens'] == 120
             assert calls[1 - unknown]['cache_tokens'] == 100
@@ -1760,11 +1713,11 @@ class TestTerminus:
                 tmp_path,
                 families_dir,
                 data_dir,
-                ResponseCompletionError,
+                NativeCompletionError,
             )
 
             assert len(endpoint.requests) == 1
-            assert collected.error == 'ResponseCompletionError'
+            assert collected.error == 'NativeCompletionError'
             assert collected.finish_reason == finish
             assert collected.stop_details is None
             assert (
@@ -1774,7 +1727,7 @@ class TestTerminus:
             ) == (120, 100, 40)
             assert context.cost_usd is None
             assert context.metadata is not None
-            (recorded,) = context.metadata['responses']
+            (recorded,) = context.metadata['calls']
             assert recorded['response_status'] == status
             assert recorded['request_id'] == 'req-1'
             assert recorded['response_model'] == 'large-2026'
@@ -1798,7 +1751,7 @@ class TestTerminus:
             system = make_system(harness='terminus-2', api='openai-responses')
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1831,7 +1784,7 @@ class TestTerminus:
             endpoint.response = response('Resumed.', response_id='resp-resumed')
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
             )
@@ -1919,9 +1872,8 @@ class TestTerminus:
             )
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=endpoint.env,
-                temperature=0.7,
                 **agent_kwargs(system),
             )
 
@@ -1937,7 +1889,6 @@ class TestTerminus:
                     'reasoning': {'effort': effort},
                     'max_output_tokens': 32768,
                     'store': False,
-                    'temperature': 0.7,
                 }
             else:
                 assert request.path == '/v1/chat/completions'
@@ -1946,7 +1897,6 @@ class TestTerminus:
                     'messages': prompt,
                     'reasoning_effort': effort,
                     'max_completion_tokens': 32768,
-                    'temperature': 0.7,
                 }
             assert request.headers['authorization'] == 'Bearer test-key'
             assert request.headers['x-trace'] == 'bench'
@@ -1966,7 +1916,7 @@ class TestTerminus:
             system = make_system(harness='terminus-2', api=api)
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name=f'openai/{system.route}',
+                model_name=system.route,
                 extra_env=tls_endpoint.env
                 | {
                     CA_FILE_VAR: str(tls_endpoint.ca_file),
@@ -2003,7 +1953,7 @@ class TestTerminus:
             Terminus.preflight(kwargs, endpoint.env | env)
             agent = NativeProbe(
                 logs_dir=tmp_path,
-                model_name='openai/acme/large',
+                model_name='acme/large',
                 extra_env=endpoint.env | env,
                 **kwargs,
             )
@@ -2037,9 +1987,9 @@ class TestTerminus:
                 'harbor_version': metadata.version('harbor'),
                 'finish_reason': None,
                 'stop_details': None,
-                'responses': [],
+                'calls': [],
                 'cache_write_unpriced': False,
             }
             if api == 'openai-responses':
-                expected['response_attempts'] = []
+                expected['attempts'] = []
             assert context.metadata == expected

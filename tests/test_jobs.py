@@ -9,8 +9,6 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
-import httpx2
-import openai
 import pytest
 import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -41,6 +39,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.generate import OUTPUT_FILE
+from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
@@ -460,13 +459,10 @@ class TestJob:
         config = jobs.job(VOTES, [make_system(api='openai-responses')], [])
         queue = RetryProbe(n_concurrent=1, retry_config=config.retry)
 
-        with pytest.raises(openai.APIError) as error:
-            result.check(
-                httpx2.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
-            )
+        with pytest.raises(NativeCompletionError) as error:
+            result.check(complete=True)
 
         assert not queue.retries(type(error.value).__name__)
-        assert not queue.retries('MessageCompletionError')
         assert queue.retries('APIConnectionError')
         assert queue.retries('InternalServerError')
         assert not queue.retries('AgentTimeoutError')
@@ -518,11 +514,11 @@ class TestJob:
         (agent,) = job.agents
         assert (agent.import_path, agent.model_name, agent.concurrency_group) == (
             'assistant_bench.harnesses.terminus:Terminus',
-            'openai/acme/large',
+            'acme/large',
             'acme/large',
         )
         assert agent.kwargs == {
-            'use_responses_api': False,
+            'api': 'openai-chat-completions',
             'system': 'acme-large',
             'fingerprint': fingerprint(systems[0]),
             'llm_call_kwargs': {'max_completion_tokens': 64},
@@ -2050,7 +2046,7 @@ class TestUsageGaps:
         [
             pytest.param(
                 {
-                    'responses': [
+                    'calls': [
                         {
                             'input_tokens': 1_000,
                             'cache_tokens': 600,
@@ -2094,7 +2090,7 @@ class TestUsageGaps:
             ),
             pytest.param(
                 {
-                    'responses': [
+                    'calls': [
                         {
                             'input_tokens': 1_000,
                             'cache_tokens': 0,

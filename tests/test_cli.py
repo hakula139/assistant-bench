@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+import sys
 import textwrap
 from collections import defaultdict
 from contextlib import AbstractContextManager, nullcontext
@@ -36,6 +37,7 @@ from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output, write_outputs
 from support import (
+    FIXTURES,
     REPORT_FIXTURE,
     SQLiteDatabase,
     finish_job,
@@ -182,9 +184,23 @@ class TestMain:
 
         assert {name: os.environ.get(name) for name in jobs.HARBOR_ENV} == {
             'HARBOR_TELEMETRY': 'off',
+            'LITELLM_LOCAL_MODEL_COST_MAP': 'true',
             'LITELLM_MODE': 'PRODUCTION',
         }
         assert SDK_HEADERS_VAR not in os.environ
+
+    def test_leaves_dotenv_loading_and_network_io_to_the_command(self) -> None:
+        environment = dict(os.environ)
+        environment.pop('LITELLM_MODE', None)
+
+        completed = subprocess.run(
+            [sys.executable, str(FIXTURES / 'import-cli.py')],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+        assert completed.returncode == 0, completed.stderr
 
 
 class TestCheck:
@@ -827,7 +843,7 @@ class TestRun:
         (agent,) = job.agents
         opus = load_systems(load_export())['opus-5.5-high']
         assert agent.import_path == 'assistant_bench.harnesses.terminus:Terminus'
-        assert agent.model_name == f'openai/{opus.route}'
+        assert agent.model_name == opus.route
         assert agent.kwargs['fingerprint'] == fingerprint(
             opus.model_copy(update={'harness': 'terminus-2'})
         )
@@ -1243,7 +1259,7 @@ class TestCollect:
             output='Hi.',
             context=AgentContext(
                 metadata={
-                    'responses': [
+                    'calls': [
                         {
                             'input_tokens': 1_000_000,
                             'cache_tokens': 0,

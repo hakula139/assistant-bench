@@ -1,11 +1,6 @@
 import asyncio
-import os
 import ssl
-import subprocess
-import sys
-import textwrap
 from pathlib import Path
-from urllib.request import getproxies_environment
 
 import anthropic
 import httpx
@@ -32,37 +27,12 @@ from support import StubEndpoint
 pytestmark = pytest.mark.usefixtures('export')
 
 
-class TestModelRequests:
-    def test_imports_the_cli_without_loading_a_local_dotenv(self) -> None:
-        environment = dict(os.environ)
-        environment.pop('LITELLM_MODE', None)
-        script = textwrap.dedent(
-            """\
-            import socket
-
-            import dotenv
-
-            def unexpected(*args, **kwargs):
-                raise AssertionError('Import attempted dotenv loading or network I/O')
-
-            dotenv.load_dotenv = unexpected
-            socket.socket.connect = unexpected
-            socket.socket.connect_ex = unexpected
-            socket.getaddrinfo = unexpected
-
-            import assistant_bench.cli
-            """
-        )
-
-        completed = subprocess.run(
-            [sys.executable, '-c', script],
-            env=environment,
-            capture_output=True,
-            text=True,
-        )
-        assert completed.returncode == 0, completed.stderr
-
-    @pytest.mark.parametrize('client_type', [httpx.AsyncClient, httpx2.AsyncClient])
+class TestLoopbackRequestsOnly:
+    @pytest.mark.parametrize(
+        'client_type',
+        [httpx.AsyncClient, httpx2.AsyncClient],
+        ids=['httpx', 'httpx2'],
+    )
     def test_blocks_non_loopback_requests_before_network_io(
         self, client_type: type[httpx.AsyncClient] | type[httpx2.AsyncClient]
     ) -> None:
@@ -79,17 +49,12 @@ class TestEndpoint:
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'anthropic-messages']
         )
-        def test_sends_private_headers_directly_to_the_configured_origin(
+        def test_sends_the_key_and_extra_headers_with_the_request_timeout(
             self,
             endpoint: StubEndpoint,
             model_requests: list[httpx2.Request],
-            monkeypatch: pytest.MonkeyPatch,
             api: Api,
         ) -> None:
-            def inherited_proxies() -> dict[str, str]:
-                return getproxies_environment() or {'http': endpoint.url}
-
-            monkeypatch.setattr('httpx2._utils.getproxies', inherited_proxies)
             configured = Endpoint.read(endpoint.env.get, api)
 
             async def request() -> httpx2.Response:
@@ -172,14 +137,14 @@ class TestEndpoint:
             env = endpoint.env | {LOCAL_ADDRESS_VAR: address}
             if endpoint.ca_file:
                 env[CA_FILE_VAR] = str(endpoint.ca_file)
-            configured = Endpoint.read(env.get)
+            configured = Endpoint.read(env.get, 'openai-responses')
 
             async def send(endpoint_config: Endpoint) -> httpx2.Response:
                 async with endpoint_config.http_client() as client:
                     return await client.post(f'{endpoint.url}/v1/responses', json={})
 
             if endpoint.ca_file:
-                untrusted = Endpoint.read(endpoint.env.get)
+                untrusted = Endpoint.read(endpoint.env.get, 'openai-responses')
                 with pytest.raises(httpx2.ConnectError):
                     asyncio.run(send(untrusted))
             reply = asyncio.run(send(configured))
@@ -197,14 +162,9 @@ class TestPreflight:
             SDK_HEADERS_VAR,
             'x-ambient-header: ambient-value\nanthropic-beta: ambient-beta',
         )
-        configured = Endpoint.read(endpoint.env.get, 'anthropic-messages')
 
         with pytest.raises(ValueError, match='ANTHROPIC_CUSTOM_HEADERS'):
             preflight(endpoint.env, 'anthropic-messages')
-        with pytest.raises(ValueError, match='ANTHROPIC_CUSTOM_HEADERS'):
-            configured.messages_client()
-
-        assert endpoint.requests == []
 
     def test_requires_the_exact_native_base_without_falling_back_to_openai(
         self, endpoint: StubEndpoint
@@ -217,16 +177,11 @@ class TestPreflight:
 
         assert endpoint.requests == []
 
-    def test_accepts_endpoint_variables_from_the_agent_env(
-        self, endpoint: StubEndpoint
-    ) -> None:
-        preflight(endpoint.env)
-
     def test_names_each_missing_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(EXPORT_VAR)
 
         with pytest.raises(ValueError) as error:
-            preflight({})
+            preflight({}, 'openai-chat-completions')
 
         assert str(error.value) == (
             'Set `BENCH_API_BASE_URL`, `BENCH_API_KEY_FILE`, `BENCH_NIXOS_CONFIG`. '
@@ -262,7 +217,7 @@ class TestPreflight:
         self, endpoint: StubEndpoint, variable: str, value: str
     ) -> None:
         with pytest.raises(ValidationError) as error:
-            preflight(endpoint.env | {variable: value})
+            preflight(endpoint.env | {variable: value}, 'openai-chat-completions')
 
         assert [e['loc'][0] for e in error.value.errors()] == [variable]
         assert value not in str(error.value)
@@ -274,11 +229,13 @@ class TestPreflight:
         ca_file.write_text('not a certificate\n')
 
         with pytest.raises(ssl.SSLError):
-            preflight(endpoint.env | {CA_FILE_VAR: str(ca_file)})
+            preflight(
+                endpoint.env | {CA_FILE_VAR: str(ca_file)}, 'openai-chat-completions'
+            )
 
     def test_treats_an_empty_optional_setting_as_unset(
         self, endpoint: StubEndpoint
     ) -> None:
         empty = dict.fromkeys((CA_FILE_VAR, HEADERS_VAR, LOCAL_ADDRESS_VAR), '')
 
-        preflight(endpoint.env | empty)
+        preflight(endpoint.env | empty, 'openai-chat-completions')

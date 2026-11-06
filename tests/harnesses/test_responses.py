@@ -1,11 +1,10 @@
 import asyncio
 
-import httpx2
-import openai
 import pytest
 from openai.types.responses import Response
 
 from assistant_bench.harnesses.endpoint import Endpoint
+from assistant_bench.harnesses.native import ITEMS_KEY, NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult, response_input
 from support import StubEndpoint, response
 
@@ -41,16 +40,18 @@ class TestResponseInput:
 
         restored = response_input(
             [
-                {'role': 'assistant', 'content': '', 'response_items': result.items},
-                {'role': 'tool', 'content': '', 'response_items': [tool_output]},
+                {'role': 'assistant', 'content': '', ITEMS_KEY: result.items},
+                {'role': 'tool', 'content': '', ITEMS_KEY: [tool_output]},
             ],
             'Continue.',
         )
 
         endpoint.response = response('Continued.')
 
+        configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
         async def replay() -> None:
-            async with Endpoint.read(endpoint.env.get).client() as client:
+            async with configured.client() as client:
                 await client.responses.create(
                     model='acme/large', input=restored, store=False
                 )
@@ -63,7 +64,5 @@ class TestResponseInput:
             tool_output,
             {'role': 'user', 'content': 'Continue.'},
         ]
-        with pytest.raises(openai.APIError, match='function call'):
-            result.check(
-                httpx2.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
-            )
+        with pytest.raises(NativeCompletionError, match='function call'):
+            result.check(complete=True)

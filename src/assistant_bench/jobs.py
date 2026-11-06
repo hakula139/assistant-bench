@@ -48,8 +48,7 @@ from assistant_bench.harnesses import (
     fingerprint,
 )
 from assistant_bench.harnesses.generate import OUTPUT_FILE
-from assistant_bench.harnesses.messages import MessageCompletionError
-from assistant_bench.harnesses.responses import ResponseCompletionError
+from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.messages import InputError, code, error_lines
 from assistant_bench.outputs import Output, tests_pass, write_outputs
 from assistant_bench.paths import data_dir
@@ -70,8 +69,13 @@ N_CONCURRENT_CONTAINERS = 4
 ROUTE_CONCURRENCY = 4
 CHECK_ATTEMPTS = 3
 # LiteLLM loads a .env above its own install unless its mode is PRODUCTION, and
-# bench loads the working directory's .env itself.
-HARBOR_ENV = {'HARBOR_TELEMETRY': 'off', 'LITELLM_MODE': 'PRODUCTION'}
+# bench loads the working directory's .env itself. Importing LiteLLM downloads its
+# cost map unless told to read the bundled copy.
+HARBOR_ENV = {
+    'HARBOR_TELEMETRY': 'off',
+    'LITELLM_LOCAL_MODEL_COST_MAP': 'true',
+    'LITELLM_MODE': 'PRODUCTION',
+}
 
 
 # ── Jobs ──
@@ -239,7 +243,7 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
-        model_name=harness.model_name(system.route),
+        model_name=system.route,
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
         kwargs=agent_kwargs(system),
@@ -499,8 +503,7 @@ def _job(
 ) -> JobConfig:
     retry = RetryConfig(max_retries=1)
     retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
-        ResponseCompletionError.__name__,
-        MessageCompletionError.__name__,
+        NativeCompletionError.__name__
     }
 
     return JobConfig(
@@ -758,9 +761,9 @@ def _responses(family: Family, output: Output) -> list[dict[str, Any]]:
     )
     result = TrialResult.model_validate_json(result_file.read_text())
     metadata = (result.agent_result and result.agent_result.metadata) or {}
-    if 'responses' in metadata:
-        responses: list[dict[str, Any]] = metadata['responses']
-        return responses
+    if 'calls' in metadata:
+        calls: list[dict[str, Any]] = metadata['calls']
+        return calls
     if 'native_usage' in metadata and metadata['response_model'] is None:
         return []
     return [metadata] if 'usage_invalid' in metadata else []
