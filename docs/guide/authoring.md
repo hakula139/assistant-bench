@@ -6,15 +6,24 @@ Have new or edited cases and tasks reviewed before any paid run over them, even 
 
 ## Families
 
-A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are.
+A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are. [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml) reads:
 
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5-high", "gpt-6.1-sol-high"]
-reference = "gpt-6.1-sol-high"
+systems = [
+  "opus-5.5-high",
+  "gpt-6-astra-high",
+  "gpt-6.1-sol-high",
+  "gemini-4-argon-high",
+  "gemini-3.8-flash-high",
+  "deepseek-v4.1-flash-1017-high",
+  "kimi-k3-high",
+]
+reference = "gemini-3.8-flash-high"
 samples = 1
 categories = ["message"]
+defects = ["facts", "mechanics", "tone", "formulaic", "length"]
 ```
 
 Shared fields:
@@ -42,7 +51,7 @@ Vote-only fields:
 
 A category ID comes from the `Category` literal, and the site labels it in its glossary, so a new ID updates that literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes.
 
-Case families use `votes`. Public preparation supports rendered case families. Authored task families retain collection and tests-only regrading. [TypeScript](../conventions/typescript.md#reports) covers adding defect IDs or languages.
+Case families use `votes`, and task families use either scorer. `bench arena prepare` publishes any `votes` family that sets `public_voting`. [TypeScript](../conventions/typescript.md#reports) covers adding defect IDs or languages.
 
 Task families with systems also require:
 
@@ -79,7 +88,7 @@ Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing ca
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Harbor runs the task's scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so the image must include bash. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
-A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, the public label of the system that wrote the task, and `author_vendor`, its vendor ID from the shared catalog or an explicitly declared bare route. Authorship remains fixed when that system retires from the runnable configuration.
+A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog or an explicitly declared bare route. Authorship remains fixed when that system retires from the runnable configuration.
 
 `bench check` checks each task's `task.toml` for what a run needs:
 

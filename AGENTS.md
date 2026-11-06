@@ -20,10 +20,11 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
 ├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
 ├── families/                               # One directory per family and leaderboard
+├── fingerprints.json                       # Each runnable system's fingerprint, kept current by a test
 ├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
-├── reports/                                # Closed rounds, written only by `bench close`
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
+├── typings/                                # Development-only type stubs for dependencies that lack them
 └── web/                                    # The results site, the vote page and its Worker, a pnpm workspace package
 ```
 
@@ -69,6 +70,7 @@ uv run ruff format --check                            # Check formatting
 uv run mypy                                           # Type check (strict)
 uv run basedpyright                                   # Check the shared editor type policy
 uv run pytest                                         # Run the tests that need no Docker, with coverage
+uv run bench fingerprints                             # Check fingerprints against the closed reports
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
 pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
 pnpm lint                                             # Lint Markdown and the site

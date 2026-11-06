@@ -4,15 +4,18 @@ Learn how to point the bench at a model endpoint, check and run a family, collec
 
 ## The Model Endpoint
 
-Every system uses its configured OpenAI-compatible Chat Completions or Responses API at the endpoint in `.env`, which `bench` loads from the working directory or a parent. Copy [`.env.example`](../../.env.example) and fill in:
+Every system calls its configured API at the endpoint in `.env`, which `bench` loads from the working directory or a parent: OpenAI-compatible Chat Completions or Responses, or the Anthropic Messages API for `api = "anthropic-messages"`. Copy [`.env.example`](../../.env.example) and fill in:
 
-| Variable                  | Value                                                                                                                                                                  |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BENCH_API_BASE_URL`      | The endpoint's base URL, including `/v1`                                                                                                                               |
-| `BENCH_API_KEY_FILE`      | A file holding the API key, so the key is never copied into the checkout                                                                                               |
-| `BENCH_API_CA_FILE`       | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                                |
-| `BENCH_API_HEADERS`       | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                                                                                     |
-| `BENCH_API_LOCAL_ADDRESS` | Optional. A local IP address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
+| Variable                   | Value                                                                                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BENCH_API_BASE_URL`       | The OpenAI-compatible base URL, including `/v1`                                                                                                                        |
+| `BENCH_ANTHROPIC_BASE_URL` | The Messages API base URL, to which the SDK appends `/v1/messages`. Required for a Messages system                                                                     |
+| `BENCH_API_KEY_FILE`       | A file holding the API key, so the key is never copied into the checkout                                                                                               |
+| `BENCH_API_CA_FILE`        | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                                |
+| `BENCH_API_HEADERS`        | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                                                                                     |
+| `BENCH_API_LOCAL_ADDRESS`  | Optional. A local IP address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
+
+Both APIs share the key file, CA bundle, headers, and local address.
 
 Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 
@@ -23,9 +26,10 @@ Each system's route is the model ID the endpoint expects. Requests use the syste
 ```bash
 uv run bench check
 uv run bench check smoke-text
+uv run bench check coding-repo --task <task>
 ```
 
-`bench check` validates each named family, or every family when none is named. It validates `family.toml` and its systems. For a `cases.toml` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs each task's reference solution and a do-nothing agent, as [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
+`bench check` validates each named family, or every family when none is named, and `--task` limits one task family to the named tasks. It validates `family.toml` and its systems. For a `cases.toml` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs each task's reference solution and a do-nothing agent, as [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
 
 ## Running a Family
 
@@ -106,7 +110,7 @@ uv run bench arena publish production <publication>.json
 uv run bench arena status production writing-zh
 ```
 
-`prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases each store votes on.
+`prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases production votes on.
 
 A family ends for a voter once no comparison is left, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 

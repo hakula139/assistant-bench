@@ -147,11 +147,7 @@ class VotesSettings(_Settings):
 
     scorer: Literal['votes']
     public_voting: bool = False
-    """Vote on the public and synthetic cases in production.
-
-    Every other case, and every case of a family without the flag, is voted
-    locally.
-    """
+    """Publish the public and synthetic cases for voting in production."""
 
     reference: str
     """Listed system anchoring at `ranking.ANCHOR` when ranked.

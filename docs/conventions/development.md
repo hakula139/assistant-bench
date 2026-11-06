@@ -42,6 +42,7 @@ Commands stay minimal, and settings live in config files:
 | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Ruff, mypy, pytest (including coverage and the default `-m "not docker"`), uv    | `pyproject.toml`'s `[tool.*]` tables                                                                                  |
 | Systems under test                                                               | `systems.toml`                                                                                                        |
+| The generation and Messages protocol versions and the Messages API version       | `pyproject.toml`'s `[tool.assistant-bench]`                                                                           |
 | A family's scorer, systems, and samples                                          | `families/<family>/family.toml`                                                                                       |
 | Model completion and context allowances                                          | The shared model catalog, or a bare route's `systems.toml` table                                                      |
 | Harbor job settings, such as concurrency and retries                             | `jobs.py`, which builds each job config at run time                                                                   |

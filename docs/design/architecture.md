@@ -9,14 +9,14 @@ src/assistant_bench/
 ├── cli.py                                  # The Typer `bench` command
 ├── ci.py                                   # Coding task selection and checks for Harbor Smoke
 ├── task_assets.py                          # Regeneration of each coding task's shared files
-├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
-├── manifest.py                             # The committed manifest of every runnable system's fingerprint
-├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── arena/
 │   ├── commands.py                         # Publication, status and moderation commands
 │   ├── d1.py                               # The D1 REST client and each target's database
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
+├── manifest.py                             # The committed manifest of every runnable system's fingerprint
+├── jobs.py                                 # Task rendering, Harbor job configs, runs, and collection
+├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
 ├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, and each system's one fingerprint
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
@@ -39,8 +39,8 @@ src/assistant_bench/
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
-├── diffs.py                                # Git-style diffs of a task's workspace against its repository
-└── paths.py                                # Repo and data directory locations, and atomic file writes
+├── paths.py                                # Repo and data directory locations, and atomic file writes
+└── diffs.py                                # Git-style diffs of a task's workspace against its repository
 ```
 
 ## Import Layers
