@@ -1,9 +1,19 @@
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from assistant_bench.catalog import Api
-from assistant_bench.harnesses.usage import measured_usage
+from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.usage import (
+    ATTEMPTS_FILE,
+    Attempt,
+    MeasuredUsage,
+    append_attempt,
+    measure,
+    measured_usage,
+)
+from support import START
 
 
 class TestMeasuredUsage:
@@ -119,3 +129,49 @@ class TestMeasuredUsage:
             measured.harbor.cache_tokens,
             measured.harbor.completion_tokens,
         ) == (130, 100, 40)
+
+
+VALID = {'prompt_tokens': 120, 'completion_tokens': 40}
+
+
+class TestAppendAttempt:
+    @pytest.mark.parametrize(
+        ('requests', 'expected'),
+        [
+            pytest.param(
+                [{**measure('openai-chat-completions', None), 'responded': False}],
+                [],
+                id='no-response',
+            ),
+            pytest.param(
+                [
+                    {
+                        **measure('openai-chat-completions', VALID),
+                        'responded': True,
+                        'response_model': None,
+                    },
+                    {'response_status': 'request_failed', 'latency_sec': 0.5},
+                    {**measure('openai-chat-completions', []), 'responded': True},
+                    {**measure('openai-chat-completions', None), 'responded': True},
+                ],
+                [MeasuredUsage(120, 0, 0, 40, None), None, None],
+                id='requests',
+            ),
+        ],
+    )
+    def test_records_each_response_in_the_job_directory(
+        self,
+        logs_dir: Path,
+        requests: list[dict[str, Any]],
+        expected: list[MeasuredUsage | None],
+    ) -> None:
+        labels = Labels(system='acme-large', fingerprint='0' * 12)
+
+        append_attempt(logs_dir, labels, START, requests)
+        append_attempt(logs_dir, labels, START, requests)
+
+        lines = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
+        attempts = [Attempt.model_validate_json(line) for line in lines]
+        assert [(item.trial, item.responses) for item in attempts] == [
+            ('trial', expected)
+        ] * 2

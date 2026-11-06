@@ -35,6 +35,7 @@ from assistant_bench.collection import Collection
 from assistant_bench.families import Family, Gate, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output, write_outputs
 from assistant_bench.tasks import render_task_config
@@ -105,6 +106,30 @@ def write_job(job_dir: Path) -> None:
     job_dir.mkdir(parents=True)
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+SPENDER = make_system(name='large', context_window=2_000_000, max_output_tokens=200_000)
+
+
+def write_spent_attempt(
+    job_dir: Path,
+    system: str = 'large',
+    responses: tuple[MeasuredUsage | None, ...] = (
+        MeasuredUsage(1_000_000, 0, 0, 100_000, None),
+        None,
+    ),
+) -> None:
+    """Record an attempt, by default of a $3 response and an unmeasured one."""
+    job_dir.mkdir(parents=True)
+    attempt = Attempt(
+        trial='c__1',
+        system=system,
+        fingerprint='fp',
+        started_at=datetime(2026, 10, 21, tzinfo=UTC),
+        finished_at=datetime(2026, 10, 21, 0, 1, tzinfo=UTC),
+        responses=list(responses),
+    )
+    (job_dir / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
 
 
 def write_closed_report(family: str, frozen: str | None) -> None:
@@ -1029,12 +1054,12 @@ class TestRun:
         result = invoke('run', 'smoke-text')
 
         (job,) = submitted
-        assert (result.exit_code, result.stdout, result.stderr) == (
+        assert (result.exit_code, result.stderr) == (
             3,
-            'Family `smoke-text`: 1 output, 0 errored.\n',
             'Harbor exited with code 3. Browse its trials with '
             f'`harbor view {jobs.job_path(job)}`.\n',
         )
+        assert result.stdout.endswith('Family `smoke-text`: 1 output, 0 errored.\n')
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
@@ -1115,6 +1140,153 @@ class TestRun:
             + ''.join(f'{line.format(current=current)}\n' for line in expected),
         )
         assert submitted == []
+
+    @pytest.mark.parametrize(
+        ('budget', 'exit_code', 'stderr'),
+        [
+            pytest.param(19, 0, '', id='within'),
+            pytest.param(
+                17,
+                1,
+                'Family `f` would reach $18.00, over its `budget_usd` of $17.00: '
+                '`large` $6.00 spent and $12.00 projected.\n',
+                id='over',
+            ),
+        ],
+    )
+    def test_refuses_a_run_whose_projection_exceeds_the_budget(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        budget: int,
+        exit_code: int,
+        stderr: str,
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write(f'budget_usd = {budget}\n')
+        resolved['large'] = SPENDER
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+
+        result = invoke('run', 'f')
+
+        assert (result.exit_code, result.stderr) == (exit_code, stderr)
+        assert result.stdout.startswith(
+            'System `large`: 2 pending trials at $6.00 each from its own usage, '
+            f'$12.00 in all.\nFamily `f`: $18.00 spent and projected, against a '
+            f'budget of ${budget:.2f}.\n'
+        )
+        assert len(submitted) == 1 - exit_code
+
+    def test_imputes_a_systems_unknown_costs_from_another_system(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 22\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(
+            name='small', context_window=2_000_000, max_output_tokens=200_000
+        )
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(
+            data_dir / 'jobs' / 'f' / 'job-2', 'small', (None, None, None)
+        )
+
+        result = invoke('run', 'f', '--system', 'small')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert result.stdout.startswith(
+            "System `small`: 1 pending trial at $6.00 each from another system's "
+            'usage, $6.00 in all.\nFamily `f`: $21.00 spent and projected, against '
+            'a budget of $22.00.\n'
+        )
+        assert len(submitted) == 1
+
+    def test_runs_a_system_without_an_estimate_from_an_empty_ledger(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small')
+
+        result = invoke('run', 'f', '--system', 'large')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert result.stdout.startswith(
+            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'so this run can exceed the budget.\n'
+        )
+        assert len(submitted) == 1
+
+    def test_leaves_ceiling_costs_out_of_the_budget(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 51\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'large', (None,) * 8)
+
+        result = invoke('run', 'f', '--system', 'small')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
+
+    def test_runs_an_unpriced_system_in_a_family_over_its_budget(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small', price=None)
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+
+        result = invoke('run', 'f', '--system', 'small')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
+
+    def test_runs_a_family_over_its_budget_with_nothing_pending(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        assert invoke('run', 'f').exit_code == 0
+        finish_job(submitted.pop())
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 1\n')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-spent')
+
+        result = invoke('run', 'f')
+
+        assert (result.exit_code, result.stderr) == (0, '')
+        assert len(submitted) == 1
 
     def test_refuses_a_later_family_before_running_any(
         self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
@@ -1234,62 +1406,129 @@ class TestRun:
         assert submitted == []
 
 
+class TestSpend:
+    def test_prints_the_ledger_and_the_projection_without_running(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+
+        result = invoke('spend', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'response without a known cost, imputed from its own usage.\n'
+            'System `large`: 1 pending trial at $6.00 each from its own usage, '
+            '$6.00 in all.\n'
+            'Family `f`: $12.00 spent and projected.\n'
+        )
+        assert submitted == []
+
+    def test_names_what_it_cannot_price_or_estimate(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        with (families_dir / 'f' / 'family.toml').open('a') as file:
+            file.write('budget_usd = 100\n')
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(name='small', price=None)
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'small', (None,))
+
+        result = invoke('spend', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            'System `small` is unpriced: 1 trial and 1 response used 0 input and 0 '
+            'output tokens, besides 1 unmeasured response.\n'
+            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'so this run can exceed the budget.\n'
+            'System `small`: 1 pending trial with no usage to estimate a cost from.\n'
+            'Family `f`: $0.00 spent and projected, against a budget of $100.00.\n'
+        )
+        assert submitted == []
+
+    @pytest.mark.parametrize(
+        ('attempts', 'expected'),
+        [
+            pytest.param(
+                [('job-1', 'large', (None,)), ('job-2', 'small', (None, None))],
+                [
+                    'System `large`: 1 trial and 1 response cost $0.00, besides 1 '
+                    'response without a known cost or usage to impute from, $7.00 at '
+                    'its ceiling, which the budget leaves out.',
+                    'System `small`: 1 trial and 2 responses cost $0.00, besides 2 '
+                    'responses without a known cost or usage to impute from, $14.00 '
+                    'at their ceilings, which the budget leaves out.',
+                ],
+                id='ceilings',
+            ),
+            pytest.param(
+                [
+                    (
+                        'job-1',
+                        'large',
+                        (MeasuredUsage(1_000_000, 0, 0, 100_000, None),),
+                    ),
+                    ('job-2', 'small', (None, None)),
+                ],
+                [
+                    'System `small`: 1 trial and 2 responses cost $0.00, plus $6.00 '
+                    'for 2 responses without a known cost, imputed from another '
+                    "system's usage."
+                ],
+                id='borrowed',
+            ),
+        ],
+    )
+    def test_names_borrowed_and_ceiling_costs(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        attempts: list[tuple[str, str, tuple[MeasuredUsage | None, ...]]],
+        expected: list[str],
+    ) -> None:
+        write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        resolved['small'] = make_system(
+            name='small', context_window=2_000_000, max_output_tokens=200_000
+        )
+        for job, system, responses in attempts:
+            write_spent_attempt(data_dir / 'jobs' / 'f' / job, system, responses)
+
+        result = invoke('spend', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert set(expected) <= set(result.stdout.splitlines()), result.stdout
+        assert submitted == []
+
+
 class TestCollect:
-    def test_reports_unknown_usage_and_its_cost_lower_bound(
+    def test_prints_each_systems_spend_from_the_ledger(
         self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
     ) -> None:
-        cases = write_votes_family(families_dir, ['large'], name='f')
-        cases.write_text(
-            textwrap.dedent(
-                """\
-                [[cases]]
-                id = "c"
-                category = "message"
-                source = "synthetic"
-                instruction = "Hi."
-                """
-            )
-        )
-        system = make_system(name='large')
-        resolved['large'] = system
-        config = jobs.job(load_family('f'), [system], [])
-        write_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'c__1',
-            config.agents[0],
-            task='f/c',
-            output='Hi.',
-            context=AgentContext(
-                metadata={
-                    'calls': [
-                        {
-                            'input_tokens': 1_000_000,
-                            'cache_tokens': 0,
-                            'cache_write_tokens': 0,
-                            'output_tokens': 100_000,
-                        },
-                        {},
-                    ]
-                }
-            ),
-            environment=config.environment,
-            verifier_disabled=config.verifier.disable,
-        )
+        write_votes_family(families_dir, ['large'], name='f')
+        resolved['large'] = SPENDER
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
 
         result = invoke('collect', 'f')
-        assert result.exit_code == 0, result.output
 
+        assert result.exit_code == 0, result.output
         assert (
-            'System `large` has unknown usage. Outputs affected: 1. Responses '
-            'without valid usage: 1. Collected outputs cost at least $3.00 '
-            '(reported usage only).\n'
+            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'response without a known cost, imputed from its own usage.\n'
         ) in result.output
-        (output,) = [
-            Output.model_validate_json(line)
-            for line in (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
-        ]
-        assert output.cost_usd is None
-        assert output.input_tokens is None
 
     def test_reports_an_unknown_task_author_vendor_without_a_traceback(
         self, families_dir: Path, monkeypatch: pytest.MonkeyPatch

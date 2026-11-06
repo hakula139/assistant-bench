@@ -36,6 +36,10 @@ class MessageResult:
     message: Message | None = None
     request_id: str | None = None
     complete: bool = False
+    final_usage: bool = False
+    """Whether `message_delta` delivered the final usage, which a stream broken
+    before it lacks."""
+
     latency_sec: float | None = None
 
     @property
@@ -78,6 +82,7 @@ class MessageResult:
     def details(self) -> dict[str, Any]:
         message = self.message
         return {
+            'responded': message is not None,
             'finish_reason': self.finish_reason,
             'native_stop_reason': message.stop_reason if message else None,
             'stop_details': message.stop_details.model_dump(
@@ -92,7 +97,10 @@ class MessageResult:
             'latency_sec': self.latency_sec,
             'anthropic_sdk_version': metadata.version('anthropic'),
             'anthropic_api_version': load_generation().anthropic_api_version,
-            **measure('anthropic-messages', getattr(message, 'usage', None)),
+            **measure(
+                'anthropic-messages',
+                message.usage if message and self.final_usage else None,
+            ),
         }
 
     def check(self, *, complete: bool) -> None:
@@ -141,6 +149,8 @@ async def request_messages(
                     result.message = event.message
                 if result.message is not None:
                     result.message = stream.current_message_snapshot
+                if event.type == 'message_delta':
+                    result.final_usage = True
                 if event.type == 'message_stop':
                     stopped = True
             if stopped:

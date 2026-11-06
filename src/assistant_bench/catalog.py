@@ -101,12 +101,12 @@ class Price(BaseModel):
 
     def cost(
         self,
-        input_tokens: int,
-        cached_tokens: int,
-        output_tokens: int,
-        cache_write_tokens: int = 0,
+        input_tokens: float,
+        cached_tokens: float,
+        output_tokens: float,
+        cache_write_tokens: float = 0,
     ) -> float | None:
-        """Return the USD cost of one call. `input_tokens` includes the cached ones."""
+        """Return the USD cost of the tokens. Input tokens include the cached ones."""
         if cache_write_tokens and self.cache_write is None:
             return None
         return (

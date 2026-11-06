@@ -22,6 +22,7 @@ from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate
 from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.harnesses.native import NativeCompletionError
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.outputs import Output
 from assistant_bench.scoring.gates import failed_gates
 from assistant_bench.tasks import render_tasks
@@ -103,8 +104,8 @@ def collect_reply(
 
 class TestGenerate:
     class TestVersion:
-        def test_reports_the_generation_protocol(self, tmp_path: Path) -> None:
-            agent = Generate(logs_dir=tmp_path, model_name='acme/large', **OPTIONS)
+        def test_reports_the_generation_protocol(self, logs_dir: Path) -> None:
+            agent = Generate(logs_dir=logs_dir, model_name='acme/large', **OPTIONS)
 
             version = agent.version()
 
@@ -138,7 +139,7 @@ class TestGenerate:
         def test_openai_cache_writes_survive_sdk_accounting_and_collection(
             self,
             endpoint: StubEndpoint,
-            tmp_path: Path,
+            logs_dir: Path,
             data_dir: Path,
             api: Api,
             writes: int,
@@ -159,9 +160,7 @@ class TestGenerate:
                 price=Price(input=2.0, output=10.0, cache_read=0.2),
             )
 
-            context, collected = collect_reply(
-                endpoint, tmp_path / 'agent', data_dir, system
-            )
+            context, collected = collect_reply(endpoint, logs_dir, data_dir, system)
 
             assert collected.text == 'Hello there.'
             assert (
@@ -196,7 +195,7 @@ class TestGenerate:
             ],
         )
         def test_accepts_the_answer_but_records_only_valid_measured_usage(
-            self, endpoint: StubEndpoint, tmp_path: Path, api: Api, scenario: str
+            self, endpoint: StubEndpoint, logs_dir: Path, api: Api, scenario: str
         ) -> None:
             payload = (
                 message()
@@ -264,7 +263,7 @@ class TestGenerate:
 
             context, output = run_agent(
                 endpoint,
-                tmp_path,
+                logs_dir,
                 api=api,
                 effort='high',
                 thinking_mode='anthropic-adaptive'
@@ -286,13 +285,13 @@ class TestGenerate:
             [('end_turn', 'stop'), ('max_tokens', 'length'), ('refusal', 'refusal')],
         )
         def test_records_terminal_native_text_and_measured_usage_without_regeneration(
-            self, endpoint: StubEndpoint, tmp_path: Path, stop: str, finish: str
+            self, endpoint: StubEndpoint, logs_dir: Path, stop: str, finish: str
         ) -> None:
             endpoint.stream = message_stream(message(stop_reason=stop))
 
             context, output = run_agent(
                 endpoint,
-                tmp_path,
+                logs_dir,
                 api='anthropic-messages',
                 effort='high',
                 thinking_mode='anthropic-adaptive',
@@ -311,7 +310,7 @@ class TestGenerate:
             assert context.metadata['native_stop_reason'] == stop
             assert context.metadata['reasoning_tokens'] is None
             assert (
-                json.loads((tmp_path / 'message.json').read_text())['content'][0][
+                json.loads((logs_dir / 'message.json').read_text())['content'][0][
                     'signature'
                 ]
                 == 'signed-msg-1'
@@ -359,7 +358,7 @@ class TestGenerate:
         def test_collects_the_native_refusal_detail_into_the_output_record(
             self,
             endpoint: StubEndpoint,
-            tmp_path: Path,
+            logs_dir: Path,
             data_dir: Path,
             stop: str,
             details: dict[str, Any] | None,
@@ -373,7 +372,7 @@ class TestGenerate:
                 api='anthropic-messages', thinking_mode='anthropic-adaptive'
             )
 
-            _, collected = collect_reply(endpoint, tmp_path / 'agent', data_dir, system)
+            _, collected = collect_reply(endpoint, logs_dir, data_dir, system)
 
             assert collected.model_dump(include={'finish_reason', 'stop_details'}) == {
                 'finish_reason': finish,
@@ -381,7 +380,7 @@ class TestGenerate:
             }
 
         def test_neither_publishes_nor_counts_a_clean_early_eof(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.stream = message_stream(message())[:-1]
             kwargs: dict[str, Any] = OPTIONS | {
@@ -390,7 +389,7 @@ class TestGenerate:
                 'thinking_mode': 'anthropic-adaptive',
             }
             agent = Generate(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name='acme/large',
                 extra_env=endpoint.env,
                 **kwargs,
@@ -402,8 +401,8 @@ class TestGenerate:
                     agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context)
                 )
 
-            assert not (tmp_path / OUTPUT_FILE).exists()
-            assert (tmp_path / 'message.json').exists()
+            assert not (logs_dir / OUTPUT_FILE).exists()
+            assert (logs_dir / 'message.json').exists()
             assert len(endpoint.requests) == 1
             assert context.metadata is not None
             assert context.metadata['input_tokens'] == 130
@@ -423,7 +422,7 @@ class TestGenerate:
             messages_clients: list[AsyncAnthropic],
             export: NixosConfigExport,
             model_requests: list[httpx2.Request],
-            tmp_path: Path,
+            logs_dir: Path,
             api: str,
         ) -> None:
             gate = endpoint.response_gate = threading.Event()
@@ -434,7 +433,7 @@ class TestGenerate:
                 else None,
             }
             agent = Generate(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name='acme/large',
                 extra_env=endpoint.env,
                 **kwargs,
@@ -479,7 +478,7 @@ class TestGenerate:
             )
             assert client.max_retries == 0
             assert client.is_closed()
-            assert not (tmp_path / OUTPUT_FILE).exists()
+            assert not (logs_dir / OUTPUT_FILE).exists()
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -500,14 +499,14 @@ class TestGenerate:
 
         @pytest.mark.parametrize('effort', [None, 'high', 'max'])
         def test_sends_a_stateless_responses_request_and_records_actual_usage(
-            self, endpoint: StubEndpoint, tmp_path: Path, effort: str | None
+            self, endpoint: StubEndpoint, logs_dir: Path, effort: str | None
         ) -> None:
             endpoint.response = response()
             Response.model_validate(endpoint.response)
 
             context, output = run_agent(
                 endpoint,
-                tmp_path,
+                logs_dir,
                 api='openai-responses',
                 effort=effort,
                 system_prompt='Be direct.',
@@ -545,6 +544,7 @@ class TestGenerate:
                 'reasoning_tokens': 25,
                 'reported_usage': endpoint.response['usage'],
                 'usage_invalid': False,
+                'responded': True,
                 'finish_reason': 'stop',
                 'response_status': 'completed',
                 'incomplete_reason': None,
@@ -557,7 +557,7 @@ class TestGenerate:
             }
 
         def test_keeps_all_responses_text_exactly_and_excludes_reasoning(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             payload = response(' leading ')
             message = payload['output'][0]
@@ -582,7 +582,7 @@ class TestGenerate:
             Response.model_validate(payload)
             endpoint.response = payload
 
-            _, output = run_agent(endpoint, tmp_path, api='openai-responses')
+            _, output = run_agent(endpoint, logs_dir, api='openai-responses')
 
             assert output.read_bytes() == b' leading \nsecond\r\nlast '
             assert len(endpoint.requests) == 1
@@ -601,7 +601,7 @@ class TestGenerate:
         def test_normalizes_responses_completion_without_retrying_or_discarding_it(
             self,
             endpoint: StubEndpoint,
-            tmp_path: Path,
+            logs_dir: Path,
             status: str,
             reason: str | None,
             refusal: str | None,
@@ -622,7 +622,7 @@ class TestGenerate:
                 samples=1,
             )
 
-            context, output = run_agent(endpoint, tmp_path, api='openai-responses')
+            context, output = run_agent(endpoint, logs_dir, api='openai-responses')
 
             assert output.read_text() == 'A partial or complete answer.'
             assert context.n_output_tokens == 40
@@ -638,7 +638,7 @@ class TestGenerate:
 
         @pytest.mark.parametrize('present', [True, False], ids=['null', 'omitted'])
         def test_keeps_responses_usage_unknown_when_none_was_reported(
-            self, endpoint: StubEndpoint, tmp_path: Path, present: bool
+            self, endpoint: StubEndpoint, logs_dir: Path, present: bool
         ) -> None:
             endpoint.response = response()
             if present:
@@ -647,7 +647,7 @@ class TestGenerate:
                 endpoint.response.pop('usage')
             Response.model_validate(endpoint.response)
 
-            context, output = run_agent(endpoint, tmp_path, api='openai-responses')
+            context, output = run_agent(endpoint, logs_dir, api='openai-responses')
 
             assert output.read_text() == 'Hello there.'
             assert (
@@ -680,7 +680,7 @@ class TestGenerate:
         def test_raises_for_unfinished_responses_while_retaining_usage_and_provenance(
             self,
             endpoint: StubEndpoint,
-            tmp_path: Path,
+            logs_dir: Path,
             status: str | None,
             error: bool,
         ) -> None:
@@ -692,7 +692,7 @@ class TestGenerate:
             endpoint.response = payload
             kwargs: dict[str, Any] = OPTIONS | {'api': 'openai-responses'}
             agent = Generate(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name='acme/large',
                 extra_env=endpoint.env,
                 **kwargs,
@@ -706,7 +706,7 @@ class TestGenerate:
                     agent.run('Greet me.', MagicMock(spec=BaseEnvironment), context)
                 )
 
-            assert (tmp_path / OUTPUT_FILE).read_text() == 'Partial output.'
+            assert (logs_dir / OUTPUT_FILE).read_text() == 'Partial output.'
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -723,18 +723,32 @@ class TestGenerate:
             assert len(endpoint.requests) == 1
 
         def test_records_a_chat_refusal_without_treating_it_as_a_complete_answer(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = completion(content=None)
             endpoint.response['choices'][0]['message']['refusal'] = 'I cannot answer.'
 
-            context, output = run_agent(endpoint, tmp_path)
+            context, output = run_agent(endpoint, logs_dir)
 
             assert output.read_text() == ''
             assert context.metadata is not None
             assert context.metadata['finish_reason'] == 'refusal'
             assert context.metadata['refusal'] == 'I cannot answer.'
             assert len(endpoint.requests) == 1
+
+        def test_records_the_usage_of_a_reply_without_choices(
+            self, endpoint: StubEndpoint, logs_dir: Path
+        ) -> None:
+            endpoint.response = completion() | {'choices': []}
+
+            with pytest.raises(IndexError):
+                run_agent(endpoint, logs_dir)
+
+            attempts = logs_dir.parent.parent / ATTEMPTS_FILE
+            (line,) = attempts.read_text().splitlines()
+            assert Attempt.model_validate_json(line).responses == [
+                MeasuredUsage(120, 100, 0, 40, 25)
+            ]
 
         def test_preserves_a_truncated_attempt_when_a_new_protocol_regenerates_it(
             self, endpoint: StubEndpoint, tmp_path: Path
@@ -752,7 +766,9 @@ class TestGenerate:
             )
 
             first, first_output = run_agent(
-                endpoint, tmp_path / 'bounded', **agent_kwargs(bounded)
+                endpoint,
+                tmp_path / 'job' / 'bounded' / 'agent',
+                **agent_kwargs(bounded),
             )
             generous = bounded.model_copy(
                 update={'max_output_tokens': 65536, 'context_window': 262144}
@@ -760,7 +776,9 @@ class TestGenerate:
             endpoint.response = completion(content='A complete answer.')
 
             second, second_output = run_agent(
-                endpoint, tmp_path / 'generous', **agent_kwargs(generous)
+                endpoint,
+                tmp_path / 'job' / 'generous' / 'agent',
+                **agent_kwargs(generous),
             )
 
             assert [
@@ -780,12 +798,12 @@ class TestGenerate:
             self,
             agent_export: tuple[dict[str, str], NixosConfigExport],
             endpoint: StubEndpoint,
-            tmp_path: Path,
+            logs_dir: Path,
         ) -> None:
             env, export = agent_export
             Generate.preflight(OPTIONS, endpoint.env | env)
 
-            context, output = run_agent(endpoint, tmp_path, env=env)
+            context, output = run_agent(endpoint, logs_dir, env=env)
 
             assert output.read_text() == 'Hello there.'
             assert len(endpoint.requests) == 1
@@ -794,9 +812,9 @@ class TestGenerate:
 
         @pytest.mark.parametrize('effort', ['high', 'max'])
         def test_sends_one_request_and_records_the_reply(
-            self, endpoint: StubEndpoint, tmp_path: Path, effort: str
+            self, endpoint: StubEndpoint, logs_dir: Path, effort: str
         ) -> None:
-            context, output = run_agent(endpoint, tmp_path, effort=effort)
+            context, output = run_agent(endpoint, logs_dir, effort=effort)
 
             (request,) = endpoint.requests
             assert request.path == '/v1/chat/completions'
@@ -827,6 +845,7 @@ class TestGenerate:
                 'reasoning_tokens': 25,
                 'reported_usage': endpoint.response['usage'],
                 'usage_invalid': False,
+                'responded': True,
                 'finish_reason': 'stop',
                 'refusal': None,
                 'response_model': 'large-2026',
@@ -835,9 +854,9 @@ class TestGenerate:
             }
 
         def test_omits_effort_and_prepends_a_system_prompt(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
-            run_agent(endpoint, tmp_path, system_prompt='Be brief.')
+            run_agent(endpoint, logs_dir, system_prompt='Be brief.')
 
             (request,) = endpoint.requests
             assert 'reasoning_effort' not in request.body
@@ -847,35 +866,35 @@ class TestGenerate:
             ]
 
         def test_keeps_a_reply_cut_off_by_the_token_limit(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = completion(content='Hello th', finish_reason='length')
 
-            context, output = run_agent(endpoint, tmp_path)
+            context, output = run_agent(endpoint, logs_dir)
 
             assert output.read_text() == 'Hello th'
             assert context.metadata is not None
             assert context.metadata['finish_reason'] == 'length'
 
         def test_counts_absent_token_details_as_unknown_reasoning_and_no_cache(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = completion(
                 usage={'prompt_tokens': 22, 'completion_tokens': 31, 'total_tokens': 53}
             )
 
-            context, _ = run_agent(endpoint, tmp_path)
+            context, _ = run_agent(endpoint, logs_dir)
 
             assert context.n_cache_tokens == 0
             assert context.metadata is not None
             assert context.metadata['reasoning_tokens'] is None
 
         def test_leaves_tokens_unknown_when_the_endpoint_reports_no_usage(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             del endpoint.response['usage']
 
-            context, output = run_agent(endpoint, tmp_path)
+            context, output = run_agent(endpoint, logs_dir)
 
             assert output.read_text() == 'Hello there.'
             assert (
@@ -887,42 +906,42 @@ class TestGenerate:
             assert context.metadata['reasoning_tokens'] is None
 
         def test_writes_an_empty_output_for_a_reply_without_content(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = completion(content=None, finish_reason='length')
 
-            _, output = run_agent(endpoint, tmp_path)
+            _, output = run_agent(endpoint, logs_dir)
 
             assert output.read_text() == ''
 
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_raises_on_a_server_error_without_retrying(
-            self, endpoint: StubEndpoint, tmp_path: Path, api: str
+            self, endpoint: StubEndpoint, logs_dir: Path, api: str
         ) -> None:
             endpoint.status = 503
             endpoint.response = {'error': {'message': 'unavailable'}}
 
             with pytest.raises(openai.InternalServerError):
-                run_agent(endpoint, tmp_path, api=api)
+                run_agent(endpoint, logs_dir, api=api)
 
             assert len(endpoint.requests) == 1
-            assert not (tmp_path / OUTPUT_FILE).exists()
+            assert not (logs_dir / OUTPUT_FILE).exists()
 
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_reaches_an_ipv6_endpoint_without_a_local_address(
-            self, ipv6_endpoint: StubEndpoint, tmp_path: Path, api: str
+            self, ipv6_endpoint: StubEndpoint, logs_dir: Path, api: str
         ) -> None:
             if api == 'openai-responses':
                 ipv6_endpoint.response = response()
 
-            _, output = run_agent(ipv6_endpoint, tmp_path, api=api)
+            _, output = run_agent(ipv6_endpoint, logs_dir, api=api)
 
             assert output.read_text() == 'Hello there.'
             assert len(ipv6_endpoint.requests) == 1
 
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_binds_connections_to_the_local_address_the_env_names(
-            self, endpoint: StubEndpoint, tmp_path: Path, api: str
+            self, endpoint: StubEndpoint, logs_dir: Path, api: str
         ) -> None:
             if api == 'openai-responses':
                 endpoint.response = response()
@@ -930,10 +949,10 @@ class TestGenerate:
             # 192.0.2.1 is reserved for documentation, so no host owns it.
             with pytest.raises(openai.APIConnectionError):
                 run_agent(
-                    endpoint, tmp_path, env={LOCAL_ADDRESS_VAR: '192.0.2.1'}, api=api
+                    endpoint, logs_dir, env={LOCAL_ADDRESS_VAR: '192.0.2.1'}, api=api
                 )
             _, output = run_agent(
-                endpoint, tmp_path, env={LOCAL_ADDRESS_VAR: '127.0.0.1'}, api=api
+                endpoint, logs_dir, env={LOCAL_ADDRESS_VAR: '127.0.0.1'}, api=api
             )
 
             assert output.read_text() == 'Hello there.'
@@ -941,17 +960,17 @@ class TestGenerate:
 
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_trusts_the_ca_bundle_the_env_names(
-            self, tls_endpoint: StubEndpoint, tmp_path: Path, api: str
+            self, tls_endpoint: StubEndpoint, logs_dir: Path, api: str
         ) -> None:
             assert tls_endpoint.ca_file is not None
             if api == 'openai-responses':
                 tls_endpoint.response = response()
 
             with pytest.raises(openai.APIConnectionError):
-                run_agent(tls_endpoint, tmp_path, api=api)
+                run_agent(tls_endpoint, logs_dir, api=api)
             _, output = run_agent(
                 tls_endpoint,
-                tmp_path,
+                logs_dir,
                 env={CA_FILE_VAR: str(tls_endpoint.ca_file)},
                 api=api,
             )

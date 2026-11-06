@@ -1,4 +1,4 @@
-"""The family arguments and the name refusal the `bench` commands share."""
+"""The family arguments, system option, and name refusals the commands share."""
 
 from collections.abc import Collection, Iterable
 from typing import Annotated
@@ -60,4 +60,12 @@ OptionalFamilyArgument = Annotated[
 FamilyArguments = Annotated[
     list[str] | None,
     typer.Argument(metavar='FAMILY...', help=FAMILY_HELP, callback=_families),
+]
+SystemOptions = Annotated[
+    list[str] | None,
+    typer.Option(
+        '--system',
+        help='Limit `bench run` to this system, in every family that lists it '
+        'unless a family is named. Repeat for several.',
+    ),
 ]

@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 
@@ -21,15 +22,18 @@ from assistant_bench.catalog import System
 from assistant_bench.families import (
     Family,
     case_task,
+    load_cases,
     load_family,
 )
 from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
+from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
     START,
     VOTES,
+    break_setting,
     finish_job,
     make_system,
     response,
@@ -396,6 +400,45 @@ class TestCheckJob:
         )
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
+
+
+class TestPendingTrials:
+    def test_counts_the_trials_harbor_would_rerun(self) -> None:
+        family = load_family('smoke-text')
+        large = make_system()
+        small = make_system(name='small', route='acme/small')
+        tasks = render_tasks(family, load_cases(family)[:2])
+        finish_job(
+            jobs.job(family, [large], tasks[:1]).model_copy(update={'job_name': 'old'})
+        )
+
+        pending = jobs.pending_trials(jobs.job(family, [large, small], tasks))
+
+        assert pending == Counter({'acme-large': 1, 'small': 2})
+
+    def test_counts_no_regrade_of_a_minor_bumped_task(self, families_dir: Path) -> None:
+        family = voted_tasks(families_dir, 'again', 'echo')
+        systems = jobs.family_systems(family, [make_system()])
+        tasks = [case_task(family, task_id) for task_id in ('again', 'echo')]
+        first = finish_job(jobs.job(family, systems, tasks))
+        break_setting(tasks[1], ('task', 'version'), '1.1.0')
+        job = jobs.job(family, systems, tasks)
+        plan = asyncio.run(JobPlan.from_config(job))
+        (source,) = job.source_jobs
+        diff = compare_job_trials(plan, load_source_trials([(source, first)]))
+        assert [trial.action for trial in diff.trials] == [
+            DiffAction.REUSE,
+            DiffAction.REGRADE,
+        ]
+
+        pending = jobs.pending_trials(job)
+
+        assert pending == Counter()
+
+    def test_counts_nothing_without_tasks(self) -> None:
+        pending = jobs.pending_trials(jobs.job(VOTES, [make_system()], []))
+
+        assert pending == Counter()
 
 
 class TestHasJobs:

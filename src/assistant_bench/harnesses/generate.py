@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, assert_never, override
 
 from harbor.agents.base import BaseAgent
@@ -18,7 +19,7 @@ from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
-from assistant_bench.harnesses.usage import MeasuredUsage, measure
+from assistant_bench.harnesses.usage import MeasuredUsage, append_attempt, measure
 
 
 OUTPUT_FILE = 'output.txt'
@@ -70,6 +71,16 @@ class Generate(BaseAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        assert isinstance(self.options, GenerateOptions)
+        started_at = datetime.now(UTC)
+        try:
+            await self._generate(instruction, context)
+        finally:
+            append_attempt(
+                self.logs_dir, self.options, started_at, [context.metadata or {}]
+            )
+
+    async def _generate(self, instruction: str, context: AgentContext) -> None:
         assert isinstance(self.options, GenerateOptions)
         nixos_config_rev = load_export(self._get_env).rev
         endpoint = Endpoint.read(self._get_env, self.options.api)
@@ -144,22 +155,25 @@ class Generate(BaseAgent):
             extra_body=extra_body,
         )
         completion = raw.parse()
-        choice = completion.choices[0]
-        (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
-
-        details = measure('openai-chat-completions', completion.usage)
+        details = {
+            **measure('openai-chat-completions', completion.usage),
+            'responded': True,
+            'response_model': completion.model,
+            'request_id': raw.headers.get('x-request-id'),
+        }
+        context.metadata = details
         usage = MeasuredUsage.from_details(details)
         if usage is not None:
             usage.record(context)
 
+        choice = completion.choices[0]
+        (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
         return {
             **details,
             'finish_reason': 'refusal'
             if choice.message.refusal
             else choice.finish_reason,
             'refusal': choice.message.refusal,
-            'response_model': completion.model,
-            'request_id': raw.headers.get('x-request-id'),
         }
 
     async def _responses(

@@ -159,6 +159,14 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
+@pytest.fixture
+def logs_dir(tmp_path: Path) -> Path:
+    """Return an agent's logs directory, nested in a trial and a job as Harbor does."""
+    path = tmp_path / 'job' / 'trial' / 'agent'
+    path.mkdir(parents=True)
+    return path
+
+
 @pytest.fixture(autouse=True)
 def reports_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Read and write closed reports outside the committed `reports/`."""

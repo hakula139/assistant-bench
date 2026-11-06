@@ -13,7 +13,7 @@ from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TimingInfo
 
 from assistant_bench import collection, jobs
-from assistant_bench.catalog import Price, System
+from assistant_bench.catalog import System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -25,9 +25,12 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
 from assistant_bench.scoring.gates import failed_gates
+from assistant_bench.spend import Entry
 from assistant_bench.tasks import (
     TASK_VERSION,
     render_task_config,
@@ -117,6 +120,35 @@ class TestCollect:
         cases = data_dir / 'cases' / 'smoke-text.toml'
         cases.parent.mkdir(parents=True)
         cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.toml').read_text())
+
+    def test_records_the_ledger_before_refusing_an_unreadable_trial(
+        self, data_dir: Path
+    ) -> None:
+        job = data_dir / 'jobs' / 'f' / 'job-1'
+        write_trial(
+            job,
+            'c__1',
+            trial_config.AgentConfig(
+                import_path='x:Y', kwargs={'system': 'acme-large'}
+            ),
+            task='f/c',
+        )
+        (job / 'c__1' / 'lock.json').unlink()
+        attempt = Attempt(
+            trial='c__1',
+            system='acme-large',
+            fingerprint='fp',
+            started_at=START,
+            finished_at=START,
+            responses=[None],
+        )
+        (job / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
+
+        with pytest.raises(InputError):
+            collection.collect(VOTES, {'acme-large': make_system()})
+
+        (line,) = (data_dir / 'spend' / 'f.jsonl').read_text().splitlines()
+        assert Entry.model_validate_json(line).trial == 'c__1'
 
     @pytest.mark.parametrize('deleted', [False, True], ids=['edited', 'removed'])
     def test_excludes_stale_case_sources_without_rerendering_installed_tasks(
@@ -1051,144 +1083,6 @@ class TestCollect:
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"
         )
-
-    @pytest.mark.parametrize(
-        ('metadata', 'unreported', 'lower_bound'),
-        [
-            pytest.param(
-                {
-                    'calls': [
-                        {
-                            'input_tokens': 1_000,
-                            'cache_tokens': 600,
-                            'cache_write_tokens': 100,
-                            'output_tokens': 500,
-                        },
-                        {},
-                        {'usage_invalid': True},
-                    ]
-                },
-                2,
-                0.00597,
-                id='terminal-responses',
-            ),
-            pytest.param(
-                {'usage_invalid': True, 'response_model': 'large-2026'},
-                1,
-                0,
-                id='single-response',
-            ),
-            pytest.param({}, 0, 0, id='no-response'),
-            pytest.param(
-                {
-                    'reported_usage': None,
-                    'response_model': None,
-                    'response_id': None,
-                    'request_id': 'req-1',
-                    'response_status': 'incomplete',
-                    'usage_invalid': False,
-                },
-                0,
-                0,
-                id='no-native-message',
-            ),
-            pytest.param(
-                {
-                    'reported_usage': None,
-                    'response_model': 'large-2026',
-                    'response_id': None,
-                    'response_status': 'completed',
-                    'usage_invalid': False,
-                },
-                1,
-                0,
-                id='native-message-without-usage-or-id',
-            ),
-            pytest.param(
-                {
-                    'calls': [
-                        {
-                            'input_tokens': 1_000,
-                            'cache_tokens': 0,
-                            'cache_write_tokens': 100,
-                            'cache_write_unpriced': True,
-                            'output_tokens': 500,
-                        },
-                        {},
-                    ]
-                },
-                1,
-                0,
-                id='unpriced-cache-write',
-            ),
-        ],
-    )
-    def test_counts_the_unreported_responses_and_reported_cost_of_unknown_usage(
-        self,
-        data_dir: Path,
-        metadata: dict[str, Any],
-        unreported: int,
-        lower_bound: float,
-    ) -> None:
-        job_dir = data_dir / 'jobs' / 'f' / 'job-1'
-        system = make_system()
-        record_trial(
-            job_dir,
-            'a__1',
-            current_agent(),
-            task='f/a',
-            context=AgentContext(metadata=metadata),
-        )
-        record_trial(
-            job_dir,
-            'b__1',
-            current_agent(),
-            task='f/b',
-            context=AgentContext(
-                n_input_tokens=1_000,
-                n_cache_tokens=600,
-                n_output_tokens=500,
-                metadata={'cache_write_tokens': 100},
-            ),
-        )
-        collected = collection.collect(VOTES, {system.name: system})
-
-        (gap,) = collected.usage_gaps
-        assert (gap.system, gap.outputs, gap.unreported) == (system.name, 1, unreported)
-        assert gap.reported_cost_usd == pytest.approx(lower_bound + 0.00597)
-        unknown, known = collected.outputs
-        assert (unknown.input_tokens, unknown.cost_usd) == (None, None)
-        assert known.cost_usd == pytest.approx(0.00597)
-
-    @pytest.mark.parametrize(
-        ('price', 'context'),
-        [
-            pytest.param(
-                make_system().price,
-                AgentContext(n_input_tokens=10, n_output_tokens=20),
-                id='known-usage',
-            ),
-            pytest.param(
-                None, AgentContext(metadata={'usage_invalid': True}), id='unpriced'
-            ),
-        ],
-    )
-    def test_reports_no_gap_for_known_usage_or_an_unpriced_system(
-        self, data_dir: Path, price: Price | None, context: AgentContext
-    ) -> None:
-        system = make_system(price=price)
-        record_trial(
-            data_dir / 'jobs' / 'f' / 'job-1',
-            'a__1',
-            current_agent(system=system),
-            task='f/a',
-            context=context,
-        )
-
-        collected = collection.collect(VOTES, {system.name: system})
-
-        assert [output.case for output in collected.outputs] == ['a']
-        assert collected.usage_gaps == []
 
 
 class TestReadTrials:

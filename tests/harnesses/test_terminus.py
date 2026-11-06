@@ -52,6 +52,7 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.responses import ResponsesLLM
 from assistant_bench.harnesses.terminus import ChatCompletionsLLM, Terminus
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
 from assistant_bench.outputs import Output, StopDetails
 from support import (
     StubEndpoint,
@@ -149,7 +150,7 @@ class NativeProbe(Terminus):
 
 
 @pytest.fixture
-def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativeProbe]:
+def responses_agent(endpoint: StubEndpoint, logs_dir: Path) -> Iterator[NativeProbe]:
     system = make_system(
         harness='terminus-2',
         api='openai-responses',
@@ -158,7 +159,7 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
         context_window=131072,
     )
     agent = NativeProbe(
-        logs_dir=tmp_path,
+        logs_dir=logs_dir,
         model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
@@ -169,7 +170,7 @@ def responses_agent(endpoint: StubEndpoint, tmp_path: Path) -> Iterator[NativePr
 
 @pytest.fixture
 def messages_agent(
-    endpoint: StubEndpoint, tmp_path: Path, messages_clients: list[AsyncAnthropic]
+    endpoint: StubEndpoint, logs_dir: Path, messages_clients: list[AsyncAnthropic]
 ) -> Iterator[NativeProbe]:
     system = make_system(
         harness='terminus-2',
@@ -180,7 +181,7 @@ def messages_agent(
         context_window=131072,
     )
     agent = NativeProbe(
-        logs_dir=tmp_path,
+        logs_dir=logs_dir,
         model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
@@ -193,7 +194,7 @@ def run_and_collect(
     system: System,
     endpoint: StubEndpoint,
     terminal_session: TmuxSession,
-    tmp_path: Path,
+    logs_dir: Path,
     families_dir: Path,
     data_dir: Path,
     error: type[Exception] | None = None,
@@ -206,7 +207,7 @@ def run_and_collect(
     family = load_family('f')
     config = jobs.job(family, [system], [])
     agent = NativeProbe(
-        logs_dir=tmp_path,
+        logs_dir=logs_dir,
         model_name=system.route,
         extra_env=endpoint.env,
         **agent_kwargs(system),
@@ -268,7 +269,7 @@ class TestTerminus:
         assert endpoint.requests == []
 
     def test_uses_native_context_management_without_an_artificial_turn_limit(
-        self, endpoint: StubEndpoint, tmp_path: Path
+        self, endpoint: StubEndpoint, logs_dir: Path
     ) -> None:
         system = make_system(
             route='acme/context-check',
@@ -277,7 +278,7 @@ class TestTerminus:
             context_window=131072,
         )
         agent = NativeProbe(
-            logs_dir=tmp_path,
+            logs_dir=logs_dir,
             model_name=system.route,
             extra_env=endpoint.env,
             **agent_kwargs(system),
@@ -566,7 +567,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             families_dir: Path,
             data_dir: Path,
             api: Api,
@@ -590,7 +591,7 @@ class TestTerminus:
             )
 
             context, collected = run_and_collect(
-                system, endpoint, terminal_session, tmp_path, families_dir, data_dir
+                system, endpoint, terminal_session, logs_dir, families_dir, data_dir
             )
 
             assert (
@@ -616,7 +617,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             families_dir: Path,
             data_dir: Path,
             reported: tuple[int | None, ...],
@@ -637,7 +638,7 @@ class TestTerminus:
             )
 
             _, collected = run_and_collect(
-                system, endpoint, terminal_session, tmp_path, families_dir, data_dir
+                system, endpoint, terminal_session, logs_dir, families_dir, data_dir
             )
 
             assert len(endpoint.requests) == 2
@@ -648,7 +649,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
-            tmp_path: Path,
+            logs_dir: Path,
         ) -> None:
             partial = message('Partial.', message_id='partial')
             completed = message('Recovered.', message_id='recovered')
@@ -669,7 +670,7 @@ class TestTerminus:
                 [{'role': 'user', 'content': 'Greet me.'}]
             ] * 2
             assert [
-                json.loads((tmp_path / f'message-{ordinal}.json').read_text())['id']
+                json.loads((logs_dir / f'message-{ordinal}.json').read_text())['id']
                 for ordinal in (1, 2)
             ] == ['partial', 'recovered']
             assert isinstance(messages_agent.client, MessagesLLM)
@@ -737,7 +738,7 @@ class TestTerminus:
             ],
         )
         def test_invalid_sdk_usage_preserves_the_answer_without_entering_accounting(
-            self, endpoint: StubEndpoint, tmp_path: Path, api: Api, scenario: str
+            self, endpoint: StubEndpoint, logs_dir: Path, api: Api, scenario: str
         ) -> None:
             payload = (
                 message()
@@ -770,7 +771,7 @@ class TestTerminus:
                 else None,
             )
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -808,7 +809,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             families_dir: Path,
             data_dir: Path,
             stop: str,
@@ -839,7 +840,7 @@ class TestTerminus:
                 system,
                 endpoint,
                 terminal_session,
-                tmp_path,
+                logs_dir,
                 families_dir,
                 data_dir,
                 NativeCompletionError,
@@ -979,6 +980,32 @@ class TestTerminus:
             assert client.is_closed()
             assert len(endpoint.requests) == 2
 
+        def test_records_the_usage_of_a_broken_stream_in_the_attempt(
+            self,
+            endpoint: StubEndpoint,
+            messages_agent: NativeProbe,
+            terminal_session: TmuxSession,
+            logs_dir: Path,
+        ) -> None:
+            text = terminus_completion()['choices'][0]['message']['content']
+            endpoint.streams = [
+                message_stream(message('Partial.', message_id='partial'))[:-1],
+                *(
+                    message_stream(message(text, message_id=name))
+                    for name in ('finished', 'confirmed')
+                ),
+            ]
+            context = AgentContext()
+
+            asyncio.run(messages_agent.execute(terminal_session, context))
+
+            assert context.metadata is not None
+            assert len(context.metadata['calls']) == 2
+            (line,) = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
+            attempt = Attempt.model_validate_json(line)
+            assert (attempt.trial, len(attempt.responses)) == ('trial', 3)
+            assert None not in attempt.responses
+
         def test_native_budget_continuation_keeps_signed_blocks_and_all_usage(
             self,
             endpoint: StubEndpoint,
@@ -1034,7 +1061,7 @@ class TestTerminus:
             endpoint: StubEndpoint,
             monkeypatch: pytest.MonkeyPatch,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
         ) -> None:
             endpoint.responses = [
                 terminus_completion(task_complete=False),
@@ -1047,11 +1074,11 @@ class TestTerminus:
             system = make_system(
                 harness='terminus-2', max_output_tokens=32768, context_window=131072
             )
-            api_log = tmp_path / 'api.json'
+            api_log = logs_dir / 'api.json'
             kwargs = agent_kwargs(system)
             kwargs['llm_call_kwargs']['logging_path'] = api_log
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **kwargs,
@@ -1106,12 +1133,12 @@ class TestTerminus:
             ) == ChatCompletion.model_validate(terminus_completion())
 
         def test_records_no_chat_call_for_an_error_body_without_choices(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = {'error': {'message': 'Unavailable.'}}
             system = make_system(harness='terminus-2')
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1127,13 +1154,13 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             endpoint_clients: list[openai.AsyncOpenAI],
-            tmp_path: Path,
+            logs_dir: Path,
         ) -> None:
             endpoint.status = 503
             endpoint.response = {'error': {'message': 'Unavailable.'}}
             system = make_system(harness='terminus-2')
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1180,7 +1207,7 @@ class TestTerminus:
             data_dir: Path,
             model_requests: list[httpx2.Request],
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             api: str,
             prior_usage: str | None,
             tokens: tuple[int | None, int | None, int | None],
@@ -1224,7 +1251,7 @@ class TestTerminus:
             family = load_family('f')
             config = jobs.job(family, [system], [])
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1303,9 +1330,9 @@ class TestTerminus:
                     result['response_status'] for result in context.metadata['calls']
                 ] == ([] if prior_usage is None else ['completed'])
                 assert sorted(
-                    path.name for path in tmp_path.glob('response-*.json')
+                    path.name for path in logs_dir.glob('response-*.json')
                 ) == ([] if prior_usage is None else ['response-1.json'])
-            trajectory = json.loads((tmp_path / 'trajectory.json').read_text())
+            trajectory = json.loads((logs_dir / 'trajectory.json').read_text())
             assert [
                 step['message']
                 for step in trajectory['steps']
@@ -1470,7 +1497,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             missing_usage: bool,
         ) -> None:
             partial_text = '{"analysis": "partial'
@@ -1482,7 +1509,7 @@ class TestTerminus:
                 harness='terminus-2', max_output_tokens=32768, context_window=131072
             )
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1532,7 +1559,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             object_type: str | None,
         ) -> None:
             second = terminus_completion()
@@ -1545,7 +1572,7 @@ class TestTerminus:
                 harness='terminus-2', max_output_tokens=32768, context_window=131072
             )
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1566,7 +1593,7 @@ class TestTerminus:
             assert tuple(
                 first[key] for key in ('input_tokens', 'cache_tokens', 'output_tokens')
             ) == (120, 100, 40)
-            assert second == {}
+            assert second == {'responded': True}
 
         @pytest.mark.parametrize(
             ('api', 'usage'),
@@ -1588,7 +1615,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             api: str,
             usage: str,
             unknown: int,
@@ -1617,7 +1644,7 @@ class TestTerminus:
                 context_window=131072,
             )
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1669,7 +1696,7 @@ class TestTerminus:
             self,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            tmp_path: Path,
+            logs_dir: Path,
             families_dir: Path,
             data_dir: Path,
             status: str,
@@ -1711,7 +1738,7 @@ class TestTerminus:
                 system,
                 endpoint,
                 terminal_session,
-                tmp_path,
+                logs_dir,
                 families_dir,
                 data_dir,
                 NativeCompletionError,
@@ -1738,11 +1765,11 @@ class TestTerminus:
             assert recorded['response_error'] == payload['error']
             assert recorded['latency_sec'] >= 0
             assert Response.model_validate_json(
-                (tmp_path / 'response-1.json').read_text()
+                (logs_dir / 'response-1.json').read_text()
             ) == Response.model_validate(payload)
 
         def test_preserves_native_budget_exhaustion_and_its_exact_partial_text(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             endpoint.response = response(
                 ' leading partial \n',
@@ -1751,7 +1778,7 @@ class TestTerminus:
             )
             system = make_system(harness='terminus-2', api='openai-responses')
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1764,7 +1791,7 @@ class TestTerminus:
             assert len(endpoint.requests) == 1
 
         def test_responses_keeps_native_tool_history_without_server_state(
-            self, endpoint: StubEndpoint, tmp_path: Path
+            self, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             system = make_system(
                 route='acme/native-responses',
@@ -1784,7 +1811,7 @@ class TestTerminus:
             endpoint.responses = [tool_response, final_response]
             endpoint.response = response('Resumed.', response_id='resp-resumed')
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1859,7 +1886,7 @@ class TestTerminus:
         @pytest.mark.parametrize('effort', ['high', 'max'])
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_forwards_the_configured_quality_settings_through_the_native_client(
-            self, endpoint: StubEndpoint, tmp_path: Path, effort: str, api: str
+            self, endpoint: StubEndpoint, logs_dir: Path, effort: str, api: str
         ) -> None:
             if api == 'openai-responses':
                 endpoint.response = response()
@@ -1872,7 +1899,7 @@ class TestTerminus:
                 context_window=131072,
             )
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=endpoint.env,
                 **agent_kwargs(system),
@@ -1909,14 +1936,14 @@ class TestTerminus:
 
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_uses_the_configured_ca_and_local_address_for_native_calls(
-            self, tls_endpoint: StubEndpoint, tmp_path: Path, api: str
+            self, tls_endpoint: StubEndpoint, logs_dir: Path, api: str
         ) -> None:
             assert tls_endpoint.ca_file is not None
             if api == 'openai-responses':
                 tls_endpoint.response = response()
             system = make_system(harness='terminus-2', api=api)
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name=system.route,
                 extra_env=tls_endpoint.env
                 | {
@@ -1945,7 +1972,7 @@ class TestTerminus:
             agent_export: tuple[dict[str, str], NixosConfigExport],
             endpoint: StubEndpoint,
             monkeypatch: pytest.MonkeyPatch,
-            tmp_path: Path,
+            logs_dir: Path,
             api: str,
             fails: bool,
         ) -> None:
@@ -1953,7 +1980,7 @@ class TestTerminus:
             kwargs = agent_kwargs(make_system(harness='terminus-2', api=api))
             Terminus.preflight(kwargs, endpoint.env | env)
             agent = NativeProbe(
-                logs_dir=tmp_path,
+                logs_dir=logs_dir,
                 model_name='acme/large',
                 extra_env=endpoint.env | env,
                 **kwargs,
