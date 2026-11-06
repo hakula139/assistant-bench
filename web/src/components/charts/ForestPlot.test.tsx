@@ -13,13 +13,7 @@ import type { Category } from '@/lib/categories';
 import type { CategoryBoard, CategoryStanding } from '@/lib/report';
 import { stubPlotFrame } from '@/test/plot';
 
-const rules = { preliminary_decisive_votes: 40 };
-const refit = (system: string, score: number, decisive = 40) => ({
-  system,
-  score,
-  votes: 40,
-  decisive_votes: decisive,
-});
+const refit = (system: string, score: number) => ({ system, score, votes: 40 });
 
 const frame = { width: 600, measure: (text: string) => text.length * 7 };
 
@@ -30,18 +24,18 @@ function draw(
   unranked: string[] = [],
 ): Element {
   return Plot.plot({
-    ...forestPlotOptions({ rows, labels, unranked, domain, rules, anchorScore: 1000 }, frame),
+    ...forestPlotOptions({ rows, labels, unranked, domain, anchorScore: 1000 }, frame),
     width: frame.width,
     height: forestPlotHeight(labels),
   });
 }
 
 describe('forestPlotOptions', () => {
-  test('draws preliminary coverage as a hollow point', () => {
+  test('draws every refit as a hollow preliminary point, since a refit has no interval', () => {
     const svg = draw(
       [
-        { label: 'settled', refit: refit('settled', 1000) },
-        { label: 'preliminary', refit: refit('preliminary', 900, 20) },
+        { label: 'top', refit: refit('top', 1000) },
+        { label: 'low', refit: refit('low', 900) },
       ],
       [600, 1100],
     );
@@ -49,7 +43,7 @@ describe('forestPlotOptions', () => {
     const points = [...svg.querySelectorAll('g[aria-label="dot"] circle')];
 
     expect(points.map((point) => point.getAttribute('fill'))).toEqual([
-      'var(--chart-series)',
+      'var(--background)',
       'var(--background)',
     ]);
   });
@@ -160,7 +154,6 @@ describe('CategoryForests', () => {
         categories={categories}
         systems={['a', 'b']}
         names={{ a: 'A', b: 'B' }}
-        rules={rules}
         anchorScore={1000}
       />,
     );

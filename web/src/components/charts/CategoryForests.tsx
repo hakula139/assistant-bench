@@ -4,8 +4,7 @@ import { ForestPlot } from '@/components/charts/ForestPlot';
 import { legendMarks, sharedDomain, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import { categoryTerms } from '@/lib/glossary';
-import { isPreliminary } from '@/lib/ranking';
-import type { CategoryBoard, VotesRules } from '@/lib/report';
+import type { CategoryBoard } from '@/lib/report';
 import { systemName, type SystemNames } from '@/lib/systems';
 
 interface CategoryForestsProps {
@@ -14,35 +13,24 @@ interface CategoryForestsProps {
   systems: string[];
   names: SystemNames;
   anchorScore: number;
-  rules: VotesRules;
 }
 
 /** Returns the marks the category forests draw, for their legend. */
-export function categoryMarks(
-  categories: CategoryBoard[],
-  anchorScore: number,
-  rules: VotesRules,
-): LegendMark[] {
+export function categoryMarks(categories: CategoryBoard[], anchorScore: number): LegendMark[] {
   const domain = sharedDomain(categories.map((board) => board.standings));
   const rows = categories.flatMap((board) =>
     board.standings.map((refit) => ({
       system: refit.system,
       name: refit.system,
       estimate: refit,
-      preliminary: isPreliminary(refit, rules),
+      preliminary: true,
     })),
   );
   return legendMarks(rows, domain, anchorScore);
 }
 
 /** One forest plot per category, on an axis every category shares. */
-export function CategoryForests({
-  categories,
-  systems,
-  names,
-  anchorScore,
-  rules,
-}: CategoryForestsProps) {
+export function CategoryForests({ categories, systems, names, anchorScore }: CategoryForestsProps) {
   const domain = useMemo(
     () => sharedDomain(categories.map((board) => board.standings)),
     [categories],
@@ -69,7 +57,6 @@ export function CategoryForests({
             unranked={board.unranked.map((system) => systemName(names, system))}
             domain={domain}
             anchorScore={anchorScore}
-            rules={rules}
           />
         </figure>
       ))}

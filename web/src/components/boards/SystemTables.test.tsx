@@ -23,10 +23,10 @@ async function round() {
 describe('RoundsTable', () => {
   afterEach(cleanup);
 
-  test("uses each historical row's own label, coverage threshold, and method", async () => {
+  test("uses each historical row's own label, preliminary threshold, and method", async () => {
     const past = await round();
-    const standing = { ...past.standings[0], decisive_votes: 20 };
-    const appearances = [12, 40].map((threshold, i) => ({
+    const standing = { ...past.standings[0], interval: { lower: 1018, upper: 1118 } };
+    const appearances = [60, 40].map((threshold, i) => ({
       round: i === 0 ? '2026-10-07' : '2026-10-21',
       reference: 'acme-large',
       anchor: 'acme-large',
@@ -39,7 +39,7 @@ describe('RoundsTable', () => {
         },
       },
       method: { ...past.method, anchor_score: i === 0 ? 1234 : 1000 },
-      rules: { ...past.rules, preliminary_decisive_votes: threshold },
+      rules: { ...past.rules, preliminary_half_width: threshold },
     }));
     const { container } = render(<RoundsTable appearances={appearances} />);
 
@@ -50,7 +50,7 @@ describe('RoundsTable', () => {
     const historical = await screen.findByRole('dialog', { name: 'Round settings' });
     expect(historical.textContent).toContain('Historical Pro');
     expect(historical.textContent).toContain('anchor 1,234');
-    expect(historical.textContent).toContain('12 raw decisive votes');
+    expect(historical.textContent).toContain('wider than ±60 points');
     expect(historical.textContent).not.toContain('Current Pro');
   });
 
@@ -124,7 +124,6 @@ describe('vote counts', () => {
           categories={[
             { label: 'docs', refit: { ...past.categories[0].standings[0], votes: 1234 } },
           ]}
-          rules={past.rules}
         />
       ),
       ['1,234'],

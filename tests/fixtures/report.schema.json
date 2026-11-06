@@ -72,18 +72,12 @@
           "minimum": 0,
           "title": "Votes",
           "type": "integer"
-        },
-        "decisive_votes": {
-          "minimum": 0,
-          "title": "Decisive Votes",
-          "type": "integer"
         }
       },
       "required": [
         "system",
         "score",
-        "votes",
-        "decisive_votes"
+        "votes"
       ],
       "title": "CategoryStanding",
       "type": "object"
@@ -131,6 +125,29 @@
         "production"
       ],
       "title": "Cutoffs",
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "The top standing and the systems its scorer's test cannot separate from it.",
+      "properties": {
+        "leader": {
+          "title": "Leader",
+          "type": "string"
+        },
+        "tied": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tied",
+          "type": "array"
+        }
+      },
+      "required": [
+        "leader",
+        "tied"
+      ],
+      "title": "Decision",
       "type": "object"
     },
     "Defect": {
@@ -299,6 +316,26 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
       "type": "string"
     },
+    "ScoreInterval": {
+      "additionalProperties": false,
+      "description": "A score interval's bounds on the round's recorded score scale.",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "title": "ScoreInterval",
+      "type": "object"
+    },
     "Share": {
       "maximum": 1,
       "minimum": 0,
@@ -315,6 +352,17 @@
           "description": "Point estimate on the round's recorded score scale.",
           "title": "Score",
           "type": "number"
+        },
+        "interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScoreInterval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The case-clustered interval at `method.interval_level`, null below two cases\nor when the round's comparisons are separated."
         },
         "rank": {
           "description": "Competition rank of the point score.",
@@ -423,6 +471,7 @@
       "required": [
         "system",
         "score",
+        "interval",
         "rank",
         "votes",
         "decisive_votes",
@@ -483,29 +532,6 @@
       "title": "TestsCategoryStanding",
       "type": "object"
     },
-    "TestsDecision": {
-      "additionalProperties": false,
-      "description": "The top pass rate and the systems a paired sign test cannot separate from it.",
-      "properties": {
-        "leader": {
-          "title": "Leader",
-          "type": "string"
-        },
-        "tied": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Tied",
-          "type": "array"
-        }
-      },
-      "required": [
-        "leader",
-        "tied"
-      ],
-      "title": "TestsDecision",
-      "type": "object"
-    },
     "TestsResults": {
       "additionalProperties": false,
       "description": "Pass rates on Harbor task tests, where every system ran every task.",
@@ -537,7 +563,8 @@
           "type": "array"
         },
         "decision": {
-          "$ref": "#/$defs/TestsDecision"
+          "$ref": "#/$defs/Decision",
+          "description": "The top pass rate and the systems a paired sign test cannot separate from it."
         }
       },
       "required": [
@@ -658,20 +685,28 @@
           "exclusiveMinimum": 0,
           "title": "Actor Cap",
           "type": "integer"
+        },
+        "interval_level": {
+          "description": "Coverage of the case-clustered score intervals, whose complement is the\nleader test's size.",
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Interval Level",
+          "type": "number"
         }
       },
       "required": [
         "l2_penalty",
         "points_per_logit",
         "anchor_score",
-        "actor_cap"
+        "actor_cap",
+        "interval_level"
       ],
       "title": "VotesMethod",
       "type": "object"
     },
     "VotesResults": {
       "additionalProperties": false,
-      "description": "Point estimates and descriptive diagnostics on eligible comparisons.",
+      "description": "Point estimates, their intervals and leader decision, and diagnostics.",
       "properties": {
         "scorer": {
           "const": "votes",
@@ -696,6 +731,12 @@
           "description": "Ranked system fixed at the recorded anchor score.",
           "title": "Anchor",
           "type": "string"
+        },
+        "cases": {
+          "description": "Cases with a weighted comparison in the ranked component, which cluster the\nintervals.",
+          "minimum": 0,
+          "title": "Cases",
+          "type": "integer"
         },
         "votes": {
           "description": "Eligible human choices across every component.",
@@ -733,6 +774,17 @@
           },
           "title": "Unranked",
           "type": "array"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The top score and the systems a clustered Wald test cannot separate from it,\nnull without intervals."
         },
         "head_to_head": {
           "items": {
@@ -780,12 +832,14 @@
         "cutoffs",
         "reference",
         "anchor",
+        "cases",
         "votes",
         "effective_votes",
         "dropped_votes",
         "voters",
         "standings",
         "unranked",
+        "decision",
         "head_to_head",
         "categories",
         "length",
@@ -797,15 +851,15 @@
     "VotesRules": {
       "additionalProperties": false,
       "properties": {
-        "preliminary_decisive_votes": {
-          "description": "Raw decisive votes below which a standing is preliminary.",
+        "preliminary_half_width": {
+          "description": "Score interval half-width above which a standing is preliminary.",
           "exclusiveMinimum": 0,
-          "title": "Preliminary Decisive Votes",
-          "type": "integer"
+          "title": "Preliminary Half Width",
+          "type": "number"
         }
       },
       "required": [
-        "preliminary_decisive_votes"
+        "preliminary_half_width"
       ],
       "title": "VotesRules",
       "type": "object"

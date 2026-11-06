@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from scipy import optimize
 from statsmodels.discrete.discrete_model import Logit
@@ -284,6 +285,126 @@ class TestRateRoot:
         assert component.ratings.systems == ('a', 'b')
         assert component.ratings.score[0] == pytest.approx(ANCHOR)
         assert component.ratings.score[1] > ANCHOR
+
+
+class TestUncertainty:
+    TRUE = np.linspace(-0.9, 0.9, 7)
+    CASE_EFFECT = 1.0
+
+    def pseudo_true(self) -> npt.NDArray[np.float64]:
+        """Return the centered strengths the fit reaches over new cases."""
+        nodes, weights = np.polynomial.hermite_e.hermegauss(40)
+        spread = np.sqrt(2) * self.CASE_EFFECT * nodes
+        k = len(self.TRUE)
+        expected = [
+            Comparison(
+                f's{i}',
+                f's{j}',
+                float(
+                    weights @ (1 / (1 + np.exp(self.TRUE[j] - self.TRUE[i] - spread)))
+                )
+                / weights.sum(),
+                'population',
+                1e6,
+                sided=False,
+            )
+            for i in range(k)
+            for j in range(k)
+            if i != j
+        ]
+        return fit(Matchups.build(expected)).strength
+
+    def round(self, rng: np.random.Generator) -> list[Comparison]:
+        k = len(self.TRUE)
+        effects = rng.normal(0, self.CASE_EFFECT, (30, k))
+        comparisons: list[Comparison] = []
+        for _ in range(1000):
+            i, j = rng.choice(k, size=2, replace=False)
+            case = rng.integers(30)
+            gap = self.TRUE[i] - self.TRUE[j] + effects[case, i] - effects[case, j]
+            p = 1 / (1 + np.exp(-gap))
+            comparisons.append(
+                Comparison(f's{i}', f's{j}', float(rng.random() < p), f'case-{case}')
+            )
+        return comparisons
+
+    def test_covers_the_strengths_over_new_cases_at_the_interval_level(self) -> None:
+        truth = self.pseudo_true()
+        rng = np.random.default_rng(7)
+
+        covered: list[npt.NDArray[np.bool_]] = []
+        for _ in range(400):
+            component = rate_root(self.round(rng), (), 's0')
+            assert component.uncertainty is not None
+            score = component.ratings.score
+            estimate = (score - score.mean()) / ranking.ELO_PER_LOGIT
+            half = component.uncertainty.half_widths() / ranking.ELO_PER_LOGIT
+            covered.append(np.abs(estimate - truth) <= half)
+
+        assert 0.93 <= np.mean(covered) <= 0.97
+
+    def test_widens_every_interval_when_votes_share_their_cases(self) -> None:
+        votes = simulate(400, seed=3)
+        independent = rate_root(
+            [vote._replace(case=f'case-{i}') for i, vote in enumerate(votes)],
+            (),
+            'medium',
+        )
+        assert independent.uncertainty is not None
+
+        shared = rate_root(
+            [vote._replace(case=f'{vote.left}-{vote.score}') for vote in votes],
+            (),
+            'medium',
+        )
+
+        assert shared.uncertainty is not None
+        assert shared.cases == 9
+        widths = independent.uncertainty.half_widths()
+        assert widths[independent.ratings.systems.index('medium')] > 0
+        assert np.all(shared.uncertainty.half_widths() > 2 * widths)
+
+    @pytest.mark.parametrize(
+        'votes',
+        [
+            pytest.param(
+                [vote._replace(case='case') for vote in simulate(100)], id='one-case'
+            ),
+            pytest.param(
+                [vote._replace(score=1.0) for vote in simulate(200)], id='one-pane'
+            ),
+            pytest.param(
+                [
+                    vote._replace(score=float(vote.left == 'large'))
+                    if 'large' in (vote.left, vote.right)
+                    else vote
+                    for vote in simulate(200)
+                ],
+                id='all-wins-entrant',
+            ),
+        ],
+    )
+    def test_has_no_uncertainty_without_a_clustered_variance(
+        self, votes: list[Comparison]
+    ) -> None:
+        component = rate_root(votes, (), 'medium')
+
+        assert component.uncertainty is None
+
+    @pytest.mark.parametrize(
+        ('other', 'separated'),
+        [('small', True), ('medium', False)],
+        ids=['far-behind', 'close-behind'],
+    )
+    def test_separates_the_leader_only_from_a_clear_gap(
+        self, other: str, separated: bool
+    ) -> None:
+        component = rate_root(simulate(60), (), 'medium')
+        assert component.uncertainty is not None
+
+        result = component.uncertainty.separates(component.ratings, 'large', other)
+
+        assert result is separated
 
 
 class TestRankAgreement:

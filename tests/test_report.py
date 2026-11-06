@@ -356,6 +356,10 @@ class TestReport:
             (('categories', 0, 'unranked'), ['unknown-category-system']),
             (('standings', 0, 'system'), ''),
             (('standings', 0, 'cost_gap'), 'unpriced'),
+            (('decision', 'leader'), 'acme-edge'),
+            (('decision', 'tied'), ['acme-pro']),
+            (('decision',), None),
+            (('standings', 0, 'interval'), None),
         ],
         ids=[
             'reference',
@@ -368,6 +372,10 @@ class TestReport:
             'category-unranked',
             'empty-id',
             'cost-gap-beside-cost',
+            'unranked-leader',
+            'leader-tied-with-itself',
+            'intervals-without-a-decision',
+            'decision-without-every-interval',
         ],
     )
     def test_rejects_inconsistent_result_contracts(
@@ -408,17 +416,25 @@ class TestReport:
         payload = json.loads(REPORT_FIXTURE.read_text())
         method = payload['results']['method']
         method.update(
-            l2_penalty=0.25, points_per_logit=200, anchor_score=1234, actor_cap=50
+            l2_penalty=0.25,
+            points_per_logit=200,
+            anchor_score=1234,
+            actor_cap=50,
+            interval_level=0.9,
         )
-        payload['results']['rules'].update(preliminary_decisive_votes=12)
+        payload['results']['rules'].update(preliminary_half_width=75.0)
 
         closed = Report.model_validate(payload)
 
         assert closed.results.scorer == 'votes'
         assert closed.results.method == report.VotesMethod(
-            l2_penalty=0.25, points_per_logit=200, anchor_score=1234, actor_cap=50
+            l2_penalty=0.25,
+            points_per_logit=200,
+            anchor_score=1234,
+            actor_cap=50,
+            interval_level=0.9,
         )
-        assert closed.results.rules.preliminary_decisive_votes == 12
+        assert closed.results.rules.preliminary_half_width == 75.0
 
     @pytest.mark.parametrize(
         ('path', 'value'),
@@ -680,7 +696,7 @@ class TestCloseTests:
         closed = close_tests_round(families_dir)
 
         assert closed.results.scorer == 'tests'
-        assert closed.results.decision == report.TestsDecision(
+        assert closed.results.decision == report.Decision(
             leader='acme-pro', tied=['acme-mini']
         )
 

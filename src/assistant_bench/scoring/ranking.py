@@ -20,6 +20,9 @@ ELO_PER_LOGIT = 400 / math.log(10)
 ANCHOR = 1000.0
 # Keeps the strength of a system that wins every vote finite.
 L2_PENALTY = 0.01
+INTERVAL_LEVEL = 0.95
+# The linear program's optimum above which a round counts as separated.
+SEPARATION_TOLERANCE = 1e-7
 LEFT_SCORE: dict[Choice, float] = {'a': 1.0, 'b': 0.0, 'tie': 0.5, 'both_bad': 0.5}
 
 
@@ -40,7 +43,7 @@ class Comparison(NamedTuple):
 
 @dataclass(frozen=True)
 class Matchups:
-    """Comparisons as parallel arrays of system indices.
+    """Comparisons as parallel arrays of system and case indices.
 
     `sided` holds 1 for a row that the left-side intercept applies to, else 0.
     """
@@ -48,22 +51,27 @@ class Matchups:
     systems: tuple[str, ...]
     left: Indices
     right: Indices
+    case: Indices
     score: Floats
     weight: Floats
     sided: Floats
 
     @classmethod
     def build(cls, comparisons: Sequence[Comparison]) -> Matchups:
-        """Index the systems in name order."""
+        """Index the systems and the cases in name order."""
         systems = tuple(
             sorted({c.left for c in comparisons} | {c.right for c in comparisons})
         )
         index = {system: i for i, system in enumerate(systems)}
+        cases = {
+            case: i for i, case in enumerate(sorted({c.case for c in comparisons}))
+        }
 
         return cls(
             systems=systems,
             left=np.array([index[c.left] for c in comparisons], dtype=np.intp),
             right=np.array([index[c.right] for c in comparisons], dtype=np.intp),
+            case=np.array([cases[c.case] for c in comparisons], dtype=np.intp),
             score=np.array([c.score for c in comparisons], dtype=np.float64),
             weight=np.array([c.weight for c in comparisons], dtype=np.float64),
             sided=np.array([c.sided for c in comparisons], dtype=np.float64),
@@ -87,6 +95,7 @@ class Matchups:
             ),
             left=index[self.left[rows]],
             right=index[self.right[rows]],
+            case=self.case[rows],
             score=self.score[rows],
             weight=self.weight[rows],
             sided=self.sided[rows],
@@ -132,6 +141,32 @@ class PointRatings:
 
 
 @dataclass(frozen=True)
+class Uncertainty:
+    """A component's case-clustered covariance and its t(G − 1) quantile.
+
+    `covariance` holds the centered strengths in squared logits, and `critical` the
+    two-sided `INTERVAL_LEVEL` quantile over the component's G cases.
+    """
+
+    covariance: Floats
+    critical: float
+
+    def half_widths(self) -> Floats:
+        """Return each system's half-width in score points, the anchor's included."""
+        widths: Floats = (
+            self.critical * ELO_PER_LOGIT * np.sqrt(np.diag(self.covariance))
+        )
+        return widths
+
+    def separates(self, ratings: PointRatings, leader: str, other: str) -> bool:
+        """Whether a two-sided Wald test of the two systems' gap rejects a tie."""
+        i, j = (ratings.systems.index(system) for system in (leader, other))
+        gap = (ratings.score[i] - ratings.score[j]) / ELO_PER_LOGIT
+        c = self.covariance
+        return bool(abs(gap) > self.critical * np.sqrt(c[i, i] + c[j, j] - 2 * c[i, j]))
+
+
+@dataclass(frozen=True)
 class Component:
     """The point fit of one connected component."""
 
@@ -140,6 +175,11 @@ class Component:
     anchor: str
     """System at `ANCHOR`, the reference when the component holds it, else the root."""
     ratings: PointRatings
+    cases: int
+    """Cases with a weighted comparison, the clusters behind `uncertainty`."""
+    uncertainty: Uncertainty | None
+    """Null below two cases, where no clustered variance exists, or when the
+    comparisons are separated, where the variance collapses toward zero."""
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
@@ -185,7 +225,76 @@ def rate_root(
     root = matchups.root(order)
     component = matchups.component(root)
     anchor = reference if reference in component.systems else root
-    return Component(root, anchor, rate_point(component, anchor))
+    point = fit(component)
+    cases = _weighted_cases(component)
+    return Component(
+        root,
+        anchor,
+        _point_ratings(component.systems, point, anchor),
+        cases,
+        None
+        if cases < 2 or _separated(component)
+        else Uncertainty(
+            _covariance(component, point),
+            float(stats.t.ppf((1 + INTERVAL_LEVEL) / 2, cases - 1)),
+        ),
+    )
+
+
+def _separated(matchups: Matchups) -> bool:
+    """Whether some strengths and left-side advantage order every decided row.
+
+    Such a direction fits every win and loss at least as well as a tie, with the
+    half scores tied, and strictly fits some. Without the penalty the fit would
+    then diverge, so the sandwich collapses toward zero.
+    """
+    weighted = matchups.weight > 0
+    x = _design(
+        matchups.left, matchups.right, matchups.sided, len(matchups.systems), []
+    )[weighted]
+    score = matchups.score[weighted]
+    sign = np.sign(score - 0.5)
+    decided = x[sign != 0] * sign[sign != 0, None]
+    tied = x[sign == 0]
+    result = optimize.linprog(
+        -decided.sum(axis=0),
+        A_ub=-decided,
+        b_ub=np.zeros(len(decided)),
+        A_eq=tied if len(tied) else None,
+        b_eq=np.zeros(len(tied)) if len(tied) else None,
+        bounds=(-1, 1),
+    )
+    if result.fun is None:
+        raise RuntimeError(f'the separation check did not solve: {result.message}')
+    return bool(-result.fun > SEPARATION_TOLERANCE)
+
+
+def _covariance(matchups: Matchups, point: Fit) -> Floats:
+    """Return the CR1 sandwich covariance of the strengths, by case.
+
+    The score sums of each case form the meat, scaled by G / (G − 1) over the G
+    cases with a weighted comparison, so votes on one case count as one draw.
+    Each design row sums to zero over the strengths, and the penalty is equal
+    across them, so the covariance already lies on the centered strengths.
+    """
+    k = len(matchups.systems)
+    x = _design(matchups.left, matchups.right, matchups.sided, k, [])
+    p = special.expit(x @ np.append(point.strength, point.position))
+    penalty = np.zeros(k + 1)
+    penalty[:k] = L2_PENALTY
+
+    hessian = x.T @ (x * (matchups.weight * p * (1 - p))[:, None]) + np.diag(penalty)
+    _, cluster = np.unique(matchups.case, return_inverse=True)
+    sums = np.zeros((cluster.max() + 1, k + 1))
+    np.add.at(sums, cluster, x * (matchups.weight * (p - matchups.score))[:, None])
+    clusters = _weighted_cases(matchups)
+
+    # The left-side column is empty when no comparison is sided, which leaves the
+    # Hessian singular in that direction alone.
+    bread = np.linalg.pinv(hessian)
+    meat = sums @ bread[:, :k] * math.sqrt(clusters / (clusters - 1))
+    covariance: Floats = meat.T @ meat
+    return covariance
 
 
 def length_feature(
@@ -234,6 +343,10 @@ def split_half_tau(votes: Sequence[Comparison], root: str) -> float | None:
     return rank_agreement(
         np.array([first[s] for s in shared]), np.array([second[s] for s in shared])
     )
+
+
+def _weighted_cases(matchups: Matchups) -> int:
+    return len(np.unique(matchups.case[matchups.weight > 0]))
 
 
 def _point_ratings(systems: tuple[str, ...], point: Fit, anchor: str) -> PointRatings:

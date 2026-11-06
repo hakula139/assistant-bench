@@ -18,11 +18,21 @@ Scores use 400 / ln 10 points per logit. The fit selects the component connected
 
 Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
 
-`rank` is descriptive competition order by point score. The site derives a preliminary coverage marker from `decisive_votes < rules.preliminary_decisive_votes`. The marker flags raw coverage alone, with a current threshold of 40 choices that have a winner.
+`rank` is descriptive competition order by point score. The site marks a standing preliminary while its interval's half-width exceeds `rules.preliminary_half_width`, currently 50 points, or while it has no interval. Category refits never have one, so their scores are always preliminary.
 
 ## Uncertainty
 
-The target is performance on new cases and voters. No method for that target is calibrated yet, so voted reports publish point scores and ranks without intervals or leader decisions.
+The target is a system's strength on new cases drawn like the family's, judged by the same voters with their capped weights. The interval makes no claim about a new population of voters, which the report's voter count lets a reader judge.
+
+Votes on one case share that case's system-specific effects, and the actor and settlement weights are not frequencies, so neither the Hessian nor a row-level sandwich gives the right variance. `_covariance` in `scoring/ranking.py` computes the case-clustered sandwich `A⁻¹BA⁻¹ · G / (G − 1)` (the CR1 correction of Cameron and Miller, 2015, [A Practitioner's Guide to Cluster-Robust Inference](https://doi.org/10.3368/jhr.50.2.317)), with `A` the penalized Hessian at the optimum, `B` the outer product of each case's summed scores and `G` the cases with a weighted row in the component. Settled rows enter under their own case. Every design row sums to zero over the strengths and the penalty treats them alike, so the covariance lies on the centered strengths: each interval measures a score against the field's average, and only the gap test below compares two systems. Each standing's `interval` spans t(G − 1) quantiles at `method.interval_level` around its point, on the board's scale, so the anchor has an interval too.
+
+A component with fewer than two cases, or whose comparisons are separated, has no intervals and no decision, so every standing is preliminary. The comparisons are separated when some strengths and left-side advantage fit every win and loss at least as well as a tie, strictly for some, with every half score tied, as when every vote favors one pane or one system wins every comparison. `_separated` finds such a direction with a linear program over the weighted rows. The penalty keeps the points finite there, but the sandwich collapses toward zero.
+
+Simulations of seven systems over 150 to 800 votes, 40 or 120 cases, case effects of 0 or 0.7 logits, and either one voter or a skewed panel of 50 kept the clustered interval's coverage between 93.8% and 95.7%, while the row-level sandwich fell to 90% and a case bootstrap to 91% at 40 cases. A normal quantile in place of t(G − 1) lost about 0.7 points. `TestUncertainty` in `tests/scoring/test_ranking.py` repeats one such cell at 1,000 votes on 30 cases.
+
+The decision names the system with the top point, the leader, and lists the systems a two-sided t(G − 1) Wald test of the score gap, with variance `C_ii + C_jj − 2C_ij`, cannot separate from it at the interval level. It reads as the tests board's [leader decision](#leader-decision) does, without a multiplicity correction.
+
+With case effects, widths stop shrinking like 1 / √votes once votes per case grow, since a fixed set of cases bounds what more votes can say, so adding cases narrows an interval faster than adding votes on the same cases. At 60 cases, seven systems reach ±50 points at about 500 votes, or 400 decisive ones, and ±75 points at about 200 votes, or 160 decisive ones.
 
 ## Counts and Diagnostics
 

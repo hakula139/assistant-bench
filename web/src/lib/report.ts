@@ -23,11 +23,16 @@ const passRate = z.strictObject({ rate: share, lower: share, upper: share });
 
 const costGap = z.enum(['unpriced', 'unreported']);
 
+const decision = z.strictObject({ leader: z.string(), tied: z.array(z.string()) });
+
 // ── Votes Results ──
+
+const scoreInterval = z.strictObject({ lower: z.number(), upper: z.number() });
 
 const standing = z.strictObject({
   system: z.string(),
   score: z.number(),
+  interval: scoreInterval.nullable(),
   rank: z.int(),
   votes: z.int().nonnegative(),
   decisive_votes: z.int().nonnegative(),
@@ -56,7 +61,6 @@ const categoryStanding = z.strictObject({
   system: z.string(),
   score: z.number(),
   votes: z.int().nonnegative(),
-  decisive_votes: z.int().nonnegative(),
 });
 
 const categoryBoard = z.strictObject({
@@ -72,10 +76,11 @@ const votesMethod = z.strictObject({
   points_per_logit: z.number().positive(),
   anchor_score: z.number(),
   actor_cap: z.int().positive(),
+  interval_level: z.number().gt(0).lt(1),
 });
 
 const votesRules = z.strictObject({
-  preliminary_decisive_votes: z.int().positive(),
+  preliminary_half_width: z.number().positive(),
 });
 
 const cutoff = z.strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() });
@@ -88,12 +93,14 @@ const votesResults = z.strictObject({
   cutoffs,
   reference: z.string(),
   anchor: z.string(),
+  cases: z.int().nonnegative(),
   votes: z.int().nonnegative(),
   effective_votes: z.number().nonnegative(),
   dropped_votes: z.int(),
   voters: z.int(),
   standings: z.array(standing),
   unranked: z.array(z.string()),
+  decision: decision.nullable(),
   head_to_head: z.array(headToHead),
   categories: z.array(categoryBoard),
   length: z.number().nullable(),
@@ -126,7 +133,7 @@ const testsResults = z.strictObject({
   samples: z.int().min(1),
   standings: z.array(testsStanding).min(1),
   categories: z.array(testsCategory),
-  decision: z.strictObject({ leader: z.string(), tied: z.array(z.string()) }),
+  decision,
 });
 
 // ── Report ──
@@ -145,6 +152,17 @@ export const reportSchema = z
       context.addIssue({ code: 'custom', message });
     };
     const referenced = new Set<string>();
+    const standing = new Set(results.standings.map((row) => row.system));
+
+    const validateDecision = ({ leader, tied }: Decision) => {
+      if (
+        !standing.has(leader) ||
+        new Set(tied).size !== tied.length ||
+        tied.some((system) => system === leader || !standing.has(system))
+      ) {
+        reject('The decision must name standing systems once');
+      }
+    };
 
     const membership = (standings: { system: string }[], unranked: string[] = []) => {
       const ids = [...standings.map(({ system }) => system), ...unranked];
@@ -165,8 +183,19 @@ export const reportSchema = z
         reject('A cost gap is present only without a mean cost');
       }
 
-      if (!results.standings.some(({ system }) => system === results.anchor)) {
+      if (!standing.has(results.anchor)) {
         reject('The anchor must have an overall standing');
+      }
+
+      if (
+        (results.decision === null) !==
+        results.standings.some(({ interval }) => interval === null)
+      ) {
+        reject('A decision is present exactly when every standing has an interval');
+      }
+
+      if (results.decision !== null) {
+        validateDecision(results.decision);
       }
 
       results.head_to_head.forEach(({ system, opponent }) => {
@@ -192,15 +221,7 @@ export const reportSchema = z
         reject('A cost gap is present exactly when finished trials lack a mean cost');
       }
 
-      const standing = new Set(results.standings.map((row) => row.system));
-      const { leader, tied } = results.decision;
-      if (
-        !standing.has(leader) ||
-        new Set(tied).size !== tied.length ||
-        tied.some((system) => system === leader || !standing.has(system))
-      ) {
-        reject('The decision must name standing systems once');
-      }
+      validateDecision(results.decision);
 
       const categories = results.categories.map(({ category }) => category);
       if (
@@ -232,6 +253,8 @@ export const reportSchema = z
   });
 
 export type PublicSystem = z.infer<typeof publicSystem>;
+export type Decision = z.infer<typeof decision>;
+export type ScoreInterval = z.infer<typeof scoreInterval>;
 export type VotesMethod = z.infer<typeof votesMethod>;
 export type VotesRules = z.infer<typeof votesRules>;
 export type Cutoffs = z.infer<typeof cutoffs>;

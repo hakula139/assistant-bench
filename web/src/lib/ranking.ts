@@ -1,7 +1,8 @@
-import type { PassRate, VotesRules } from '@/lib/report';
+import type { PassRate, ScoreInterval, VotesRules } from '@/lib/report';
 
-export function isPreliminary(standing: { decisive_votes: number }, rules: VotesRules): boolean {
-  return standing.decisive_votes < rules.preliminary_decisive_votes;
+/** Whether a score has no interval or one wider than the rule allows. */
+export function isPreliminary(interval: ScoreInterval | null, rules: VotesRules): boolean {
+  return interval === null || (interval.upper - interval.lower) / 2 > rules.preliminary_half_width;
 }
 
 /** Orders systems by pass rate, highest first, and then by display name. */
