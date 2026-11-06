@@ -1,7 +1,3 @@
-import os
-
-import pipeline
-
 from .project import ProjectCase
 
 
@@ -37,16 +33,12 @@ class IncrementalBuildTest(ProjectCase):
         self.assert_matches_clean_build()
 
     def test_touching_files_runs_nothing(self) -> None:
-        for name in [*self.root.glob('raw/*'), self.root / 'steps.py']:
-            os.utime(name, (2_000_000_000, 2_000_000_000))
+        self.project('touch', patterns=['raw/*', 'steps.py'], seconds=2_000_000_000)
 
         self.assertEqual(self.build(), [])
 
     def test_edits_that_keep_size_and_time_are_seen(self) -> None:
-        path = self.root / 'raw/b.csv'
-        status = path.stat()
-        path.write_text('c; 4\n')
-        os.utime(path, ns=(status.st_atime_ns, status.st_mtime_ns))
+        self.project('rewrite_keeping_status', name='raw/b.csv', content='c; 4\n')
 
         self.assertEqual(self.build(), ['clean', 'report'])
         self.assert_matches_clean_build()
@@ -63,7 +55,7 @@ class IncrementalBuildTest(ProjectCase):
         self.write('raw/c.csv', 'd; 4\n')
         self.assertEqual(self.build(), ALL)
 
-        (self.root / 'raw/b.csv').unlink()
+        self.project('remove', name='raw/b.csv')
         self.assertEqual(self.build(), ALL)
 
         self.write('raw/notes.md', 'not an input')
@@ -74,7 +66,7 @@ class IncrementalBuildTest(ProjectCase):
         self.edit('pipeline.toml', '"Weekly"', '"Daily"')
 
         self.assertEqual(self.build(), ['publish'])
-        self.assertEqual((self.root / 'site/index.txt').read_text(), 'Daily: 3 rows\n')
+        self.assertEqual(self.read('site/index.txt'), 'Daily: 3 rows\n')
 
     def test_parameter_type_changes(self) -> None:
         for old, new in (('"Weekly"', '2025-01-01'), ('2025-01-01', '"2025-01-01"')):
@@ -111,8 +103,7 @@ class IncrementalBuildTest(ProjectCase):
         self.assert_matches_clean_build()
 
     def test_reordered_outputs(self) -> None:
-        config = self.root / 'pipeline.toml'
-        config.write_text(config.read_text() + PAIR)
+        self.project('append', name='pipeline.toml', content=PAIR)
         self.assertEqual(self.build(), ['pair'])
 
         self.edit(
@@ -122,18 +113,15 @@ class IncrementalBuildTest(ProjectCase):
         )
 
         self.assertEqual(self.build(), ['pair'])
-        self.assertEqual((self.root / 'build/second.txt').read_text(), 'first\n')
+        self.assertEqual(self.read('build/second.txt'), 'first\n')
         self.assert_matches_clean_build()
 
     def test_recursive_patterns_see_only_project_files(self) -> None:
-        config = self.root / 'pipeline.toml'
-        config.write_text(config.read_text() + INDEX)
+        self.project('append', name='pipeline.toml', content=INDEX)
         self.assertEqual(self.build(), ['index'])
 
         self.assertEqual(self.build(), [])
-        self.assertEqual(
-            (self.root / 'site/files.txt').read_text(), 'build/summary.json\n'
-        )
+        self.assertEqual(self.read('site/files.txt'), 'build/summary.json\n')
         self.assert_matches_clean_build()
 
     def test_module_source_changes(self) -> None:
@@ -161,23 +149,21 @@ class IncrementalBuildTest(ProjectCase):
 
     def test_module_edits_between_builds_in_one_process(self) -> None:
         """Builds through the Python API, under a module name no other test imports."""
-        steps = self.root / 'edited_steps.py'
-        (self.root / 'steps.py').rename(steps)
-        config = self.root / 'pipeline.toml'
-        config.write_text(config.read_text().replace('"steps:', '"edited_steps:'))
-        project = pipeline.load(self.root)
-        pipeline.build(project, log=lambda _: None)
-        steps.write_text(
-            steps.read_text().replace("SEPARATOR = ','", "SEPARATOR = ' | '")
-        )
+        self.project('rename', name='steps.py', new='edited_steps.py')
+        self.project('edit', name='pipeline.toml', old='"steps:', new='"edited_steps:')
 
-        pipeline.build(project, log=lambda _: None)
+        self.api(
+            'edit_between_builds',
+            name='edited_steps.py',
+            old="SEPARATOR = ','",
+            new="SEPARATOR = ' | '",
+        )
 
         self.build()
         self.assert_matches_clean_build()
 
     def test_missing_or_edited_outputs_are_rebuilt(self) -> None:
-        (self.root / 'build/summary.json').unlink()
+        self.project('remove', name='build/summary.json')
         self.assertEqual(self.build(), ['report'])
 
         self.write('site/index.txt', 'edited by hand\n')
@@ -191,13 +177,13 @@ class IncrementalBuildTest(ProjectCase):
 
         self.assertEqual(failed.returncode, 1)
         self.assertIn('report failed', failed.stderr)
-        self.assertEqual(self.runs(), ['clean', 'report'])
+        self.assertEqual(failed.runs, ['clean', 'report'])
         self.assertEqual(self.build(), ['report', 'publish'])
         self.assert_matches_clean_build()
 
     def test_failed_runs_rerun_after_their_inputs_revert(self) -> None:
         """A failed run that wrote part of an output, then one that wrote none."""
-        original = (self.root / 'raw/b.csv').read_text()
+        original = self.read('raw/b.csv')
         for failure in ('partial', 'early'):
             with self.subTest(failure=failure):
                 self.write('raw/b.csv', 'c; 30\n')

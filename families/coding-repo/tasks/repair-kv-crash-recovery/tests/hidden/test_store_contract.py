@@ -1,28 +1,12 @@
 import struct
 import subprocess
 import sys
-import tempfile
-import textwrap
 import unittest
 import zlib
 from pathlib import Path
+from typing import Any
 
-from tinykv import CorruptSegment, CorruptSnapshot, Store, StoreClosed, StoreError
-
-
-CRASH_AFTER_UNSYNCED_PUT = textwrap.dedent(
-    """
-    import os
-    import sys
-    from pathlib import Path
-
-    from tinykv import Store
-
-    store = Store.open(Path(sys.argv[1]), sync=False)
-    store.put(b'key', b'value')
-    os._exit(0)
-    """
-)
+import sandbox
 
 
 def frame(op: int, key: bytes, value: bytes = b'') -> bytes:
@@ -34,157 +18,144 @@ def segment(sequence: int, *frames: bytes) -> bytes:
     return b'TKVL' + struct.pack('>I', sequence) + b''.join(frames)
 
 
-def segments(directory: Path) -> list[Path]:
-    """Return the store's segments in sequence order."""
-    return sorted(directory.glob('wal-*.log'), key=lambda path: int(path.stem[4:]))
+def pairs(*items: tuple[bytes, bytes]) -> list[list[str]]:
+    """Return `items` as the store scenarios report them."""
+    return [[key.hex(), value.hex()] for key, value in items]
 
 
 class StoreContractTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.directory = sandbox.scratch()
+
+    def observe(
+        self, function: str, directory: Path | None = None, **args: object
+    ) -> Any:
+        """Run a store scenario on `directory`, by default the test's store."""
+        return sandbox.observe(
+            'store_contract',
+            function,
+            directory=str(self.directory if directory is None else directory),
+            **args,
+        )
+
+    def append(self, data: bytes) -> None:
+        """Append `data` to the active segment of the test's store."""
+        sandbox.observe(
+            'files', 'append', directory=str(self.directory), data=data.hex()
+        )
 
     def test_api_keeps_its_behavior(self) -> None:
-        with Store.open(self.directory) as store:
-            store.put(b'\x00binary', b'')
-            store.put(b'b', b'2')
-            store.put(b'a', b'1')
-            self.assertFalse(store.delete(b'missing'))
-            self.assertTrue(store.delete(b'b'))
-            with self.assertRaises(ValueError):
-                store.put(b'k' * 65536, b'v')
-            with self.assertRaises(ValueError):
-                store.put(b'k', b'v' * (16 * 1024 * 1024 + 1))
-            with self.assertRaises(ValueError):
-                Store.open(self.directory / 'other', segment_bytes=63)
+        seen = self.observe('api_keeps_its_behavior')
 
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.items(), [(b'\x00binary', b''), (b'a', b'1')])
-            self.assertEqual(store.items(b'a'), [(b'a', b'1')])
-            self.assertEqual(store.get(b'\x00binary'), b'')
-            self.assertIsNone(store.get(b'b'))
-            self.assertEqual(len(store), 2)
-
-        with self.assertRaises(StoreClosed):
-            store.items()
+        missing, deleted = seen['deleted']
+        self.assertFalse(missing)
+        self.assertTrue(deleted)
+        self.assertEqual(seen['rejected'], [True, True, True])
+        reopened = seen['reopened']
+        self.assertEqual(reopened['items'], pairs((b'\x00binary', b''), (b'a', b'1')))
+        self.assertEqual(reopened['prefixed'], pairs((b'a', b'1')))
+        self.assertEqual(reopened['binary'], '')
+        self.assertIsNone(reopened['missing'])
+        self.assertEqual(reopened['length'], 2)
+        self.assertIs(seen['closed'], True)
 
     def test_replays_many_segments_in_sequence_order(self) -> None:
-        with Store.open(self.directory, segment_bytes=64) as store:
-            for index in range(40):
-                store.put(b'counter', str(index).encode() * 8)
-                store.put(f'key-{index:02}'.encode(), b'x' * 16)
+        self.observe('fill_segments')
 
-        self.assertGreater(len(segments(self.directory)), 11)
-        with Store.open(self.directory, segment_bytes=64) as store:
-            self.assertEqual(store.get(b'counter'), b'39' * 8)
-            self.assertEqual(len(store), 41)
+        count = sandbox.observe('files', 'segment_count', directory=str(self.directory))
+        self.assertGreater(count, 11)
+        seen = self.observe('replay_segments')
+        self.assertEqual(seen['counter'], (b'39' * 8).hex())
+        self.assertEqual(seen['length'], 41)
 
     def test_opens_a_store_written_in_the_current_format(self) -> None:
-        for sequence in range(1, 13):
-            data = segment(
+        files = {
+            f'wal-{sequence}.log': segment(
                 sequence,
                 frame(1, b'version', str(sequence).encode()),
                 frame(1, f'key-{sequence}'.encode(), b'value'),
-            )
-            (self.directory / f'wal-{sequence}.log').write_bytes(data)
+            ).hex()
+            for sequence in range(1, 13)
+        }
+        sandbox.observe('files', 'write', directory=str(self.directory), files=files)
 
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.get(b'version'), b'12')
-            self.assertEqual(len(store), 13)
-            store.put(b'version', b'13')
+        seen = self.observe('reopen_current_format')
 
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.get(b'version'), b'13')
-            store.compact()
-
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.get(b'version'), b'13')
-            self.assertEqual(len(store), 13)
+        self.assertEqual(seen['opened'], {'version': b'12'.hex(), 'length': 13})
+        self.assertEqual(seen['written'], b'13'.hex())
+        self.assertEqual(seen['compacted'], {'version': b'13'.hex(), 'length': 13})
 
     def test_reports_damage_to_a_sealed_segment(self) -> None:
         for damage in ('flipped byte', 'truncated tail'):
             with self.subTest(damage):
                 directory = self.directory / damage.replace(' ', '-')
-                with Store.open(directory, segment_bytes=64) as store:
-                    for index in range(8):
-                        store.put(f'key-{index}'.encode(), b'v' * 24)
+                self.observe('seal_segments', directory)
 
-                sealed = segments(directory)[0]
-                data = bytearray(sealed.read_bytes())
-                if damage == 'flipped byte':
-                    data[-2] ^= 0xFF
-                else:
-                    del data[-3:]
-                sealed.write_bytes(bytes(data))
+                sandbox.observe(
+                    'files', 'damage_sealed', directory=str(directory), kind=damage
+                )
 
-                with self.assertRaises(CorruptSegment):
-                    Store.open(directory, segment_bytes=64)
+                raised = self.observe(
+                    'opening_raises',
+                    directory,
+                    error='CorruptSegment',
+                    segment_bytes=64,
+                )
+                self.assertIs(raised, True)
 
     def test_reports_a_damaged_snapshot(self) -> None:
-        with Store.open(self.directory) as store:
-            store.put(b'key', b'value')
-            store.compact()
+        self.observe('compact_one_entry')
 
-        snapshot = self.directory / 'snapshot.db'
-        data = bytearray(snapshot.read_bytes())
-        data[len(data) // 2] ^= 0xFF
-        snapshot.write_bytes(bytes(data))
+        sandbox.observe('files', 'damage_snapshot', directory=str(self.directory))
 
-        with self.assertRaises(CorruptSnapshot):
-            Store.open(self.directory)
+        self.assertIs(self.observe('opening_raises', error='CorruptSnapshot'), True)
 
     def test_writes_after_an_interrupted_append_survive_restarts(self) -> None:
-        with Store.open(self.directory) as store:
-            store.put(b'kept', b'1')
+        self.observe('store_kept')
 
-        active = segments(self.directory)[-1]
-        with active.open('ab') as file:
-            file.write(frame(1, b'lost', b'2')[:9])
+        self.append(frame(1, b'lost', b'2')[:9])
 
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.items(), [(b'kept', b'1')])
-            store.put(b'after', b'3')
-
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.items(), [(b'after', b'3'), (b'kept', b'1')])
+        seen = self.observe('recover_and_put')
+        self.assertIsNone(seen['error'])
+        self.assertEqual(seen['recovered'], pairs((b'kept', b'1')))
+        self.assertEqual(seen['reopened'], pairs((b'after', b'3'), (b'kept', b'1')))
 
     def test_bad_frames_in_the_active_segment_are_dropped(self) -> None:
-        with Store.open(self.directory) as store:
-            store.put(b'kept', b'1')
+        self.observe('store_kept')
 
         damaged = bytearray(frame(1, b'bad', b'checksum'))
         damaged[-1] ^= 0xFF
-        with segments(self.directory)[-1].open('ab') as file:
-            file.write(bytes(damaged) + frame(1, b'after-bad', b'2'))
+        self.append(bytes(damaged) + frame(1, b'after-bad', b'2'))
 
-        try:
-            store = Store.open(self.directory)
-        except StoreError as error:
-            self.fail(f'a bad frame in the active segment stops the store: {error!r}')
-        with store:
-            self.assertEqual(store.items(), [(b'kept', b'1')])
-            store.put(b'after', b'3')
-
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.items(), [(b'after', b'3'), (b'kept', b'1')])
+        seen = self.observe('recover_and_put')
+        if seen['error'] is not None:
+            self.fail(
+                f'a bad frame in the active segment stops the store: {seen["error"]}'
+            )
+        self.assertEqual(seen['recovered'], pairs((b'kept', b'1')))
+        self.assertEqual(seen['reopened'], pairs((b'after', b'3'), (b'kept', b'1')))
 
     def test_unsynced_writes_survive_a_process_crash(self) -> None:
-        subprocess.run(
-            [sys.executable, '-c', CRASH_AFTER_UNSYNCED_PUT, str(self.directory)],
-            check=True,
-            timeout=30,
+        crashed = sandbox.start(
+            'store_contract', 'crash_after_unsynced_put', directory=str(self.directory)
         )
+        crashed.communicate(timeout=30)
+        self.assertEqual(crashed.returncode, 0)
 
-        with Store.open(self.directory) as store:
-            self.assertEqual(store.items(), [(b'key', b'value')])
+        self.assertEqual(self.observe('items'), pairs((b'key', b'value')))
 
     def test_cli_keeps_its_behavior(self) -> None:
         def run(*args: str) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
+            process = sandbox.spawn(
                 [sys.executable, '-m', 'tinykv', str(self.directory), *args],
-                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=10,
-                check=False,
+            )
+            stdout, stderr = process.communicate(timeout=10)
+            return subprocess.CompletedProcess(
+                process.args, process.returncode, stdout, stderr
             )
 
         self.assertEqual(run('put', 'b', 'two').returncode, 0)
@@ -195,7 +166,3 @@ class StoreContractTest(unittest.TestCase):
         missing = run('delete', 'b')
         self.assertEqual(missing.returncode, 1)
         self.assertIn('not found', missing.stderr)
-
-
-if __name__ == '__main__':
-    unittest.main()

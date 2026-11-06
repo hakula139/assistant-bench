@@ -1,21 +1,19 @@
-"""Drive a store in a child process that can crash at any file mutation.
+"""Drive a store in a scenario process that can crash at any file mutation.
 
-`run DIRECTORY SEGMENT_BYTES OPS [CRASH_AT [tear]]` opens the store, prints
-`opened`, applies the JSON operations, and prints `done <index>` after each one
-returns. Every file mutation that opening the store and the operations make is
-counted: creating or truncating a file, writing to it, renaming, truncating or
-removing it. With `CRASH_AT`, the process exits with status 86 just before that
-mutation, or with `tear`, after writing only the first half of that write's
-bytes. Without it, the run prints `mutation <kind>` for each one, and `sync
-file` or `sync dir` for each `fsync` or `fdatasync`.
+`run` opens the store, prints `opened`, applies the operations, and prints
+`done <index>` after each one returns. Every file mutation that opening the
+store and the operations make is counted: creating or truncating a file,
+writing to it, renaming, truncating or removing it. With `crash_at`, the
+process exits with status 86 just before that mutation, or with `tear`, after
+writing only the first half of that write's bytes. Without it, the run prints
+`mutation <kind>` for each one, and `sync file` or `sync dir` for each `fsync`
+or `fdatasync`.
 """
 
 import builtins
 import io
-import json
 import os
 import stat
-import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Self
@@ -152,14 +150,19 @@ def track_sync(name: str, injector: Injector) -> None:
 
 
 def run(
-    directory: Path, segment_bytes: int, ops: list[list[str]], args: list[str]
+    directory: str,
+    segment_bytes: int,
+    ops: list[list[str]],
+    crash_at: int | None,
+    tear: bool,
 ) -> None:
-    injector = Injector(int(args[0]) if args else None, args[1:] == ['tear'])
+    """Apply `ops`, whose operands are hex, to the store in `directory`."""
+    injector = Injector(crash_at, tear)
     install(injector)
     from tinykv import Store
 
     injector.active = True
-    store = Store.open(directory, segment_bytes=segment_bytes)
+    store = Store.open(Path(directory), segment_bytes=segment_bytes)
     print('opened', flush=True)
     for index, (name, *operands) in enumerate(ops):
         values = [bytes.fromhex(operand) for operand in operands]
@@ -173,13 +176,3 @@ def run(
 
     injector.active = False
     store.close()
-
-
-def main() -> None:
-    command, directory, segment_bytes, ops, *rest = sys.argv[1:]
-    assert command == 'run'
-    run(Path(directory), int(segment_bytes), json.loads(ops), rest)
-
-
-if __name__ == '__main__':
-    main()

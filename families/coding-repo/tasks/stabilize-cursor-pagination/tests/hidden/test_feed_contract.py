@@ -1,74 +1,83 @@
 import json
-import subprocess
-import sys
-import tempfile
 import unittest
-from pathlib import Path
+from typing import Any
 
-from eventfeed import CursorError, Event, Store, page
+import sandbox
+
+
+def event(identifier: str, occurred_at: int, tag: str) -> dict[str, Any]:
+    return {'id': identifier, 'occurred_at': occurred_at, 'tag': tag}
 
 
 class PageTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.db = Path(self.directory.name) / 'feed.db'
+        self.db = str(sandbox.scratch() / 'feed.db')
 
-    def append(self, events: list[Event]) -> None:
-        with Store(self.db) as store:
-            for event in events:
-                store.append(event)
+    def append(self, events: list[dict[str, Any]]) -> None:
+        sandbox.observe('feed', 'append', path=self.db, events=events)
+
+    def read(self, **args: Any) -> dict[str, Any]:
+        """Return the scenario's page, naming the error class it raised, if any."""
+        return sandbox.observe('feed', 'page', path=self.db, **args)
+
+    def page(self, **args: Any) -> dict[str, Any]:
+        result = self.read(**args)
+        if result['error'] is not None:
+            self.fail(f'page({args}) raised {result["error"]}')
+        return result
 
     def test_snapshot_traversal_preserves_ties_filters_and_changed_limits(self) -> None:
         original = [
-            Event('z', 10, 'news'),
-            Event('a', 10, 'news'),
-            Event('é', 10, 'news'),
-            Event('中', 10, 'news'),
-            Event('late', 30, 'news'),
-            Event('ignored', 5, 'other'),
-            Event('middle', 20, 'news'),
+            event('z', 10, 'news'),
+            event('a', 10, 'news'),
+            event('é', 10, 'news'),
+            event('中', 10, 'news'),
+            event('late', 30, 'news'),
+            event('ignored', 5, 'other'),
+            event('middle', 20, 'news'),
         ]
         self.append(original)
 
-        first = page(self.db, limit=2, tag='news')
+        first = self.page(limit=2, tag='news')
 
-        self.assertEqual(first.items, [Event('a', 10, 'news'), Event('z', 10, 'news')])
-        self.assertIsNotNone(first.next_cursor)
+        self.assertEqual(
+            first['items'], [event('a', 10, 'news'), event('z', 10, 'news')]
+        )
+        self.assertIsNotNone(first['next_cursor'])
         self.append(
             [
-                Event('backdated', -1, 'news'),
-                Event('between', 15, 'news'),
-                Event('future', 100, 'news'),
+                event('backdated', -1, 'news'),
+                event('between', 15, 'news'),
+                event('future', 100, 'news'),
             ]
         )
-        seen = list(first.items)
-        cursor = first.next_cursor
+        seen = list(first['items'])
+        cursor = first['next_cursor']
         limits = iter((1, 3, 2, 2, 2))
         while cursor is not None:
-            current = page(self.db, limit=next(limits), tag='news', cursor=cursor)
-            seen.extend(current.items)
-            cursor = current.next_cursor
+            current = self.page(limit=next(limits), tag='news', cursor=cursor)
+            seen.extend(current['items'])
+            cursor = current['next_cursor']
 
         expected = sorted(
-            [event for event in original if event.tag == 'news'],
-            key=lambda event: (event.occurred_at, event.id),
+            [entry for entry in original if entry['tag'] == 'news'],
+            key=lambda entry: (entry['occurred_at'], entry['id']),
         )
         self.assertEqual(seen, expected)
-        self.assertEqual(len({event.id for event in seen}), len(expected))
+        self.assertEqual(len({entry['id'] for entry in seen}), len(expected))
 
     def test_empty_and_full_final_pages_have_no_cursor(self) -> None:
-        empty = page(self.db, limit=2)
+        empty = self.page(limit=2)
 
-        self.assertEqual(empty.items, [])
-        self.assertIsNone(empty.next_cursor)
+        self.assertEqual(empty['items'], [])
+        self.assertIsNone(empty['next_cursor'])
 
         self.append(
             [
-                Event('a', 1, ''),
-                Event('b', 2, 'x'),
-                Event('c', 3, ''),
-                Event('d', 4, ''),
+                event('a', 1, ''),
+                event('b', 2, 'x'),
+                event('c', 3, ''),
+                event('d', 4, ''),
             ]
         )
         for tag, expected in [
@@ -79,70 +88,74 @@ class PageTest(unittest.TestCase):
             with self.subTest(tag=tag):
                 limit = len(expected) or 1
 
-                final = page(self.db, limit=limit, tag=tag)
+                final = self.page(limit=limit, tag=tag)
 
-                self.assertEqual([event.id for event in final.items], expected)
-                self.assertIsNone(final.next_cursor)
+                self.assertEqual([entry['id'] for entry in final['items']], expected)
+                self.assertIsNone(final['next_cursor'])
 
     def test_cursor_binds_filter_and_rejects_unsupported_input(self) -> None:
         self.append(
-            [Event('a', 1, 'news'), Event('b', 2, 'news'), Event('c', 3, 'other')]
+            [event('a', 1, 'news'), event('b', 2, 'news'), event('c', 3, 'other')]
         )
-        first = page(self.db, limit=1, tag='news')
-        self.assertIsNotNone(first.next_cursor)
+        first = self.page(limit=1, tag='news')
+        self.assertIsNotNone(first['next_cursor'])
 
         for tag in (None, '', 'other'):
-            with self.subTest(tag=tag), self.assertRaises(CursorError):
-                page(self.db, limit=1, tag=tag, cursor=first.next_cursor)
+            with self.subTest(tag=tag):
+                rejected = self.read(limit=1, tag=tag, cursor=first['next_cursor'])
+                self.assertEqual(rejected['error'], 'CursorError')
 
         for invalid in ('', 'not-an-issued-cursor', '\x00'):
-            with self.subTest(cursor=invalid), self.assertRaises(CursorError):
-                page(self.db, limit=1, tag='news', cursor=invalid)
+            with self.subTest(cursor=invalid):
+                rejected = self.read(limit=1, tag='news', cursor=invalid)
+                self.assertEqual(rejected['error'], 'CursorError')
 
-        continuation = page(self.db, limit=100, tag='news', cursor=first.next_cursor)
+        continuation = self.page(limit=100, tag='news', cursor=first['next_cursor'])
 
-        self.assertEqual(continuation.items, [Event('b', 2, 'news')])
-        self.assertIsNone(continuation.next_cursor)
+        self.assertEqual(continuation['items'], [event('b', 2, 'news')])
+        self.assertIsNone(continuation['next_cursor'])
 
     def test_append_preserves_existing_ids_and_allocates_ingestion_order(self) -> None:
-        self.append([Event('first', 100, 'a'), Event('second', -100, 'b')])
-        with Store(self.db) as store:
-            ceiling = store.highwater()
+        self.append([event('first', 100, 'a'), event('second', -100, 'b')])
 
-            try:
-                store.append(Event('first', 200, 'changed'))
-            except Exception:
-                store.append(Event('third', 0, 'c'))
-            else:
-                self.fail('An existing event ID must be rejected.')
+        appended = sandbox.observe(
+            'feed',
+            'append_after_duplicate',
+            path=self.db,
+            duplicate=event('first', 200, 'changed'),
+            replacement=event('third', 0, 'c'),
+        )
 
-            self.assertGreater(store.highwater(), ceiling)
+        if not appended['rejected']:
+            self.fail('An existing event ID must be rejected.')
+        self.assertGreater(appended['highwater'], appended['ceiling'])
 
-        result = page(self.db, limit=100)
+        result = self.page(limit=100)
 
         self.assertEqual(
-            result.items,
+            result['items'],
             [
-                Event('second', -100, 'b'),
-                Event('third', 0, 'c'),
-                Event('first', 100, 'a'),
+                event('second', -100, 'b'),
+                event('third', 0, 'c'),
+                event('first', 100, 'a'),
             ],
         )
 
     def test_limit_bounds_are_enforced(self) -> None:
         for limit in (-1, 0, 101):
-            with self.subTest(limit=limit), self.assertRaises(ValueError):
-                page(self.db, limit=limit)
+            with self.subTest(limit=limit):
+                rejected = self.read(limit=limit)
+                self.assertIn(rejected['error'], {'CursorError', 'ValueError'})
 
     def test_cli_continuation_uses_persisted_snapshot(self) -> None:
-        command = [sys.executable, '-m', 'eventfeed']
         for identifier, occurred_at in [('a', 10), ('b', 20), ('c', 30)]:
-            inserted = subprocess.run(
-                [
-                    *command,
+            inserted = sandbox.observe(
+                'feed',
+                'cli',
+                args=[
                     'append',
                     '--db',
-                    str(self.db),
+                    self.db,
                     '--id',
                     identifier,
                     '--occurred-at',
@@ -150,36 +163,31 @@ class PageTest(unittest.TestCase):
                     '--tag',
                     'news',
                 ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
             )
             self.assertEqual(
-                json.loads(inserted.stdout),
+                json.loads(inserted),
                 {'id': identifier, 'occurred_at': occurred_at, 'tag': 'news'},
             )
 
-        first = subprocess.run(
-            [*command, 'page', '--db', str(self.db), '--limit', '1', '--tag', 'news'],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
+        first = sandbox.observe(
+            'feed',
+            'cli',
+            args=['page', '--db', self.db, '--limit', '1', '--tag', 'news'],
         )
-        first_value = json.loads(first.stdout)
+        first_value = json.loads(first)
         self.assertEqual(
             first_value['items'], [{'id': 'a', 'occurred_at': 10, 'tag': 'news'}]
         )
         self.assertIsInstance(first_value['next_cursor'], str)
-        self.append([Event('backdated', 0, 'news'), Event('later', 40, 'news')])
+        self.append([event('backdated', 0, 'news'), event('later', 40, 'news')])
 
-        rest = subprocess.run(
-            [
-                *command,
+        rest = sandbox.observe(
+            'feed',
+            'cli',
+            args=[
                 'page',
                 '--db',
-                str(self.db),
+                self.db,
                 '--limit',
                 '2',
                 '--tag',
@@ -187,14 +195,10 @@ class PageTest(unittest.TestCase):
                 '--cursor',
                 first_value['next_cursor'],
             ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
         )
 
         self.assertEqual(
-            json.loads(rest.stdout),
+            json.loads(rest),
             {
                 'items': [
                     {'id': 'b', 'occurred_at': 20, 'tag': 'news'},

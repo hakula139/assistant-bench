@@ -1,29 +1,18 @@
 import csv
 import hashlib
 import json
-import sqlite3
-import subprocess
-import sys
-import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
-from ledgerload import (
-    ConflictError,
-    ImportResult,
-    LedgerRow,
-    SourceError,
-    Store,
-    import_file,
-)
+import sandbox
 
 
 class ImportFileTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
-        self.db = self.root / 'ledger.db'
+        self.root = sandbox.scratch(writable=False)
+        self.data = sandbox.scratch()
+        self.db = self.data / 'ledger.db'
         self.csv_path = self.root / 'entries.csv'
 
     def write_rows(self, rows: list[tuple[str, str, str]]) -> None:
@@ -31,6 +20,27 @@ class ImportFileTest(unittest.TestCase):
             writer = csv.writer(stream)
             writer.writerow(('external_id', 'amount', 'memo'))
             writer.writerows(rows)
+
+    def import_file(self, db: Path, source_id: str, **options: Any) -> dict[str, Any]:
+        return sandbox.observe(
+            'imports',
+            'import_source',
+            db=str(db),
+            source=str(self.csv_path),
+            source_id=source_id,
+            **options,
+        )
+
+    def ledger(self, db: Path, source_id: str | None = None) -> dict[str, Any]:
+        return sandbox.observe('imports', 'ledger', db=str(db), source_id=source_id)
+
+    def raised(self, outcome: dict[str, Any], kind: str) -> dict[str, Any]:
+        if kind not in outcome.get('raised', ()):
+            self.fail(f'{kind} not raised: {outcome}')
+        return outcome
+
+    def ledgerload(self, *arguments: str, check: bool = False) -> dict[str, Any]:
+        return sandbox.observe('imports', 'cli', arguments=list(arguments), check=check)
 
     def test_reordered_headers_quoted_records_and_exact_totals(self) -> None:
         with self.csv_path.open('w', encoding='utf-8', newline='') as stream:
@@ -41,21 +51,23 @@ class ImportFileTest(unittest.TestCase):
             writer.writerow(())
             writer.writerow(('zero', '-0.00', 'zero'))
 
-        result = import_file(self.db, self.csv_path, source_id='quoted', batch_size=2)
+        result = self.import_file(self.db, 'quoted', batch_size=2)
 
-        self.assertEqual(result, ImportResult(processed=3, inserted=3, checkpoint=3))
-        with Store(self.db) as store:
-            self.assertCountEqual(
-                store.rows(),
-                [
-                    LedgerRow('大', 9223372036854775807, 'quoted, memo\n下一行'),
-                    LedgerRow('second', 9223372036854775807, ''),
-                    LedgerRow('zero', 0, 'zero'),
-                ],
-            )
-            self.assertEqual(
-                store.report(), {'rows': 3, 'total_cents': 18446744073709551614}
-            )
+        self.assertEqual(
+            result, {'result': {'processed': 3, 'inserted': 3, 'checkpoint': 3}}
+        )
+        stored = self.ledger(self.db)
+        self.assertCountEqual(
+            stored['rows'],
+            [
+                ['大', 9223372036854775807, 'quoted, memo\n下一行'],
+                ['second', 9223372036854775807, ''],
+                ['zero', 0, 'zero'],
+            ],
+        )
+        self.assertEqual(
+            stored['report'], {'rows': 3, 'total_cents': 18446744073709551614}
+        )
 
     def test_failed_checkpoint_rolls_back_batch_and_retry_skips_committed_records(
         self,
@@ -69,56 +81,62 @@ class ImportFileTest(unittest.TestCase):
                 ('d', '4.00', 'd'),
             ]
         )
-        with Store(self.db) as store:
-            store.connection.execute(
-                """
-                CREATE TRIGGER stop_second_batch BEFORE UPDATE OF checkpoint ON sources
-                WHEN NEW.checkpoint = 4
-                BEGIN
-                    SELECT RAISE(ABORT, 'checkpoint unavailable');
-                END
-                """
-            )
-            store.connection.commit()
+        sandbox.observe(
+            'imports',
+            'execute',
+            db=str(self.db),
+            statement="""
+            CREATE TRIGGER stop_second_batch BEFORE UPDATE OF checkpoint ON sources
+            WHEN NEW.checkpoint = 4
+            BEGIN
+                SELECT RAISE(ABORT, 'checkpoint unavailable');
+            END
+            """,
+        )
 
-        with self.assertRaises(sqlite3.Error):
-            import_file(self.db, self.csv_path, source_id='upload', batch_size=2)
+        self.raised(self.import_file(self.db, 'upload', batch_size=2), 'sqlite3.Error')
 
-        with Store(self.db) as store:
-            self.assertEqual(store.rows(), [LedgerRow('a', 100, '')])
-            self.assertEqual(store.checkpoint('upload'), 2)
-            self.assertEqual(
-                store.source_digest('upload'),
-                hashlib.sha256(self.csv_path.read_bytes()).hexdigest(),
-            )
-            store.connection.execute('DROP TRIGGER stop_second_batch')
-            store.connection.commit()
+        stored = self.ledger(self.db, 'upload')
+        self.assertEqual(stored['rows'], [['a', 100, '']])
+        self.assertEqual(stored['checkpoint'], 2)
+        self.assertEqual(
+            stored['digest'],
+            hashlib.sha256(self.csv_path.read_bytes()).hexdigest(),
+        )
+        sandbox.observe(
+            'imports',
+            'execute',
+            db=str(self.db),
+            statement='DROP TRIGGER stop_second_batch',
+        )
 
-        result = import_file(self.db, self.csv_path, source_id='upload', batch_size=2)
-
-        self.assertEqual(result, ImportResult(processed=3, inserted=3, checkpoint=5))
-        with Store(self.db) as store:
-            self.assertCountEqual(
-                store.rows(),
-                [
-                    LedgerRow('a', 100, ''),
-                    LedgerRow('b', -201, 'b'),
-                    LedgerRow('c', 3, 'c'),
-                    LedgerRow('d', 400, 'd'),
-                ],
-            )
-            self.assertEqual(store.checkpoint('upload'), 5)
-            self.assertEqual(store.report(), {'rows': 4, 'total_cents': 302})
+        result = self.import_file(self.db, 'upload', batch_size=2)
 
         self.assertEqual(
-            import_file(self.db, self.csv_path, source_id='upload'),
-            ImportResult(processed=0, inserted=0, checkpoint=5),
+            result, {'result': {'processed': 3, 'inserted': 3, 'checkpoint': 5}}
+        )
+        stored = self.ledger(self.db, 'upload')
+        self.assertCountEqual(
+            stored['rows'],
+            [
+                ['a', 100, ''],
+                ['b', -201, 'b'],
+                ['c', 3, 'c'],
+                ['d', 400, 'd'],
+            ],
+        )
+        self.assertEqual(stored['checkpoint'], 5)
+        self.assertEqual(stored['report'], {'rows': 4, 'total_cents': 302})
+
+        self.assertEqual(
+            self.import_file(self.db, 'upload'),
+            {'result': {'processed': 0, 'inserted': 0, 'checkpoint': 5}},
         )
 
     def test_conflict_rolls_back_only_its_batch(self) -> None:
         for amount, memo in [('2.00', 'original'), ('1.00', 'changed')]:
             with self.subTest(amount=amount, memo=memo):
-                db = self.root / f'conflict-{amount}-{memo}.db'
+                db = self.data / f'conflict-{amount}-{memo}.db'
                 self.write_rows(
                     [
                         ('a', '1.00', 'original'),
@@ -128,40 +146,42 @@ class ImportFileTest(unittest.TestCase):
                     ]
                 )
 
-                with self.assertRaises(ConflictError) as caught:
-                    import_file(db, self.csv_path, source_id='conflict', batch_size=2)
+                caught = self.raised(
+                    self.import_file(db, 'conflict', batch_size=2), 'ConflictError'
+                )
 
-                self.assertEqual(caught.exception.record_index, 4)
-                with Store(db) as store:
-                    self.assertCountEqual(
-                        store.rows(),
-                        [LedgerRow('a', 100, 'original'), LedgerRow('b', 200, '')],
-                    )
-                    self.assertEqual(store.checkpoint('conflict'), 2)
+                self.assertEqual(caught['record_index'], 4)
+                stored = self.ledger(db, 'conflict')
+                self.assertCountEqual(
+                    stored['rows'], [['a', 100, 'original'], ['b', 200, '']]
+                )
+                self.assertEqual(stored['checkpoint'], 2)
 
     def test_source_bytes_are_bound_even_after_first_batch_fails(self) -> None:
         self.write_rows([('a', '1.00', 'first'), ('b', 'invalid', '')])
         original_digest = hashlib.sha256(self.csv_path.read_bytes()).hexdigest()
 
-        with self.assertRaises(SourceError) as caught:
-            import_file(self.db, self.csv_path, source_id='bound', batch_size=2)
+        caught = self.raised(
+            self.import_file(self.db, 'bound', batch_size=2), 'SourceError'
+        )
 
-        self.assertEqual(caught.exception.record_index, 2)
-        with Store(self.db) as store:
-            self.assertEqual(store.rows(), [])
-            self.assertEqual(store.checkpoint('bound'), 0)
-            self.assertEqual(store.source_digest('bound'), original_digest)
+        self.assertEqual(caught['record_index'], 2)
+        stored = self.ledger(self.db, 'bound')
+        self.assertEqual(stored['rows'], [])
+        self.assertEqual(stored['checkpoint'], 0)
+        self.assertEqual(stored['digest'], original_digest)
 
         self.write_rows([('a', '1.00', 'first'), ('b', '2.00', '')])
 
-        with self.assertRaises(SourceError) as changed:
-            import_file(self.db, self.csv_path, source_id='bound', batch_size=2)
+        changed = self.raised(
+            self.import_file(self.db, 'bound', batch_size=2), 'SourceError'
+        )
 
-        self.assertEqual(changed.exception.record_index, 0)
-        with Store(self.db) as store:
-            self.assertEqual(store.rows(), [])
-            self.assertEqual(store.checkpoint('bound'), 0)
-            self.assertEqual(store.source_digest('bound'), original_digest)
+        self.assertEqual(changed['record_index'], 0)
+        stored = self.ledger(self.db, 'bound')
+        self.assertEqual(stored['rows'], [])
+        self.assertEqual(stored['checkpoint'], 0)
+        self.assertEqual(stored['digest'], original_digest)
 
     def test_invalid_amounts_and_ids_report_logical_record_index(self) -> None:
         invalid_rows = [
@@ -186,18 +206,19 @@ class ImportFileTest(unittest.TestCase):
         ]
         for index, row in enumerate(invalid_rows):
             with self.subTest(row=row):
-                db = self.root / f'invalid-{index}.db'
+                db = self.data / f'invalid-{index}.db'
                 self.write_rows(
                     [('first', '-92233720368547758.08', 'quoted\nrecord'), row]
                 )
 
-                with self.assertRaises(SourceError) as caught:
-                    import_file(db, self.csv_path, source_id='invalid', batch_size=2)
+                caught = self.raised(
+                    self.import_file(db, 'invalid', batch_size=2), 'SourceError'
+                )
 
-                self.assertEqual(caught.exception.record_index, 2)
-                with Store(db) as store:
-                    self.assertEqual(store.rows(), [])
-                    self.assertEqual(store.checkpoint('invalid'), 0)
+                self.assertEqual(caught['record_index'], 2)
+                stored = self.ledger(db, 'invalid')
+                self.assertEqual(stored['rows'], [])
+                self.assertEqual(stored['checkpoint'], 0)
 
     def test_bad_headers_encoding_and_batch_sizes_fail_without_rows(self) -> None:
         documents = (
@@ -208,31 +229,30 @@ class ImportFileTest(unittest.TestCase):
         )
         for index, content in enumerate(documents):
             with self.subTest(content=content):
-                db = self.root / f'file-{index}.db'
+                db = self.data / f'file-{index}.db'
                 self.csv_path.write_bytes(content)
 
-                with self.assertRaises(SourceError) as caught:
-                    import_file(db, self.csv_path, source_id='invalid-file')
+                caught = self.raised(
+                    self.import_file(db, 'invalid-file'), 'SourceError'
+                )
 
-                self.assertEqual(caught.exception.record_index, 0)
-                with Store(db) as store:
-                    self.assertEqual(store.rows(), [])
+                self.assertEqual(caught['record_index'], 0)
+                self.assertEqual(self.ledger(db)['rows'], [])
 
         self.write_rows([('valid', '1.00', '')])
         for batch_size in (0, -1):
             with self.subTest(batch_size=batch_size):
-                absent = self.root / f'not-opened-{batch_size}.db'
+                absent = self.data / f'not-opened-{batch_size}.db'
 
-                with self.assertRaises(ValueError):
-                    import_file(
-                        absent, self.csv_path, source_id='valid', batch_size=batch_size
-                    )
+                self.raised(
+                    self.import_file(absent, 'valid', batch_size=batch_size),
+                    'ValueError',
+                )
 
                 self.assertFalse(absent.exists())
 
     def test_cli_import_report_replay_and_failure(self) -> None:
         self.write_rows([('one', '0.10', ''), ('two', '-0.03', 'quoted, memo')])
-        command = [sys.executable, '-m', 'ledgerload']
         arguments = [
             'import',
             '--db',
@@ -245,41 +265,22 @@ class ImportFileTest(unittest.TestCase):
             '1',
         ]
 
-        imported = subprocess.run(
-            [*command, *arguments],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
-        report = subprocess.run(
-            [*command, 'report', '--db', str(self.db)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
-        replay = subprocess.run(
-            [*command, *arguments],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
+        imported = self.ledgerload(*arguments, check=True)
+        report = self.ledgerload('report', '--db', str(self.db), check=True)
+        replay = self.ledgerload(*arguments, check=True)
 
         self.assertEqual(
-            json.loads(imported.stdout),
+            json.loads(imported['stdout']),
             {'processed': 2, 'inserted': 2, 'checkpoint': 2},
         )
-        self.assertEqual(json.loads(report.stdout), {'rows': 2, 'total_cents': 7})
+        self.assertEqual(json.loads(report['stdout']), {'rows': 2, 'total_cents': 7})
         self.assertEqual(
-            json.loads(replay.stdout), {'processed': 0, 'inserted': 0, 'checkpoint': 2}
+            json.loads(replay['stdout']),
+            {'processed': 0, 'inserted': 0, 'checkpoint': 2},
         )
 
         self.write_rows([('one', '0.11', '')])
-        rejected = subprocess.run(
-            [*command, *arguments], capture_output=True, text=True, timeout=10
-        )
+        rejected = self.ledgerload(*arguments)
 
-        self.assertNotEqual(rejected.returncode, 0)
-        self.assertTrue(rejected.stderr.strip())
+        self.assertNotEqual(rejected['returncode'], 0)
+        self.assertTrue(rejected['stderr'].strip())

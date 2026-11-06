@@ -1,243 +1,132 @@
 """Transaction and retry boundaries for public order delivery."""
 
 import json
-import sqlite3
-import subprocess
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
-from dispatchbox import (
-    ConflictError,
-    DeliveryError,
-    FakeReceiver,
-    Store,
-    dispatch_pending,
-    place_order,
-)
+import sandbox
 
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-class Receiver:
-    def __init__(self, failures: set[str] | None = None) -> None:
-        self.failures = failures or set()
-        self.attempts: list[tuple[str, bytes]] = []
-        self.effects: dict[str, bytes] = {}
-
-    def send(self, key: str, payload: bytes) -> None:
-        self.attempts.append((key, payload))
-        if key in self.failures:
-            raise DeliveryError('Temporarily unavailable.')
-        if key in self.effects and self.effects[key] != payload:
-            raise DeliveryError('Conflicting retry payload.')
-        self.effects[key] = payload
+OUTBOX_MISSING = 'The durable outbox table must exist before adding its trigger.'
 
 
 class TestOrderDelivery(unittest.TestCase):
-    def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
-        self.db = self.root / 'orders.sqlite'
-
     def test_identical_placement_is_idempotent_and_conflicts_preserve_work(
         self,
     ) -> None:
-        order = place_order(self.db, 'café-1', 1250)
+        seen = sandbox.observe('delivery', 'identical_placement')
 
-        repeated = place_order(self.db, 'café-1', 1250)
-        with self.assertRaises(ConflictError):
-            place_order(self.db, 'café-1', 1251)
-
-        self.assertEqual((order.order_id, order.amount_cents), ('café-1', 1250))
-        self.assertEqual(repeated, order)
-        with Store(self.db) as store:
-            self.assertEqual(store.orders(), [order])
-            notifications = store.pending(100)
+        self.assertIs(seen['conflicted'], True, 'ConflictError not raised')
+        order = seen['order']
+        self.assertEqual(order, ['café-1', 1250])
+        self.assertEqual(seen['repeated'], order)
+        self.assertEqual(seen['orders'], [order])
+        notifications = seen['pending']
         self.assertEqual(
-            [(item.order_id, item.key) for item in notifications],
+            [(item['order_id'], item['key']) for item in notifications],
             [('café-1', 'order:café-1')],
         )
         self.assertEqual(
-            json.loads(notifications[0].payload),
+            json.loads(bytes.fromhex(notifications[0]['payload'])),
             {'order_id': 'café-1', 'amount_cents': 1250},
         )
 
     def test_order_and_notification_rollback_together_on_insert_failure(self) -> None:
-        with Store(self.db) as store:
-            self.assertIsNotNone(
-                store.connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name = 'outbox'"
-                ).fetchone(),
-                'The durable outbox table must exist before adding its trigger.',
-            )
-            store.connection.executescript(
-                """
-                CREATE TRIGGER reject_notification
-                BEFORE INSERT ON outbox
-                WHEN NEW.order_id = 'blocked'
-                BEGIN
-                    SELECT RAISE(ABORT, 'Rejected notification');
-                END;
-                """
-            )
+        seen = sandbox.observe('delivery', 'rollback_on_insert_failure')
 
-        with self.assertRaises(sqlite3.DatabaseError):
-            place_order(self.db, 'blocked', 500)
-
-        with Store(self.db) as store:
-            self.assertIsNone(store.get_order('blocked'))
-            self.assertEqual(store.pending(100), [])
-            store.connection.execute('DROP TRIGGER reject_notification')
-            store.connection.commit()
-
-        recovered = place_order(self.db, 'blocked', 500)
-
-        self.assertEqual(recovered.amount_cents, 500)
-        with Store(self.db) as store:
-            self.assertEqual(
-                [item.order_id for item in store.pending(100)], ['blocked']
-            )
+        self.assertIs(seen['outbox'], True, OUTBOX_MISSING)
+        self.assertIs(seen['rejected'], True, 'DatabaseError not raised')
+        self.assertIsNone(seen['blocked'])
+        self.assertEqual(seen['rolled_back'], [])
+        self.assertEqual(seen['recovered'][1], 500)
+        self.assertEqual([item['order_id'] for item in seen['after']], ['blocked'])
 
     def test_delivery_limit_counts_attempts_and_failures_do_not_stop_later_records(
         self,
     ) -> None:
-        for name, amount in [('a', 100), ('b', 200), ('c', 300)]:
-            place_order(self.db, name, amount)
-        receiver = Receiver({'order:a'})
-        with Store(self.db) as store:
-            stored = {item.key: item.payload for item in store.pending(100)}
+        seen = sandbox.observe('delivery', 'delivery_limit')
 
-        first = dispatch_pending(self.db, receiver, limit=2)
-
-        self.assertEqual((first.attempted, first.delivered, first.failed), (2, 1, 1))
-        self.assertEqual([key for key, _ in receiver.attempts], ['order:a', 'order:b'])
-        with Store(self.db) as store:
-            self.assertEqual([item.order_id for item in store.pending(100)], ['a', 'c'])
-
-        second = dispatch_pending(self.db, receiver)
-
-        self.assertEqual((second.attempted, second.delivered, second.failed), (2, 1, 1))
+        stored = seen['stored']
+        self.assertEqual(tuple(seen['first']), (2, 1, 1))
+        self.assertEqual(seen['first_attempts'], ['order:a', 'order:b'])
         self.assertEqual(
-            [key for key, _ in receiver.attempts],
-            ['order:a', 'order:b', 'order:a', 'order:c'],
+            [item['order_id'] for item in seen['first_pending']], ['a', 'c']
         )
-        receiver.failures.clear()
-
-        third = dispatch_pending(self.db, receiver)
-        empty = dispatch_pending(self.db, receiver)
-
-        self.assertEqual((third.attempted, third.delivered, third.failed), (1, 1, 0))
-        self.assertEqual((empty.attempted, empty.delivered, empty.failed), (0, 0, 0))
-        self.assertEqual(receiver.effects, stored)
+        self.assertEqual(tuple(seen['second']), (2, 1, 1))
+        self.assertEqual(
+            seen['second_attempts'], ['order:a', 'order:b', 'order:a', 'order:c']
+        )
+        self.assertEqual(tuple(seen['third']), (1, 1, 0))
+        self.assertEqual(tuple(seen['empty']), (0, 0, 0))
+        self.assertEqual(seen['effects'], stored)
         self.assertTrue(
-            all(payload == stored[key] for key, payload in receiver.attempts)
+            all(payload == stored[key] for key, payload in seen['attempts'])
         )
 
     def test_receiver_acceptance_before_database_failure_is_safe_to_retry(self) -> None:
-        for name, amount in [('a', 100), ('b', 200), ('c', 300)]:
-            place_order(self.db, name, amount)
-        receiver = FakeReceiver(self.root / 'receiver.sqlite')
-        with Store(self.db) as store:
-            stored = {item.key: item.payload for item in store.pending(100)}
-            self.assertIsNotNone(
-                store.connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name = 'outbox'"
-                ).fetchone(),
-                'The durable outbox table must exist before adding its trigger.',
-            )
-            store.connection.executescript(
-                """
-                CREATE TRIGGER reject_delivered
-                BEFORE UPDATE OF delivered ON outbox
-                WHEN NEW.order_id = 'b' AND NEW.delivered = 1
-                BEGIN
-                    SELECT RAISE(ABORT, 'Delivered mark unavailable');
-                END;
-                """
-            )
+        seen = sandbox.observe('delivery', 'acceptance_before_database_failure')
 
-        with self.assertRaises(sqlite3.DatabaseError):
-            dispatch_pending(self.db, receiver)
-
+        self.assertIs(seen['outbox'], True, OUTBOX_MISSING)
+        stored = seen['stored']
+        self.assertIs(seen['failed'], True, 'DatabaseError not raised')
         self.assertEqual(
-            receiver.effects(), {key: stored[key] for key in ('order:a', 'order:b')}
+            seen['accepted'], {key: stored[key] for key in ('order:a', 'order:b')}
         )
-        with Store(self.db) as store:
-            self.assertEqual([item.order_id for item in store.pending(100)], ['b', 'c'])
-            store.connection.execute('DROP TRIGGER reject_delivered')
-            store.connection.commit()
-
-        retried = dispatch_pending(self.db, receiver)
-
-        self.assertEqual(
-            (retried.attempted, retried.delivered, retried.failed), (2, 2, 0)
-        )
-        self.assertEqual(receiver.effects(), stored)
-        with Store(self.db) as store:
-            self.assertEqual(store.pending(100), [])
+        self.assertEqual([item['order_id'] for item in seen['left']], ['b', 'c'])
+        self.assertEqual(tuple(seen['retried']), (2, 2, 0))
+        self.assertEqual(seen['effects'], stored)
+        self.assertEqual(seen['after'], [])
 
     def test_invalid_placement_and_dispatch_limits_leave_database_unchanged(
         self,
     ) -> None:
-        for amount in (0, -1, True, 2**63):
-            with self.subTest(amount=amount), self.assertRaises(ValueError):
-                place_order(self.db, 'bad', amount)
-        with self.assertRaises(ValueError):
-            place_order(self.db, '', 10)
-        good = place_order(self.db, 'good', 2**63 - 1)
-        receiver = Receiver()
+        amounts = [0, -1, True, 2**63]
+        limits = [0, -1, True]
 
-        for limit in (0, -1, True):
-            with self.subTest(limit=limit), self.assertRaises(ValueError):
-                dispatch_pending(self.db, receiver, limit=limit)
+        seen = sandbox.observe(
+            'delivery', 'invalid_inputs', amounts=amounts, limits=limits
+        )
 
-        self.assertEqual(receiver.attempts, [])
-        with Store(self.db) as store:
-            self.assertEqual(store.orders(), [good])
-            self.assertEqual([item.order_id for item in store.pending(100)], ['good'])
+        for amount, rejected in zip(amounts, seen['amounts'], strict=True):
+            with self.subTest(amount=amount):
+                self.assertIs(rejected, True, 'ValueError not raised')
+        self.assertIs(seen['order_id'], True, 'ValueError not raised')
+        for limit, rejected in zip(limits, seen['limits'], strict=True):
+            with self.subTest(limit=limit):
+                self.assertIs(rejected, True, 'ValueError not raised')
+        self.assertEqual(seen['attempts'], 0)
+        self.assertEqual(seen['orders'], [seen['good']])
+        self.assertEqual([item['order_id'] for item in seen['pending']], ['good'])
 
     def test_cli_placement_and_dispatch_reopen_the_same_persisted_pipeline(
         self,
     ) -> None:
-        receiver_path = self.root / 'cli-receiver.sqlite'
-
-        for args in (
+        commands = [
             [
                 'place',
                 '--db',
-                str(self.db),
+                '{db}',
                 '--order-id',
                 'cli',
                 '--amount-cents',
                 '425',
             ],
-            ['dispatch', '--db', str(self.db), '--receiver', str(receiver_path)],
-        ):
-            with self.subTest(command=args[0]):
-                result = subprocess.run(
-                    [sys.executable, '-m', 'dispatchbox', *args],
-                    cwd=ROOT,
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                json.loads(result.stdout)
+            ['dispatch', '--db', '{db}', '--receiver', '{receiver}'],
+        ]
 
-        effects = FakeReceiver(receiver_path).effects()
+        seen = sandbox.observe('delivery', 'cli_pipeline', commands=commands)
+
+        for args, result in zip(commands, seen['runs'], strict=True):
+            with self.subTest(command=args[0]):
+                self.assertEqual(result['returncode'], 0, result['stderr'])
+                json.loads(result['stdout'])
         self.assertEqual(
-            {key: json.loads(payload) for key, payload in effects.items()},
+            {
+                key: json.loads(bytes.fromhex(payload))
+                for key, payload in seen['effects'].items()
+            },
             {'order:cli': {'order_id': 'cli', 'amount_cents': 425}},
         )
-        with Store(self.db) as store:
-            self.assertEqual(store.pending(100), [])
+        self.assertEqual(seen['after'], [])
 
 
 if __name__ == '__main__':

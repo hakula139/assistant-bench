@@ -135,7 +135,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/add-byte-range-requests"
-extraPaths = ["families/coding-repo/tasks/add-byte-range-requests/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/add-byte-range-requests/solution/app",
+  "families/coding-repo/tasks/add-byte-range-requests/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/deliver-transactional-outbox/environment/app"
@@ -143,7 +146,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/deliver-transactional-outbox"
-extraPaths = ["families/coding-repo/tasks/deliver-transactional-outbox/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/deliver-transactional-outbox/solution/app",
+  "families/coding-repo/tasks/deliver-transactional-outbox/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/make-pipeline-incremental/environment/app"
@@ -151,7 +157,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/make-pipeline-incremental"
-extraPaths = ["families/coding-repo/tasks/make-pipeline-incremental/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/make-pipeline-incremental/solution/app",
+  "families/coding-repo/tasks/make-pipeline-incremental/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/migrate-customer-store/environment/app"
@@ -159,7 +168,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/migrate-customer-store"
-extraPaths = ["families/coding-repo/tasks/migrate-customer-store/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/migrate-customer-store/solution/app",
+  "families/coding-repo/tasks/migrate-customer-store/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/publish-asset-graph/environment/app"
@@ -167,7 +179,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/publish-asset-graph"
-extraPaths = ["families/coding-repo/tasks/publish-asset-graph/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/publish-asset-graph/solution/app",
+  "families/coding-repo/tasks/publish-asset-graph/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-job-leases/environment/app"
@@ -175,7 +190,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-job-leases"
-extraPaths = ["families/coding-repo/tasks/repair-job-leases/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/repair-job-leases/solution/app",
+  "families/coding-repo/tasks/repair-job-leases/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-kv-crash-recovery/environment/app"
@@ -183,7 +201,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-kv-crash-recovery"
-extraPaths = ["families/coding-repo/tasks/repair-kv-crash-recovery/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/repair-kv-crash-recovery/solution/app",
+  "families/coding-repo/tasks/repair-kv-crash-recovery/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-singleflight-cache/environment/app"
@@ -191,7 +212,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/repair-singleflight-cache"
-extraPaths = ["families/coding-repo/tasks/repair-singleflight-cache/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/repair-singleflight-cache/solution/app",
+  "families/coding-repo/tasks/repair-singleflight-cache/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/resume-ledger-import/environment/app"
@@ -199,7 +223,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/resume-ledger-import"
-extraPaths = ["families/coding-repo/tasks/resume-ledger-import/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/resume-ledger-import/solution/app",
+  "families/coding-repo/tasks/resume-ledger-import/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/stabilize-cursor-pagination/environment/app"
@@ -207,7 +234,10 @@ extraPaths = []
 
 [[tool.basedpyright.executionEnvironments]]
 root = "families/coding-repo/tasks/stabilize-cursor-pagination"
-extraPaths = ["families/coding-repo/tasks/stabilize-cursor-pagination/solution/app"]
+extraPaths = [
+  "families/coding-repo/tasks/stabilize-cursor-pagination/solution/app",
+  "families/coding-repo/tasks/stabilize-cursor-pagination/tests",
+]
 
 [[tool.basedpyright.executionEnvironments]]
 root = "."

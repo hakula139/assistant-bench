@@ -1,14 +1,7 @@
-import json
-import os
-import sqlite3
-import subprocess
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 from typing import Any
 
-from jobq import Lease, LeaseLost, Queue, Worker
+import sandbox
 
 
 STARTER_SCHEMA = """
@@ -36,111 +29,65 @@ PRAGMA user_version = 1;
 """The database format of the version operators already run."""
 
 
-class FakeClock:
-    def __init__(self) -> None:
-        self.now = 50_000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 class LeaseTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.path = self.directory / 'jobs.db'
-        self.clock = FakeClock()
-
-    def open(self, **options: Any) -> Queue:
-        return self.enterContext(Queue(self.path, clock=self.clock, **options))
-
-    def claim(self, queue: Queue, worker: str, lease_seconds: float = 30) -> Lease:
-        lease = queue.claim(worker, lease_seconds=lease_seconds)
+    def claimed(self, lease: dict[str, Any] | None, worker: str) -> dict[str, Any]:
         if lease is None:
             self.fail(f'{worker} found no ready job')
         return lease
 
     def test_expired_leases_are_claimed_again(self) -> None:
-        queue = self.open()
-        job_id = queue.enqueue('task')
-        first = self.claim(queue, 'w1')
-        self.clock.now += 29.5
-        self.assertIsNone(queue.claim('w2'))
+        seen = sandbox.observe('leases', 'expired_leases_are_claimed_again')
 
-        self.clock.now += 0.5
-        second = self.claim(queue, 'w2')
-
-        self.assertEqual((second.job_id, second.attempt), (job_id, 2))
-        self.assertNotEqual(second.token, first.token)
-        job = queue.get(job_id)
-        self.assertEqual((job.status, job.attempts), ('running', 2))
-        self.assertEqual(job.last_error, 'lease expired')
+        first = self.claimed(seen['first'], 'w1')
+        self.assertIsNone(seen['early'])
+        second = self.claimed(seen['second'], 'w2')
+        self.assertEqual((second['job_id'], second['attempt']), (seen['job_id'], 2))
+        self.assertNotEqual(second['token'], first['token'])
+        job = seen['job']
+        self.assertEqual((job['status'], job['attempts']), ('running', 2))
+        self.assertEqual(job['last_error'], 'lease expired')
 
     def test_superseded_leases_change_nothing(self) -> None:
-        queue = self.open()
-        job_id = queue.enqueue('task')
-        stale = self.claim(queue, 'w1')
-        self.clock.now += 31
-        current = self.claim(queue, 'w2')
+        seen = sandbox.observe('leases', 'superseded_leases_change_nothing')
 
-        for action in (
-            lambda: queue.complete(stale, 'from w1'),
-            lambda: queue.fail(stale, 'w1 failed'),
-            lambda: queue.heartbeat(stale),
-        ):
-            with self.assertRaises(LeaseLost):
-                action()
-
-        job = queue.get(job_id)
-        self.assertEqual((job.status, job.result, job.attempts), ('running', None, 2))
-        queue.complete(current, 'from w2')
-        self.assertEqual(queue.get(job_id).result, 'from w2')
+        self.assertEqual(seen['lost'], [True, True, True])
+        before = seen['before']
+        self.assertEqual(
+            (before['status'], before['result'], before['attempts']),
+            ('running', None, 2),
+        )
+        self.assertEqual(seen['after']['result'], 'from w2')
 
     def test_expired_leases_cannot_be_used(self) -> None:
-        queue = self.open()
-        job_id = queue.enqueue('task')
-        lease = self.claim(queue, 'w1', lease_seconds=10)
-        self.clock.now += 10
+        seen = sandbox.observe('leases', 'expired_leases_cannot_be_used')
 
-        for action in (
-            lambda: queue.heartbeat(lease),
-            lambda: queue.complete(lease, 'late'),
-            lambda: queue.fail(lease, 'late failure'),
-        ):
-            with self.assertRaises(LeaseLost):
-                action()
-
-        job = queue.get(job_id)
-        self.assertIn(job.status, {'queued', 'running'})
-        self.assertEqual((job.attempts, job.result), (1, None))
-        self.assertNotEqual(job.last_error, 'late failure')
-        self.assertEqual(self.claim(queue, 'w2').job_id, job_id)
+        self.assertEqual(seen['lost'], [True, True, True])
+        job = seen['job']
+        self.assertIn(job['status'], {'queued', 'running'})
+        self.assertEqual((job['attempts'], job['result']), (1, None))
+        self.assertNotEqual(job['last_error'], 'late failure')
+        self.assertEqual(self.claimed(seen['next'], 'w2')['job_id'], seen['job_id'])
 
     def test_claims_take_the_earliest_run_at_then_the_lowest_id(self) -> None:
-        queue = self.open()
-        later = queue.enqueue('task', delay=10)
-        earlier = queue.enqueue('task')
-        tied = queue.enqueue('task', delay=10)
-        self.clock.now += 10
+        seen = sandbox.observe('leases', 'claim_order')
 
-        order = [self.claim(queue, 'w1').job_id for _ in range(3)]
-
-        self.assertEqual(order, [earlier, later, tied])
+        order = [self.claimed(lease, 'w1')['job_id'] for lease in seen['order']]
+        self.assertEqual(order, [seen['earlier'], seen['later'], seen['tied']])
 
     def test_opens_queues_written_by_the_current_version(self) -> None:
-        now = self.clock.now
         rows: list[dict[str, Any]] = [
-            {'kind': 'ready', 'payload': '[1]', 'dedupe_key': 'q', 'run_at': now - 10},
-            {'kind': 'later', 'payload': '{}', 'run_at': now + 100},
+            {'kind': 'ready', 'payload': '[1]', 'dedupe_key': 'q', 'run_at': -10},
+            {'kind': 'later', 'payload': '{}', 'run_at': 100},
             {
                 'kind': 'held',
                 'payload': 'null',
                 'dedupe_key': 'r',
                 'status': 'running',
                 'attempts': 1,
-                'run_at': now - 5,
+                'run_at': -5,
                 'lease_owner': 'gone',
                 'lease_token': 'stale',
-                'lease_until': now - 1,
+                'lease_until': -1,
             },
             {
                 'kind': 'finished',
@@ -149,7 +96,7 @@ class LeaseTest(unittest.TestCase):
                 'status': 'done',
                 'attempts': 1,
                 'result': '{"ok": true}',
-                'finished_at': now - 25,
+                'finished_at': -25,
             },
             {
                 'kind': 'broken',
@@ -158,154 +105,97 @@ class LeaseTest(unittest.TestCase):
                 'status': 'dead',
                 'attempts': 5,
                 'last_error': 'boom',
-                'finished_at': now - 25,
+                'finished_at': -25,
             },
         ]
-        db = sqlite3.connect(self.path)
-        db.executescript(STARTER_SCHEMA)
-        for job_id, row in enumerate(rows, 1):
-            row = {
-                'id': job_id,
-                'status': 'queued',
-                'run_at': now - 30,
-                'created_at': now - 40,
-                **row,
-            }
-            columns, values = ', '.join(row), ', '.join('?' * len(row))
-            db.execute(
-                f'INSERT INTO jobs ({columns}) VALUES ({values})', tuple(row.values())
-            )
-        db.commit()
-        db.close()
+        rows = [
+            {'id': job_id, 'status': 'queued', 'run_at': -30, 'created_at': -40, **row}
+            for job_id, row in enumerate(rows, 1)
+        ]
 
-        try:
-            queue = self.open()
-        except Exception as error:
-            self.fail(f'a queue in the current format fails to open: {error!r}')
+        seen = sandbox.observe(
+            'leases', 'open_current_format', schema=STARTER_SCHEMA, rows=rows
+        )
 
-        done = queue.get(4)
+        if seen['error'] is not None:
+            self.fail(f'a queue in the current format fails to open: {seen["error"]}')
+        done = seen['done']
         self.assertEqual(
-            (done.status, done.result, done.payload), ('done', {'ok': True}, 'x')
+            (done['status'], done['result'], done['payload']),
+            ('done', {'ok': True}, 'x'),
         )
+        self.assertEqual(seen['dead'], [[5, 'boom']])
+        first = self.claimed(seen['first'], 'w1')
+        second = self.claimed(seen['second'], 'w2')
+        self.assertIsNone(seen['third'])
         self.assertEqual(
-            [(job.id, job.last_error) for job in queue.dead_letters()], [(5, 'boom')]
+            (first['job_id'], first['payload'], first['attempt']), (1, [1], 1)
         )
-        first = self.claim(queue, 'w1')
-        second = self.claim(queue, 'w2')
-        self.assertIsNone(queue.claim('w3'))
-        self.assertEqual((first.job_id, first.payload, first.attempt), (1, [1], 1))
-        self.assertEqual((second.job_id, second.attempt), (3, 2))
-        self.assertEqual(queue.get(3).last_error, 'lease expired')
-        self.assertEqual(queue.enqueue('ready', dedupe_key='q'), 1)
-        self.assertEqual(queue.enqueue('held', dedupe_key='r'), 3)
-        self.assertNotIn(queue.enqueue('finished', dedupe_key='d'), {1, 2, 3, 4, 5})
-        self.assertNotIn(queue.enqueue('broken', dedupe_key='x'), {1, 2, 3, 4, 5})
-        queue.complete(first, 'one')
+        self.assertEqual((second['job_id'], second['attempt']), (3, 2))
+        self.assertEqual(seen['held']['last_error'], 'lease expired')
+        ready, held, finished, broken = seen['enqueued']
+        self.assertEqual((ready, held), (1, 3))
+        self.assertNotIn(finished, {1, 2, 3, 4, 5})
+        self.assertNotIn(broken, {1, 2, 3, 4, 5})
         self.assertEqual(
-            queue.counts(), {'queued': 3, 'running': 1, 'done': 2, 'dead': 1}
+            seen['counts'], {'queued': 3, 'running': 1, 'done': 2, 'dead': 1}
         )
 
     def test_heartbeats_keep_the_lease(self) -> None:
-        queue = self.open()
-        job_id = queue.enqueue('task')
-        lease = self.claim(queue, 'w1', lease_seconds=10)
+        seen = sandbox.observe('leases', 'heartbeats_keep_the_lease')
 
-        self.clock.now += 8
-        lease = queue.heartbeat(lease, lease_seconds=10)
-        self.clock.now += 8
-
-        self.assertIsNone(queue.claim('w2'))
-        queue.complete(lease, 'kept')
-        self.assertEqual(queue.get(job_id).status, 'done')
+        self.assertIsNone(seen['other'])
+        self.assertEqual(seen['job']['status'], 'done')
 
     def test_jobs_whose_leases_keep_expiring_are_dead_lettered(self) -> None:
-        queue = self.open(max_attempts=3)
-        job_id = queue.enqueue('poison')
-        other = queue.enqueue('fine', delay=1000)
-        for attempt in (1, 2, 3):
-            self.assertEqual(self.claim(queue, f'w{attempt}').attempt, attempt)
-            self.clock.now += 31
+        seen = sandbox.observe('leases', 'leases_keep_expiring')
 
-        self.assertIsNone(queue.claim('w4'))
-
-        job = queue.get(job_id)
-        self.assertEqual((job.status, job.attempts), ('dead', 3))
-        self.assertEqual(job.last_error, 'lease expired')
-        self.assertEqual([dead.id for dead in queue.dead_letters()], [job_id])
-        self.clock.now += 1000
-        self.assertEqual(self.claim(queue, 'w5').job_id, other)
+        attempts = [
+            self.claimed(lease, f'w{attempt}')['attempt']
+            for attempt, lease in enumerate(seen['attempts'], 1)
+        ]
+        self.assertEqual(attempts, [1, 2, 3])
+        self.assertIsNone(seen['fourth'])
+        job = seen['job']
+        self.assertEqual((job['status'], job['attempts']), ('dead', 3))
+        self.assertEqual(job['last_error'], 'lease expired')
+        self.assertEqual(seen['dead'], [seen['job_id']])
+        self.assertEqual(self.claimed(seen['last'], 'w5')['job_id'], seen['other'])
 
     def test_failures_back_off_on_the_queue_clock(self) -> None:
-        queue = self.open(max_attempts=4, retry_delay=2, max_retry_delay=5)
-        job_id = queue.enqueue('flaky')
-        for delay in (2, 4, 5):
-            lease = self.claim(queue, 'w1')
-            failed_at = self.clock.now
+        delays = [2, 4, 5]
 
-            job = queue.fail(lease, f'attempt {lease.attempt}')
+        seen = sandbox.observe('leases', 'failures_back_off', delays=delays)
 
-            self.assertEqual((job.status, job.run_at), ('queued', failed_at + delay))
-            self.clock.now = failed_at + delay - 0.01
-            self.assertIsNone(queue.claim('w1'))
-            self.clock.now = failed_at + delay
-
-        lease = self.claim(queue, 'w1')
-        job = queue.fail(lease, 'attempt 4')
-        self.assertEqual((job.status, job.last_error), ('dead', 'attempt 4'))
-        self.assertIsNone(queue.claim('w1'))
-        self.assertEqual(queue.get(job_id).attempts, 4)
+        for delay, retry in zip(delays, seen['retries'], strict=True):
+            with self.subTest(delay=delay):
+                self.assertEqual((retry['status'], retry['wait']), ('queued', delay))
+                self.assertIsNone(retry['early'])
+        final = seen['final']
+        self.assertEqual((final['status'], final['last_error']), ('dead', 'attempt 4'))
+        self.assertIsNone(seen['after'])
+        self.assertEqual(seen['attempts'], 4)
 
     def test_dedupe_keys_are_freed_by_finished_jobs(self) -> None:
-        queue = self.open(max_attempts=1)
-        first = queue.enqueue('sync', dedupe_key='k')
-        lease = self.claim(queue, 'w1')
-        self.assertEqual(queue.enqueue('sync', dedupe_key='k'), first)
-        queue.complete(lease)
+        seen = sandbox.observe('leases', 'dedupe_keys_are_freed')
 
-        second = queue.enqueue('sync', dedupe_key='k')
-        lease = self.claim(queue, 'w1')
-        queue.fail(lease, 'gone')
-        third = queue.enqueue('sync', dedupe_key='k')
-
-        self.assertEqual(len({first, second, third}), 3)
-        self.assertEqual(queue.get(third).status, 'queued')
-        self.assertEqual(queue.enqueue('sync', dedupe_key='k'), third)
+        self.assertEqual(seen['while_running'], seen['first'])
+        self.assertEqual(len({seen['first'], seen['second'], seen['third']}), 3)
+        self.assertEqual(seen['third_status'], 'queued')
+        self.assertEqual(seen['again'], seen['third'])
 
     def test_workers_drop_jobs_they_outlived(self) -> None:
-        queue = self.open()
-        job_id = queue.enqueue('slow')
+        seen = sandbox.observe('leases', 'workers_drop_outlived_jobs')
 
-        def slow(_: object) -> str:
-            self.clock.now += 60
-            return 'too late'
-
-        ran = Worker(queue, {'slow': slow}, name='w1', lease_seconds=30).run_once()
-
-        self.assertTrue(ran)
-        self.assertNotEqual(queue.get(job_id).status, 'done')
-        lease = self.claim(queue, 'w2')
-        self.assertEqual((lease.job_id, lease.attempt), (job_id, 2))
+        self.assertIs(seen['ran'], True)
+        self.assertNotEqual(seen['job']['status'], 'done')
+        lease = self.claimed(seen['next'], 'w2')
+        self.assertEqual((lease['job_id'], lease['attempt']), (seen['job_id'], 2))
 
     def test_cli_workers_run_every_job(self) -> None:
-        (self.directory / 'handlers.py').write_text(
-            'HANDLERS = {"square": lambda n: n * n}\n'
-        )
-        env = {**os.environ, 'PYTHONPATH': f'{self.directory}{os.pathsep}{Path.cwd()}'}
+        numbers = [0, 1, 2]
 
-        def jobq(*args: str) -> str:
-            return subprocess.run(
-                [sys.executable, '-m', 'jobq', str(self.path), *args],
-                capture_output=True,
-                text=True,
-                check=True,
-                env=env,
-            ).stdout
+        seen = sandbox.observe('leases', 'cli_workers_run_every_job', numbers=numbers)
 
-        ids = [int(jobq('enqueue', 'square', str(n))) for n in range(3)]
-        ran = jobq('work', 'handlers', '--name', 'cli', '--until-idle')
-
-        self.assertEqual(int(ran), 3)
-        self.assertEqual(
-            [json.loads(jobq('status', str(job_id)))['result'] for job_id in ids],
-            [0, 1, 4],
-        )
+        self.assertEqual(seen['ran'], 3)
+        self.assertEqual(seen['results'], [n * n for n in numbers])

@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from shlex import quote
 from types import ModuleType
 from typing import Any
+from unittest import mock
 from urllib.parse import urlsplit
 
 import pytest
@@ -160,6 +162,32 @@ def test_coding_fixture_directories_match_tasks() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    'module',
+    sorted(
+        path
+        for task in CODING_TASKS
+        for path in (task / 'tests' / 'hidden').glob('*.py')
+    ),
+    ids=lambda path: f'{path.parent.parent.parent.name}/{path.name}',
+)
+def test_coding_hidden_tests_import_only_the_standard_library(module: Path) -> None:
+    trusted = sys.stdlib_module_names | {'sandbox'}
+    nodes = list(ast.walk(ast.parse(module.read_text())))
+    imported = {
+        alias.name.split('.')[0]
+        for node in nodes
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module.split('.')[0]
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
+    }
+
+    assert imported <= trusted, f'{module} imports outside the trusted boundary'
+
+
 def solved_workspace(task: Path, tmp_path: Path, *, solved: bool) -> Path:
     """Copy a task's starter into `tmp_path`, with the reference applied if `solved`."""
     workspace = tmp_path / 'app'
@@ -184,16 +212,16 @@ def run_verifier(task: Path, workspace: Path, logs: Path, tmp_path: Path) -> str
     """Run a task's `test.sh` against `workspace`, logging to `logs`, for its output."""
     verifier = tmp_path / 'tests'
     shutil.copytree(task / 'tests', verifier)
-    verify = verifier / 'verify.py'
-    verify.write_text(
-        verify.read_text().replace(
+    sandbox = verifier / 'sandbox.py'
+    sandbox.write_text(
+        sandbox.read_text().replace(
             "pathlib.Path('/app')", f'pathlib.Path({str(workspace)!r})'
         )
     )
     script = (
         (verifier / 'test.sh')
         .read_text()
-        .replace('/tests/verify.py', quote(str(verify)))
+        .replace('/tests/verify.py', quote(str(verifier / 'verify.py')))
         .replace('/logs/verifier', quote(str(logs)))
     )
     result = subprocess.run(
@@ -263,7 +291,7 @@ def test_coding_verifiers_reward_only_the_reference(
 def test_coding_verifiers_reject_bypasses_and_planted_rewards(
     task: Path, bypass: str, tmp_path: Path
 ) -> None:
-    workspace = solved_workspace(task, tmp_path, solved=True)
+    workspace = solved_workspace(task, tmp_path, solved=False)
     source = (CODING_FIXTURES / f'{bypass}.py').read_text()
     for package in workspace.glob('*/__init__.py'):
         if package.parent.name != 'tests':
@@ -284,12 +312,16 @@ def test_coding_verifiers_reject_bypasses_and_planted_rewards(
 
 
 def load_coding_verifier() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        'coding_verify', CODING / 'shared' / 'tests' / 'verify.py'
-    )
+    """Load `verify.py` beside the `sandbox` module it imports."""
+    tests = CODING / 'shared' / 'tests'
+    spec = importlib.util.spec_from_file_location('coding_verify', tests / 'verify.py')
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with (
+        mock.patch.object(sys, 'path', [str(tests), *sys.path]),
+        mock.patch.dict(sys.modules),
+    ):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -300,70 +332,28 @@ def verifier_wait_sec() -> int:
 
 
 @pytest.mark.parametrize(
-    ('record', 'expected', 'reason'),
+    ('record', 'reason'),
     [
         pytest.param(
-            None,
             None,
             'The run left no record, as it exited early or ran past 300 s.',
             id='no-record',
         ),
+        pytest.param({'passed': ['t.a'], 'successful': True}, None, id='passes'),
         pytest.param(
-            {'intact': False, 'passed': ['t.a'], 'successful': True},
-            None,
-            None,
-            id='workspace-passes-unchecked-machinery',
+            {'passed': ['t.a'], 'successful': False}, 'A test failed.', id='failure'
         ),
         pytest.param(
-            {'intact': True, 'passed': ['t.a'], 'successful': False},
-            None,
-            'A test failed.',
-            id='workspace-failure',
-        ),
-        pytest.param(
-            {'intact': True, 'passed': [], 'successful': True},
-            None,
-            'No test passed.',
-            id='workspace-without-passes',
-        ),
-        pytest.param(
-            {'intact': True, 'passed': ['t.a', 't.b'], 'successful': True},
-            ['t.a', 't.b'],
-            None,
-            id='hidden-exact-match',
-        ),
-        pytest.param(
-            {'intact': False, 'passed': ['t.a', 't.b'], 'successful': True},
-            ['t.a', 't.b'],
-            'The run changed the `unittest` machinery.',
-            id='hidden-machinery-changed',
-        ),
-        pytest.param(
-            {'intact': True, 'passed': ['t.a'], 'successful': True},
-            ['t.a', 't.b'],
-            'These tests did not pass: t.b',
-            id='hidden-missing-test',
-        ),
-        pytest.param(
-            {'intact': True, 'passed': ['t.a', 't.b', 't.c'], 'successful': True},
-            ['t.a', 't.b'],
-            'Tests beyond the hidden test methods passed.',
-            id='hidden-extra-test',
-        ),
-        pytest.param(
-            {'intact': True, 'passed': ['t.a', 't.b'], 'successful': False},
-            ['t.a', 't.b'],
-            'A class or module fixture failed.',
-            id='hidden-fixture-failure',
+            {'passed': [], 'successful': True}, 'No test passed.', id='without-passes'
         ),
     ],
 )
-def test_coding_verifier_judges_each_run_record(
-    record: dict[str, Any] | None, expected: list[str] | None, reason: str | None
+def test_coding_verifier_judges_each_workspace_record(
+    record: dict[str, Any] | None, reason: str | None
 ) -> None:
     verify = load_coding_verifier()
 
-    judged = verify.judge(None if record is None else verify.Record(**record), expected)
+    judged = verify.judge(None if record is None else verify.Record(**record))
 
     assert judged == reason
 
