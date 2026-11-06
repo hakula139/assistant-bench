@@ -72,7 +72,6 @@ def prepare(family: FamilyArgument) -> None:
             load_cases(selected),
             outputs,
             {system.name: system.display_name for system in listed},
-            'production',
         )
         path = publication.write(prepared, outputs)
     except (OSError, RuntimeError, ValueError) as error:
@@ -289,7 +288,6 @@ def _listing(database: Database, family: str, selector: votes.Selector) -> str:
 def _selector(
     *, ip_tag: str | None, actor: str | None, vote: list[int] | None = None
 ) -> votes.Selector | None:
-    """Return the selector the options give, or None when they give none."""
     given: dict[str, votes.Selector] = {}
     if ip_tag is not None:
         given['--ip-tag'] = votes.Selector(column='ip_tag', values=(ip_tag,))

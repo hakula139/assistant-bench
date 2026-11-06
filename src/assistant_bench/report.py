@@ -10,7 +10,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 import numpy as np
 from pydantic import (
@@ -18,7 +18,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -33,6 +32,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.outputs import (
     Output,
+    Verdict,
     read_outputs,
     system_fingerprints,
     tests_pass,
@@ -81,15 +81,6 @@ class Distribution(_Model):
 type Share = Annotated[float, Field(ge=0, le=1)]
 
 type CostGap = Literal['unpriced', 'unreported']
-
-
-def _check_cost_gap(
-    mean_cost_usd: float | None, cost_gap: CostGap | None, finished: int
-) -> None:
-    if (cost_gap is None) != (mean_cost_usd is not None or finished == 0):
-        raise ValueError(
-            'A cost gap is present exactly when finished outputs lack a mean cost.'
-        )
 
 
 class PassRate(_Model):
@@ -141,10 +132,9 @@ class Cutoff(_Model):
 
 
 class Cutoffs(_Model):
-    """Each store's cutoff at closing, null for a store closing did not read."""
+    """Each store's cutoff at closing."""
 
-    production: Cutoff | None
-    local: Cutoff | None
+    production: Cutoff
 
 
 class Standing(_Model):
@@ -156,25 +146,20 @@ class Standing(_Model):
     """Competition rank of the point score."""
 
     votes: Annotated[int, Field(ge=0)]
-    effective_votes: Annotated[float, Field(ge=0)]
-    """Eligible human row weight, excluding settled comparisons."""
     decisive_votes: Annotated[int, Field(ge=0)]
     both_bad_rate: float | None
 
-    outputs: int
-    """Outputs that finished without an error."""
     gate_failure_rate: float | None
     """Failure share among outputs with a verdict, including errored agents."""
     pass_rate: PassRate | None
     """The tests pass rate over tasks, null when the system's outputs lack rewards."""
 
     mean_cost_usd: float | None
-    """Null unless every finished output's cost is known, like the other aggregates."""
+    """Null unless every output that finished without an error reports a cost."""
     cost_gap: CostGap | None
     """Why finished outputs lack a mean cost: `unpriced` when an output with known
     usage has no cost, and `unreported` when only outputs without usage do."""
 
-    p50_latency_sec: float | None
     output_tokens: Distribution | None
     latency_sec: Distribution | None
 
@@ -183,21 +168,20 @@ class Standing(_Model):
 
     @model_validator(mode='after')
     def validate_cost_gap(self) -> Standing:
-        _check_cost_gap(self.mean_cost_usd, self.cost_gap, self.outputs)
+        if self.cost_gap is not None and self.mean_cost_usd is not None:
+            raise ValueError('A cost gap is present only without a mean cost.')
         return self
 
 
 class HeadToHead(_Model):
     """Human choices between two systems, with half credit for either tie.
 
-    The outcome counts are raw choices, while `effective_votes` and `win_rate` use
-    the actors' weights.
+    The outcome counts are raw choices, while `win_rate` uses the actors' weights.
     """
 
     system: str
     opponent: str
     votes: Annotated[int, Field(ge=0)]
-    effective_votes: Annotated[float, Field(ge=0)]
     wins: int
     losses: int
     ties: int
@@ -209,7 +193,6 @@ class CategoryStanding(_Model):
     system: str
     score: float
     votes: Annotated[int, Field(ge=0)]
-    effective_votes: Annotated[float, Field(ge=0)]
     decisive_votes: Annotated[int, Field(ge=0)]
 
 
@@ -251,8 +234,6 @@ class VotesResults(_Model):
     head_to_head: list[HeadToHead]
     categories: list[CategoryBoard]
 
-    position: float | None
-    """Left-pane advantage in score points, null without ranked human rows."""
     length: float | None
     """Score points per length-difference standard deviation, if identifiable."""
     split_half_tau: float | None
@@ -274,7 +255,7 @@ class TestsStanding(_Model):
     """Share of tasks whose `samples` trials all passed, null for one sample."""
 
     mean_cost_usd: float | None
-    """Null unless every finished trial's cost is known, like the median latency."""
+    """Null unless every trial that finished without an error reports a cost."""
     cost_gap: CostGap | None
     """Why finished trials lack a mean cost: `unpriced` when a trial with known
     usage has no cost, and `unreported` when only trials without usage do."""
@@ -283,7 +264,11 @@ class TestsStanding(_Model):
 
     @model_validator(mode='after')
     def validate_cost_gap(self) -> TestsStanding:
-        _check_cost_gap(self.mean_cost_usd, self.cost_gap, self.trials - self.errored)
+        finished = self.trials - self.errored
+        if (self.cost_gap is None) != (self.mean_cost_usd is not None or finished == 0):
+            raise ValueError(
+                'A cost gap is present exactly when finished trials lack a mean cost.'
+            )
         return self
 
 
@@ -372,17 +357,19 @@ class Report(_Model):
         if len(set(names)) != len(names):
             raise ValueError('Public display names must be unique within a report.')
 
-        unranked: list[str] = []
-        if isinstance(self.results, VotesResults):
-            unranked = self.results.unranked
-            for board in self.results.categories:
-                _validate_memberships(
-                    [row.system for row in board.standings], board.unranked
-                )
-            if self.results.anchor not in {
-                row.system for row in self.results.standings
-            }:
-                raise ValueError('The anchor must have an overall standing.')
+        match self.results:
+            case VotesResults() as results:
+                unranked = results.unranked
+                for board in results.categories:
+                    _validate_memberships(
+                        [row.system for row in board.standings], board.unranked
+                    )
+                if results.anchor not in {row.system for row in results.standings}:
+                    raise ValueError('The anchor must have an overall standing.')
+            case TestsResults():
+                unranked = []
+            case _:
+                assert_never(self.results)
 
         _validate_memberships([row.system for row in self.results.standings], unranked)
 
@@ -397,31 +384,30 @@ def _validate_memberships(ranked: list[str], unranked: list[str]) -> None:
 
 def _referenced_systems(results: Results) -> set[str]:
     systems = {row.system for row in results.standings}
-    if isinstance(results, VotesResults):
-        systems.update((results.reference, results.anchor))
-        systems.update(results.unranked)
-        for row in results.head_to_head:
-            systems.update((row.system, row.opponent))
-        for board in results.categories:
-            systems.update(row.system for row in board.standings)
-            systems.update(board.unranked)
+    match results:
+        case VotesResults():
+            systems.update((results.reference, results.anchor))
+            systems.update(results.unranked)
+            for row in results.head_to_head:
+                systems.update((row.system, row.opponent))
+            for board in results.categories:
+                systems.update(row.system for row in board.standings)
+                systems.update(board.unranked)
+        case TestsResults():
+            pass
+        case _:
+            assert_never(results)
 
     return systems
 
 
-def close(
-    family: Family,
-    closed_at: datetime,
-    *,
-    samples: int,
-    system_names: Mapping[str, str],
-    frozen_fingerprints: Mapping[str, str | None],
+def close_tests(
+    family: Family, closed_at: datetime, system_names: Mapping[str, str]
 ) -> Report:
     """Aggregate a tests family's current outputs under their public system names.
 
     `closed_at` is an aware time, and its UTC date names the round.
     """
-    closed_at = closed_at.astimezone(UTC)
     categories: dict[str, Category] = {
         case.id: case.category for case in load_cases(family)
     }
@@ -432,20 +418,11 @@ def close(
     if not outputs:
         raise ValueError(f'Family `{family.name}` has no outputs on its current cases.')
 
+    samples = family.settings.samples
     _require_every_trial(outputs, categories, samples)
-    results = _tests_results(outputs, categories, samples)
-
-    return Report(
-        family=family.name,
-        round=closed_at.date().isoformat(),
-        closed_at=closed_at,
-        systems=_public_systems(
-            _referenced_systems(results),
-            system_fingerprints(outputs),
-            system_names,
-            frozen_fingerprints,
-        ),
-        results=results,
+    results = _tests_results(outputs, categories, family.settings.categories, samples)
+    return _report(
+        family.name, closed_at, results, system_fingerprints(outputs), system_names
     )
 
 
@@ -455,37 +432,32 @@ def close_votes(
     *,
     fingerprints: Mapping[str, str],
     system_names: Mapping[str, str],
-    frozen_fingerprints: Mapping[str, str | None],
 ) -> Report:
-    """Close a round's votes under the fingerprints and names its publications record.
+    """Close a round's votes under the fingerprints and names its publication records.
 
     `closed_at` is an aware time, and its UTC date names the round.
     """
-    closed_at = closed_at.astimezone(UTC)
-    results = votes_results(analysis)
-    return Report(
-        family=analysis.family,
-        round=closed_at.date().isoformat(),
-        closed_at=closed_at,
-        systems=_public_systems(
-            _referenced_systems(results),
-            fingerprints,
-            system_names,
-            frozen_fingerprints,
-        ),
-        results=results,
+    return _report(
+        analysis.family,
+        closed_at,
+        votes_results(analysis),
+        fingerprints,
+        system_names,
     )
 
 
-def _public_systems(
-    referenced: set[str],
+def _report(
+    family: str,
+    closed_at: datetime,
+    results: Results,
     fingerprints: Mapping[str, str | None],
     names: Mapping[str, str],
-    frozen: Mapping[str, str | None],
-) -> dict[str, PublicSystem]:
-    """Name each referenced system after checking it keeps its frozen fingerprint."""
+) -> Report:
+    """Name each referenced system, refusing one that left the fingerprint it froze."""
+    closed_at = closed_at.astimezone(UTC)
+    frozen = reported_fingerprints(family)
     public: dict[str, PublicSystem] = {}
-    for system in sorted(referenced):
+    for system in sorted(_referenced_systems(results)):
         fingerprint = fingerprints.get(system)
         known = frozen.get(system)
         if known is not None and fingerprint is not None and known != fingerprint:
@@ -495,7 +467,13 @@ def _public_systems(
             display_name=names[system], fingerprint=fingerprint
         )
 
-    return public
+    return Report(
+        family=family,
+        round=closed_at.date().isoformat(),
+        closed_at=closed_at,
+        systems=public,
+        results=results,
+    )
 
 
 def write_report(report: Report) -> Path:
@@ -514,13 +492,8 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
     ValueError
         Two closed reports froze different fingerprints under one system.
     """
-    family = TypeAdapter(FamilyName).validate_python(family)
-    return _frozen_fingerprints(_closed(family))
-
-
-def _frozen_fingerprints(reports: Iterable[Report]) -> dict[str, str | None]:
     frozen: dict[str, str | None] = {}
-    for report in reports:
+    for report in _closed(family):
         for system, metadata in report.systems.items():
             known = frozen.get(system)
             if metadata.fingerprint is None:
@@ -551,7 +524,6 @@ def _closed(family: str) -> list[Report]:
 
 @dataclass(frozen=True)
 class HumanEvidence:
-    receipt: str
     actor: str
     choice: Choice
     defects_a: tuple[Defect, ...]
@@ -571,7 +543,7 @@ class OutputMeasurement:
     case: str
     system: str
     errored: bool
-    verdict: Literal['pass', 'fail', 'ungraded']
+    verdict: Verdict
     reward: float | None
     """The task tests' reward, absent for rendered cases and untested trials."""
 
@@ -594,11 +566,11 @@ class AnalysisInput:
     cutoffs: Cutoffs
     declared_categories: tuple[Category, ...]
     """The family's declared category IDs, whose order the boards keep."""
-    categories: tuple[tuple[str, Category | None], ...]
-    """Every frozen case, with None marking an explicitly uncategorized case."""
+    categories: tuple[tuple[str, Category], ...]
+    """Every frozen case with its category."""
 
     ordinary: tuple[HumanEvidence, ...]
-    """Eligible human choices, ordered by store and then by vote ID."""
+    """Eligible human choices, ordered by vote ID."""
 
     settlements: tuple[ranking.Comparison, ...]
     outputs: tuple[OutputMeasurement, ...]
@@ -617,13 +589,14 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     if not comparisons:
         raise ValueError(f'Family `{analysis.family}` has no eligible comparisons.')
 
-    board, *_ = ranking.rate_components(
-        comparisons, analysis.systems, analysis.reference
-    )
+    board = ranking.rate_root(comparisons, analysis.systems, analysis.reference)
     ratings = board.ratings
     ranked = set(ratings.systems)
     connected = [row for row in votes if set(row.systems) <= ranked]
-    feature = _length_feature(connected)
+    feature = ranking.length_feature(
+        [(row.length_a, row.length_b) for row in connected],
+        [row.comparison.weight for row in connected],
+    )
     length = (
         None
         if feature is None
@@ -658,9 +631,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         voters=len({row.actor for row in votes}),
         standings=standings,
         unranked=sorted({output.system for output in outputs} - ranked),
-        head_to_head=_head_to_head(
-            votes, sorted({system for row in votes for system in row.systems})
-        ),
+        head_to_head=_head_to_head(votes),
         categories=_categories(
             dict(analysis.categories),
             analysis.declared_categories,
@@ -669,9 +640,10 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             comparisons,
             outputs,
         ),
-        position=ratings.position if connected else None,
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
-        split_half_tau=_split_half_tau(votes, board.root),
+        split_half_tau=ranking.split_half_tau(
+            [row.comparison for row in votes], board.root
+        ),
     )
 
 
@@ -696,7 +668,6 @@ def _standing(
 
     finished = [output for output in outputs if not output.errored]
     graded = [output for output in outputs if output.verdict != 'ungraded']
-    decisive = choices['a'] + choices['b']
     effective = sum(vote.comparison.weight for vote in votes)
 
     return Standing(
@@ -704,15 +675,13 @@ def _standing(
         score=score,
         rank=rank,
         votes=len(votes),
-        effective_votes=effective,
-        decisive_votes=decisive,
+        decisive_votes=choices['a'] + choices['b'],
         both_bad_rate=(
             sum(vote.comparison.weight for vote in votes if vote.choice == 'both_bad')
             / effective
             if effective
             else None
         ),
-        outputs=len(finished),
         gate_failure_rate=_share(output.verdict == 'fail' for output in graded),
         pass_rate=(
             _pass_rate(_pass_shares(outputs).values())
@@ -721,59 +690,45 @@ def _standing(
         ),
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         cost_gap=_cost_gap(finished),
-        p50_latency_sec=_median(output.latency_sec for output in finished),
         output_tokens=_distribution(output.output_tokens for output in finished),
         latency_sec=_distribution(output.latency_sec for output in finished),
         defects={defect: defects[defect] for defect in listed},
     )
 
 
-def _head_to_head(
-    votes: list[HumanEvidence], systems: Iterable[str]
-) -> list[HeadToHead]:
+def _head_to_head(votes: list[HumanEvidence]) -> list[HeadToHead]:
     tallies: defaultdict[tuple[str, str], Counter[Choice]] = defaultdict(Counter)
     weighted: defaultdict[tuple[str, str], defaultdict[Choice, float]] = defaultdict(
         lambda: defaultdict(float)
     )
     for vote in votes:
         left, right = vote.systems
-        tallies[(left, right)][vote.choice] += 1
-        tallies[(right, left)][SWAPPED[vote.choice]] += 1
-        weighted[(left, right)][vote.choice] += vote.comparison.weight
-        weighted[(right, left)][SWAPPED[vote.choice]] += vote.comparison.weight
+        tallies[left, right][vote.choice] += 1
+        tallies[right, left][SWAPPED[vote.choice]] += 1
+        weighted[left, right][vote.choice] += vote.comparison.weight
+        weighted[right, left][SWAPPED[vote.choice]] += vote.comparison.weight
 
-    rows: list[HeadToHead] = []
-    for system in systems:
-        for opponent in systems:
-            tally = tallies.get((system, opponent))
-            if tally is None:
-                continue
-
-            total = tally.total()
-            effective = weighted[(system, opponent)]
-            mass = sum(effective.values())
-            rows.append(
-                HeadToHead(
-                    system=system,
-                    opponent=opponent,
-                    votes=total,
-                    effective_votes=mass,
-                    wins=tally['a'],
-                    losses=tally['b'],
-                    ties=tally['tie'],
-                    both_bad=tally['both_bad'],
-                    win_rate=sum(
-                        ranking.LEFT_SCORE[c] * n for c, n in effective.items()
-                    )
-                    / mass,
-                )
+    return [
+        HeadToHead(
+            system=system,
+            opponent=opponent,
+            votes=tally.total(),
+            wins=tally['a'],
+            losses=tally['b'],
+            ties=tally['tie'],
+            both_bad=tally['both_bad'],
+            win_rate=sum(
+                ranking.LEFT_SCORE[choice] * weight
+                for choice, weight in weighted[system, opponent].items()
             )
-
-    return rows
+            / sum(weighted[system, opponent].values()),
+        )
+        for (system, opponent), tally in sorted(tallies.items())
+    ]
 
 
 def _categories(
-    categories: Mapping[str, Category | None],
+    categories: Mapping[str, Category],
     declared: tuple[Category, ...],
     anchor: str,
     votes: list[HumanEvidence],
@@ -783,18 +738,15 @@ def _categories(
     """Refit each declared category in the anchor's component, anchored there too."""
     category_votes: defaultdict[Category, list[HumanEvidence]] = defaultdict(list)
     for row in votes:
-        if (category := categories[row.comparison.case]) is not None:
-            category_votes[category].append(row)
+        category_votes[categories[row.comparison.case]].append(row)
 
     by_category: defaultdict[Category, list[ranking.Comparison]] = defaultdict(list)
     for comparison in comparisons:
-        if (category := categories[comparison.case]) is not None:
-            by_category[category].append(comparison)
+        by_category[categories[comparison.case]].append(comparison)
 
     entrants: defaultdict[Category, set[str]] = defaultdict(set)
     for output in outputs:
-        if (category := categories[output.case]) is not None:
-            entrants[category].add(output.system)
+        entrants[categories[output.case]].add(output.system)
 
     boards: list[CategoryBoard] = []
     for name in declared:
@@ -816,7 +768,6 @@ def _categories(
                     system=system,
                     score=float(ratings.score[i]),
                     votes=len(mine),
-                    effective_votes=sum(row.comparison.weight for row in mine),
                     decisive_votes=decisive,
                 )
             )
@@ -834,45 +785,6 @@ def _categories(
         )
 
     return boards
-
-
-def _length_feature(votes: list[HumanEvidence]) -> ranking.Floats | None:
-    """Return the z-scored (A − B) / (A + B) of each vote's output lengths.
-
-    Returns None when every vote has the same relative length difference.
-    """
-    a = np.array([row.length_a for row in votes])
-    b = np.array([row.length_b for row in votes])
-    total = a + b
-    relative = np.divide(a - b, total, out=np.zeros(len(votes)), where=total > 0)
-    if not votes or np.ptp(relative) == 0:
-        return None
-
-    weights = np.array([row.comparison.weight for row in votes])
-    centered = relative - np.average(relative, weights=weights)
-    scale = np.sqrt(np.average(centered**2, weights=weights))
-    feature: ranking.Floats = centered / scale
-    return feature
-
-
-def _split_half_tau(votes: list[HumanEvidence], root: str) -> float | None:
-    """Compare the systems both halves connect to the root, if each has it.
-
-    Alternate votes form each half, since a round may have only two or three
-    voters.
-    """
-    halves = [[row.comparison for row in votes[half::2]] for half in (0, 1)]
-    if not all(any(root in (c.left, c.right) for c in half) for half in halves):
-        return None
-
-    first, second = (
-        dict(zip(fitted.systems, ranking.fit(fitted).strength, strict=True))
-        for fitted in (ranking.Matchups.build(half).component(root) for half in halves)
-    )
-    shared = sorted(first.keys() & second.keys())
-    return ranking.rank_agreement(
-        np.array([first[s] for s in shared]), np.array([second[s] for s in shared])
-    )
 
 
 # ── Tests Results ──
@@ -905,7 +817,10 @@ def _require_every_trial(
 
 
 def _tests_results(
-    outputs: list[Output], categories: Mapping[str, Category], samples: int
+    outputs: list[Output],
+    categories: Mapping[str, Category],
+    declared: Sequence[Category],
+    samples: int,
 ) -> TestsResults:
     by_system: defaultdict[str, list[Output]] = defaultdict(list)
     for output in outputs:
@@ -925,13 +840,13 @@ def _tests_results(
         scorer='tests',
         samples=samples,
         standings=standings,
-        categories=_tests_categories(standings, shares, categories),
+        categories=_tests_categories(standings, shares, categories, declared),
         decision=TestsDecision(
             leader=leader,
             tied=[
                 row.system
                 for row in standings[1:]
-                if not _separated(shares[leader], shares[row.system])
+                if not pass_rates.separates(shares[leader], shares[row.system])
             ],
         ),
     )
@@ -943,7 +858,6 @@ def _tests_standing(
     shares: Mapping[str, float],
     samples: int,
 ) -> TestsStanding:
-    """Summarize one system's trials and its pass share per task."""
     finished = [output for output in trials if output.error is None]
 
     return TestsStanding(
@@ -952,11 +866,7 @@ def _tests_standing(
         trials=len(trials),
         errored=len(trials) - len(finished),
         pass_rate=_pass_rate(shares.values()),
-        pass_hat_k=(
-            statistics.fmean(share == 1 for share in shares.values())
-            if samples > 1
-            else None
-        ),
+        pass_hat_k=pass_rates.pass_hat_k(shares.values()) if samples > 1 else None,
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         cost_gap=_cost_gap(finished),
         p50_latency_sec=_median(output.latency_sec for output in finished),
@@ -967,12 +877,12 @@ def _tests_categories(
     standings: Sequence[TestsStanding],
     shares: Mapping[str, Mapping[str, float]],
     categories: Mapping[str, Category],
+    declared: Sequence[Category],
 ) -> list[TestsCategory]:
-    present: set[Category] = {
-        categories[task] for row in shares.values() for task in row
-    }
+    """Rate each category with tasks over them, in the family's declared order."""
+    used = {categories[task] for row in shares.values() for task in row}
     boards: list[TestsCategory] = []
-    for category in sorted(present):
+    for category in (name for name in declared if name in used):
         rows: list[TestsCategoryStanding] = []
         for standing in standings:
             mine = [
@@ -991,13 +901,6 @@ def _tests_categories(
         boards.append(TestsCategory(category=category, standings=rows))
 
     return boards
-
-
-def _separated(leader: Mapping[str, float], other: Mapping[str, float]) -> bool:
-    shared = sorted(leader.keys() & other.keys())
-    return pass_rates.separates(
-        [leader[task] for task in shared], [other[task] for task in shared]
-    )
 
 
 def _pass_shares(trials: Iterable[Output | OutputMeasurement]) -> dict[str, float]:

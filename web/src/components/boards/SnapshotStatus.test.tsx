@@ -8,7 +8,7 @@ import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 const closedAt = '2026-01-02T12:00:00Z';
 const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
 const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
-const cutoffs = { production: { id: 337, votes: 330 }, local: null };
+const cutoffs = { production: { id: 337, votes: 330 } };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
@@ -58,21 +58,6 @@ describe('SnapshotStatus', () => {
       expect(signal).toBeInstanceOf(AbortSignal);
     },
   );
-
-  test.each([
-    [
-      { production: { id: 337, votes: 330 }, local: { id: 12, votes: 12 } },
-      '&production=337&production_votes=330',
-    ],
-    [{ production: { id: 0, votes: 0 }, local: null }, '&production=0&production_votes=0'],
-    [{ production: null, local: { id: 12, votes: 12 } }, ''],
-  ])('sends only the production cutoff and its counted votes in %j', (read, query) => {
-    const fetch = stubFetch(Promise.withResolvers<Response>().promise);
-
-    render(<SnapshotStatus family="writing-zh" closedAt={closedAt} cutoffs={read} />);
-
-    expect(fetch.mock.calls[0][0]).toBe(`/api/freshness?family=writing-zh${query}`);
-  });
 
   test.each([
     ['an unsupported status', () => Promise.resolve(Response.json({ status: 'pending' }))],

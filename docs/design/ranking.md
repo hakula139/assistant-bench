@@ -26,13 +26,12 @@ The target is performance on new cases and voters. No method for that target is 
 
 ## Counts and Diagnostics
 
-`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall mass. Category counts use that category's choices with their original weights. Excluded votes and votes on outputs that no longer count stay out of the fit and count in `dropped_votes`.
+`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall count. Category counts use that category's choices with their original weights. Excluded votes and votes on outputs that no longer count stay out of the fit and count in `dropped_votes`.
 
 | Field            | Meaning                                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `position`       | Fitted left-pane advantage in score points, null without human sided rows in the ranked component                                                                |
 | `length`         | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
-| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by store and ID, over systems both halves connect to their root                           |
+| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by ID, over systems both halves connect to their root                                     |
 
 Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed evidence and supply no population interval.
 

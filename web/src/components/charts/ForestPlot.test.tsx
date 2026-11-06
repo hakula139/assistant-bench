@@ -18,7 +18,6 @@ const refit = (system: string, score: number, decisive = 40) => ({
   system,
   score,
   votes: 40,
-  effective_votes: 40,
   decisive_votes: decisive,
 });
 

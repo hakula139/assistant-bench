@@ -32,8 +32,8 @@ src/assistant_bench/
 ├── scoring/
 │   ├── gates.py                            # Eligibility gates for voted outputs
 │   ├── length.py                           # Shared output length measurement
-│   ├── pass_rates.py                       # Task-clustered pass-rate intervals and the paired leader test
-│   ├── ranking.py                          # Bradley-Terry point fit and descriptive order agreement
+│   ├── pass_rates.py                       # Task-clustered pass-rate intervals, pass^k, and the paired leader test
+│   ├── ranking.py                          # Bradley-Terry point fit and its descriptive diagnostics
 │   └── weighting.py                        # Family-wide cumulative actor caps
 ├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export

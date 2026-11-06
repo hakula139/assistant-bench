@@ -45,7 +45,6 @@ def published_store(
         cases,
         [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
         ARENA_NAMES,
-        'production',
     )
     publication.publish(arena_store, published, NOW - timedelta(days=1))
     return arena_store, published
@@ -99,13 +98,13 @@ def snapshot(
     production: tuple[Vote, ...] = (),
     *,
     excluded: int = 0,
-    local: tuple[Vote, ...] | None = None,
     reference: str = 'acme-large',
-    local_reference: str = 'acme-large',
 ) -> Snapshot:
-    def cut(rows: tuple[Vote, ...], excluded: int, reference: str) -> Cut:
-        return Cut(
-            cutoff=max((row.id for row in rows), default=0),
+    return Snapshot(
+        family=FAMILY.name,
+        taken_at=NOW,
+        production=Cut(
+            cutoff=max((row.id for row in production), default=0),
             inventory=Inventory(
                 id='publication',
                 family=FAMILY.name,
@@ -118,15 +117,9 @@ def snapshot(
                 ),
                 outputs=outputs,
             ),
-            votes=rows,
+            votes=production,
             excluded=excluded,
-        )
-
-    return Snapshot(
-        family=FAMILY.name,
-        taken_at=NOW,
-        production=cut(production, excluded, reference),
-        local=None if local is None else cut(local, 0, local_reference),
+        ),
     )
 
 
@@ -670,9 +663,9 @@ class TestVotingInput:
             snapshot((a, b, failing, twin), rows, excluded=2), FAMILY, []
         )
 
-        assert [row.receipt for row in analysis.ordinary] == ['production:1']
+        assert [row.actor for row in analysis.ordinary] == ['actor']
         assert analysis.dropped == 5
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4), local=None)
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4))
 
     def test_drops_a_vote_on_a_case_whose_text_changed(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
@@ -687,7 +680,7 @@ class TestVotingInput:
 
         analysis = votes.voting_input(snapshot((a, b)), FAMILY, [])
 
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0), local=None)
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0))
 
     def test_anchors_on_the_reference_the_publication_froze(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
@@ -697,30 +690,6 @@ class TestVotingInput:
         )
 
         assert analysis.reference == 'acme-small'
-
-    def test_refuses_cuts_that_froze_different_references(self) -> None:
-        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
-        both = snapshot((a, b), local=(), local_reference='acme-small')
-
-        with pytest.raises(ValueError, match='no single reference'):
-            votes.voting_input(both, FAMILY, [])
-
-    def test_prefixes_actors_and_receipts_with_their_store(self) -> None:
-        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
-
-        analysis = votes.voting_input(
-            snapshot((a, b), (vote(1, a, b),), local=(vote(1, a, b, choice='b'),)),
-            FAMILY,
-            [],
-        )
-
-        assert [(row.receipt, row.actor) for row in analysis.ordinary] == [
-            ('production:1', 'production:actor'),
-            ('local:1', 'local:actor'),
-        ]
-        assert analysis.cutoffs == Cutoffs(
-            production=Cutoff(id=1, votes=1), local=Cutoff(id=1, votes=1)
-        )
 
     def test_settles_the_pairings_verdicts_and_identical_content_decide(
         self,

@@ -11,13 +11,12 @@ from statsmodels.discrete.discrete_model import Logit
 from assistant_bench.scoring import ranking
 from assistant_bench.scoring.ranking import (
     ANCHOR,
-    ELO_PER_LOGIT,
     Comparison,
     Matchups,
     fit,
     rank_agreement,
-    rate_components,
     rate_point,
+    rate_root,
 )
 
 
@@ -211,14 +210,10 @@ class TestRatePoint:
         assert ratings.systems == ('large', 'medium', 'small')
         assert ratings.score[1] == pytest.approx(ANCHOR)
         assert ratings.score[0] > ANCHOR > ratings.score[2]
-        assert ratings.position == pytest.approx(0.25 * ELO_PER_LOGIT, abs=40)
         assert shifted.score[0] == pytest.approx(ANCHOR)
         assert np.diff(shifted.score) == pytest.approx(np.diff(ratings.score))
-        assert shifted.position == ratings.position
 
-    def test_fits_on_one_blas_thread_and_restores_the_limit(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fits_on_one_blas_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
         thread_limit = 8
         threads: list[int] = []
         minimize = optimize.minimize
@@ -240,31 +235,34 @@ class TestRatePoint:
         monkeypatch.setattr(ranking, 'threadpool_limits', limit_threads)
         monkeypatch.setattr(optimize, 'minimize', recording)
 
-        with limit_threads(limits=2, user_api='blas'):
-            rate_point(Matchups.build(simulate(60)), 'large')
-            after = thread_limit
+        rate_point(Matchups.build(simulate(60)), 'large')
 
         assert threads == [1]
-        assert after == 2
-        assert thread_limit == 8
 
 
-class TestRateComponents:
+class TestRateRoot:
     ORDER = ('a', 'b', 'x', 'y')
 
-    def test_fits_every_component_after_the_weighted_human_root(self) -> None:
+    @pytest.mark.parametrize(
+        ('reference', 'anchor'),
+        [('y', 'y'), ('b', 'x')],
+        ids=['reference-in-component', 'reference-elsewhere'],
+    )
+    def test_fits_the_weighted_human_roots_component(
+        self, reference: str, anchor: str
+    ) -> None:
         shared = [Comparison('a', 'b', 1.0, f'ab-{i}', 0.4) for i in range(250)]
         many = [Comparison('x', 'y', 1.0, f'xy-{i}') for i in range(101)]
 
-        components = rate_components(shared + many, self.ORDER, 'b')
+        component = rate_root(shared + many, self.ORDER, reference)
 
-        assert [(c.ratings.systems, c.root, c.anchor) for c in components] == [
-            (('x', 'y'), 'x', 'x'),
-            (('a', 'b'), 'a', 'b'),
-        ]
-        for component, rows in zip(components, (many, shared), strict=True):
-            expected = rate_point(Matchups.build(rows), component.anchor)
-            assert component.ratings.score == pytest.approx(expected.score)
+        assert (component.ratings.systems, component.root, component.anchor) == (
+            ('x', 'y'),
+            'x',
+            anchor,
+        )
+        expected = rate_point(Matchups.build(many), anchor)
+        assert component.ratings.score == pytest.approx(expected.score)
 
     def test_keeps_settlement_mass_out_of_root_selection(self) -> None:
         settled = [
@@ -272,21 +270,17 @@ class TestRateComponents:
             for i in range(20)
         ]
 
-        components = rate_components(
+        component = rate_root(
             [Comparison('x', 'y', 1.0, 'voted'), *settled], self.ORDER, 'a'
         )
 
-        assert [c.ratings.systems for c in components] == [('x', 'y'), ('a', 'b')]
-        expected = rate_point(Matchups.build(settled), 'a')
-        assert components[1].ratings.score == pytest.approx(expected.score)
+        assert component.ratings.systems == ('x', 'y')
 
-    def test_supports_settlement_only_and_unrated_startup(self) -> None:
+    def test_supports_settlement_only_comparisons(self) -> None:
         settled = [Comparison('a', 'b', 0.0, 'settled', 0.25, sided=False)]
 
-        startup = rate_components([], self.ORDER, 'a')
-        (component,) = rate_components(settled, self.ORDER, 'a')
+        component = rate_root(settled, self.ORDER, 'a')
 
-        assert startup == ()
         assert component.ratings.systems == ('a', 'b')
         assert component.ratings.score[0] == pytest.approx(ANCHOR)
         assert component.ratings.score[1] > ANCHOR

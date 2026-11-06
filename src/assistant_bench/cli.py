@@ -221,10 +221,10 @@ def close(
                 selected,
                 _take_snapshot(selected) if snapshot is None else snapshot,
             )
-        case TaskTestsSettings(samples=samples):
+        case TaskTestsSettings():
             if snapshot is not None:
                 _fail(f'Family `{family}` is scored by tests, so it has no votes.')
-            closed = _close_tests(selected, samples)
+            closed = _close_tests(selected)
         case _:
             assert_never(selected.settings)
 
@@ -255,9 +255,7 @@ def _take_snapshot(family: Family) -> Path:
         )
 
     path = votes.write_snapshot(
-        votes.Snapshot(
-            family=family.name, taken_at=taken_at, production=cut, local=None
-        )
+        votes.Snapshot(family=family.name, taken_at=taken_at, production=cut)
     )
     typer.echo(f'Votes saved to `{path}`.')
     return path
@@ -270,24 +268,19 @@ def _close_votes(family: Family, path: Path) -> report.Report:
             votes.voting_input(snapshot, family, read_outputs(family.name)),
             datetime.now(UTC),
             fingerprints=votes.fingerprints(snapshot),
-            system_names=votes.system_names(snapshot),
-            frozen_fingerprints=report.reported_fingerprints(family.name),
+            system_names=snapshot.production.inventory.systems,
         )
     except (OSError, ValueError) as error:
         _fail(str(error))
 
 
-def _close_tests(family: Family, samples: int) -> report.Report:
+def _close_tests(family: Family) -> report.Report:
     _collect(family)
     try:
-        return report.close(
+        return report.close_tests(
             family,
             datetime.now(UTC),
-            samples=samples,
-            system_names={
-                name: system.display_name for name, system in _load_systems().items()
-            },
-            frozen_fingerprints=report.reported_fingerprints(family.name),
+            {name: system.display_name for name, system in _load_systems().items()},
         )
     except ValueError as error:
         _fail(str(error))

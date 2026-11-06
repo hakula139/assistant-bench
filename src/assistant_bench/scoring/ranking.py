@@ -1,4 +1,4 @@
-"""Penalized Bradley-Terry point ratings from weighted comparisons."""
+"""Penalized Bradley-Terry point ratings and their descriptive diagnostics."""
 
 import math
 from collections.abc import Sequence
@@ -125,11 +125,10 @@ class Fit:
 
 @dataclass(frozen=True)
 class PointRatings:
-    """Fitted scores on the Elo-like scale, plus the left side's advantage."""
+    """Fitted scores on the Elo-like scale."""
 
     systems: tuple[str, ...]
     score: Floats
-    position: float
 
 
 @dataclass(frozen=True)
@@ -146,8 +145,8 @@ class Component:
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     """Fit Bradley-Terry with a left-side intercept by penalized logistic loss.
 
-    `covariate` adds a per-vote feature, such as a length difference, when it is
-    identifiable apart from system and position effects on positive-weight rows.
+    `covariate` adds a per-vote feature, which the fit drops unless it is
+    identifiable apart from the system and position effects.
     """
     columns: list[Floats] = [] if covariate is None else [covariate]
     x = _design(
@@ -173,31 +172,39 @@ def rate_point(matchups: Matchups, anchor: str) -> PointRatings:
     return _point_ratings(matchups.systems, fit(matchups), anchor)
 
 
-def rate_components(
+def rate_root(
     comparisons: Sequence[Comparison], order: Sequence[str], reference: str
-) -> tuple[Component, ...]:
-    """Fit each connected component, the overall weighted root's component first.
+) -> Component:
+    """Fit the component of the root, given at least one comparison.
 
-    `order` breaks ties between roots. The reference anchors its own component and
-    each other component anchors at its root, so their scores cannot be compared.
+    The root is the system incident on the greatest effective human weight, and
+    `order` breaks ties. The reference anchors the component when it belongs to it,
+    and the root anchors it otherwise.
     """
-    if not comparisons:
-        return ()
-
     matchups = Matchups.build(comparisons)
-    remaining = set(matchups.systems)
-    components: list[Component] = []
-    for system in (matchups.root(order), *matchups.systems):
-        if system not in remaining:
-            continue
+    root = matchups.root(order)
+    component = matchups.component(root)
+    anchor = reference if reference in component.systems else root
+    return Component(root, anchor, rate_point(component, anchor))
 
-        component = matchups.component(system)
-        root = component.root(order)
-        anchor = reference if reference in component.systems else root
-        components.append(Component(root, anchor, rate_point(component, anchor)))
-        remaining.difference_update(component.systems)
 
-    return tuple(components)
+def length_feature(
+    lengths: Sequence[tuple[int, int]], weights: Sequence[float]
+) -> Floats | None:
+    """Return the weighted z-score of each vote's (A − B) / (A + B) output lengths.
+
+    Returns None when every vote has the same relative length difference.
+    """
+    a = np.array([left for left, _ in lengths])
+    b = np.array([right for _, right in lengths])
+    total = a + b
+    relative = np.divide(a - b, total, out=np.zeros(len(lengths)), where=total > 0)
+    if not lengths or np.ptp(relative) == 0:
+        return None
+
+    centered = relative - np.average(relative, weights=weights)
+    feature: Floats = centered / np.sqrt(np.average(centered**2, weights=weights))
+    return feature
 
 
 def rank_agreement(first: Floats, second: Floats) -> float | None:
@@ -209,12 +216,30 @@ def rank_agreement(first: Floats, second: Floats) -> float | None:
     return None if np.isnan(statistic) else statistic
 
 
+def split_half_tau(votes: Sequence[Comparison], root: str) -> float | None:
+    """Compare the point orders fit to alternating votes, if each half has the root.
+
+    The orders cover the systems both halves connect to the root. Alternating
+    votes form the halves, since a round may have only two or three voters.
+    """
+    halves = [votes[half::2] for half in (0, 1)]
+    if not all(any(root in (c.left, c.right) for c in half) for half in halves):
+        return None
+
+    first, second = (
+        dict(zip(fitted.systems, fit(fitted).strength, strict=True))
+        for fitted in (Matchups.build(half).component(root) for half in halves)
+    )
+    shared = sorted(first.keys() & second.keys())
+    return rank_agreement(
+        np.array([first[s] for s in shared]), np.array([second[s] for s in shared])
+    )
+
+
 def _point_ratings(systems: tuple[str, ...], point: Fit, anchor: str) -> PointRatings:
     shift = point.strength[systems.index(anchor)]
     return PointRatings(
-        systems=systems,
-        score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift),
-        position=ELO_PER_LOGIT * point.position,
+        systems=systems, score=ANCHOR + ELO_PER_LOGIT * (point.strength - shift)
     )
 
 

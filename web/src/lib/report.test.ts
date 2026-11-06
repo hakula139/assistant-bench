@@ -81,20 +81,12 @@ describe('reportSchema', () => {
     },
   );
 
-  test.each([
-    ['standing', ['standings', 0]],
-    ['head-to-head', ['head_to_head', 0]],
-    ['category', ['categories', 0]],
-    ['category standing', ['categories', 0, 'standings', 0]],
-  ] satisfies [string, (string | number)[]][])(
-    'rejects a negative %s effective vote total',
-    async (_, path) => {
-      const payload = await readFixture();
-      replaceField(payload, ['results', ...path, 'effective_votes'], -1);
+  test('rejects a negative category effective vote total', async () => {
+    const payload = await readFixture();
+    replaceField(payload, ['results', 'categories', 0, 'effective_votes'], -1);
 
-      expect(reportSchema.safeParse(payload).success).toBe(false);
-    },
-  );
+    expect(reportSchema.safeParse(payload).success).toBe(false);
+  });
 
   test.each([
     ['missing cutoffs', ['cutoffs'], undefined],
@@ -162,7 +154,6 @@ describe('reportSchema', () => {
     ['unknown category system', ['categories', 0, 'unranked'], ['unknown']],
     ['empty system id', ['standings', 0, 'system'], ''],
     ['cost gap beside a mean cost', ['standings', 0, 'cost_gap'], 'unpriced'],
-    ['unknown mean cost without a gap', ['standings', 0, 'mean_cost_usd'], null],
   ] satisfies [string, (string | number)[], unknown][])(
     'rejects inconsistent %s',
     async (_, path, value) => {

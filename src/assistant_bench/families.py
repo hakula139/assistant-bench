@@ -404,7 +404,6 @@ def load_cases(family: Family) -> list[Case]:
 
 
 def _hidden(path: Path) -> bool:
-    """Return whether the path's name starts with a dot."""
     return path.name.startswith('.')
 
 

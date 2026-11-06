@@ -1,1 +1,1 @@
-"""Scoring of outputs: gates for voted families, and the ranking from votes."""
+"""Scoring of outputs: gates and the ranking for voted families, and pass rates."""

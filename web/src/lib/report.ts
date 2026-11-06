@@ -30,15 +30,12 @@ const standing = z.strictObject({
   score: z.number(),
   rank: z.int(),
   votes: z.int().nonnegative(),
-  effective_votes: z.number().nonnegative(),
   decisive_votes: z.int().nonnegative(),
   both_bad_rate: z.number().nullable(),
-  outputs: z.int(),
   gate_failure_rate: z.number().nullable(),
   pass_rate: passRate.nullable(),
   mean_cost_usd: z.number().nullable(),
   cost_gap: costGap.nullable(),
-  p50_latency_sec: z.number().nullable(),
   output_tokens: distribution.nullable(),
   latency_sec: distribution.nullable(),
   defects: z.partialRecord(z.enum(defects), z.int()),
@@ -48,7 +45,6 @@ const headToHead = z.strictObject({
   system: z.string(),
   opponent: z.string(),
   votes: z.int().nonnegative(),
-  effective_votes: z.number().nonnegative(),
   wins: z.int(),
   losses: z.int(),
   ties: z.int(),
@@ -60,7 +56,6 @@ const categoryStanding = z.strictObject({
   system: z.string(),
   score: z.number(),
   votes: z.int().nonnegative(),
-  effective_votes: z.number().nonnegative(),
   decisive_votes: z.int().nonnegative(),
 });
 
@@ -83,10 +78,8 @@ const votesRules = z.strictObject({
   preliminary_decisive_votes: z.int().positive(),
 });
 
-const cutoff = z
-  .strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() })
-  .nullable();
-const cutoffs = z.strictObject({ production: cutoff, local: cutoff });
+const cutoff = z.strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() });
+const cutoffs = z.strictObject({ production: cutoff });
 
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
@@ -103,7 +96,6 @@ const votesResults = z.strictObject({
   unranked: z.array(z.string()),
   head_to_head: z.array(headToHead),
   categories: z.array(categoryBoard),
-  position: z.number().nullable(),
   length: z.number().nullable(),
   split_half_tau: z.number().nullable(),
 });
@@ -165,19 +157,13 @@ export const reportSchema = z
 
     membership(results.standings, results.scorer === 'votes' ? results.unranked : []);
 
-    const finished = (row: Standing | TestsStanding) =>
-      'outputs' in row ? row.outputs : row.trials - row.errored;
-    if (
-      results.standings.some(
-        (row) => (row.cost_gap === null) !== (row.mean_cost_usd !== null || finished(row) === 0),
-      )
-    ) {
-      reject('A cost gap is present exactly when finished outputs lack a mean cost');
-    }
-
     if (results.scorer === 'votes') {
       referenced.add(results.reference);
       referenced.add(results.anchor);
+
+      if (results.standings.some((row) => row.cost_gap !== null && row.mean_cost_usd !== null)) {
+        reject('A cost gap is present only without a mean cost');
+      }
 
       if (!results.standings.some(({ system }) => system === results.anchor)) {
         reject('The anchor must have an overall standing');
@@ -195,6 +181,15 @@ export const reportSchema = z
     if (results.scorer === 'tests') {
       if (results.standings.some((row) => (row.pass_hat_k === null) !== (results.samples === 1))) {
         reject('pass^k is present exactly when tasks run several times');
+      }
+
+      if (
+        results.standings.some(
+          (row) =>
+            (row.cost_gap === null) !== (row.mean_cost_usd !== null || row.trials === row.errored),
+        )
+      ) {
+        reject('A cost gap is present exactly when finished trials lack a mean cost');
       }
 
       const standing = new Set(results.standings.map((row) => row.system));

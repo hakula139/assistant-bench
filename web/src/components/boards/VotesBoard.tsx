@@ -224,7 +224,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   );
 
   const latencyPoints = useMemo(
-    () => scatterPoints(rows, (standing) => standing.p50_latency_sec),
+    () => scatterPoints(rows, (standing) => standing.latency_sec?.p50 ?? null),
     [rows],
   );
 
@@ -376,7 +376,9 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
                       <TableCell>{row.name}</TableCell>
                       <TableCell numeric>{formatScore(row.score)}</TableCell>
                       <TableCell numeric>{formatCost(row.standing.mean_cost_usd)}</TableCell>
-                      <TableCell numeric>{formatSeconds(row.standing.p50_latency_sec)}</TableCell>
+                      <TableCell numeric>
+                        {formatSeconds(row.standing.latency_sec?.p50 ?? null)}
+                      </TableCell>
                       <TableCell>{frontiers.join(' and ') || MISSING}</TableCell>
                     </TableRow>
                   );
