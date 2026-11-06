@@ -33,7 +33,7 @@ Drop a test once another covers everything it checks.
 
 ## The Voting Worker
 
-`web/vitest.config.ts` runs two projects. The `site` project runs in Node and jsdom, and the `worker` project runs `web/worker/` in workerd through `@cloudflare/vitest-plugin`, under the `local` environment of `web/wrangler.toml` with test keys. Its setup applies `web/migrations/` and, before each test, empties the tables and loads `tests/fixtures/arena-publication.sql`, since storage persists between tests. Tests call the Worker through `exports.default.fetch` with the helpers in `worker/test/support.ts` and stub siteverify by spying on `fetch`. workerd exposes no V8 coverage, so both projects report through istanbul.
+`web/vitest.config.ts` runs two projects. The `site` project runs in Node and jsdom, and the `worker` project runs `web/worker/` in workerd through `@cloudflare/vitest-plugin`, under the `local` environment of `web/wrangler.toml` with test keys and `STORE` set to `production`. Its setup applies `web/migrations/` and, before each test, empties the tables and loads `tests/fixtures/arena-publication.sql`, since storage persists between tests. Tests call the Worker through `exports.default.fetch` with the helpers in `worker/test/support.ts` and stub siteverify by spying on `fetch`. workerd exposes no V8 coverage, so both projects report through istanbul.
 
 ## Accessibility
 

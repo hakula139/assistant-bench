@@ -1,7 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test, vi } from 'vitest';
-
-import type { Freshness } from '@/lib/arena';
+import { describe, expect, test } from 'vitest';
 
 import { ipTag } from './actors';
 import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
@@ -11,7 +9,6 @@ import {
   browser,
   call,
   CODING,
-  ORIGIN,
   pairOf,
   pendingRow,
   publish,
@@ -19,7 +16,7 @@ import {
   vote,
   WRITING,
 } from './test/support';
-import { cachedFreshness, freshness } from './votes';
+import { freshness } from './votes';
 
 const TAG_IP = '198.51.100.9';
 
@@ -86,6 +83,20 @@ describe('POST /api/votes', () => {
     const response = await call(from, 'POST', '/votes', body);
 
     expect(response.status).toBe(204);
+    expect(await storedVotes()).toHaveLength(1);
+  });
+
+  test('answers two identical votes sent at once with 204 each and records one', async () => {
+    const from = await admitted();
+    const { pair } = await pairOf(from);
+    const body = { pair: pair?.id, choice: 'tie', defects: { a: ['facts'], b: [] } };
+
+    const responses = await Promise.all([
+      call(from, 'POST', '/votes', body),
+      call(from, 'POST', '/votes', body),
+    ]);
+
+    expect(responses.map(({ status }) => status)).toEqual([204, 204]);
     expect(await storedVotes()).toHaveLength(1);
   });
 
@@ -345,28 +356,28 @@ describe('freshness', () => {
   test('leaves excluded votes after the cutoff out', async () => {
     await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
 
-    const status = await freshness(env.DB, 'production', {
-      family: WRITING,
-      production: '0',
-      production_votes: '0',
-    });
+    const response = await call(
+      browser(),
+      'GET',
+      `/freshness?family=${WRITING}&production=0&production_votes=0`,
+    );
 
-    expect(status).toBe('current');
+    expect(await response.json()).toEqual({ status: 'current' });
   });
 
-  test('reuses an answer for the same parameters in any order', async () => {
-    const answer = vi
-      .fn<() => Promise<Freshness>>()
-      .mockResolvedValueOnce('current')
-      .mockResolvedValueOnce('stale');
-    const ask = (query: string) => cachedFreshness(`${ORIGIN}/api/freshness?${query}`, answer);
+  test('reuses an answer for the same parameters, in any order, for a minute', async () => {
+    await seedVote(WRITING, caseKey, systems);
+    const { ids } = await read();
+    const from = browser();
+    const ask = async (query: string) =>
+      (await (await call(from, 'GET', `/freshness?${query}`)).json<{ status: string }>()).status;
+    const cut = `production=${ids[0]}&production_votes=1`;
+    expect(await ask(`family=${WRITING}&${cut}`)).toBe('current');
 
-    const first = await ask(`family=${WRITING}&production=1&production_votes=1`);
-    const reordered = await ask(`production=1&production_votes=1&family=${WRITING}`);
-    const changed = await ask(`family=${WRITING}&production=1&production_votes=2`);
+    await seedVote(WRITING, caseKey, systems);
 
-    expect([first, reordered, changed]).toEqual(['current', 'current', 'stale']);
-    expect(answer).toHaveBeenCalledTimes(2);
+    expect(await ask(`${cut}&family=${WRITING}`)).toBe('current');
+    expect(await ask(`family=${WRITING}&production=${ids[0]}&production_votes=2`)).toBe('stale');
   });
 
   test('rejects a cutoff without its counted votes', async () => {
