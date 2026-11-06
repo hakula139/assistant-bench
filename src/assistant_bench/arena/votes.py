@@ -1,4 +1,4 @@
-"""Production's vote cuts and moderation, the snapshots that save cuts, and rounds."""
+"""A store's vote cuts and moderation, production's cut snapshots, and rounds."""
 
 import json
 from collections import defaultdict

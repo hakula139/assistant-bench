@@ -111,7 +111,7 @@ const testsStanding = z.strictObject({
   pass_hat_k: share.nullable(),
   mean_cost_usd: z.number().nullable(),
   cost_gap: costGap.nullable(),
-  p50_latency_sec: z.number().nullable(),
+  latency_sec: distribution.nullable(),
 });
 
 const testsCategory = z.strictObject({

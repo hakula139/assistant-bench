@@ -280,7 +280,9 @@ def _close_tests(family: Family) -> report.Report:
         return report.close_tests(
             family,
             datetime.now(UTC),
-            {name: system.display_name for name, system in _load_systems().items()},
+            system_names={
+                name: system.display_name for name, system in _load_systems().items()
+            },
         )
     except ValueError as error:
         _fail(str(error))

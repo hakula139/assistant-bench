@@ -33,7 +33,11 @@
         "pass_hat_k": 0.8333333333333334,
         "mean_cost_usd": 0.2,
         "cost_gap": null,
-        "p50_latency_sec": 30.0
+        "latency_sec": {
+          "p10": 30.0,
+          "p50": 30.0,
+          "p90": 31.0
+        }
       },
       {
         "system": "acme-mini",
@@ -48,7 +52,11 @@
         "pass_hat_k": 0.6666666666666666,
         "mean_cost_usd": 0.05000000000000001,
         "cost_gap": null,
-        "p50_latency_sec": 12.5
+        "latency_sec": {
+          "p10": 12.0,
+          "p50": 12.5,
+          "p90": 13.0
+        }
       },
       {
         "system": "acme-small",
@@ -63,7 +71,11 @@
         "pass_hat_k": 0.0,
         "mean_cost_usd": 0.01,
         "cost_gap": null,
-        "p50_latency_sec": 9.0
+        "latency_sec": {
+          "p10": 8.0,
+          "p50": 9.0,
+          "p90": 9.0
+        }
       }
     ],
     "categories": [
@@ -126,7 +138,7 @@
             "pass_rate": {
               "rate": 0.0,
               "lower": 0.0,
-              "upper": 0.7075982261787133
+              "upper": 0.7075982261787134
             }
           }
         ]

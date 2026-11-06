@@ -1510,7 +1510,7 @@ class TestClose:
         self,
         store: Store,
         data_dir: Path,
-        tmp_path: Path,
+        reports_dir: Path,
     ) -> None:
         now = datetime.now(UTC)
         for case, actor in enumerate(('first', 'second')):
@@ -1535,7 +1535,7 @@ class TestClose:
         assert store.targets == ['production']
         (snapshot,) = (data_dir / 'votes' / 'f').glob('*.json')
         assert f'Votes saved to `{snapshot}`.' in result.output
-        (path,) = (tmp_path / 'reports' / 'f').iterdir()
+        (path,) = (reports_dir / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
         assert closed.results.cutoffs == report.Cutoffs(
@@ -1550,7 +1550,7 @@ class TestClose:
     def test_recloses_a_saved_snapshot_without_reading_the_store(
         self,
         store: Store,
-        tmp_path: Path,
+        reports_dir: Path,
     ) -> None:
         now = datetime.now(UTC)
         record_vote(
@@ -1566,7 +1566,7 @@ class TestClose:
 
         assert result.exit_code == 0, result.output
         assert store.targets == []
-        assert (tmp_path / 'reports' / 'f').is_dir()
+        assert (reports_dir / 'f').is_dir()
 
     def test_names_the_publish_command_when_production_has_no_publication(
         self, store: Store
@@ -1622,7 +1622,7 @@ class TestClose:
     def test_collects_real_test_trials_before_writing_their_aggregate(
         self,
         families_dir: Path,
-        tmp_path: Path,
+        reports_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         write_task_family(families_dir, 'echo')
@@ -1650,7 +1650,7 @@ class TestClose:
         result = invoke('close', 'f')
         assert result.exit_code == 0, result.output
 
-        (path,) = (tmp_path / 'reports' / 'f').iterdir()
+        (path,) = (reports_dir / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'tests'
         assert closed.results.standings[0].pass_rate.rate == 1.0
@@ -1692,8 +1692,6 @@ class TestFingerprints:
     )
     def test_fails_for_a_system_that_left_its_frozen_fingerprint(
         self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         family: str | None,
         frozen: str | None,
         failure: str | None,
@@ -1722,11 +1720,11 @@ class TestFingerprints:
             )
 
     def test_names_conflicting_closed_reports_without_a_traceback(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, reports_dir: Path
     ) -> None:
         write_closed_report('writing-en', 'fp-old')
         later = report.Report.model_validate_json(
-            (tmp_path / 'reports' / 'writing-en' / '2026-10-21.json').read_text()
+            (reports_dir / 'writing-en' / '2026-10-21.json').read_text()
         )
         systems = later.systems | {
             'opus-5.5-high': later.systems['opus-5.5-high'].model_copy(

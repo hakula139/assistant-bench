@@ -132,7 +132,7 @@ class Cutoff(_Model):
 
 
 class Cutoffs(_Model):
-    """Each store's cutoff at closing."""
+    """Production's cutoff at closing."""
 
     production: Cutoff
 
@@ -224,7 +224,7 @@ class VotesResults(_Model):
     effective_votes: Annotated[float, Field(ge=0)]
     """Eligible human row weight across every component, excluding settlements."""
     dropped_votes: int
-    """Excluded votes plus votes on outputs the publications no longer admit."""
+    """Excluded votes plus votes on outputs the publication no longer admits."""
     voters: int
     """Browsers with at least one eligible human choice."""
 
@@ -260,7 +260,7 @@ class TestsStanding(_Model):
     """Why finished trials lack a mean cost: `unpriced` when a trial with known
     usage has no cost, and `unreported` when only trials without usage do."""
 
-    p50_latency_sec: float | None
+    latency_sec: Distribution | None
 
     @model_validator(mode='after')
     def validate_cost_gap(self) -> TestsStanding:
@@ -402,7 +402,7 @@ def _referenced_systems(results: Results) -> set[str]:
 
 
 def close_tests(
-    family: Family, closed_at: datetime, system_names: Mapping[str, str]
+    family: Family, closed_at: datetime, *, system_names: Mapping[str, str]
 ) -> Report:
     """Aggregate a tests family's current outputs under their public system names.
 
@@ -869,7 +869,7 @@ def _tests_standing(
         pass_hat_k=pass_rates.pass_hat_k(shares.values()) if samples > 1 else None,
         mean_cost_usd=_mean(output.cost_usd for output in finished),
         cost_gap=_cost_gap(finished),
-        p50_latency_sec=_median(output.latency_sec for output in finished),
+        latency_sec=_distribution(output.latency_sec for output in finished),
     )
 
 
@@ -879,7 +879,7 @@ def _tests_categories(
     categories: Mapping[str, Category],
     declared: Sequence[Category],
 ) -> list[TestsCategory]:
-    """Rate each category with tasks over them, in the family's declared order."""
+    """Rate each category that has tasks, in the family's declared order."""
     used = {categories[task] for row in shares.values() for task in row}
     boards: list[TestsCategory] = []
     for category in (name for name in declared if name in used):
@@ -943,11 +943,6 @@ def _known(values: Iterable[float | None]) -> list[float] | None:
 def _mean(values: Iterable[float | None]) -> float | None:
     known = _known(values)
     return statistics.fmean(known) if known else None
-
-
-def _median(values: Iterable[float | None]) -> float | None:
-    known = _known(values)
-    return statistics.median(known) if known else None
 
 
 def _distribution(values: Iterable[float | None]) -> Distribution | None:

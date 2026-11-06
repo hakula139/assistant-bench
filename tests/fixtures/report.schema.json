@@ -121,7 +121,7 @@
     },
     "Cutoffs": {
       "additionalProperties": false,
-      "description": "Each store's cutoff at closing.",
+      "description": "Production's cutoff at closing.",
       "properties": {
         "production": {
           "$ref": "#/$defs/Cutoff"
@@ -610,16 +610,15 @@
           ],
           "description": "Why finished trials lack a mean cost: `unpriced` when a trial with known\nusage has no cost, and `unreported` when only trials without usage do."
         },
-        "p50_latency_sec": {
+        "latency_sec": {
           "anyOf": [
             {
-              "type": "number"
+              "$ref": "#/$defs/Distribution"
             },
             {
               "type": "null"
             }
-          ],
-          "title": "P50 Latency Sec"
+          ]
         }
       },
       "required": [
@@ -631,7 +630,7 @@
         "pass_hat_k",
         "mean_cost_usd",
         "cost_gap",
-        "p50_latency_sec"
+        "latency_sec"
       ],
       "title": "TestsStanding",
       "type": "object"
@@ -711,7 +710,7 @@
           "type": "number"
         },
         "dropped_votes": {
-          "description": "Excluded votes plus votes on outputs the publications no longer admit.",
+          "description": "Excluded votes plus votes on outputs the publication no longer admits.",
           "title": "Dropped Votes",
           "type": "integer"
         },

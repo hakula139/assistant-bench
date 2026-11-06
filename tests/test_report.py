@@ -221,7 +221,7 @@ def close_tests_round(families_dir: Path) -> Report:
     return report.close_tests(
         load_family('coding-tasks'),
         AT,
-        {
+        system_names={
             'acme-pro': 'Acme Pro',
             'acme-mini': 'Acme Mini',
             'acme-small': 'Acme Small',
@@ -231,7 +231,7 @@ def close_tests_round(families_dir: Path) -> Report:
 
 def close_smoke(closed_at: datetime = AT) -> Report:
     return report.close_tests(
-        load_family('smoke'), closed_at, {'large': 'Public large'}
+        load_family('smoke'), closed_at, system_names={'large': 'Public large'}
     )
 
 
@@ -629,7 +629,9 @@ class TestCloseTests:
         assert standing.pass_rate.rate == pytest.approx(2 / 3)
         assert standing.pass_hat_k is None
         assert standing.mean_cost_usd == pytest.approx(0.01)
-        assert standing.p50_latency_sec == 3.0
+        assert standing.latency_sec is not None
+        latency = standing.latency_sec
+        assert (latency.p10, latency.p50, latency.p90) == pytest.approx((2.2, 3.0, 3.8))
         assert closed.systems['large'].display_name == 'Public large'
 
     def test_leaves_the_mean_cost_unknown_when_a_finished_trial_lacks_usage(
@@ -721,7 +723,9 @@ class TestCloseTests:
             [make_output(case=case, system='large', reward=1.0) for case in 'ab'],
         )
 
-        closed = report.close_tests(load_family('f'), AT, {'large': 'Public large'})
+        closed = report.close_tests(
+            load_family('f'), AT, system_names={'large': 'Public large'}
+        )
 
         assert closed.results.scorer == 'tests'
         assert [board.category for board in closed.results.categories] == [
@@ -754,7 +758,9 @@ class TestCloseTests:
             match=r'lack some: `large` on `b`\. Run `uv run bench run --system <name>`',
         ):
             report.close_tests(
-                load_family('f'), AT, {'large': 'Public large', 'small': 'Public small'}
+                load_family('f'),
+                AT,
+                system_names={'large': 'Public large', 'small': 'Public small'},
             )
 
 

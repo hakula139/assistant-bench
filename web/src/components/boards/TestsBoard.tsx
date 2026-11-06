@@ -166,7 +166,7 @@ export function TestsBoard({ round: { systems, results } }: TestsBoardProps) {
                     {formatCost(standing.mean_cost_usd)}
                   </TableCell>
                   <TableCell numeric className={wide}>
-                    {formatSeconds(standing.p50_latency_sec)}
+                    {formatSeconds(standing.latency_sec?.p50 ?? null)}
                   </TableCell>
                 </>
               )}
