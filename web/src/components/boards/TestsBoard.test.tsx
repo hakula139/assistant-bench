@@ -6,16 +6,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { TestsBoard } from '@/components/boards/TestsBoard';
 import { passHatKTerm, terms } from '@/lib/glossary';
-import type { TestsRound } from '@/lib/reports';
+import type { TestsReport } from '@/lib/reports';
 import { readReport } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-async function testsRound(): Promise<TestsRound> {
-  const { round, closed_at, systems, results } = await readReport('report-tests', 'tests');
-  return { round, closed_at, systems, results };
-}
+const testsRound = (): Promise<TestsReport> => readReport('report-tests', 'tests');
 
 describe('TestsBoard', () => {
   beforeEach(() => {

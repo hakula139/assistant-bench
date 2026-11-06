@@ -1,7 +1,7 @@
 ---
 import { BookOpen, FileText } from 'lucide-react';
 
-import { scorerViews } from '@/components/scorers';
+import { viewOf } from '@/components/scorers';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
 import { MethodStrip } from '@/components/site/Method';
 import { note, PageHeader } from '@/components/site/PageParts';
@@ -9,7 +9,7 @@ import { RoundSwitcher } from '@/components/site/RoundSwitcher';
 import Base from '@/layouts/Base.astro';
 import { boardGuide } from '@/lib/method';
 import type { Report } from '@/lib/report';
-import { boardPath, latest, roundLinks, type BoardLink, type Family } from '@/lib/reports';
+import { boardPath, roundLinks, type BoardLink, type Family } from '@/lib/reports';
 import { sitePath, SOURCE } from '@/lib/site';
 
 interface Props {
@@ -22,9 +22,9 @@ interface Props {
 
 const { family, boards, named } = Astro.props;
 const { config, title } = family;
-const { Board } = scorerViews[config.scorer];
+const { Board } = viewOf(family);
 const guide = boardGuide(config);
-const newest = latest(family);
+const newest = family.rounds.at(-1);
 const round = named ?? newest;
 ---
 

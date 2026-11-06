@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { boardSlug, publicFamilies, systemPages, testsRounds, votesRounds } from '@/lib/reports';
-import { FIXTURE_NAMES, readFixture } from '@/test/fixture';
+import { boardSlug, publicFamilies, systemPages, type VotesFamily } from '@/lib/reports';
+import { FIXTURE_NAMES, readFixture, readReport } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
   scorer: 'votes',
@@ -49,8 +49,8 @@ describe('publicFamilies', () => {
       [{ name: 'writing-prose', config: votes(true) }],
       [later, earlier],
       {},
-    );
-    const rounds = votesRounds(family);
+    ) as VotesFamily[];
+    const { rounds } = family;
 
     expect(rounds.map(({ systems }) => systems['acme-large'].display_name)).toEqual([
       'Acme Large',
@@ -63,43 +63,12 @@ describe('publicFamilies', () => {
     expect(systemPages(family).has('acme-large')).toBe(true);
   });
 
-  test('keeps tests-scorer identities and descriptive results without a runnable system', () => {
-    const closed: Report = {
-      family: 'writing-prose',
-      round: '2026-10-21',
-      closed_at: '2026-10-21T18:00:00Z',
-      systems: { retired: { display_name: 'Retired System', fingerprint: null } },
-      results: {
-        scorer: 'tests',
-        samples: 1,
-        standings: [
-          {
-            system: 'retired',
-            tasks: 4,
-            trials: 4,
-            errored: 1,
-            pass_rate: { rate: 0.5, lower: 0.15, upper: 0.85 },
-            pass_hat_k: null,
-            mean_cost_usd: null,
-            cost_gap: 'unreported',
-            p50_latency_sec: null,
-          },
-        ],
-        categories: [],
-        decision: { leader: 'retired', tied: [] },
-      },
-    };
-    const [family] = publicFamilies([{ name: 'writing-prose', config: votes(true) }], [closed], {});
+  test("refuses a report that another scorer than its family's wrote", async () => {
+    const closed = { ...(await readReport('report-tests', 'tests')), family: 'writing-prose' };
 
-    expect(testsRounds(family)).toEqual([
-      {
-        round: closed.round,
-        closed_at: closed.closed_at,
-        systems: closed.systems,
-        results: closed.results,
-      },
-    ]);
-    expect(votesRounds(family)).toEqual([]);
+    expect(() =>
+      publicFamilies([{ name: 'writing-prose', config: votes(true) }], [closed], {}),
+    ).toThrow(`report writing-prose/${closed.round} is scored by tests, not votes`);
   });
 
   test('lists the families by name', () => {
@@ -127,6 +96,7 @@ describe('publicFamilies', () => {
         name: 'writing-prose',
         title: 'Writing · Prose',
         aspect: 'writing',
+        scorer: 'votes',
         config: votes(true),
         rounds: [],
         systemNames: FIXTURE_NAMES,
@@ -189,7 +159,7 @@ describe('systemPages', () => {
       [{ name: 'writing-prose', config: votes(true) }],
       [round],
       FIXTURE_NAMES,
-    );
+    ) as VotesFamily[];
 
     const pages = systemPages(family);
 

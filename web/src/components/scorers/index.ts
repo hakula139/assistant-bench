@@ -9,14 +9,13 @@ import VotesMethod from '@/components/scorers/votes/Method.astro';
 import VotesPanel from '@/components/scorers/votes/Panel.astro';
 import { votesParts } from '@/components/scorers/votes/parts';
 import TestsThenVotes from '@/components/scorers/votes/TestsThenVotes.astro';
-import type { Scorer } from '@/lib/family';
 import { legendMarks, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import type { RenderSection } from '@/lib/method';
-import { votesRounds, type Family } from '@/lib/reports';
+import type { Family, TestsFamily, VotesFamily } from '@/lib/reports';
 
-/** How the site renders the families of one scorer. */
-interface ScorerView {
+/** How the site renders the families `F` of one scorer. */
+interface ScorerView<F extends Family> {
   /**
    * The family page's board, given `family` and the closed `round` to show, with its own state
    * before the first round.
@@ -32,9 +31,9 @@ interface ScorerView {
   /** The section's parts by key, each headed at `partId(scorer, key)` and listed in contents. */
   parts: Record<string, string>;
   /** The legend marks the family's panel draws, which the home page's shared legend names. */
-  marks: (family: Family) => LegendMark[];
+  marks: (family: F) => LegendMark[];
   /** What the panel's header adds after the latest round's date, such as its vote count. */
-  roundDetail: (family: Family) => string | null;
+  roundDetail: (family: F) => string | null;
 }
 
 /** Each scorer's views, which every page dispatches through, so a new scorer adds an entry here. */
@@ -49,7 +48,7 @@ export const scorerViews = {
       return legendMarks(rows, domain, anchorScore);
     },
     roundDetail: (family) => {
-      const round = votesRounds(family).at(-1);
+      const round = family.rounds.at(-1);
       return round ? formatCountOf(round.results.votes, 'vote') : null;
     },
   },
@@ -61,7 +60,12 @@ export const scorerViews = {
     marks: () => [],
     roundDetail: () => null,
   },
-} satisfies Record<Scorer, ScorerView>;
+} satisfies { votes: ScorerView<VotesFamily>; tests: ScorerView<TestsFamily> };
+
+/** Returns the views of a family's scorer, typed for the family. */
+export function viewOf<F extends Family>(family: F): ScorerView<F> {
+  return scorerViews[family.scorer] as ScorerView<F>;
+}
 
 /**
  * The methodology sections on a render's own protocol, after the scorers' sections, which the

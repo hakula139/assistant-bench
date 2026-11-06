@@ -4,18 +4,16 @@ import { Forest, ForestLegend } from '@/components/site/Forest';
 import { note } from '@/components/site/PageParts';
 import { EMPTY_DOMAIN, legendMarks, unmeasuredRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
-import type { Report } from '@/lib/report';
-import { boardPath, configOf, votesRound, type Family } from '@/lib/reports';
+import { boardPath, type VotesFamily, type VotesReport } from '@/lib/reports';
 
 interface Props {
-  family: Family;
+  family: VotesFamily;
   /** The closed round to show, or nothing before the first round closes. */
-  round: Report | undefined;
+  round: VotesReport | undefined;
 }
 
-const { family, round: report } = Astro.props;
-const config = configOf(family, 'votes');
-const round = report && votesRound(report);
+const { family, round } = Astro.props;
+const { config } = family;
 const rows = round === undefined ? unmeasuredRows(config.systems, family.systemNames) : [];
 ---
 

@@ -9,9 +9,8 @@ import Header from '@/components/site/Header.astro';
 import Base from '@/layouts/Base.astro';
 import { familyTitle } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
-import type { FamilyConfig, VotesConfig } from '@/lib/family';
+import type { FamilyConfig, TestsConfig, VotesConfig } from '@/lib/family';
 import { defectTerms, terms } from '@/lib/glossary';
-import { reportSchema } from '@/lib/report';
 import {
   boardPath,
   familyPaths,
@@ -19,6 +18,9 @@ import {
   systemPath,
   systemPaths,
   type Family,
+  type TestsFamily,
+  type VotesFamily,
+  type VotesReport,
 } from '@/lib/reports';
 import { SOURCE } from '@/lib/site';
 import SystemPage from '@/pages/[aspect]/[board]/[system].astro';
@@ -27,7 +29,7 @@ import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
 import NotFoundPage from '@/pages/404.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
-import { FIXTURE_NAMES, readFixture, shownSlugs, visitIslandProps } from '@/test/fixture';
+import { FIXTURE_NAMES, readReport, shownSlugs, visitIslandProps } from '@/test/fixture';
 
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
 vi.mock(import('@/lib/reports'), async (importOriginal) => ({
@@ -55,14 +57,11 @@ const arenaConfig: VotesConfig = {
   public: true,
 };
 
-async function family(): Promise<Family> {
-  const latest = reportSchema.parse(await readFixture());
+async function family(): Promise<VotesFamily> {
+  const latest = await readReport('report', 'votes');
   const earlier = structuredClone(latest);
   earlier.round = '2026-10-07';
   earlier.closed_at = '2026-10-07T18:00:00Z';
-  if (earlier.results.scorer !== 'votes' || latest.results.scorer !== 'votes') {
-    throw new Error('the fixture is a votes report');
-  }
   for (const standing of earlier.results.standings) {
     standing.score = 900;
   }
@@ -74,7 +73,7 @@ async function family(): Promise<Family> {
   return listedFamily('writing-arena', arenaConfig, [earlier, latest]);
 }
 
-async function codingFamily(): Promise<Family> {
+async function codingFamily(): Promise<VotesFamily> {
   const config: VotesConfig = {
     ...arenaConfig,
     aspect: 'coding',
@@ -94,18 +93,15 @@ function headerStats(html: string): string[] {
   );
 }
 
-function listedFamily(name: string, config: FamilyConfig, rounds: Family['rounds']): Family {
+function listing(name: string, config: FamilyConfig) {
   if (!config.public || config.aspect === undefined) {
     throw new Error(`family ${name} is not listed under a public aspect`);
   }
-  return {
-    name,
-    title: familyTitle(config),
-    aspect: config.aspect,
-    config,
-    rounds,
-    systemNames: FIXTURE_NAMES,
-  };
+  return { name, title: familyTitle(config), aspect: config.aspect, systemNames: FIXTURE_NAMES };
+}
+
+function listedFamily(name: string, config: VotesConfig, rounds: VotesReport[]): VotesFamily {
+  return { ...listing(name, config), scorer: 'votes', config, rounds };
 }
 
 async function render(
@@ -128,20 +124,17 @@ const text = (html: string) =>
     .replace(/&#(?:x27|39);/g, "'")
     .replace(/\s+/g, ' ');
 
-async function testsFamily(): Promise<Family> {
-  const report = reportSchema.parse(await readFixture('report-tests'));
-  return listedFamily(
-    report.family,
-    {
-      scorer: 'tests',
-      aspect: 'coding',
-      display_name: 'Tasks',
-      systems: ['acme-pro', 'acme-small'],
-      categories: [],
-      public: true,
-    },
-    [report],
-  );
+async function testsFamily(): Promise<TestsFamily> {
+  const report = await readReport('report-tests', 'tests');
+  const config: TestsConfig = {
+    scorer: 'tests',
+    aspect: 'coding',
+    display_name: 'Tasks',
+    systems: ['acme-pro', 'acme-small'],
+    categories: [],
+    public: true,
+  };
+  return { ...listing(report.family, config), scorer: 'tests', config, rounds: [report] };
 }
 
 function guide(html: string): string {
@@ -559,9 +552,6 @@ describe('system page', () => {
   ])('lists the issues %s', async (_, defects, row) => {
     const tagged = await family();
     const latest = tagged.rounds[tagged.rounds.length - 1];
-    if (latest.results.scorer !== 'votes') {
-      throw new Error('the fixture is a votes report');
-    }
     const mini = latest.results.standings.find((standing) => standing.system === 'acme-mini');
     if (mini === undefined) {
       throw new Error('the fixture ranks acme-mini');
@@ -601,9 +591,6 @@ describe('system page', () => {
   ])('%s', async (_, earlierAnchor, marked) => {
     const arena = await family();
     const earlier = arena.rounds[0].results;
-    if (earlier.scorer !== 'votes') {
-      throw new Error('the fixture is a votes report');
-    }
     earlier.anchor = earlierAnchor;
 
     const html = await render(SystemPage, {
@@ -902,7 +889,7 @@ function islandRounds(html: string): string[] {
 }
 
 /** A tests family with an earlier round before the one `testsFamily` closes. */
-async function testsFamilyWithHistory(): Promise<Family> {
+async function testsFamilyWithHistory(): Promise<TestsFamily> {
   const tested = await testsFamily();
   const [latest] = tested.rounds;
   const earlier = { ...structuredClone(latest), round: '2026-10-07' };
@@ -1035,9 +1022,6 @@ describe('round pages', () => {
   test("links a system page's round to the page of the round it last appeared in", async () => {
     const arena = await family();
     const later = arena.rounds[1].results;
-    if (later.scorer !== 'votes') {
-      throw new Error('the fixture is a votes report');
-    }
     later.standings = later.standings.filter((standing) => standing.system !== 'acme-pro');
     const pages = await boardPages(arena);
 

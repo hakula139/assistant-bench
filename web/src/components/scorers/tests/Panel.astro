@@ -11,14 +11,14 @@ import {
 import { formatPercent, formatPercentRange } from '@/lib/format';
 import { terms } from '@/lib/glossary';
 import { byPassRate } from '@/lib/ranking';
-import { testsRounds, type Family, type TestsRound } from '@/lib/reports';
+import type { TestsFamily, TestsReport } from '@/lib/reports';
 import { reportNames, systemName } from '@/lib/systems';
 
 interface Props {
-  family: Family;
+  family: TestsFamily;
 }
 
-function passRows({ systems, results }: TestsRound) {
+function passRows({ systems, results }: TestsReport) {
   const names = reportNames(systems);
   return results.standings
     .map(({ system, pass_rate }) => ({ name: systemName(names, system), pass_rate }))
@@ -26,7 +26,7 @@ function passRows({ systems, results }: TestsRound) {
 }
 
 const { family } = Astro.props;
-const round = testsRounds(family).at(-1);
+const round = family.rounds.at(-1);
 const rows = round && passRows(round);
 ---
 
