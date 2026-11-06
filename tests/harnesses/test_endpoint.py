@@ -82,18 +82,17 @@ class TestEndpoint:
         def test_sends_private_headers_directly_to_the_configured_origin(
             self,
             endpoint: StubEndpoint,
-            model_requests: list[httpx.Request | httpx2.Request],
+            model_requests: list[httpx2.Request],
             monkeypatch: pytest.MonkeyPatch,
             api: Api,
         ) -> None:
             def inherited_proxies() -> dict[str, str]:
                 return getproxies_environment() or {'http': endpoint.url}
 
-            monkeypatch.setattr('httpx._utils.getproxies', inherited_proxies)
             monkeypatch.setattr('httpx2._utils.getproxies', inherited_proxies)
             configured = Endpoint.read(endpoint.env.get, api)
 
-            async def request() -> httpx.Response | httpx2.Response:
+            async def request() -> httpx2.Response:
                 if api == 'anthropic-messages':
                     async with configured.messages_client() as client:
                         return await client.post(
@@ -103,7 +102,7 @@ class TestEndpoint:
                         )
                 async with configured.client() as client:
                     return await client.post(
-                        f'{endpoint.url}/v1/responses', cast_to=httpx.Response, body={}
+                        f'{endpoint.url}/v1/responses', cast_to=httpx2.Response, body={}
                     )
 
             reply = asyncio.run(request())
@@ -151,7 +150,7 @@ class TestEndpoint:
                 async with configured.client() as client:
                     await client.post(
                         f'{endpoint.url}/v1/responses',
-                        cast_to=httpx.Response,
+                        cast_to=httpx2.Response,
                         body={},
                     )
 
@@ -161,7 +160,6 @@ class TestEndpoint:
             assert len(endpoint.requests) == 1
             assert ipv6_endpoint.requests == []
 
-    class TestMessagesHttpClient:
         @pytest.mark.parametrize(
             ('fixture', 'address'),
             [('tls_endpoint', '127.0.0.1'), ('ipv6_endpoint', '::1')],
@@ -174,23 +172,21 @@ class TestEndpoint:
             env = endpoint.env | {LOCAL_ADDRESS_VAR: address}
             if endpoint.ca_file:
                 env[CA_FILE_VAR] = str(endpoint.ca_file)
-            configured = Endpoint.read(env.get, 'anthropic-messages')
+            configured = Endpoint.read(env.get)
 
             async def send(endpoint_config: Endpoint) -> httpx2.Response:
-                async with endpoint_config.messages_http_client() as client:
-                    return await client.post(
-                        f'{endpoint.url}/anthropic/v1/messages', json={}
-                    )
+                async with endpoint_config.http_client() as client:
+                    return await client.post(f'{endpoint.url}/v1/responses', json={})
 
             if endpoint.ca_file:
-                untrusted = Endpoint.read(endpoint.env.get, 'anthropic-messages')
+                untrusted = Endpoint.read(endpoint.env.get)
                 with pytest.raises(httpx2.ConnectError):
                     asyncio.run(send(untrusted))
             reply = asyncio.run(send(configured))
 
             assert reply.status_code == 200
             (sent,) = endpoint.requests
-            assert sent.path == '/anthropic/v1/messages'
+            assert sent.path == '/v1/responses'
 
 
 class TestPreflight:

@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
-import httpx
+import httpx2
 import openai
 import pytest
 import tomli_w
@@ -469,7 +469,7 @@ class TestJob:
 
         with pytest.raises(openai.APIError) as error:
             result.check(
-                httpx.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
+                httpx2.Request('POST', 'http://127.0.0.1/v1/responses'), complete=True
             )
 
         assert not queue.retries(type(error.value).__name__)

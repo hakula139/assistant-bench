@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, override
 
-import httpx
+import httpx2
 from harbor.llms.base import (
     BaseLLM,
     ContextLengthExceededError,
@@ -85,7 +85,7 @@ class ResponseResult:
             for item in self.response.output
         ]
 
-    def check(self, request: httpx.Request, *, complete: bool) -> None:
+    def check(self, request: httpx2.Request, *, complete: bool) -> None:
         response = self.response
         if response.error is not None or response.status not in (
             'completed',

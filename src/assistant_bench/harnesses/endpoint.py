@@ -4,7 +4,6 @@ import os
 import ssl
 from collections.abc import Callable, Mapping
 
-import httpx
 import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -42,8 +41,7 @@ ENDPOINT_VARS = (
 # The Anthropic SDK adds these headers to every request it sends.
 SDK_HEADERS_VAR = 'ANTHROPIC_CUSTOM_HEADERS'
 
-REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=30.0, read=None)
-MESSAGES_TIMEOUT = httpx2.Timeout(**REQUEST_TIMEOUT.as_dict())
+REQUEST_TIMEOUT = httpx2.Timeout(600.0, connect=30.0, read=None)
 
 
 class Endpoint(BaseModel):
@@ -99,18 +97,18 @@ class Endpoint(BaseModel):
             http_client=self.http_client(),
         )
 
-    def http_client(self) -> httpx.AsyncClient:
+    def http_client(self) -> httpx2.AsyncClient:
         """Bind the local address and refuse automatic redirects."""
         verify = self.verify()
         transport = (
-            httpx.AsyncHTTPTransport(
+            httpx2.AsyncHTTPTransport(
                 local_address=str(self.local_address), verify=verify
             )
             if self.local_address
             else None
         )
 
-        return httpx.AsyncClient(
+        return httpx2.AsyncClient(
             transport=transport,
             verify=verify,
             follow_redirects=False,
@@ -124,28 +122,12 @@ class Endpoint(BaseModel):
             api_key=self.api_key(),
             max_retries=0,
             open_telemetry=False,
-            timeout=MESSAGES_TIMEOUT,
+            timeout=REQUEST_TIMEOUT,
             default_headers={
                 **(self.headers or {}),
                 'anthropic-version': load_generation().anthropic_api_version,
             },
-            http_client=self.messages_http_client(),
-        )
-
-    def messages_http_client(self) -> httpx2.AsyncClient:
-        verify = self.verify()
-        transport = (
-            httpx2.AsyncHTTPTransport(
-                local_address=str(self.local_address), verify=verify
-            )
-            if self.local_address
-            else None
-        )
-        return httpx2.AsyncClient(
-            transport=transport,
-            verify=verify,
-            follow_redirects=False,
-            timeout=MESSAGES_TIMEOUT,
+            http_client=self.http_client(),
         )
 
 

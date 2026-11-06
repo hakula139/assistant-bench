@@ -105,26 +105,17 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def model_requests(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[httpx.Request | httpx2.Request]:
-    requests: list[httpx.Request | httpx2.Request] = []
-    send = httpx.AsyncClient.send
-    send_messages = httpx2.AsyncClient.send
+) -> list[httpx2.Request]:
+    requests: list[httpx2.Request] = []
+    send = httpx2.AsyncClient.send
 
     async def record(
-        client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
-    ) -> httpx.Response:
-        requests.append(request)
-        return await send(client, request, **kwargs)
-
-    monkeypatch.setattr(httpx.AsyncClient, 'send', record)
-
-    async def record_messages(
         client: httpx2.AsyncClient, request: httpx2.Request, **kwargs: Any
     ) -> httpx2.Response:
         requests.append(request)
-        return await send_messages(client, request, **kwargs)
+        return await send(client, request, **kwargs)
 
-    monkeypatch.setattr(httpx2.AsyncClient, 'send', record_messages)
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', record)
     return requests
 
 

@@ -4,7 +4,7 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
@@ -45,7 +45,7 @@ class TestHostEnvironment:
         endpoint: StubEndpoint,
         endpoint_clients: list[AsyncOpenAI],
         export: NixosConfigExport,
-        model_requests: list[httpx.Request],
+        model_requests: list[httpx2.Request],
         monkeypatch: pytest.MonkeyPatch,
         api: str,
     ) -> None:
