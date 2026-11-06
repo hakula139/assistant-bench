@@ -882,7 +882,10 @@ def _tests_categories(
     """Rate each category that has tasks, in the family's declared order."""
     used = {categories[task] for row in shares.values() for task in row}
     boards: list[TestsCategory] = []
-    for category in (name for name in declared if name in used):
+    for category in declared:
+        if category not in used:
+            continue
+
         rows: list[TestsCategoryStanding] = []
         for standing in standings:
             mine = [
