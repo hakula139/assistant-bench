@@ -790,7 +790,8 @@ class TestRun:
         assert result.exit_code == 2
         assert (
             "Invalid value for '--system': Family `f` does not list "
-            '`gpt-6-astra-high`. Choose among `opus-5.5-high`.' in result.output
+            '`gpt-6-astra-high`. Choose among `opus-5.5-high`.'
+            in Text.from_ansi(result.stderr).plain
         )
         assert submitted == []
 
@@ -932,7 +933,7 @@ class TestRun:
 
         assert result.exit_code == 2
         assert f"Invalid value for '--system': No family lists `{name}`. {hint}" in (
-            result.output
+            Text.from_ansi(result.stderr).plain
         )
         assert submitted == []
 
