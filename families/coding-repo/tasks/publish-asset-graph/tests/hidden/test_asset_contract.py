@@ -1,20 +1,15 @@
 """Consumer-visible asset graph and immutable publication contracts."""
 
+import dataclasses
 import hashlib
 import re
-import subprocess
-import sys
-import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 from textwrap import dedent
 from urllib.parse import unquote, urlsplit
 
-from siteassets import BuildError, build
-
-
-ROOT = Path(__file__).resolve().parents[1]
+import sandbox
 
 
 class HtmlReferences(HTMLParser):
@@ -32,46 +27,73 @@ class HtmlReferences(HTMLParser):
             self.urls.append(href)
 
 
-def html_urls(path: Path) -> list[str]:
-    parser = HtmlReferences()
-    parser.feed(path.read_text())
-    return parser.urls
+@dataclasses.dataclass(frozen=True)
+class Release:
+    """The directory and manifest a successful build reports."""
+
+    directory: Path
+    manifest: dict[str, str]
 
 
-def css_urls(path: Path) -> list[str]:
-    return [
-        match.group(1)
-        for match in re.finditer(r"url\(['\"]?([^'\")]+)", path.read_text())
-    ]
+@dataclasses.dataclass(frozen=True)
+class Entry:
+    """What a path in the sandbox is, where it links, and where it resolves."""
 
-
-def target(consumer: Path, url: str) -> Path:
-    return (consumer.parent / unquote(urlsplit(url).path)).resolve()
-
-
-def files(root: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in root.rglob('*')
-        if path.is_file()
-    }
+    is_file: bool
+    link: str | None
+    resolved: Path
 
 
 class TestAssetPublication(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = sandbox.scratch()
 
-    def write(self, source: Path, relative: str, content: str | bytes) -> Path:
-        path = source / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content.encode() if isinstance(content, str) else content)
-        return path
+    def write(
+        self, source: Path, files: dict[str, str], links: dict[str, str] | None = None
+    ) -> None:
+        sandbox.observe(
+            'assets', 'write', root=str(source), files=files, links=links or {}
+        )
+
+    def build(self, source: Path, output: Path) -> Release:
+        seen = sandbox.observe(
+            'assets', 'build', source=str(source), output=str(output)
+        )
+        if seen['error'] is not None:
+            self.fail(f'the build fails: {seen["error"]}')
+        return Release(Path(seen['directory']), seen['manifest'])
+
+    def entry(self, path: Path) -> Entry:
+        seen = sandbox.observe('assets', 'entry', path=str(path))
+        return Entry(seen['is_file'], seen['link'], Path(seen['resolved']))
+
+    def resolve(self, path: Path) -> Path:
+        return self.entry(path).resolved
+
+    def read(self, path: Path) -> bytes:
+        return bytes.fromhex(sandbox.observe('assets', 'read', path=str(path)))
+
+    def files(self, root: Path) -> dict[str, bytes]:
+        seen = sandbox.observe('assets', 'files', root=str(root))
+        return {name: bytes.fromhex(content) for name, content in seen.items()}
+
+    def html_urls(self, path: Path) -> list[str]:
+        parser = HtmlReferences()
+        parser.feed(self.read(path).decode())
+        return parser.urls
+
+    def css_urls(self, path: Path) -> list[str]:
+        return [
+            match.group(1)
+            for match in re.finditer(r"url\(['\"]?([^'\")]+)", self.read(path).decode())
+        ]
+
+    def target(self, consumer: Path, url: str) -> Path:
+        return self.resolve(consumer.parent / unquote(urlsplit(url).path))
 
     def assert_hashed(self, release: Path, source: str, emitted: str) -> None:
         original = Path(source)
-        digest = hashlib.sha256((release / emitted).read_bytes()).hexdigest()[:12]
+        digest = hashlib.sha256(self.read(release / emitted)).hexdigest()[:12]
         self.assertEqual(
             emitted,
             f'assets/{original.stem}.{digest}{original.suffix}',
@@ -83,40 +105,33 @@ class TestAssetPublication(unittest.TestCase):
         source, output = self.root / 'source', self.root / 'output'
         self.write(
             source,
-            'pages/detail.html',
-            dedent(
-                """
-                <link rel="preload stylesheet"
-                      href="../styles/base.css?theme=dark#screen">
-                """
-            ),
+            {
+                'pages/detail.html': dedent(
+                    """
+                    <link rel="preload stylesheet"
+                          href="../styles/base.css?theme=dark#screen">
+                    """
+                ),
+                'styles/base.css': dedent(
+                    """
+                    @import url('nested/extra.css');
+                    .icon { background: url('/media/logo.svg'); }
+                    """
+                ),
+                'styles/nested/extra.css': dedent(
+                    """
+                    .extra {
+                        background: url("../../media/caf%C3%A9%20logo.svg?size=2#icon");
+                    }
+                    """
+                ),
+                'media/logo.svg': '<svg>plain</svg>',
+                'media/café logo.svg': '<svg>accent</svg>',
+                'unused.svg': '<svg>unused</svg>',
+            },
         )
-        self.write(
-            source,
-            'styles/base.css',
-            dedent(
-                """
-                @import url('nested/extra.css');
-                .icon { background: url('/media/logo.svg'); }
-                """
-            ),
-        )
-        self.write(
-            source,
-            'styles/nested/extra.css',
-            dedent(
-                """
-                .extra {
-                    background: url("../../media/caf%C3%A9%20logo.svg?size=2#icon");
-                }
-                """
-            ),
-        )
-        self.write(source, 'media/logo.svg', '<svg>plain</svg>')
-        self.write(source, 'media/café logo.svg', '<svg>accent</svg>')
-        self.write(source, 'unused.svg', '<svg>unused</svg>')
 
-        result = build(source, output)
+        result = self.build(source, output)
 
         self.assertEqual(
             set(result.manifest),
@@ -127,32 +142,35 @@ class TestAssetPublication(unittest.TestCase):
                 'media/café logo.svg',
             },
         )
-        self.assertTrue((output / 'current').is_symlink())
-        self.assertEqual((output / 'current').resolve(), result.directory.resolve())
-        base_url = html_urls(result.directory / 'pages/detail.html')[0]
+        self.assertIsNotNone(self.entry(output / 'current').link)
+        self.assertEqual(
+            self.resolve(output / 'current'), self.resolve(result.directory)
+        )
+        base_url = self.html_urls(result.directory / 'pages/detail.html')[0]
         self.assertEqual(urlsplit(base_url).query, 'theme=dark')
         self.assertEqual(urlsplit(base_url).fragment, 'screen')
         base = result.directory / result.manifest['styles/base.css']
         self.assertEqual(
-            target(result.directory / 'pages/detail.html', base_url), base.resolve()
+            self.target(result.directory / 'pages/detail.html', base_url),
+            self.resolve(base),
         )
-        urls = css_urls(base)
+        urls = self.css_urls(base)
         self.assertEqual(
-            [target(base, url) for url in urls],
+            [self.target(base, url) for url in urls],
             [
-                (
+                self.resolve(
                     result.directory / result.manifest['styles/nested/extra.css']
-                ).resolve(),
-                (result.directory / result.manifest['media/logo.svg']).resolve(),
+                ),
+                self.resolve(result.directory / result.manifest['media/logo.svg']),
             ],
         )
         extra = result.directory / result.manifest['styles/nested/extra.css']
-        extra_url = css_urls(extra)[0]
+        extra_url = self.css_urls(extra)[0]
         self.assertEqual(urlsplit(extra_url).query, 'size=2')
         self.assertEqual(urlsplit(extra_url).fragment, 'icon')
         self.assertEqual(
-            target(extra, extra_url),
-            (result.directory / result.manifest['media/café logo.svg']).resolve(),
+            self.target(extra, extra_url),
+            self.resolve(result.directory / result.manifest['media/café logo.svg']),
         )
         for original, emitted in result.manifest.items():
             with self.subTest(asset=original):
@@ -160,21 +178,26 @@ class TestAssetPublication(unittest.TestCase):
 
     def test_child_changes_propagate_hashes_without_mutating_old_release(self) -> None:
         source, output = self.root / 'source', self.root / 'output'
-        self.write(source, 'index.html', '<link rel="stylesheet" href="style.css">')
-        self.write(source, 'style.css', '.x { background: url("image.svg"); }')
-        self.write(source, 'image.svg', '<svg>first</svg>')
-        first = build(source, output)
-        original = files(first.directory)
-        self.write(source, 'image.svg', '<svg>second</svg>')
+        self.write(
+            source,
+            {
+                'index.html': '<link rel="stylesheet" href="style.css">',
+                'style.css': '.x { background: url("image.svg"); }',
+                'image.svg': '<svg>first</svg>',
+            },
+        )
+        first = self.build(source, output)
+        original = self.files(first.directory)
+        self.write(source, {'image.svg': '<svg>second</svg>'})
 
-        second = build(source, output)
-        repeated = build(source, output)
+        second = self.build(source, output)
+        repeated = self.build(source, output)
 
         self.assertNotEqual(first.manifest['image.svg'], second.manifest['image.svg'])
         self.assertNotEqual(first.manifest['style.css'], second.manifest['style.css'])
-        self.assertEqual(files(first.directory), original)
+        self.assertEqual(self.files(first.directory), original)
         self.assertEqual(second.manifest, repeated.manifest)
-        self.assertEqual(files(second.directory), files(repeated.directory))
+        self.assertEqual(self.files(second.directory), self.files(repeated.directory))
         for original_path, emitted in second.manifest.items():
             with self.subTest(asset=original_path):
                 self.assert_hashed(second.directory, original_path, emitted)
@@ -184,15 +207,20 @@ class TestAssetPublication(unittest.TestCase):
     ) -> None:
         source, output = self.root / 'source', self.root / 'output'
         self.write(
-            source, 'original/page.html', '<link rel="stylesheet" href="theme.css">'
+            source,
+            {
+                'original/page.html': '<link rel="stylesheet" href="theme.css">',
+                'original/theme.css': '.x { background: url("image.svg"); }',
+                'original/image.svg': '<svg>original</svg>',
+                'alias/image.svg': '<svg>alias</svg>',
+            },
+            {
+                'alias/page.html': '../original/page.html',
+                'alias/theme.css': '../original/theme.css',
+            },
         )
-        self.write(source, 'original/theme.css', '.x { background: url("image.svg"); }')
-        self.write(source, 'original/image.svg', '<svg>original</svg>')
-        self.write(source, 'alias/image.svg', '<svg>alias</svg>')
-        (source / 'alias/page.html').symlink_to('../original/page.html')
-        (source / 'alias/theme.css').symlink_to('../original/theme.css')
 
-        result = build(source, output)
+        result = self.build(source, output)
 
         self.assertEqual(
             set(result.manifest),
@@ -206,16 +234,16 @@ class TestAssetPublication(unittest.TestCase):
         for base in ('original', 'alias'):
             with self.subTest(base=base):
                 page = result.directory / base / 'page.html'
-                self.assertTrue(page.is_file())
-                css = target(page, html_urls(page)[0])
+                self.assertTrue(self.entry(page).is_file)
+                css = self.target(page, self.html_urls(page)[0])
                 self.assertEqual(
                     css, (result.directory / result.manifest[f'{base}/theme.css'])
                 )
-                image = target(css, css_urls(css)[0])
+                image = self.target(css, self.css_urls(css)[0])
                 self.assertEqual(
                     image, (result.directory / result.manifest[f'{base}/image.svg'])
                 )
-                self.assertEqual(image.read_text(), f'<svg>{base}</svg>')
+                self.assertEqual(self.read(image).decode(), f'<svg>{base}</svg>')
                 self.assert_hashed(
                     result.directory,
                     f'{base}/theme.css',
@@ -230,19 +258,6 @@ class TestAssetPublication(unittest.TestCase):
             'data:image/svg+xml;base64,PHN2Zy8+',
             '#logo',
         ]
-        self.write(
-            source,
-            'index.html',
-            dedent(
-                """
-                <script src="https://example.com/app.js?x=1&amp;y=2#top"></script>
-                <img src="//example.com/image.svg">
-                <img src="data:image/svg+xml;base64,PHN2Zy8+">
-                <img src="#logo">
-                <link rel="stylesheet" href="style.css">
-                """
-            ),
-        )
         css = dedent(
             """
             /* url(missing-comment.svg) */
@@ -251,13 +266,27 @@ class TestAssetPublication(unittest.TestCase):
             .x { background: url("https://example.com/background.svg?q=1#x"); }
             """
         )
-        self.write(source, 'style.css', css)
+        self.write(
+            source,
+            {
+                'index.html': dedent(
+                    """
+                    <script src="https://example.com/app.js?x=1&amp;y=2#top"></script>
+                    <img src="//example.com/image.svg">
+                    <img src="data:image/svg+xml;base64,PHN2Zy8+">
+                    <img src="#logo">
+                    <link rel="stylesheet" href="style.css">
+                    """
+                ),
+                'style.css': css,
+            },
+        )
 
-        result = build(source, output)
+        result = self.build(source, output)
 
-        self.assertEqual(html_urls(result.directory / 'index.html')[:4], untouched)
+        self.assertEqual(self.html_urls(result.directory / 'index.html')[:4], untouched)
         self.assertEqual(
-            (result.directory / result.manifest['style.css']).read_text(),
+            self.read(result.directory / result.manifest['style.css']).decode(),
             css,
         )
         self.assertEqual(set(result.manifest), {'style.css'})
@@ -267,30 +296,37 @@ class TestAssetPublication(unittest.TestCase):
     ) -> None:
         source = self.root / 'source'
         output = source / 'build'
-        self.write(source, 'index.html', '<img src="a/logo.svg"><img src="b/logo.svg">')
-        self.write(source, 'a/logo.svg', '<svg>A</svg>')
-        self.write(source, 'b/logo.svg', '<svg>B</svg>')
+        self.write(
+            source,
+            {
+                'index.html': '<img src="a/logo.svg"><img src="b/logo.svg">',
+                'a/logo.svg': '<svg>A</svg>',
+                'b/logo.svg': '<svg>B</svg>',
+            },
+        )
 
-        first = build(source, output)
-        second = build(source, output)
+        first = self.build(source, output)
+        second = self.build(source, output)
 
         self.assertEqual(set(first.manifest), {'a/logo.svg', 'b/logo.svg'})
         self.assertNotEqual(first.manifest['a/logo.svg'], first.manifest['b/logo.svg'])
         self.assertEqual(first.manifest, second.manifest)
         self.assertEqual(
             [
-                path.read_bytes()
+                self.read(path)
                 for path in (
-                    target(second.directory / 'index.html', url)
-                    for url in html_urls(second.directory / 'index.html')
+                    self.target(second.directory / 'index.html', url)
+                    for url in self.html_urls(second.directory / 'index.html')
                 )
             ],
             [b'<svg>A</svg>', b'<svg>B</svg>'],
         )
         self.assertEqual(
             [
-                path.relative_to(second.directory).as_posix()
-                for path in second.directory.rglob('*.html')
+                Path(path).relative_to(second.directory).as_posix()
+                for path in sandbox.observe(
+                    'assets', 'glob', root=str(second.directory), pattern='*.html'
+                )
             ],
             ['index.html'],
         )
@@ -303,92 +339,98 @@ class TestAssetPublication(unittest.TestCase):
                     self.root / failure / 'output',
                 )
                 self.write(
-                    source, 'index.html', '<link rel="stylesheet" href="style.css">'
+                    source,
+                    {
+                        'index.html': '<link rel="stylesheet" href="style.css">',
+                        'style.css': '.x { background: url("image.svg"); }',
+                        'image.svg': '<svg>good</svg>',
+                    },
                 )
-                self.write(source, 'style.css', '.x { background: url("image.svg"); }')
-                self.write(source, 'image.svg', '<svg>good</svg>')
-                previous = build(source, output)
-                previous_link = (output / 'current').readlink()
-                previous_files = files(previous.directory)
+                previous = self.build(source, output)
+                previous_link = self.entry(output / 'current').link
+                previous_files = self.files(previous.directory)
                 if failure == 'missing':
-                    self.write(source, 'style.css', '@import url("nested.css");')
                     self.write(
-                        source, 'nested.css', '.x { background: url("missing.svg"); }'
+                        source,
+                        {
+                            'style.css': '@import url("nested.css");',
+                            'nested.css': '.x { background: url("missing.svg"); }',
+                        },
                     )
                 elif failure == 'cycle':
-                    self.write(source, 'style.css', '@import url("nested.css");')
-                    self.write(source, 'nested.css', '@import url("style.css");')
+                    self.write(
+                        source,
+                        {
+                            'style.css': '@import url("nested.css");',
+                            'nested.css': '@import url("style.css");',
+                        },
+                    )
                 elif failure == 'traversal':
                     self.write(
-                        source, 'style.css', '.x { background: url("../outside.svg"); }'
+                        source,
+                        {'style.css': '.x { background: url("../outside.svg"); }'},
                     )
-                    self.write(source.parent, 'outside.svg', '<svg>outside</svg>')
+                    self.write(source.parent, {'outside.svg': '<svg>outside</svg>'})
                 else:
                     self.write(
-                        source, 'style.css', '.x { background: url("escape.svg"); }'
+                        source, {'style.css': '.x { background: url("escape.svg"); }'}
                     )
-                    outside = self.write(
-                        source.parent, 'outside.svg', '<svg>outside</svg>'
-                    )
-                    (source / 'escape.svg').symlink_to(outside)
+                    outside = source.parent / 'outside.svg'
+                    self.write(source.parent, {'outside.svg': '<svg>outside</svg>'})
+                    self.write(source, {}, {'escape.svg': str(outside)})
 
-                with self.assertRaises(BuildError):
-                    build(source, output)
+                seen = sandbox.observe(
+                    'assets', 'build', source=str(source), output=str(output)
+                )
 
-                self.assertEqual((output / 'current').readlink(), previous_link)
-                self.assertEqual(files((output / 'current').resolve()), previous_files)
+                self.assertIsNotNone(seen['error'], 'the build succeeds')
+                self.assertEqual(self.entry(output / 'current').link, previous_link)
+                self.assertEqual(
+                    self.files(self.resolve(output / 'current')), previous_files
+                )
 
     def test_output_write_failure_in_another_process_preserves_publication(
         self,
     ) -> None:
         source, output = self.root / 'source', self.root / 'output'
-        self.write(source, 'index.html', '<img src="image.bin">')
-        self.write(source, 'image.bin', b'previous image')
-        previous = build(source, output)
-        previous_link = (output / 'current').readlink()
-        previous_files = files(previous.directory)
-        self.write(source, 'image.bin', b'x' * 65536)
+        self.write(
+            source,
+            {'index.html': '<img src="image.bin">', 'image.bin': 'previous image'},
+        )
+        previous = self.build(source, output)
+        previous_link = self.entry(output / 'current').link
+        previous_files = self.files(previous.directory)
+        self.write(source, {'image.bin': 'x' * 65536})
 
-        failed = subprocess.run(
-            [
-                sys.executable,
-                '-m',
-                'tests.limited_build',
-                str(source),
-                str(output),
-                '4096',
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
+        failed = sandbox.observe(
+            'assets',
+            'limited_build',
+            source=str(source),
+            output=str(output),
+            limit=4096,
         )
 
-        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
-        self.assertEqual(failed.stdout.strip(), 'Build failed.')
-        self.assertEqual((output / 'current').readlink(), previous_link)
-        self.assertEqual(files((output / 'current').resolve()), previous_files)
-        self.assertEqual(files(previous.directory), previous_files)
+        self.assertEqual(failed['returncode'], 1, failed['stdout'] + failed['stderr'])
+        self.assertEqual(failed['stdout'].strip(), 'Build failed.')
+        self.assertEqual(self.entry(output / 'current').link, previous_link)
+        self.assertEqual(self.files(self.resolve(output / 'current')), previous_files)
+        self.assertEqual(self.files(previous.directory), previous_files)
 
     def test_cli_publishes_a_complete_readable_release(self) -> None:
         source, output = self.root / 'source', self.root / 'output'
-        self.write(source, 'index.html', '<img src="image.svg">')
-        self.write(source, 'image.svg', '<svg>cli</svg>')
-
-        completed = subprocess.run(
-            [sys.executable, '-m', 'siteassets', str(source), str(output)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
+        self.write(
+            source,
+            {'index.html': '<img src="image.svg">', 'image.svg': '<svg>cli</svg>'},
         )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        completed = sandbox.observe(
+            'assets', 'cli', source=str(source), output=str(output)
+        )
+        self.assertEqual(completed['returncode'], 0, completed['stderr'])
 
         page = output / 'current' / 'index.html'
         self.assertEqual(
-            target(page, html_urls(page)[0]).read_bytes(), b'<svg>cli</svg>'
+            self.read(self.target(page, self.html_urls(page)[0])), b'<svg>cli</svg>'
         )
 
 
