@@ -98,7 +98,7 @@ class ChatCompletionsLLM(LiteLLM):
             response.get('object') == 'chat.completion'
             and response.get('usage') is not None
         ):
-            call.update(measure('openai-chat-completions', response['usage'])[1])
+            call.update(measure('openai-chat-completions', response['usage']))
 
     @override
     def _extract_usage_info(self, response: Any) -> UsageInfo | None:

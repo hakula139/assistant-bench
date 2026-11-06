@@ -33,7 +33,8 @@ Commands stay minimal, and settings live in config files:
 | The generation and Messages protocol versions and the Messages API version       | `pyproject.toml`'s `[tool.assistant-bench]`                                                                           |
 | A family's scorer, systems, and samples                                          | `families/<family>/family.toml`                                                                                       |
 | Model completion and context allowances                                          | The shared model catalog                                                                                              |
-| Harbor job settings                                                              | `jobs.py`, which builds each job config at run time, and `tasks.py` for the agent timeout and `TASK_VERSION`          |
+| Harbor job settings                                                              | `jobs.py`, which builds each job config at run time                                                                   |
+| Rendered task settings                                                           | `tasks.py`                                                                                                            |
 | Admission, cap, and retention limits of the vote API                             | `web/worker/limits.ts`, with the per-minute request limit in `web/wrangler.toml`                                      |
 | The Cloudflare account, the voting Worker's environments, and their D1 databases | `web/wrangler.toml`                                                                                                   |
 | Point-fit parameters, the actor cap, and diagnostic coverage rules               | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |

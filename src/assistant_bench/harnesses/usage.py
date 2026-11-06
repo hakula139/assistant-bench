@@ -26,7 +26,7 @@ class MeasuredUsage:
 
     @classmethod
     def from_details(cls, details: Mapping[str, Any]) -> Self | None:
-        """Return the usage that `measure`'s details record, `None` if invalid."""
+        """Return the details' usage, `None` when they hold no valid usage."""
         if 'input_tokens' not in details:
             return None
         return cls(**{field.name: details[field.name] for field in fields(cls)})
@@ -58,15 +58,16 @@ class MeasuredUsage:
         context.n_output_tokens = self.output_tokens
 
 
-def measure(api: Api, reported: object) -> tuple[MeasuredUsage | None, dict[str, Any]]:
-    """Return the measured usage and the details a call records about it.
+def measure(api: Api, reported: object) -> dict[str, Any]:
+    """Return the details a call records about its usage.
 
     The details hold the payload as `reported_usage`, whether it was reported but
-    inconsistent, and the measured counters.
+    inconsistent, and the measured counters, which `MeasuredUsage.from_details`
+    reads back.
     """
     payload = _payload(reported)
     usage = measured_usage(api, payload)
-    return usage, {
+    return {
         **(usage.details if usage else {'reasoning_tokens': None}),
         'reported_usage': payload,
         'usage_invalid': payload is not None and usage is None,

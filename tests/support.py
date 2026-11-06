@@ -88,6 +88,7 @@ REPORT_FIXTURE = FIXTURES / 'report.json'
 EARLY_REPORT_FIXTURE = FIXTURES / 'report-early.json'
 TESTS_REPORT_FIXTURE = FIXTURES / 'report-tests.json'
 REPORT_SCHEMA_FIXTURE = FIXTURES / 'report.schema.json'
+
 START = datetime(2026, 10, 21, tzinfo=UTC)
 
 
@@ -478,7 +479,7 @@ def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
 # ── Git Repositories ──
 
 
-def git(root: Path, *args: str) -> str:
+def _git(root: Path, *args: str) -> str:
     """Run git in `root` and return its output, stripped."""
     return subprocess.run(
         ['git', *args], cwd=root, check=True, stdout=subprocess.PIPE, text=True
@@ -491,17 +492,17 @@ def new_repository(root: Path, files: Mapping[str, str]) -> str:
         file = root / path
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(content)
-    git(root, 'init', '--quiet')
-    git(root, 'config', 'user.email', 'test@example.com')
-    git(root, 'config', 'user.name', 'Test')
+    _git(root, 'init', '--quiet')
+    _git(root, 'config', 'user.email', 'test@example.com')
+    _git(root, 'config', 'user.name', 'Test')
     return commit_all(root, 'Initial files')
 
 
 def commit_all(root: Path, message: str) -> str:
     """Commit every change in the repository at `root`, and return the commit."""
-    git(root, 'add', '.')
-    git(root, 'commit', '--quiet', '-m', message)
-    return git(root, 'rev-parse', 'HEAD')
+    _git(root, 'add', '.')
+    _git(root, 'commit', '--quiet', '-m', message)
+    return _git(root, 'rev-parse', 'HEAD')
 
 
 # ── Stub Endpoint ──

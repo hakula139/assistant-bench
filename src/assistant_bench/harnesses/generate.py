@@ -147,7 +147,8 @@ class Generate(BaseAgent):
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
 
-        usage, details = measure('openai-chat-completions', completion.usage)
+        details = measure('openai-chat-completions', completion.usage)
+        usage = MeasuredUsage.from_details(details)
         if usage is not None:
             usage.record(context)
 
