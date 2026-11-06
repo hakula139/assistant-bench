@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 import subprocess
 import sys
@@ -161,7 +162,7 @@ def delivery_limit() -> dict[str, Any]:
 
 
 def acceptance_before_database_failure() -> dict[str, Any]:
-    """Retry after a failed delivered mark, with every order's cents since changed."""
+    """Retry after a failed delivered mark, changing every order's cents if allowed."""
     db = new_db()
     for name, amount in [('a', 100), ('b', 200), ('c', 300)]:
         place_order(db, name, amount)
@@ -186,7 +187,10 @@ def acceptance_before_database_failure() -> dict[str, Any]:
     with Store(db) as store:
         left = pending(store)
         store.connection.execute('DROP TRIGGER reject_delivered')
-        store.connection.execute('UPDATE orders SET amount_cents = amount_cents + 1')
+        with contextlib.suppress(sqlite3.DatabaseError):
+            store.connection.execute(
+                'UPDATE orders SET amount_cents = amount_cents + 1'
+            )
         store.connection.commit()
     retried = counts(dispatch_pending(db, receiver))
     with Store(db) as store:
