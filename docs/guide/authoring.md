@@ -126,7 +126,7 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 | Key                 | Meaning                                                                                                                                 |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`             | A nixos-config catalog model, which supplies the route, the default effort, prices, and the display name                                |
+| `model`             | A nixos-config catalog model, which supplies the route, the default effort, and prices                                                  |
 | `route`             | The endpoint's model ID, for a model outside the catalog. Set exactly one of `model` and `route`                                        |
 | `api`               | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
 | `thinking_mode`     | For a bare native Messages route, required as `anthropic-adaptive`. Catalog models supply their thinking mode                           |
@@ -136,9 +136,9 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | `context_window`    | For a `route`, its configured joint input and output capacity. Catalog models supply `contextWindow`                                    |
 | `effort`            | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
 | `prompt`            | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
-| `display_name`      | The name the site shows, in place of the catalog model's `name`. Required for a `route`                                                 |
+| `display_name`      | The required public name that the site and reports show                                                                                 |
 
-Current catalog entries use their display names, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
+The site shows the display name, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
 Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints), and whether the system keeps its name follows the rule there. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 

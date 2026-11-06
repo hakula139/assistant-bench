@@ -12,7 +12,7 @@ web/src/
 ├── components/site/                        # Shared page composition, navigation, terminology, and static plots
 ├── components/ui/                          # shadcn/ui copies
 ├── components/vote/                        # The vote island
-├── content.config.ts                       # The families, reports, systems, and models collections
+├── content.config.ts                       # The families, reports, and public systems collections
 ├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
 ├── integrations/voting.ts                  # Injects the vote route
 ├── layouts/                                # The page shell
@@ -34,7 +34,7 @@ web/src/
 
 ## Reports
 
-- The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, `systems.toml` through the `systems` collection's `file()` loader, and the export that `BENCH_NIXOS_CONFIG` names through the `models` collection's inline loader, so `pnpm build` and `pnpm typecheck` run only inside the dev shell. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
+- The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, and public display names from `systems.toml` through the `systems` collection's `file()` loader. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
 - `lib/family.ts` lists only the `family.toml` keys the site reads, with objects that drop the rest, since the pydantic settings model already rejects unknown keys.
 - `lib/report.ts` mirrors the Pydantic `Report` model field for field with strict Zod objects. Change both schemas in one PR so the build rejects unknown fields and invalid values.
 - Only `content.config.ts`, `lib/family.ts`, and `lib/report.ts` build classic Zod schemas, and other modules import only types from the last two, as ESLint enforces. Building a classic schema in the browser runs Zod's eval probe, which the pages' script policy reports as a violation. Browser code that validates data, such as the vote client's `lib/arena.ts` and `lib/vote-flow.ts`, uses `zod/mini`, which never probes.

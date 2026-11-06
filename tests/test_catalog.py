@@ -71,17 +71,30 @@ class TestSystemConfig:
     @pytest.mark.parametrize(
         'table',
         [
-            {},
-            {'model': 'acme-large', 'route': 'acme/large'},
-            {'route': 'acme/large'},
+            {'display_name': 'Acme Large'},
             {
                 'model': 'acme-large',
+                'route': 'acme/large',
+                'display_name': 'Acme Large',
+            },
+            {'model': 'acme-large'},
+            {
+                'model': 'acme-large',
+                'display_name': 'Acme Large',
                 'price': {'input': 1, 'output': 1, 'cache_read': 0},
             },
-            {'model': 'acme-large', 'vendor': 'other'},
-            {'model': 'acme-large', 'max_output_tokens': 64},
-            {'model': 'acme-large', 'context_window': 8192},
-            {'model': 'acme-large', 'api': 'unsupported'},
+            {'model': 'acme-large', 'display_name': 'Acme Large', 'vendor': 'other'},
+            {
+                'model': 'acme-large',
+                'display_name': 'Acme Large',
+                'max_output_tokens': 64,
+            },
+            {
+                'model': 'acme-large',
+                'display_name': 'Acme Large',
+                'context_window': 8192,
+            },
+            {'model': 'acme-large', 'display_name': 'Acme Large', 'api': 'unsupported'},
             {
                 'route': 'acme/large',
                 'display_name': 'Acme Large',
@@ -96,7 +109,7 @@ class TestSystemConfig:
         ids=[
             'no-source',
             'both-sources',
-            'route-without-display-name',
+            'no-display-name',
             'model-with-price',
             'model-with-vendor',
             'model-with-output-override',
@@ -151,9 +164,11 @@ class TestLoadSystems:
                 """\
                 [large]
                 model = "acme-large"
+                display_name = "Acme Large"
 
                 [small]
                 model = "acme-small"
+                display_name = "Acme Small"
                 """
             )
         )
@@ -174,10 +189,12 @@ class TestLoadSystems:
                 """\
                 [large]
                 model = "acme-large"
+                display_name = "Acme Large"
 
                 [large-codex]
                 model = "acme-large"
                 prompt = "nixos-config:codex"
+                display_name = "Acme Large"
                 """
             )
         )
@@ -197,9 +214,11 @@ class TestLoadSystems:
                 """\
                 [large]
                 model = "acme-large"
+                display_name = "Acme Large"
 
                 [broken]
                 effort = "low"
+                display_name = "Broken"
                 """,
                 '`systems.toml`: `broken`: set exactly one of `model` and `route`.',
                 id='invalid-table',
@@ -288,7 +307,10 @@ class TestResolveSystem:
                 entry[field] = value
         configured = NixosConfigExport.model_validate(document)
         config = SystemConfig(
-            model='acme-large', api='anthropic-messages', effort='high'
+            model='acme-large',
+            display_name='Acme Large',
+            api='anthropic-messages',
+            effort='high',
         )
 
         with pytest.raises(ValueError, match=message):
@@ -303,7 +325,10 @@ class TestResolveSystem:
         configured = NixosConfigExport.model_validate(document)
 
         system = resolve_system(
-            'large', SystemConfig(model='acme-large'), configured, GENERATION
+            'large',
+            SystemConfig(model='acme-large', display_name='Acme Large'),
+            configured,
+            GENERATION,
         )
 
         assert system.api == 'openai-chat-completions'
@@ -314,14 +339,20 @@ class TestResolveSystem:
             ValueError, match='API `openai-chat-completions` is not one of'
         ):
             resolve_system(
-                'large', SystemConfig(model='acme-large'), configured, GENERATION
+                'large',
+                SystemConfig(model='acme-large', display_name='Acme Large'),
+                configured,
+                GENERATION,
             )
 
     def test_resolves_native_capacities_and_thinking_from_catalog_metadata(
         self, export: NixosConfigExport
     ) -> None:
         config = SystemConfig(
-            model='acme-large', api='anthropic-messages', effort='high'
+            model='acme-large',
+            display_name='Acme Large',
+            api='anthropic-messages',
+            effort='high',
         )
 
         resolved = resolve_system('native', config, export, GENERATION)
@@ -363,7 +394,12 @@ class TestResolveSystem:
         thinking['defaultLevel'] = default
         thinking['requiresEffort'] = required
         resolved_export = NixosConfigExport.model_validate(document)
-        config = SystemConfig(model='acme-large', api='openai-responses', effort=effort)
+        config = SystemConfig(
+            model='acme-large',
+            display_name='Acme Large',
+            api='openai-responses',
+            effort=effort,
+        )
 
         if expected == 'invalid':
             with pytest.raises(
@@ -385,7 +421,10 @@ class TestResolveSystem:
         historical = NixosConfigExport.model_validate(document)
 
         system = resolve_system(
-            'large', SystemConfig(model='acme-large'), historical, GENERATION
+            'large',
+            SystemConfig(model='acme-large', display_name='Acme Large'),
+            historical,
+            GENERATION,
         )
 
         assert system.vendor is None
@@ -399,7 +438,7 @@ class TestResolveSystem:
     ) -> None:
         document = export.model_dump(by_alias=True)
         entry = document['catalog']['models']['acme-large']
-        config = SystemConfig(model='acme-large')
+        config = SystemConfig(model='acme-large', display_name='Acme Large')
         if change == 'price':
             entry['channelCost'] = {}
         elif change == 'display-name':
@@ -414,7 +453,10 @@ class TestResolveSystem:
 
         assert fingerprint(system) == fingerprint(
             resolve_system(
-                'large', SystemConfig(model='acme-large'), export, GENERATION
+                'large',
+                SystemConfig(model='acme-large', display_name='Acme Large'),
+                export,
+                GENERATION,
             )
         )
 
@@ -422,7 +464,10 @@ class TestResolveSystem:
         self, export: NixosConfigExport
     ) -> None:
         system = resolve_system(
-            'large', SystemConfig(model='acme-large'), export, GENERATION
+            'large',
+            SystemConfig(model='acme-large', display_name='Acme Large'),
+            export,
+            GENERATION,
         )
 
         assert system == make_system(name='large')
@@ -431,7 +476,10 @@ class TestResolveSystem:
         self, export: NixosConfigExport
     ) -> None:
         system = resolve_system(
-            'small', SystemConfig(model='acme-small'), export, GENERATION
+            'small',
+            SystemConfig(model='acme-small', display_name='Acme Small'),
+            export,
+            GENERATION,
         )
 
         assert system.route == 'acme/small'
@@ -441,7 +489,7 @@ class TestResolveSystem:
     def test_keeps_an_accepted_effort(self, export: NixosConfigExport) -> None:
         system = resolve_system(
             'small',
-            SystemConfig(model='acme-small', effort='low'),
+            SystemConfig(model='acme-small', display_name='Acme Small', effort='low'),
             export,
             GENERATION,
         )
@@ -452,7 +500,10 @@ class TestResolveSystem:
         self, export: NixosConfigExport
     ) -> None:
         system = resolve_system(
-            'local', SystemConfig(model='local-model'), export, GENERATION
+            'local',
+            SystemConfig(model='local-model', display_name='Local Model'),
+            export,
+            GENERATION,
         )
 
         assert system.route == 'local/model'
@@ -488,24 +539,16 @@ class TestResolveSystem:
         assert system.api == 'openai-responses'
         assert (system.max_output_tokens, system.context_window) == (32768, 131072)
 
-    def test_takes_a_display_name_over_the_catalog_name(
-        self, export: NixosConfigExport
-    ) -> None:
-        system = resolve_system(
-            'large',
-            SystemConfig(model='acme-large', display_name='Acme Large 0901'),
-            export,
-            GENERATION,
-        )
-
-        assert system.display_name == 'Acme Large 0901'
-
     def test_reads_a_nixos_config_system_prompt(
         self, export: NixosConfigExport
     ) -> None:
         system = resolve_system(
             'large',
-            SystemConfig(model='acme-large', prompt='nixos-config:claudeCode'),
+            SystemConfig(
+                model='acme-large',
+                display_name='Acme Large',
+                prompt='nixos-config:claudeCode',
+            ),
             export,
             GENERATION,
         )
@@ -516,40 +559,52 @@ class TestResolveSystem:
         ('config', 'message'),
         [
             (
-                SystemConfig(model='acme-huge'),
+                SystemConfig(model='acme-huge', display_name='Acme X'),
                 'System `x`: model `acme-huge` is not in the nixos-config catalog, '
                 '`data/llm-models.nix`. Check it against `acme-large`, '
                 '`acme-routed`, `acme-unrouted`.',
             ),
             (
-                SystemConfig(model='zeta'),
+                SystemConfig(model='zeta', display_name='Acme X'),
                 'System `x`: model `zeta` is not in the nixos-config catalog, '
                 '`data/llm-models.nix`.',
             ),
             (
-                SystemConfig(model='acme-small', effort='medium'),
+                SystemConfig(
+                    model='acme-small', display_name='Acme Small', effort='medium'
+                ),
                 'System `x`: effort `medium` is not one of `low`, `high`.',
             ),
             (
-                SystemConfig(model='local-model', effort='low'),
+                SystemConfig(
+                    model='local-model', display_name='Local Model', effort='low'
+                ),
                 'System `x`: the model takes no effort.',
             ),
             (
-                SystemConfig(model='acme-unrouted'),
+                SystemConfig(model='acme-unrouted', display_name='Acme X'),
                 'System `x`: catalog model `acme-unrouted` has no channel.',
             ),
             (
-                SystemConfig(model='acme-routed'),
+                SystemConfig(model='acme-routed', display_name='Acme X'),
                 'System `x`: catalog model `acme-routed` has channels `acme`, '
                 '`router`. Set its `route` and `price` instead.',
             ),
             (
-                SystemConfig(model='acme-large', prompt='nixos-config:omp'),
+                SystemConfig(
+                    model='acme-large',
+                    display_name='Acme Large',
+                    prompt='nixos-config:omp',
+                ),
                 'System `x`: nixos-config has no `omp` instructions. Choose among '
                 '`claudeCode`, `codex`.',
             ),
             (
-                SystemConfig(model='acme-large', prompt='prompts/brief.md'),
+                SystemConfig(
+                    model='acme-large',
+                    display_name='Acme Large',
+                    prompt='prompts/brief.md',
+                ),
                 'System `x`: prompt `prompts/brief.md` is not `nixos-config:<client>`.',
             ),
         ],

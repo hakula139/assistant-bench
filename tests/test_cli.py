@@ -666,7 +666,7 @@ class TestCheck:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         path = tmp_path / 'systems.toml'
-        path.write_text('[broken]\neffort = "low"\n')
+        path.write_text('[broken]\neffort = "low"\ndisplay_name = "Broken"\n')
 
         def invalid_systems(export: NixosConfigExport) -> dict[str, System]:
             return catalog.load_systems(export, path)
