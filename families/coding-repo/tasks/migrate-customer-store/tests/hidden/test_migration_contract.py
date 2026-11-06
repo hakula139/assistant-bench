@@ -55,7 +55,10 @@ class TestCustomerMigration(unittest.TestCase):
     def assert_schema(self, schema: dict[str, Any]) -> None:
         columns = schema['columns']
         self.assertNotIn('full_name', columns)
-        self.assertEqual(columns['display_name'][3], 1)
+        self.assertIn('display_name', columns)
+        self.assertTrue(
+            schema['null_name_rejected'], 'a NULL display_name raised no IntegrityError'
+        )
         self.assertEqual(schema['customers_name'], ['display_name'])
         self.assertEqual(schema['orders_customer_id'], ['customer_id'])
         self.assertEqual(schema['foreign_key_check'], [])

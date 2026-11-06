@@ -51,7 +51,18 @@ def schema(connection: sqlite3.Connection) -> dict[str, Any]:
     def indexed(index: str) -> list[str]:
         return [row[2] for row in connection.execute(f'PRAGMA index_info({index})')]
 
+    connection.execute('SAVEPOINT null_name')
+    null_name = raised(
+        lambda: connection.execute(
+            'INSERT INTO customers(id, display_name) VALUES (1000, NULL)'
+        ),
+        sqlite3.IntegrityError,
+    )
+    connection.execute('ROLLBACK TO null_name')
+    connection.execute('RELEASE null_name')
+
     return {
+        'null_name_rejected': null_name is not None,
         'columns': {
             row[1]: row for row in connection.execute('PRAGMA table_info(customers)')
         },
