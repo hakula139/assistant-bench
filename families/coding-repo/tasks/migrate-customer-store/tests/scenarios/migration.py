@@ -47,25 +47,43 @@ def snapshot(connection: sqlite3.Connection) -> list[Any]:
     ]
 
 
+def null_name_rejected(connection: sqlite3.Connection) -> bool:
+    """Try to clear the first customer's display_name, then undo the attempt.
+
+    The name counts as required when the update fails or leaves it set, as an
+    `ON CONFLICT IGNORE` or `REPLACE` constraint does. An `ON CONFLICT ROLLBACK`
+    constraint ends the connection's whole transaction, so call this only with
+    every earlier write committed.
+    """
+    first = '(SELECT min(id) FROM customers)'
+    connection.execute('SAVEPOINT null_name')
+    try:
+        connection.execute(
+            f'UPDATE customers SET display_name = NULL WHERE id = {first}'
+        )
+        name = connection.execute(
+            f'SELECT display_name FROM customers WHERE id = {first}'
+        ).fetchone()
+        return name is not None and name[0] is not None
+    except sqlite3.IntegrityError:
+        return True
+    finally:
+        if connection.in_transaction:
+            connection.execute('ROLLBACK TO null_name')
+            connection.execute('RELEASE null_name')
+
+
 def schema(connection: sqlite3.Connection) -> dict[str, Any]:
     def indexed(index: str) -> list[str]:
         return [row[2] for row in connection.execute(f'PRAGMA index_info({index})')]
 
-    connection.execute('SAVEPOINT null_name')
-    null_name = raised(
-        lambda: connection.execute(
-            'INSERT INTO customers(id, display_name) VALUES (1000, NULL)'
-        ),
-        sqlite3.IntegrityError,
-    )
-    connection.execute('ROLLBACK TO null_name')
-    connection.execute('RELEASE null_name')
-
+    columns = {
+        row[1]: row for row in connection.execute('PRAGMA table_info(customers)')
+    }
     return {
-        'null_name_rejected': null_name is not None,
-        'columns': {
-            row[1]: row for row in connection.execute('PRAGMA table_info(customers)')
-        },
+        'columns': columns,
+        'null_name_rejected': 'display_name' in columns
+        and null_name_rejected(connection),
         'customers_name': indexed('customers_name'),
         'orders_customer_id': indexed('orders_customer_id'),
         'foreign_key_check': connection.execute('PRAGMA foreign_key_check').fetchall(),
