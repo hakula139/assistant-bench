@@ -1,14 +1,6 @@
 import { cn } from 'cn';
 import { Check, ChevronDown, CircleCheck } from 'lucide-react';
-import {
-  useEffect,
-  useEffectEvent,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
 import { bleed, pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
@@ -23,39 +15,14 @@ import { DefectPicker } from '@/components/vote/DefectPicker';
 import { InlineMarkdown, Markdown, prose } from '@/components/vote/Markdown';
 import { OutputPane } from '@/components/vote/OutputPane';
 import { band, panel, scroll } from '@/components/vote/panel';
+import { useVoteSession } from '@/components/vote/use-vote-session';
 import { Verification } from '@/components/vote/Verification';
-import type {
-  Choice,
-  FamilyView,
-  PairState,
-  PairView,
-  TaggedDefects,
-  VoteRequest,
-} from '@/lib/arena';
+import type { Choice, FamilyView, PairView, TaggedDefects } from '@/lib/arena';
 import { familyTitle, groupByAspect, isAspect } from '@/lib/aspects';
 import type { Defect } from '@/lib/defects';
 import { formatCountOf } from '@/lib/format';
 import { categoryTerm } from '@/lib/glossary';
-import {
-  ApiError,
-  castVote,
-  emptyDraft,
-  errorMessage,
-  errorMessages,
-  getPair,
-  listFamilies,
-  readDraft,
-  skipPair,
-  undoVote,
-  writeDraft,
-  type Draft,
-} from '@/lib/vote-flow';
-
-const FAMILY_PARAM = 'family';
-const SAVED_MS = 1500;
-const DROPPED = 'The pair you were choosing on changed, so your choice was cleared.';
-const COOKIES = 'Voting needs cookies. Allow cookies for this site, then reload the page.';
-const NO_OTHER_PAIR = 'No other pair is available for these outputs.';
+import { writeDraft } from '@/lib/vote-flow';
 
 const CHOICES: { value: Choice; label: string; key: string; className?: string }[] = [
   { value: 'a', label: 'A is better', key: 'a' },
@@ -86,10 +53,7 @@ function keyedDefects(defects: readonly Defect[]) {
   );
 }
 
-const isCode = (reason: unknown, code: ApiError['code']): reason is ApiError =>
-  reason instanceof ApiError && reason.code === code;
-
-function ErrorAlert({ error }: { error: ReactNode }) {
+function ErrorAlert({ error }: { error: string | null }) {
   return (
     error !== null && (
       <p role="alert" className="text-sm text-destructive">
@@ -124,7 +88,7 @@ function StartScreen({
   onStart,
 }: {
   families: FamilyView[] | null;
-  error: ReactNode;
+  error: string | null;
   onStart: (family: string) => void;
 }) {
   const groupsId = useId();
@@ -257,32 +221,173 @@ function Brief({
   );
 }
 
+function StatusBand({
+  title,
+  votes,
+  remaining,
+  saved,
+  notice,
+}: {
+  title: string;
+  votes: number;
+  remaining: number;
+  saved: boolean;
+  notice: string | null;
+}) {
+  return (
+    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm text-muted-foreground max-sm:basis-full">
+      <span role="status" className="flex items-center gap-1 empty:sr-only max-sm:order-last">
+        {saved ? (
+          <>
+            <Check className="size-4" aria-hidden="true" />
+            Saved
+          </>
+        ) : (
+          notice
+        )}
+      </span>
+      <span className="whitespace-nowrap tabular-nums">
+        {title},{' '}
+        <Hint
+          term={{
+            term: 'Your votes',
+            definition: `${formatCountOf(remaining, 'pair')} left to vote on.`,
+          }}
+        >
+          {formatCountOf(votes, 'vote')}
+        </Hint>
+      </span>
+    </div>
+  );
+}
+
+function Ballot({
+  choice,
+  undoable,
+  locked,
+  recovery,
+  onChoose,
+  onUndo,
+  onSkip,
+  onSubmit,
+}: {
+  choice: Choice | null;
+  undoable: boolean;
+  locked: boolean;
+  recovery: ReactNode;
+  onChoose: (choice: Choice | null) => void;
+  onUndo: () => void;
+  onSkip: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        bleed,
+        'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
+      )}
+    >
+      {recovery !== null && <div className="sm:col-span-2">{recovery}</div>}
+      <ToggleGroup
+        type="single"
+        variant="choice"
+        size="lg"
+        spacing={2}
+        value={choice ?? ''}
+        disabled={locked}
+        onValueChange={(value) => {
+          onChoose(CHOICES.find((item) => item.value === value)?.value ?? null);
+        }}
+        aria-label="Verdict"
+        className="grid w-full grid-cols-2 sm:grid-cols-4"
+      >
+        {CHOICES.map(({ value, label, key, className }) => (
+          <ToggleGroupItem
+            key={value}
+            value={value}
+            aria-keyshortcuts={key.toUpperCase()}
+            className={className}
+          >
+            {label}
+            <Kbd
+              aria-hidden="true"
+              className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
+            >
+              {key.toUpperCase()}
+            </Kbd>
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onUndo}
+          disabled={!undoable || locked}
+          aria-keyshortcuts="U"
+        >
+          Undo
+          <Kbd aria-hidden="true">U</Kbd>
+        </Button>
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onSkip}
+          disabled={locked}
+          aria-keyshortcuts="S"
+        >
+          Skip
+          <Kbd aria-hidden="true">S</Kbd>
+        </Button>
+        <Button
+          size="lg"
+          onClick={onSubmit}
+          disabled={choice === null || locked}
+          aria-keyshortcuts="Enter"
+          className="max-sm:flex-1"
+        >
+          Submit vote
+          <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
+            ↵
+          </Kbd>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The vote page. The server keeps the pending pair, and this tab keeps the voter's draft and view
  * in `sessionStorage`, so a reload shows exactly what the voter saw and never sends a vote.
  */
 export function VoteApp() {
-  // The page renders only in the browser, so its URL is readable on the first render.
-  const [family, setFamily] = useState(
-    () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? undefined,
-  );
-  const [families, setFamilies] = useState<FamilyView[] | null>(null);
-  const [state, setState] = useState<PairState | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [sitekey, setSitekey] = useState<string | null>(null);
-  const [failedVote, setFailedVote] = useState<VoteRequest | null>(null);
-  const [error, setError] = useState<ReactNode>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const {
+    family,
+    families,
+    state,
+    pair,
+    draft,
+    sitekey,
+    failedVote,
+    error,
+    notice,
+    saved,
+    busy,
+    locked,
+    choiceBody,
+    start,
+    reconnect,
+    verified,
+    update,
+    submit,
+    skip,
+    undo,
+    toggleDefect,
+  } = useVoteSession();
   const pairView = useRef<HTMLDivElement>(null);
   const panes = useRef<Record<keyof TaggedDefects, HTMLDivElement | null>>({ a: null, b: null });
-  const restoring = useRef<Draft['scroll'] | null>(null);
-  // A browser that keeps no cookie asks for admission again right after passing it.
-  const admitted = useRef(false);
 
-  const pair = state?.pair ?? null;
-  const locked = busy || sitekey !== null || failedVote !== null;
   const title = familyTitle(
     families?.find((item) => item.family === family) ?? {
       aspect: null,
@@ -290,101 +395,10 @@ export function VoteApp() {
     },
   );
 
-  /** Shows a pair state, restoring the tab's draft only when it belongs to the same pair. */
-  const show = (name: string, next: PairState, options: { restore?: boolean } = {}) => {
-    const stored = readDraft();
-    const id = next.pair?.id ?? null;
-    let shown: Draft;
-    restoring.current = null;
-    if (options.restore && stored?.family === name && stored.pair === id) {
-      shown = stored;
-      restoring.current = stored.scroll;
-    } else {
-      if (options.restore && stored?.family === name && stored.choice !== null) {
-        setNotice(DROPPED);
-      }
-      shown = {
-        ...emptyDraft(name, id),
-        markdown: draft?.markdown ?? stored?.markdown ?? false,
-        collapsed:
-          (draft?.collapsed ?? false) && state?.pair?.instruction === next.pair?.instruction,
-      };
-    }
-    writeDraft(shown);
-    setDraft(shown);
-    setState(next);
-    setError(null);
-  };
-
-  const failed = (reason: unknown) => {
-    if (isCode(reason, 'admission_required') && admitted.current) {
-      setError(COOKIES);
-    } else if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
-      setSitekey(reason.sitekey);
-      setError(null);
-    } else {
-      setError(errorMessage(reason));
-    }
-  };
-
-  /** Returns to the family list with the reason a pair did not load, unless admission can help. */
-  const loadFailed = (reason: unknown) => {
-    if (isCode(reason, 'admission_required')) {
-      failed(reason);
-      return;
-    }
-    history.replaceState(null, '', window.location.pathname);
-    setFamily(undefined);
-    setState(null);
-    setNotice(null);
-    setError(errorMessage(reason));
-  };
-
-  const load = async (name: string, options: { restore?: boolean; notice?: string } = {}) => {
-    try {
-      show(name, await getPair(name), options);
-      if (options.notice !== undefined) {
-        setSaved(false);
-        setNotice(options.notice);
-      }
-    } catch (reason) {
-      loadFailed(reason);
-    }
-  };
-
-  const act = async (action: () => Promise<void>) => {
-    setBusy(true);
-    try {
-      await action();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const initialize = useEffectEvent(() => {
-    listFamilies().then(
-      ({ families }) => {
-        setFamilies(families);
-      },
-      (reason: unknown) => {
-        setError(<>Could not list families: {errorMessage(reason)}</>);
-      },
-    );
-    if (family !== undefined) {
-      getPair(family).then((next) => {
-        show(family, next, { restore: true });
-      }, loadFailed);
-    }
-  });
-
-  useEffect(() => {
-    initialize();
-  }, []);
-
-  useLayoutEffect(() => {
+  /** Focuses a newly shown pair and scrolls it to the draft's offsets. */
+  const placePair = useEffectEvent(() => {
     pairView.current?.focus({ preventScroll: true });
-    const offsets = restoring.current ?? { window: 0, a: 0, b: 0 };
-    restoring.current = null;
+    const offsets = draft?.scroll ?? { window: 0, a: 0, b: 0 };
     window.scrollTo({ top: offsets.window });
     for (const { key } of SIDES) {
       const pane = panes.current[key];
@@ -392,18 +406,11 @@ export function VoteApp() {
         pane.scrollTop = offsets[key];
       }
     }
-  }, [pair?.id]);
+  });
 
-  const update = (change: Partial<Draft>) => {
-    setDraft((current) => {
-      if (current === null) {
-        return current;
-      }
-      const next = { ...current, ...change };
-      writeDraft(next);
-      return next;
-    });
-  };
+  useLayoutEffect(() => {
+    placePair();
+  }, [pair?.id]);
 
   const onPageHide = useEffectEvent(() => {
     if (draft !== null) {
@@ -428,107 +435,6 @@ export function VoteApp() {
       window.removeEventListener('pagehide', listener);
     };
   }, []);
-
-  useEffect(() => {
-    if (!saved) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setSaved(false);
-    }, SAVED_MS);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [saved]);
-
-  const submit = (body: VoteRequest | null) => {
-    if (body === null || family === undefined || busy || sitekey !== null) {
-      return;
-    }
-
-    void act(async () => {
-      try {
-        await castVote(body);
-        update({ choice: null });
-        setFailedVote(null);
-        setSaved(true);
-        setNotice(null);
-        await load(family);
-      } catch (reason) {
-        if (isCode(reason, 'stale_pair')) {
-          setFailedVote(null);
-          await load(family, { notice: errorMessages.stale_pair });
-        } else {
-          setFailedVote(body);
-          failed(reason);
-        }
-      }
-    });
-  };
-
-  const choiceBody =
-    pair !== null && draft !== null && draft.choice !== null
-      ? { pair: pair.id, choice: draft.choice, defects: draft.defects }
-      : null;
-
-  const skip = () => {
-    if (pair === null || family === undefined || locked) {
-      return;
-    }
-
-    void act(async () => {
-      try {
-        const next = await skipPair(pair.id);
-        if (next.pair?.id === pair.id) {
-          setNotice(NO_OTHER_PAIR);
-        } else {
-          show(family, next);
-          setNotice(null);
-        }
-      } catch (reason) {
-        if (isCode(reason, 'stale_pair')) {
-          await load(family, { notice: errorMessages.stale_pair });
-        } else {
-          failed(reason);
-        }
-      }
-    });
-  };
-
-  const undo = () => {
-    if (state?.undo !== true || family === undefined || locked) {
-      return;
-    }
-
-    void act(async () => {
-      try {
-        await undoVote(family);
-        await load(family, { notice: 'Vote withdrawn.' });
-      } catch (reason) {
-        if (isCode(reason, 'nothing_to_undo')) {
-          await load(family, { notice: reason.message });
-        } else {
-          failed(reason);
-        }
-      }
-    });
-  };
-
-  const toggleDefect = (side: keyof TaggedDefects, defect: Defect) => {
-    if (locked || draft === null || pair === null) {
-      return;
-    }
-    update({
-      defects: {
-        ...draft.defects,
-        [side]: pair.defects.filter(
-          (item) => (item === defect) !== draft.defects[side].includes(item),
-        ),
-      },
-    });
-  };
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing || event.repeat || busy) {
@@ -597,16 +503,7 @@ export function VoteApp() {
 
   const recovery =
     sitekey !== null ? (
-      <Verification
-        sitekey={sitekey}
-        onReady={() => {
-          admitted.current = true;
-          setSitekey(null);
-          if (family !== undefined) {
-            void act(() => load(family, { restore: true }));
-          }
-        }}
-      />
+      <Verification sitekey={sitekey} onReady={verified} />
     ) : failedVote !== null ? (
       <Button
         disabled={busy}
@@ -619,12 +516,7 @@ export function VoteApp() {
     ) : (
       error !== null &&
       family !== undefined && (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void act(() => load(family, { restore: true }));
-          }}
-        >
+        <Button disabled={busy} onClick={reconnect}>
           Retry connection
         </Button>
       )
@@ -641,17 +533,7 @@ export function VoteApp() {
       );
     }
 
-    return (
-      <StartScreen
-        families={families}
-        error={error}
-        onStart={(name) => {
-          history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name })}`);
-          setFamily(name);
-          void act(() => load(name, { restore: true }));
-        }}
-      />
-    );
+    return <StartScreen families={families} error={error} onStart={start} />;
   }
 
   if (pair === null || draft === null) {
@@ -684,31 +566,6 @@ export function VoteApp() {
   }
 
   const hasText = pair.render === 'text';
-  const status = (
-    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm text-muted-foreground max-sm:basis-full">
-      <span role="status" className="flex items-center gap-1 empty:sr-only max-sm:order-last">
-        {saved ? (
-          <>
-            <Check className="size-4" aria-hidden="true" />
-            Saved
-          </>
-        ) : (
-          notice
-        )}
-      </span>
-      <span className="whitespace-nowrap tabular-nums">
-        {title},{' '}
-        <Hint
-          term={{
-            term: 'Your votes',
-            definition: `${formatCountOf(state.remaining, 'pair')} left to vote on.`,
-          }}
-        >
-          {formatCountOf(state.votes, 'vote')}
-        </Hint>
-      </span>
-    </div>
-  );
 
   return (
     <div
@@ -731,7 +588,15 @@ export function VoteApp() {
           onCollapsedChange={(collapsed) => {
             update({ collapsed });
           }}
-          status={status}
+          status={
+            <StatusBand
+              title={title}
+              votes={state.votes}
+              remaining={state.remaining}
+              saved={saved}
+              notice={notice}
+            />
+          }
         />
         {SIDES.map(({ side, key }) => (
           <OutputPane
@@ -780,83 +645,20 @@ export function VoteApp() {
         </div>
       )}
 
-      <div
-        className={cn(
-          bleed,
-          'grid gap-2 max-md:sticky max-md:bottom-0 max-md:border-t max-md:bg-background max-md:py-3 sm:grid-cols-[1fr_auto]',
-        )}
-      >
-        {(sitekey !== null || failedVote !== null) && (
-          <div className="sm:col-span-2">{recovery}</div>
-        )}
-        <ToggleGroup
-          type="single"
-          variant="choice"
-          size="lg"
-          spacing={2}
-          value={draft.choice ?? ''}
-          disabled={locked}
-          onValueChange={(value) => {
-            update({ choice: CHOICES.find((item) => item.value === value)?.value ?? null });
-          }}
-          aria-label="Verdict"
-          className="grid w-full grid-cols-2 sm:grid-cols-4"
-        >
-          {CHOICES.map(({ value, label, key, className }) => (
-            <ToggleGroupItem
-              key={value}
-              value={value}
-              aria-keyshortcuts={key.toUpperCase()}
-              className={className}
-            >
-              {label}
-              <Kbd
-                aria-hidden="true"
-                className="in-data-[state=on]:bg-primary-foreground in-data-[state=on]:text-primary"
-              >
-                {key.toUpperCase()}
-              </Kbd>
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={undo}
-            disabled={!state.undo || locked}
-            aria-keyshortcuts="U"
-          >
-            Undo
-            <Kbd aria-hidden="true">U</Kbd>
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={skip}
-            disabled={locked}
-            aria-keyshortcuts="S"
-          >
-            Skip
-            <Kbd aria-hidden="true">S</Kbd>
-          </Button>
-          <Button
-            size="lg"
-            onClick={() => {
-              submit(choiceBody);
-            }}
-            disabled={choiceBody === null || locked}
-            aria-keyshortcuts="Enter"
-            className="max-sm:flex-1"
-          >
-            Submit vote
-            <Kbd aria-hidden="true" className="bg-primary-foreground text-primary">
-              ↵
-            </Kbd>
-          </Button>
-        </div>
-      </div>
+      <Ballot
+        choice={draft.choice}
+        undoable={state.undo}
+        locked={locked}
+        recovery={sitekey !== null || failedVote !== null ? recovery : null}
+        onChoose={(choice) => {
+          update({ choice });
+        }}
+        onUndo={undo}
+        onSkip={skip}
+        onSubmit={() => {
+          submit(choiceBody);
+        }}
+      />
     </div>
   );
 }
