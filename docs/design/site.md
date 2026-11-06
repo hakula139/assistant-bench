@@ -4,7 +4,7 @@ The site under `web/` has two views built from one Astro project and one compone
 
 ## Results
 
-The site lists only families with `public = true` and their reports. Before its first round closes, a family shows unmeasured systems under their current display names. Closed rounds use their own frozen public identities. Titles and meta tags use full family names. The build rejects incomplete report metadata and public family IDs without their aspect prefix.
+The site lists only families with `public = true` and their reports. Before its first round closes, a family shows unmeasured systems under their current display names. Closed rounds use their own frozen public identities. Titles and meta tags use full family names. The build rejects incomplete report metadata, public family IDs without their aspect prefix, and reports scored by another scorer than their family's.
 
 A board lives at `/<aspect>/<slug>/`, where the slug is the family ID after its aspect prefix, so only a family rename moves it. The board's path shows the latest round, and each closed round keeps its own page at `/<aspect>/<slug>/rounds/<round>/`, so a family page carries only the round it shows however many rounds close. Every board page links all its rounds by static links, which carry the query string once the page loads, so the board's filters hold on the next round. The home page groups boards under their aspects at `/#<aspect>`. Family pages link sibling boards, and a system page links its family, the round it shows, and the same system's pages on sibling boards.
 

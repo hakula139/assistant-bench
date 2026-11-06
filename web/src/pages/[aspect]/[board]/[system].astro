@@ -32,13 +32,11 @@ import { isPreliminary } from '@/lib/ranking';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
-  configOf,
   getFamilies,
   roundPath,
   systemPaths,
-  votesRounds,
   type BoardLink,
-  type Family,
+  type VotesFamily,
 } from '@/lib/reports';
 import { sitePath } from '@/lib/site';
 import { reportNames, systemName } from '@/lib/systems';
@@ -47,15 +45,15 @@ export const getStaticPaths = (async () =>
   systemPaths(await getFamilies())) satisfies GetStaticPaths;
 
 interface Props {
-  family: Family;
+  family: VotesFamily;
   system: string;
   /** The system's pages on the boards of the family's aspect, this one included. */
   boards: BoardLink[];
 }
 
 const { family, system, boards } = Astro.props;
-const rounds = votesRounds(family);
-const { usage } = boardLabels(configOf(family, 'votes'));
+const { rounds } = family;
+const { usage } = boardLabels(family.config);
 const appearances = rounds.flatMap(({ round, systems, results }) => {
   const standing = results.standings.find((item) => item.system === system);
   const { reference, anchor, method, rules } = results;

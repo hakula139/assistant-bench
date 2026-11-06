@@ -9,22 +9,14 @@ import { Forest } from '@/components/site/Forest';
 import { forestDomain, roundRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
 import type { PassRate } from '@/lib/report';
-import type { VotesRound } from '@/lib/reports';
+import type { VotesReport } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
 import { FIXTURE_NAMES, readReport, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 import { trackDrawing, type TrackDrawing } from '@/test/track';
 
-async function load(name: 'report' | 'report-early' = 'report'): Promise<VotesRound> {
-  const report = await readReport(name, 'votes');
-  return {
-    family: report.family,
-    round: report.round,
-    closed_at: report.closed_at,
-    systems: report.systems,
-    results: report.results,
-  };
-}
+const load = (name: 'report' | 'report-early' = 'report'): Promise<VotesReport> =>
+  readReport(name, 'votes');
 
 const PASS_RATES: Record<string, PassRate | null> = {
   'acme-mini': { rate: 0.9, lower: 0.6, upper: 1 },
@@ -39,7 +31,7 @@ const PASS_RATES: Record<string, PassRate | null> = {
  * Loads the round with the pass rates that a family with task-test rewards reports, where none of
  * `acme-tiny`'s outputs has a reward.
  */
-async function loadTested(): Promise<VotesRound> {
+async function loadTested(): Promise<VotesReport> {
   const round = await load();
   for (const standing of round.results.standings) {
     standing.pass_rate = PASS_RATES[standing.system];
@@ -52,7 +44,7 @@ const BOARD = '/writing/arena/';
 const CASES = boardLabels({ render: 'text' });
 const DIFFS = boardLabels({ render: 'diff' });
 
-function render(round: VotesRound, names?: Record<string, string>, labels = CASES): string {
+function render(round: VotesReport, names?: Record<string, string>, labels = CASES): string {
   const reversed = { ...round.results, standings: round.results.standings.toReversed() };
   const systems = names
     ? Object.fromEntries(
@@ -128,7 +120,7 @@ describe('VotesBoard', () => {
       }
       pro.decisive_votes = 13;
     }
-    const draw = (round: VotesRound) =>
+    const draw = (round: VotesReport) =>
       renderToString(<VotesBoard base={BOARD} round={round} labels={CASES} />);
 
     const historical = draw(earlier);

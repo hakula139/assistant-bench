@@ -47,3 +47,5 @@ export type FamilyConfig = z.infer<typeof familyConfigSchema>;
 export type Scorer = FamilyConfig['scorer'];
 
 export type VotesConfig = Extract<FamilyConfig, { scorer: 'votes' }>;
+
+export type TestsConfig = Extract<FamilyConfig, { scorer: 'tests' }>;

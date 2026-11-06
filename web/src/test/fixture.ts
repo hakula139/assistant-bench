@@ -1,4 +1,6 @@
-import { reportSchema, type Report } from '@/lib/report';
+import type { Scorer } from '@/lib/family';
+import { reportSchema } from '@/lib/report';
+import type { ScoredReport } from '@/lib/reports';
 import type { SystemNames } from '@/lib/systems';
 
 /** Display names for every system the fixtures name, each unlike its table name. */
@@ -86,13 +88,8 @@ export async function readFixture(
   return structuredClone(await fixtures[`../../../tests/fixtures/${name}.json`]());
 }
 
-/** A report whose results the named scorer wrote. */
-type ScoredReport<S extends Report['results']['scorer']> = Report & {
-  results: Extract<Report['results'], { scorer: S }>;
-};
-
 /** Parses a report fixture, refusing one that another scorer wrote. */
-export async function readReport<S extends Report['results']['scorer']>(
+export async function readReport<S extends Scorer>(
   name: 'report' | 'report-early' | 'report-tests',
   scorer: S,
 ): Promise<ScoredReport<S>> {

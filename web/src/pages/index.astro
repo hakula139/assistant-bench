@@ -1,5 +1,5 @@
 ---
-import { scorerViews } from '@/components/scorers';
+import { viewOf } from '@/components/scorers';
 import FamilyPanel from '@/components/site/FamilyPanel.astro';
 import { ForestLegend } from '@/components/site/Forest';
 import { AspectTitle } from '@/components/site/Method';
@@ -11,7 +11,7 @@ import { getFamilies } from '@/lib/reports';
 import { SITE_DESCRIPTION, sitePath } from '@/lib/site';
 
 const families = await getFamilies();
-const marks = unionMarks(families.map((family) => scorerViews[family.config.scorer].marks(family)));
+const marks = unionMarks(families.map((family) => viewOf(family).marks(family)));
 ---
 
 <Base section="leaderboards">

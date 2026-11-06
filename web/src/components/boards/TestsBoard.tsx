@@ -17,13 +17,13 @@ import { formatCost, formatPercent, formatPercentRange, formatSeconds } from '@/
 import { passHatKTerm, terms } from '@/lib/glossary';
 import { byPassRate } from '@/lib/ranking';
 import type { PassRate, TestsResults, TestsStanding } from '@/lib/report';
-import type { TestsRound } from '@/lib/reports';
+import type { TestsReport } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useCategory } from '@/lib/use-category';
 
 interface TestsBoardProps {
   /** The closed round the board shows. */
-  round: TestsRound;
+  round: TestsReport;
 }
 
 /** One system's pass rate on the family's tasks or a category's. */

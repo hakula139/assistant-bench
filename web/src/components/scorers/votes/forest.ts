@@ -5,26 +5,24 @@ import {
   unmeasuredRows,
   type ForestRow,
 } from '@/lib/forest';
-import { configOf, latest, systemPath, type Family } from '@/lib/reports';
+import { systemPath, type VotesFamily } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
 
 /** A voted family's home panel rows and axis: its latest round, or its systems before one. */
-export function panelForest(family: Family): {
+export function panelForest(family: VotesFamily): {
   rows: ForestRow[];
   domain: [number, number];
   anchorScore?: number;
 } {
-  const config = configOf(family, 'votes');
-  const report = latest(family);
-  const results = report?.results;
-
-  if (!report || results?.scorer !== 'votes') {
+  const report = family.rounds.at(-1);
+  if (!report) {
     return {
-      rows: unmeasuredRows(config.systems, family.systemNames),
+      rows: unmeasuredRows(family.config.systems, family.systemNames),
       domain: EMPTY_DOMAIN,
     };
   }
 
+  const { results } = report;
   return {
     rows: roundRows(
       (system) => systemPath(family, system),

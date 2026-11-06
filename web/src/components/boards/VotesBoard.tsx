@@ -57,7 +57,7 @@ import type {
   VotesResults,
   VotesRules,
 } from '@/lib/report';
-import type { VotesRound } from '@/lib/reports';
+import type { VotesReport } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useCategory } from '@/lib/use-category';
 
@@ -65,7 +65,7 @@ interface VotesBoardProps {
   /** The board's path, which each system's page extends. */
   base: string;
   /** The closed round the board shows. */
-  round: VotesRound;
+  round: VotesReport;
   /** What the board calls its outputs and their figures, from `boardLabels`. */
   labels: BoardLabels;
 }
@@ -114,7 +114,7 @@ function scatterPoints(rows: LeaderboardRow[], x: (standing: Standing) => number
   });
 }
 
-function RoundSummary({ round, lengthBias }: { round: VotesRound; lengthBias: Term }) {
+function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: Term }) {
   const { results } = round;
   const { length } = results;
 

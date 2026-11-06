@@ -1,18 +1,18 @@
 ---
-import { scorerViews } from '@/components/scorers';
+import { viewOf } from '@/components/scorers';
 import { ScorerIcon } from '@/components/site/Method';
 import { sectionTitle } from '@/components/site/PageParts';
 import { scorers } from '@/lib/method';
-import { boardPath, latest, type Family } from '@/lib/reports';
+import { boardPath, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
 }
 
 const { family } = Astro.props;
-const { scorer } = family.config;
-const { Panel, roundDetail } = scorerViews[scorer];
-const report = latest(family);
+const { scorer } = family;
+const { Panel, roundDetail } = viewOf(family);
+const report = family.rounds.at(-1);
 const round = report
   ? [`Round ${report.round}`, roundDetail(family)].filter(Boolean).join(' · ')
   : 'No round has closed yet';

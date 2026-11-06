@@ -3,40 +3,42 @@ import { getCollection } from 'astro:content';
 import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
 import { systemPagePath } from '@/lib/paths';
-import type { Report, TestsResults, VotesResults } from '@/lib/report';
+import type { Report } from '@/lib/report';
 import { sitePath } from '@/lib/site';
 import type { SystemNames } from '@/lib/systems';
 
-export interface VotesRound {
-  family: string;
-  round: string;
-  closed_at: string;
-  systems: Report['systems'];
-  results: VotesResults;
-}
+/** A report whose results the scorer `S` wrote. */
+export type ScoredReport<S extends Scorer> = Report & {
+  results: Extract<Report['results'], { scorer: S }>;
+};
 
-export interface TestsRound {
-  round: string;
-  closed_at: string;
-  systems: Report['systems'];
-  results: TestsResults;
-}
+export type VotesReport = ScoredReport<'votes'>;
 
-export interface Family {
+export type TestsReport = ScoredReport<'tests'>;
+
+/** A public family scored by `S`, whose config and rounds that scorer types. */
+interface ScoredFamily<S extends Scorer> {
   name: string;
   /** The family's full name, which titles and lists outside its aspect show. */
   title: string;
   /** The aspect the family is listed under, which every public family has. */
   aspect: Aspect;
-  config: FamilyConfig;
+  scorer: S;
+  config: Extract<FamilyConfig, { scorer: S }>;
   /**
    * Closed rounds, oldest first, so the last one carries the cumulative board. Empty until the
    * first round closes.
    */
-  rounds: Report[];
+  rounds: ScoredReport<S>[];
   /** Current display names for families without a closed round. */
   systemNames: SystemNames;
 }
+
+export type VotesFamily = ScoredFamily<'votes'>;
+
+export type TestsFamily = ScoredFamily<'tests'>;
+
+export type Family = VotesFamily | TestsFamily;
 
 /**
  * A family's path segment under its aspect: its ID without the aspect prefix.
@@ -71,12 +73,24 @@ export function systemPath(family: Family, system: string): string {
   return systemPagePath(boardPath(family), system);
 }
 
+/** Returns `reports`, oldest first, once each holds results that `scorer` wrote. */
+function scoredRounds<S extends Scorer>(scorer: S, reports: Report[]): ScoredReport<S>[] {
+  for (const { family, round, results } of reports) {
+    if (results.scorer !== scorer) {
+      throw new Error(`report ${family}/${round} is scored by ${results.scorer}, not ${scorer}`);
+    }
+  }
+  return (reports as ScoredReport<S>[]).toSorted(
+    (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
+  );
+}
+
 /**
  * Pairs each public family's config with its reports, by name, and lists them by name. Families
  * without `public = true` stay off the site together with their reports.
  *
- * @throws Error when two families, listed or not, share a full name, or when a public family has
- *   no aspect.
+ * @throws Error when two families, listed or not, share a full name, when a public family has no
+ *   aspect, or when a public family's report was scored by another scorer.
  */
 export function publicFamilies(
   configs: { name: string; config: FamilyConfig }[],
@@ -96,7 +110,7 @@ export function publicFamilies(
   const rounds = Map.groupBy(reports, (report) => report.family);
 
   return configs
-    .flatMap(({ name, config }) => {
+    .flatMap(({ name, config }): Family[] => {
       if (!config.public) {
         return [];
       }
@@ -105,17 +119,12 @@ export function publicFamilies(
         throw new Error(`public family ${name} has no aspect`);
       }
 
+      const listing = { name, title: familyTitle(config), aspect: config.aspect, systemNames };
+      const reports = rounds.get(name) ?? [];
       return [
-        {
-          name,
-          title: familyTitle(config),
-          aspect: config.aspect,
-          config,
-          rounds: (rounds.get(name) ?? []).toSorted(
-            (a, b) => Date.parse(a.closed_at) - Date.parse(b.closed_at),
-          ),
-          systemNames,
-        },
+        config.scorer === 'votes'
+          ? { ...listing, scorer: 'votes', config, rounds: scoredRounds('votes', reports) }
+          : { ...listing, scorer: 'tests', config, rounds: scoredRounds('tests', reports) },
       ];
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
@@ -135,53 +144,9 @@ export async function getFamilies(): Promise<Family[]> {
   );
 }
 
-/**
- * Returns the config of a family that the caller dispatched by scorer, typed for that scorer.
- *
- * @throws Error when the family is scored otherwise, which breaks the dispatch's contract.
- */
-export function configOf<S extends Scorer>(
-  family: Family,
-  scorer: S,
-): Extract<FamilyConfig, { scorer: S }> {
-  const { config } = family;
-  if (config.scorer !== scorer) {
-    throw new Error(`expected ${family.name} to be scored by ${scorer}, got ${config.scorer}`);
-  }
-  return config as Extract<FamilyConfig, { scorer: S }>;
-}
-
-export function latest(family: Family): Report | undefined {
-  return family.rounds.at(-1);
-}
-
-export function votesRound({
-  family,
-  round,
-  closed_at,
-  systems,
-  results,
-}: Report): VotesRound | undefined {
-  return results.scorer === 'votes' ? { family, round, closed_at, systems, results } : undefined;
-}
-
-export function testsRound({ round, closed_at, systems, results }: Report): TestsRound | undefined {
-  return results.scorer === 'tests' ? { round, closed_at, systems, results } : undefined;
-}
-
-export function votesRounds(family: Family): VotesRound[] {
-  return family.rounds.flatMap((report) => votesRound(report) ?? []);
-}
-
-export function testsRounds(family: Family): TestsRound[] {
-  return family.rounds.flatMap((report) => testsRound(report) ?? []);
-}
-
 /** Returns the systems with a page on a family's board: those its voted rounds placed. */
-export function systemPages(family: Family): Set<string> {
-  return new Set(
-    votesRounds(family).flatMap(({ results }) => results.standings.map((s) => s.system)),
-  );
+export function systemPages(family: VotesFamily): Set<string> {
+  return new Set(family.rounds.flatMap(({ results }) => results.standings.map((s) => s.system)));
 }
 
 export interface BoardLink {
@@ -239,16 +204,17 @@ export function roundPaths(families: Family[]) {
 }
 
 export function systemPaths(families: Family[]) {
-  const pages = new Map(families.map((family) => [family.name, systemPages(family)]));
-  const byAspect = Map.groupBy(families, (family) => family.aspect);
-  return families.flatMap((family) =>
-    [...systemPages(family)].map((system) => ({
+  const voted = families.filter((family) => family.scorer === 'votes');
+  const pages = new Map(voted.map((family) => [family, systemPages(family)]));
+  const byAspect = Map.groupBy(voted, (family) => family.aspect);
+  return [...pages].flatMap(([family, systems]) =>
+    [...systems].map((system) => ({
       params: { ...boardParams(family), system },
       props: {
         family,
         system,
         boards: (byAspect.get(family.aspect) ?? [])
-          .filter((item) => pages.get(item.name)?.has(system))
+          .filter((item) => pages.get(item)?.has(system))
           .map((item): BoardLink => ({
             href: systemPath(item, system),
             label: item.config.display_name,
