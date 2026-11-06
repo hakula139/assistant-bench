@@ -113,7 +113,7 @@ class RangeTest(ServerCase):
                     self.assert_unsatisfiable(response, 1000)
                     continue
                 if response.status == 200:
-                    self.assertEqual(body, BINARY)
+                    self.assert_full(response, body, BINARY)
                     continue
                 self.assertEqual(response.status, 206)
                 content_type = response.getheader('Content-Type') or ''
@@ -131,7 +131,7 @@ class RangeTest(ServerCase):
                     self.assertEqual(length, len(BINARY), content_range)
                     self.assertEqual(data, BINARY[first : last + 1], content_range)
                     covered.update(range(first, last + 1))
-                # RFC 9110 section 14.2 lets a server send some of the ranges.
+                # RFC 9110 section 15.3.7.2 lets a server send some of the ranges.
                 self.assertLessEqual(
                     covered - selected, coalescable_gaps(covered & selected)
                 )
@@ -221,7 +221,7 @@ class RangeTest(ServerCase):
                 )
                 self.assertEqual(response.getheader('Vary'), 'Accept-Encoding')
                 if response.status == 200:
-                    self.assertEqual(body, representation)
+                    self.assert_full(response, body, representation)
                     continue
                 if first is None or last is None:
                     first, last = len(representation) - 50, len(representation) - 1
@@ -240,7 +240,7 @@ class RangeTest(ServerCase):
                 gzipped = response.getheader('Content-Encoding') == 'gzip'
                 representation = gzip_body(text) if gzipped else text
                 if response.status == 200:
-                    self.assertEqual(body, representation)
+                    self.assert_full(response, body, representation)
                     continue
                 self.assertEqual(response.getheader('ETag'), tag)
                 self.assert_partial(response, body, representation, 0, 99)
