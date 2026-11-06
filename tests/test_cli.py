@@ -2007,9 +2007,9 @@ class TestClose:
         models = ('large-2026', 'other-2026')
         trials = sorted(job_dir.glob('*/result.json'))
         for path, model in zip(trials, models, strict=True):
-            result = TrialResult.model_validate_json(path.read_text())
-            result.agent_result = AgentContext(metadata={'response_model': model})
-            path.write_text(result.model_dump_json())
+            trial = TrialResult.model_validate_json(path.read_text())
+            trial.agent_result = AgentContext(metadata={'response_model': model})
+            path.write_text(trial.model_dump_json())
 
         result = invoke('close', 'f')
 
