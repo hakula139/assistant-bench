@@ -190,7 +190,7 @@ export async function freshness(
   store: Bindings['STORE'],
   query: FreshnessQuery,
 ): Promise<Freshness> {
-  if (store !== 'production' || query.production === undefined) {
+  if (store !== 'production' || !('production' in query)) {
     return 'unknown';
   }
   const row = await db

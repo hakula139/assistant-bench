@@ -32,17 +32,10 @@ export const voteRequest = z.strictObject({
 });
 export const undoRequest = familyQuery;
 /** The production cutoff with the counted votes the round read up to it, or neither. */
-export const freshnessQuery = z
-  .strictObject({
-    family: familyName,
-    production: z.optional(queryCount),
-    production_votes: z.optional(queryCount),
-  })
-  .check(
-    z.refine(
-      (query) => (query.production === undefined) === (query.production_votes === undefined),
-    ),
-  );
+export const freshnessQuery = z.union([
+  z.strictObject({ family: familyName, production: queryCount, production_votes: queryCount }),
+  z.strictObject({ family: familyName }),
+]);
 
 // ── Responses ──
 
