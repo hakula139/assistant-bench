@@ -6,60 +6,37 @@ Have new or edited cases and tasks reviewed before any paid run over them, even 
 
 ## Families
 
-A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are. [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml) reads:
+A family corresponds to one directory under `families/` and one leaderboard, containing `family.toml` and exactly one task source: `cases.toml`, which the bench renders into one Harbor task per case, or `tasks/`, which contains Harbor task directories that run as they are. A minimal votes family reads:
 
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = [
-  "opus-5.5-high",
-  "gpt-6-astra-high",
-  "gpt-6.1-sol-high",
-  "gemini-4-argon-high",
-  "gemini-3.8-flash-high",
-  "deepseek-v4.1-flash-1017-high",
-  "kimi-k3-high",
-]
+systems = ["opus-5.5-high", "gemini-3.8-flash-high"]
 reference = "gemini-3.8-flash-high"
 samples = 1
 categories = ["message"]
-defects = ["facts", "mechanics", "tone", "formulaic", "length"]
 ```
 
-Shared fields:
+A `family.toml` lists its fields in this order:
 
-| Field          | Required        | Meaning                                                                                                                                                            |
-| -------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `scorer`       | yes             | `votes` for blind pairwise votes, or `tests` for a task family's test rewards                                                                                      |
-| `aspect`       | public families | The skill measured. Public families use `web/src/lib/aspects.ts` and an ID starting with that aspect, such as `writing-zh`. Private families may use any aspect ID |
-| `display_name` | yes             | The short name within the aspect, or the whole name without one. The full name, such as `Writing · English`, must be unique                                        |
-| `public`       | no              | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                   |
-| `systems`      | no              | The `systems.toml` tables to run. Defaults to empty                                                                                                                |
-| `samples`      | yes             | Harbor attempts per task and system, at least 1                                                                                                                    |
-| `categories`   | no              | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary               |
+| Field           | Required                   | Meaning                                                                                                                                                                               |
+| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scorer`        | yes                        | `votes` for blind pairwise votes, or `tests` for a task family's test rewards. Case families use `votes`                                                                              |
+| `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                                   |
+| `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                                         |
+| `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                                      |
+| `public_voting` | no                         | For `votes`, publish the family for [production voting](../design/arena.md#publication-and-closing). Defaults to `false`                                                              |
+| `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                                   |
+| `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                                           |
+| `render`        | `votes` task families      | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                                                    |
+| `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                                |
+| `samples`       | yes                        | Harbor attempts per task and system, at least 1. Raising it runs only the extra attempts                                                                                              |
+| `harness`       | task families with systems | The agent every system uses, which must act in the task's environment, so currently `terminus-2`. Changing it replaces the family's trials. Case families use `generate` and set none |
+| `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                                  |
+| `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                               |
+| `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                                    |
 
-Vote-only fields:
-
-| Field           | Required      | Meaning                                                                                                                                |
-| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `reference`     | yes           | One of `systems`, anchored at 1,000 when the round ranks it                                                                            |
-| `public_voting` | no            | Vote on the family's public and synthetic cases in [production](../design/arena.md#publication-and-closing). Defaults to `false`       |
-| `render`        | task families | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                     |
-| `defects`       | no            | Unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. See [Voting](voting.md#casting-a-vote) for shortcuts |
-| `language`      | no            | `zh` or `en` for a case family's language gate                                                                                         |
-| `[gates]`       | no            | A case family's `min_chars`, `max_chars`, and `script = "hans"` settings, defined in [Writing](../design/families/writing.md#gates)    |
-
-A category ID comes from the `Category` literal, and the site labels it in its glossary, so a new ID updates that literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes.
-
-Case families use `votes`, and task families use either scorer. `bench arena prepare` publishes any `votes` family that sets `public_voting`. [TypeScript](../conventions/typescript.md#reports) covers adding defect IDs or languages.
-
-Task families with systems also require:
-
-| Field     | Meaning                                                                                                  |
-| --------- | -------------------------------------------------------------------------------------------------------- |
-| `harness` | The agent every system uses. Currently `terminus-2`, since `generate` cannot act in a task's environment |
-
-Case families use `generate` and set no `harness`. Systems supply their completion and context allowances. Changing the harness replaces the family's trials. Raising `samples` runs only the extra attempts.
+A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
 
 ## Cases
 
@@ -76,9 +53,9 @@ Write a one-sentence greeting for a new contributor to an open-source project.
 checklist = ["One sentence"]
 ```
 
-- `id` is a slug of the scenario alone, such as `starship-bump`, unique across the committed and local cases of the family and using lowercase letters, digits, and hyphens. It omits the language, which the family fixes, and the category, since moving a case to another category would then change its ID, which gives Harbor a new task name and reruns the case on every system the family lists. A case keeps its ID when its instruction is edited and reruns on the next run. [Running](running.md#running-a-family) describes what happens to its earlier outputs.
+- `id` is a slug of the scenario alone, unique across the family's committed and local cases and using lowercase letters, digits, and hyphens. It omits the language, which the family fixes, and the category, so a case can move between categories without a new ID, which would give Harbor a new task name and rerun the case on every listed system. Editing the instruction keeps the ID and [reruns](../design/architecture.md#reruns) the case.
 - `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. The site shows its label from the glossary. A family's page under [`design/families/`](../design/families/) describes its categories.
-- `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](running.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
+- `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](../conventions/data.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes. The instruction follows the repository's Markdown rules like any other Markdown file, with chat logs, transcripts, and other material whose lines Markdown would join or garble in a fenced code block.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 
@@ -86,7 +63,7 @@ Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing ca
 
 ## Tasks
 
-Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. Harbor runs the task's scripts through bash in the container that runs them, which is the verifier's own container when the verifier is separate, so the image must include bash. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
+Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. The image must include bash, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) explains. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
 A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog or an explicitly declared bare route. Authorship remains fixed when that system retires from the runnable configuration.
 
@@ -150,9 +127,9 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 The site shows the display name, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
 
-Changing a system's generation settings changes its [fingerprint](../design/systems.md#fingerprints), and whether the system keeps its name follows the rule there. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
+[Systems](../design/systems.md#fingerprints) decides whether a system whose fingerprint changes keeps its name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 
-When a change moves fingerprints, whether through a model snapshot, effort, capacities, the generation protocol, or the fingerprint code:
+When a change moves fingerprints:
 
 1. Run `uv run bench fingerprints`, which fails on each changed system whose closed reports froze its earlier fingerprint.
 2. Give each changed system that a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.

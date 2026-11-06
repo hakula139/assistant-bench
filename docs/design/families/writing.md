@@ -23,13 +23,11 @@ The site labels these categories Reply, Message, Docs, Fiction, Essay, and Revie
 
 The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
 
-Most instructions supply the material a reply must use, such as a list of facts, a thread, a log, or code, and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
+Most instructions supply the material a reply must use and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 
-A review case supplies the material on its invented work, such as a synopsis, the staging notes a close reading draws on, or a rules summary with playtest notes. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker beyond the concept's own name, and ban inventing quotations.
-
-A case's `checklist` names what voters should check beyond general quality, such as reporting what was not verified.
+A review case supplies the material on its invented work. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker beyond the concept's own name, and ban inventing quotations.
 
 Voters can optionally tag missed requirements, incorrect facts, unclear writing, unsuitable tone, language errors, formulaic prose, and excessive length, in that order. These tags describe the comparison and do not change the vote's weight. Fictional invention is allowed unless it contradicts supplied material or presents invented evidence as fact.
 
@@ -43,23 +41,23 @@ Chinese cases are written in Chinese and keep code, paths, and commands in their
 
 Every collection runs the gates on each output of a trial that finished without an error and records the failed gates in the output's `gate_failures`:
 
-| Gate        | Fails when                                                                                       | Setting                          |
-| ----------- | ------------------------------------------------------------------------------------------------ | -------------------------------- |
-| `empty`     | The output is blank, in which case only `truncated` is also checked                              | Always on                        |
-| `truncated` | The endpoint reported a finish reason other than `stop`, or none, such as a cut at the token cap | Always on                        |
-| `length`    | The stripped output has fewer than `min_chars` or more than `max_chars` characters               | `[gates] min_chars`, `max_chars` |
-| `language`  | The output's dominant language differs from the family's `language`                              | `language`                       |
-| `script`    | The output holds Traditional-only characters that the case instruction lacks                     | `[gates] script = "hans"`        |
+| Gate        | Fails when                                                                         | Setting                          |
+| ----------- | ---------------------------------------------------------------------------------- | -------------------------------- |
+| `empty`     | The output is blank, in which case only `truncated` is also checked                | Always on                        |
+| `truncated` | The endpoint reported a finish reason other than `stop`, or none                   | Always on                        |
+| `length`    | The stripped output has fewer than `min_chars` or more than `max_chars` characters | `[gates] min_chars`, `max_chars` |
+| `language`  | The output's dominant language differs from the family's `language`                | `language`                       |
+| `script`    | The output holds Traditional-only characters that the case instruction lacks       | `[gates] script = "hans"`        |
 
 The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `writing-zh`'s is half of `writing-en`'s, since English takes about two to three times as many characters as Chinese for the same content. The maximums sit well above every length a case asks for, at about 3x the longest zh band and 2.4x the longest en band, so they catch only runaway output that stays under the token cap.
 
-The language gate parses the output as CommonMark with markdown-it-py and compares Han characters with Latin words in its natural language. It counts inline text and visible HTML prose, excluding inline code and the content of closed HTML `code`, `pre`, `script`, and `style` elements. An element left unclosed contributes its content, so a stray raw tag does not hide the prose after it. URLs, attributes, and markup comments do not contribute. A fence tagged `markdown`, `md`, `text`, or `txt`, such as a fenced README section or commit message, is parsed the same way.
+The language gate parses the output as CommonMark with markdown-it-py and compares Han characters with Latin words in its natural language. It counts inline text and visible HTML prose, excluding inline code and the content of closed HTML `code`, `pre`, `script`, and `style` elements. An element left unclosed contributes its content, so a stray raw tag does not hide the prose after it. URLs, attributes, and markup comments do not contribute. A fence tagged `markdown`, `md`, `text`, or `txt` is parsed the same way.
 
-Every other fenced or indented code block contributes only its comments: the rest of a line after `#` and whitespace or after `//`, where the marker starts the line or follows whitespace, `/* */` blocks, and triple-quoted strings. Code-comment outputs are therefore judged by the language of their comments, while `#include`, CSS colors, shebangs, and `#[attribute]` lines count as code.
+Every other fenced or indented code block contributes only its comments: the rest of a line after `#` and whitespace or after `//`, where the marker starts the line or follows whitespace, `/* */` blocks, and triple-quoted strings. Code-comment outputs are therefore judged by the language of their comments.
 
 An output with as many Han characters as Latin words, including one with neither, passes.
 
-The script gate works per character, using the CC-CEDICT character sets that zhon ships: a character fails when it is Traditional and never Simplified, unless the instruction also contains it, so an output may quote a Traditional name the case supplies. Because a failure is an automatic loss, the gate never flags a character valid in both scripts, such as 乾, 著, or 於. It therefore misses Traditional text written only in such characters, such as 於是, which a phrase-level converter would catch, a gap that narrows with length because longer Traditional text rarely avoids every Traditional-only character.
+The script gate works per character, using the CC-CEDICT character sets that zhon ships: a character fails when it is Traditional and never Simplified, unless the instruction also contains it, so an output may quote a Traditional name the case supplies. Because a failure is an automatic loss, the gate never flags a character valid in both scripts. It therefore misses Traditional text written only in such characters, which a phrase-level converter would catch, a gap that narrows with length because longer Traditional text rarely avoids every Traditional-only character.
 
 ## Gate Verdicts
 
@@ -71,4 +69,4 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | No verdict: a case trial errored, a task was ungraded, or the family's scorer has no gates                            |
 
-The names are the values of `families.Gate`, which sits beside the gate settings so that readers of outputs can import it without the gate code, and they follow the gate order above. `scoring.gates.failed_gates(settings, text, finish_reason, instruction)` computes the same list for one output, and every collection prints the count of outputs that failed a gate and the failures by gate.
+The names are the values of `families.Gate` and follow the gate order above. `scoring.gates.failed_gates` computes the same list for one output, and every collection prints the count of outputs that failed a gate and the failures by gate.

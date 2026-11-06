@@ -25,7 +25,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. Real voting uses the production D1 database, and staging has a separate one for validation. A browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Static previews without the API show an unavailable state.
+`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. A browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Static previews without the API show an unavailable state.
 
 The server keeps each browser's pending pair, and the tab keeps its draft in `sessionStorage`: the choice, issues, Markdown toggle, collapsed prompt and scroll offsets of that pair. A reload restores the draft only while the server still holds the same pair and never sends a vote. `sessionStorage` keeps two tabs' drafts apart and clears when the tab closes, so a shared device keeps no unsent choices.
 
@@ -39,6 +39,6 @@ The wordmark and favicon use decorative capped-line artwork. Votes ranking plots
 
 The remaining design uses ink text, one ultramarine accent, tabular numbers, and no card grid or hero number. IBM Plex Sans sets text, Sarasa Gothic SC or Source Han Sans SC supplies Chinese where installed, and Maple Mono sets code. Charts use one series hue and one emphasis hue for the hovered or current system.
 
-Lists of aspects and families, such as the board switcher, the home page, the methodology, and the vote page's family list, must hold many more entries than today, so none takes a fixed-size slot such as one header tab per family. Visible copy stays minimal, with details in tooltips or popovers that a tap also opens.
+Lists of aspects and families must scale to many more entries, so none uses a fixed slot per entry. Visible copy stays minimal, with details in tooltips or popovers that a tap also opens.
 
 No paragraph ends on a lone word in any browser. The base style sets `text-pretty` and, where a browser lacks `pretty`, `text-balance` on text blocks, while headings, labels, and short notes that still end on one word take `text-balance` or tighter wording. Screenshot review catches orphans, so no test checks for them.

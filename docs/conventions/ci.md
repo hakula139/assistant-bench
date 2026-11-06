@@ -39,7 +39,7 @@ Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/w
 
   The Preview's `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own.
 
-  It joins the concurrency group `preview-<number>`, which it shares with Preview Cleanup, only once Build Site passes, so closing a PR cancels a deploy already in the group, while a deploy that starts after the close, including one that waits for a running cleanup, finds the PR closed and skips.
+  It joins the concurrency group `preview-<number>`, which it shares with Preview Cleanup, only once Build Site passes, so closing a PR cancels a deploy already in the group, while a deploy that starts after the close finds the PR closed and skips.
 
 - **Preview Cleanup:** deletes the Preview once the PR closes, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged.
 

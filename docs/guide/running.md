@@ -12,7 +12,7 @@ Every system calls its configured API at the endpoint in `.env`, which `bench` l
 | `BENCH_ANTHROPIC_BASE_URL` | The Messages API base URL, to which the SDK appends `/v1/messages`. Required for a Messages system                                                                     |
 | `BENCH_API_KEY_FILE`       | A file holding the API key, so the key is never copied into the checkout                                                                                               |
 | `BENCH_API_CA_FILE`        | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                                |
-| `BENCH_API_HEADERS`        | Optional. A JSON object of extra request headers, such as `{"x-example": "value"}`                                                                                     |
+| `BENCH_API_HEADERS`        | Optional. A JSON object of extra request headers                                                                                                                       |
 | `BENCH_API_LOCAL_ADDRESS`  | Optional. A local IP address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
 
 Both APIs share the key file, CA bundle, headers, and local address.
@@ -51,13 +51,13 @@ When Harbor exits, `bench run` collects the family's trials into `outputs/<famil
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
 
-An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists. Editing a case's instruction reruns it under its ID on every system, and collection keeps the current trials. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
+An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists, and an edited case [reruns](../design/architecture.md#reruns) on every system. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
 
 Moving `jobs/<family>/` out of the data directory makes the next run regenerate that family's trials. Publishing the resulting outputs requires a new reviewed release.
 
 Removing a system from the family's `systems` stops new trials and current collection. Closed reports keep their frozen identities, and a removed `reference` needs a replacement for later rounds.
 
-A run refuses a system whose earlier trials or closed reports recorded another fingerprint, naming the recorded and current ones, since that would leave two fingerprints under one name, which `bench close` refuses. [Systems](../design/systems.md#fingerprints) and [Authoring](authoring.md#systems) describe the fix.
+A run refuses a system whose earlier trials or closed reports recorded another fingerprint, as [Systems](../design/systems.md#fingerprints) describes, and [Authoring](authoring.md#systems) gives the fix.
 
 Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their `[[cases]]` entries in `cases.toml`, then, once they are [reviewed](authoring.md), `uv run bench run`.
 
@@ -74,32 +74,32 @@ It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `sam
 
 The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several.
 
-When the family lists systems, each system's verifier pass rate on tasks its own vendor authored appears beside its rate on other vendors' tasks, with a reward of at least 1 counting as a pass and an ungraded trial as a failure.
+When the family lists systems, each system's verifier [pass rate](../design/ranking.md#test-pass-rates) on tasks its own vendor authored appears beside its rate on other vendors' tasks.
 
 Each record holds:
 
-| Field                                                                                      | Holds                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trial`, `job`                                                                             | The Harbor trial and job the record came from                                                                                                                                                     |
-| `case`, `system`                                                                           | The case, and the system's `systems.toml` name                                                                                                                                                    |
-| `fingerprint`, `nixos_config_rev`                                                          | The system's fingerprint and the export revision it ran under                                                                                                                                     |
-| `harness_version`                                                                          | The Harbor version whose terminal agent wrote a task's solution                                                                                                                                   |
-| `text`                                                                                     | A case's reply, or on a voted task the git-style diff of the graded `/app` against the task's `environment/app/`, without `.git` or tool caches such as `__pycache__`                             |
-| `reward`                                                                                   | A task's reward from its tests                                                                                                                                                                    |
-| `gate_failures`                                                                            | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed, which on a task is `tests` when its reward is below 1                                                             |
-| `error`                                                                                    | The error type of a failed trial. A graded task can retain its diff and gate verdict after an agent error                                                                                         |
-| `finish_reason`                                                                            | The endpoint's finish reason for a single-call reply, or for the completion failure that ended a terminal agent's run, such as `refusal` or `pause_turn`, null otherwise                          |
-| `stop_details`                                                                             | The `type`, `category`, and `explanation` that the Messages API gave for the refusal that ended the trial, whether a single-call reply or a terminal agent's request, null otherwise              |
-| `input_tokens`, `cached_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` | Token counts summed over the trial's requests, null unless every request reports valid usage. An unreported cache count adds 0, while an unreported reasoning count makes `reasoning_tokens` null |
-| `cost_usd`                                                                                 | The cost at catalog prices, null when the catalog channel has no price, an input or output token count is unknown, or a cache write has no declared price                                         |
-| `latency_sec`                                                                              | The end-to-end latency, or a terminal agent's execution time                                                                                                                                      |
-| `response_model`, `request_id`                                                             | The model that answered a single-call reply, and the endpoint's request ID                                                                                                                        |
+| Field                                                                                      | Holds                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trial`, `job`                                                                             | The Harbor trial and job the record came from                                                                                                                                                                                                                                                                        |
+| `case`, `system`                                                                           | The case, and the system's `systems.toml` name                                                                                                                                                                                                                                                                       |
+| `fingerprint`, `nixos_config_rev`                                                          | The system's fingerprint and the export revision it ran under                                                                                                                                                                                                                                                        |
+| `harness_version`                                                                          | The Harbor version whose terminal agent wrote a task's solution                                                                                                                                                                                                                                                      |
+| `text`                                                                                     | A case's reply, or on a voted task the git-style diff of the graded `/app` against the task's `environment/app/`, without `.git` or tool caches                                                                                                                                                                      |
+| `reward`                                                                                   | A task's reward from its tests                                                                                                                                                                                                                                                                                       |
+| `gate_failures`                                                                            | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed, which on a task is `tests` when its reward is below 1                                                                                                                                                                                |
+| `error`                                                                                    | The error type of a failed trial. A graded task can retain its diff and gate verdict after an agent error                                                                                                                                                                                                            |
+| `finish_reason`                                                                            | The endpoint's finish reason for a single-call reply, or for the completion failure that ended a terminal agent's run, null otherwise                                                                                                                                                                                |
+| `stop_details`                                                                             | The `type`, `category`, and `explanation` that the Messages API gave for the refusal that ended the trial, whether a single-call reply or a terminal agent's request, null otherwise                                                                                                                                 |
+| `input_tokens`, `cached_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` | Token counts summed over the trial's requests, null unless every request reports valid usage. `input_tokens` includes `cached_tokens` and `cache_write_tokens`, and `output_tokens` includes `reasoning_tokens`. An unreported cache count adds 0, while an unreported reasoning count makes `reasoning_tokens` null |
+| `cost_usd`                                                                                 | The cost at catalog prices, null when the catalog channel has no price, an input or output token count is unknown, or a cache write has no declared price                                                                                                                                                            |
+| `latency_sec`                                                                              | The end-to-end latency, or a terminal agent's execution time                                                                                                                                                                                                                                                         |
+| `response_model`, `request_id`                                                             | The model that answered a single-call reply, and the endpoint's request ID                                                                                                                                                                                                                                           |
 
 `bench collect` names priced systems with unknown usage and prints a lower bound on the cost of all their collected outputs, using reported usage at catalog prices. That partial cost stays out of records and reports, and excludes attempts collection did not select. A terminal agent's trajectory `final_metrics` also counts only responses with valid usage.
 
 ## Voting
 
-Follow the site's Vote link and choose an available family. Every device records real votes in the same production D1 database. Staging uses a separate D1 database to validate publications and runtime changes.
+Follow the site's Vote link and choose an available family. [Arena](../design/arena.md#vote-store) describes the production and staging vote stores.
 
 Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml`, and `BENCH_D1_TOKEN_FILE` in `.env` naming a file that holds a Cloudflare API token with D1 Edit:
 
@@ -154,7 +154,7 @@ uv run bench arena restore production writing-zh --vote <id> --vote <id>
 
 A summary row shows the votes, the browsers behind a tag or the tags a browser used, the share of each choice, the median time per vote, the first and last vote, and how many votes are excluded. A listing shows each vote's systems, choice and time, and the reason for an exclusion. Votes whose tag has been cleared show `(cleared)` in place of a tag. Copy tags and browser IDs from these listings, since only the voting Worker can compute a tag.
 
-`exclude` and `restore` take exactly one of `--ip-tag`, `--actor` or `--vote`, which repeats, and print how many votes changed. An excluded vote keeps the reason it was first excluded for. An exclusion covers only the votes already recorded, so later votes from the same tag or browser count until you exclude them too. A closed report keeps its votes until the next `bench close`, which leaves the excluded ones out and counts them in `dropped_votes`. Fast votes, minority preferences and disagreement with your own choices are reasons to look closer, and none of them alone is a reason to exclude.
+`exclude` and `restore` take exactly one of `--ip-tag`, `--actor` or `--vote`, which repeats, and print how many votes changed. [Arena](../design/arena.md#moderation) describes what an exclusion covers and which signals warrant a closer look.
 
 ## Closing a Round
 
@@ -167,7 +167,7 @@ For a voted family, `bench close` saves the production votes that can no longer 
 
 ## The Data Directory
 
-Everything a run produces stays out of Git in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`:
+Everything a run produces stays out of Git in the [data directory](../conventions/data.md#the-data-directory):
 
 ```text
 assistant-bench/

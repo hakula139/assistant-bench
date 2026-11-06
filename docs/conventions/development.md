@@ -2,25 +2,13 @@
 
 ## Dev Shell
 
-Both Nix shells provide uv, Node.js, and pnpm. The default shell also installs the pre-commit hooks, while Python CI jobs use `.#python`:
-
-```bash
-nix develop                                                      # Dev shell with uv, Node.js, and the hooks
-uv sync                                                          # Virtualenv with Harbor and the dev tools
-pnpm install                                                     # Node-based formatters, linters, spell checker, and the site
-pnpm --filter web exec playwright install --only-shell chromium   # The site test's browser, again after each Playwright update
-nix flake check                                                  # Run the pre-commit hooks that need neither node_modules nor the virtualenv
-```
-
-If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loads the dev shell whenever you enter the repository.
-
-Both shells export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input).
+Both Nix shells provide uv, Node.js, and pnpm and export `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input). The default shell also installs the pre-commit hooks, while Python CI jobs use `.#python`. [Quickstart](../guide/quickstart.md#setup) sets up a checkout, and [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) lists the steps every new checkout and host needs.
 
 The root Python project contains the `assistant_bench` CLI, and `uv sync` installs its dependencies with the `dev` group. The voting Worker is TypeScript in `web/worker/`, which `web/wrangler.toml` configures and the `web` package's Wrangler deploys.
 
-Production and staging use separate remote D1 bindings. Real votes from every device use production, while staging validates the same application. The `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
+Beside the production and staging [vote stores](../design/arena.md#vote-store), the `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
 
-The project supports Python 3.14, selected by `.python-version` and bounded by the root and typing package requirements. Ruff infers its target from the root requirement, while mypy and basedpyright use the selected interpreter. The host and authored task code share this policy. Each coding task's hidden tests and reference resolve imports against its reference package, while its starter resolves only its own modules. Editors use the root `.venv`.
+The project supports Python 3.14, selected by `.python-version` and bounded by the root and typing package requirements. Ruff infers its target from the root requirement, while mypy and basedpyright use the selected interpreter. The host and authored task code share one strict typing policy in the root `pyproject.toml`, which permits missing library typing metadata while missing imports and unknown or incompatible API types remain errors. Each coding task's hidden tests and reference resolve imports against its reference package, while its starter resolves only its own modules. Editors use the root `.venv`, where `uv sync` installs the checkers CI runs.
 
 ## Pre-Commit Hooks
 
@@ -30,7 +18,7 @@ The hook runs the fast subset of the [verification](../../AGENTS.md#verification
 
 Hooks that fix files in place fail the commit if they make changes, so stage the fixes and commit again.
 
-The authored task applications, reference solutions and hidden tests follow the same formatting, spelling and strict typing policy as the host code. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
+The authored task applications, reference solutions and hidden tests follow the host code's formatting and spelling too. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
 
 The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs only the other hooks because the check's store source has neither `node_modules` nor the virtualenv, while [CI](ci.md#checks) runs those tools.
 
@@ -45,7 +33,7 @@ Commands stay minimal, and settings live in config files:
 | The generation and Messages protocol versions and the Messages API version       | `pyproject.toml`'s `[tool.assistant-bench]`                                                                           |
 | A family's scorer, systems, and samples                                          | `families/<family>/family.toml`                                                                                       |
 | Model completion and context allowances                                          | The shared model catalog, or a bare route's `systems.toml` table                                                      |
-| Harbor job settings, such as concurrency and retries                             | `jobs.py`, which builds each job config at run time                                                                   |
+| Harbor job settings                                                              | `jobs.py`, which builds each job config at run time                                                                   |
 | Admission, cap, and retention limits of the vote API                             | `web/worker/limits.ts`, with the per-minute request limit in `web/wrangler.toml`                                      |
 | The Cloudflare account, the voting Worker's environments, and their D1 databases | `web/wrangler.toml`                                                                                                   |
 | Point-fit parameters, the actor cap, and diagnostic coverage rules               | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |
@@ -56,8 +44,6 @@ Commands stay minimal, and settings live in config files:
 
 Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, and the D1 token file `BENCH_D1_TOKEN_FILE` from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory), and GitLab's `CI_PAGES_URL` and `CI_PROJECT_URL` for [Pages builds](ci.md#deploy). The voting Worker's origins and D1 bindings belong to its environments in `web/wrangler.toml`, and its keys are Worker secrets, which [Running](../guide/running.md#setting-up-a-vote-store) sets.
 
-`bench` sets `HARBOR_TELEMETRY=off` and `LITELLM_MODE=PRODUCTION` in its own environment, which Harbor inherits, because Harbor reads telemetry consent and LiteLLM its `.env` switch from nowhere else.
-
 Job configs are generated per run and never committed. Harbor copies each one into its job directory as `config.json`.
 
 ## Toolchain and Pins
@@ -65,7 +51,7 @@ Job configs are generated per run and never committed. Harbor copies each one in
 - The flake pins the stable Nixpkgs channel for Node.js, uv, and the hooks. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
 - On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. When such a bump moves a fingerprint, the stale `fingerprints.json` fails its test, so the PR waits until someone rewrites the manifest and applies the rule in [Systems](../design/systems.md#fingerprints).
-- `uv.lock` pins the Python dependencies, including Ruff, mypy and basedpyright, and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
+- `uv.lock` pins the Python dependencies and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
 
 ## The nixos-config Input
 
@@ -87,4 +73,4 @@ A bump that changes a system's resolved prompt, route, or effort changes its fin
 
 ## Config Style
 
-Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wrap YAML, TOML, and shell files by hand. Keep comments within 100 columns and other lines within about 100, counting the indent, unless a line holds an unbreakable token such as a URL.
+Because Prettier and Taplo leave long strings alone and shfmt does not wrap, wrap YAML, TOML, and shell files by hand. Keep comments within 100 columns and other lines within about 100, counting the indent, unless a line holds an unbreakable token.

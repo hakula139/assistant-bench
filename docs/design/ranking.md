@@ -18,7 +18,7 @@ Scores use 400 / ln 10 points per logit. The fit selects the component connected
 
 Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
 
-`rank` is descriptive competition order by point score. The site derives a preliminary coverage marker from `decisive_votes < rules.preliminary_decisive_votes`. The current threshold is 40 raw choices with a winner. It supplies no independent-voter count or confidence claim.
+`rank` is descriptive competition order by point score. The site derives a preliminary coverage marker from `decisive_votes < rules.preliminary_decisive_votes`. The marker flags raw coverage alone, with a current threshold of 40 choices that have a winner.
 
 ## Uncertainty
 
@@ -33,7 +33,7 @@ The target is performance on new cases and voters. No method for that target is 
 | `length`         | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
 | `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by ID, over systems both halves connect to their root                                     |
 
-Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed evidence and supply no population interval.
+Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed votes alone.
 
 ## Test Pass Rates
 
@@ -41,7 +41,7 @@ Cost, token and latency aggregates cover error-free outputs and remain unknown u
 
 `scoring/pass_rates.py` holds the statistics that `report.py` applies to a tests family's trials. The target is a system's pass rate on new tasks like the family's, so the task is the sampling unit and repeated trials of one task are clustered within it.
 
-A trial passes when its tests reach a reward of 1, which they can after an agent error such as a timeout, since Harbor still runs the verifier. A trial whose tests never ran fails. A round closes only once every system has `samples` trials of every current task, so all systems are compared over the same tasks and trial counts. A system's pass rate is the mean over tasks of each task's share of passing trials, and categories apply the same rule to their own tasks.
+A trial passes when its tests reach a reward of 1, which they can after an agent error, since Harbor still runs the verifier. A trial whose tests never ran fails. A round closes only once every system has `samples` trials of every current task, so all systems are compared over the same tasks and trial counts. A system's pass rate is the mean over tasks of each task's share of passing trials, and categories apply the same rule to their own tasks.
 
 ### Interval
 

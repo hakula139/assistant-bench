@@ -4,7 +4,7 @@ A report publishes one closed round's aggregates under public system IDs. `repor
 
 ## Closing a Round
 
-`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family first saves a cut of its counted votes, which `--snapshot <path>` recloses later, while a test-scored family collects and aggregates its current trials. The round is the UTC closing date, so closing again that day replaces its file. Only this command writes reports, which are committed through ordinary PRs.
+`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family first saves a cut of its counted votes, which `--snapshot <path>` recloses later, while a test-scored family collects and aggregates its current trials. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
 
 Voted closure uses the cut's active publication, the collected measurements and the current family's labels. It requires eligible human choices or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
 
@@ -23,7 +23,7 @@ Voted systems get labels, fingerprints and the reference from the publication th
 
 Preliminary markers are derived from each round's raw decisive counts and recorded rule. In a head-to-head row, `wins`, `losses`, `ties` and `both_bad` are raw counts, while `win_rate` uses actor weights. [Ranking](ranking.md) defines the fit and uncertainty target, and its [test pass rates](ranking.md#test-pass-rates) define the tests intervals and leader decision.
 
-Each round's output inventory determines its measurement denominators. Cost, latency and token aggregates cover completed outputs without errors, and each aggregate is null unless every such output reports its value. A null mean cost records `cost_gap`: `unpriced` when an output with known usage lacks a price, or `unreported` when only outputs without usage lack a cost. A system without completed outputs has no cost gap. Gate-failure rates cover outputs with a verdict, including errored task agents whose tests ran. Defect tags count once per choice on the tagged output. Pass rates average each task's passing share over every trial, and a trial whose tests never ran fails. A votes standing carries this pass rate with its 95% interval when the system's outputs have test rewards, and null otherwise. A tests round closes only once every system has `samples` trials of every current task.
+Each round's output inventory determines its measurement denominators. Cost, latency and token aggregates cover completed outputs without errors, and each aggregate is null unless every such output reports its value. A null mean cost records `cost_gap`: `unpriced` when an output with known usage lacks a price, or `unreported` when only outputs without usage lack a cost. A system without completed outputs has no cost gap. Gate-failure rates cover outputs with a verdict, including errored task agents whose tests ran. Defect tags count once per choice on the tagged output. A votes standing carries the [pass rate](ranking.md#test-pass-rates) with its 95% interval when the system's outputs have test rewards, and null otherwise.
 
 ## Publication Boundaries
 
@@ -31,4 +31,4 @@ Reports contain no case ID, instruction, output, route, request ID or session. T
 
 ## Synthetic Fixtures
 
-`tests/fixtures/report.json` and `report-early.json` are synthetic votes rounds closed from one simulated vote cut through the capped close path, and `report-tests.json` is a synthetic tests round, all shared by Python and site tests. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes regeneration and schema comparison. Prettier leaves generated reports and fixtures as their writer formats them.
+Python and site tests share synthetic report fixtures, which [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes. Prettier leaves generated reports and fixtures as their writer formats them.

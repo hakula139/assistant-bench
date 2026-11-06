@@ -14,7 +14,7 @@ Early development. The first families, `writing-zh` and `writing-en`, rank how s
 
 ## Usage
 
-The [voting guide](docs/guide/voting.md) explains the site's blind comparisons. Running the benchmark requires Nix with flakes (and nix-ld on NixOS), a running Docker daemon for task families, and an OpenAI-compatible endpoint. The [quickstart](docs/guide/quickstart.md) prepares a checkout and runs the smoke families.
+The [voting guide](docs/guide/voting.md) explains the site's blind comparisons. The [quickstart](docs/guide/quickstart.md) lists what running the benchmark requires, prepares a checkout, and runs the smoke families.
 
 ## Documentation
 
