@@ -66,7 +66,7 @@ def stale_fixture(request: pytest.FixtureRequest) -> Callable[[Path, str], None]
 @pytest.fixture(autouse=True)
 def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
     send = httpx.AsyncClient.send
-    send_messages = httpx2.AsyncClient.send
+    send2 = httpx2.AsyncClient.send
 
     async def checked_send(
         client: httpx.AsyncClient, request: httpx.Request, **kwargs: Any
@@ -79,16 +79,16 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
 
-    async def checked_messages_send(
+    async def checked_send2(
         client: httpx2.AsyncClient, request: httpx2.Request, **kwargs: Any
     ) -> httpx2.Response:
         if request.url.host not in {'127.0.0.1', '::1'}:
             pytest.fail(
                 f'A model test attempted a non-loopback request: {request.url.host}'
             )
-        return await send_messages(client, request, **kwargs)
+        return await send2(client, request, **kwargs)
 
-    monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_messages_send)
+    monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_send2)
 
     handle = httpx.HTTPTransport.handle_request
 
