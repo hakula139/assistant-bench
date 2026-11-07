@@ -456,6 +456,44 @@ class TestWrite:
 
 
 class TestRead:
+    @pytest.mark.parametrize('invalid', ['length', 'ineligible', 'fenced'])
+    def test_refuses_self_consistent_html_files_that_break_the_document_contract(
+        self, tmp_path: Path, invalid: str
+    ) -> None:
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        published = prepare(
+            with_settings(make_votes_family(), render='html'),
+            [make_case('page')],
+            [
+                make_trial(
+                    'page', system, text=source.replace('<title>', f'<title>{index} ')
+                )
+                for index, system in enumerate(ARENA_SYSTEMS)
+            ],
+        )
+        first = published.outputs[0]
+        assert first.content is not None
+        if invalid == 'length':
+            changed = first.model_copy(update={'length': 10})
+            message = 'HTML outputs have no text length'
+        else:
+            content = (
+                f'```html\n{first.content}```\n'
+                if invalid == 'fenced'
+                else first.content.replace('</body>', '')
+            )
+            changed = first.model_copy(update={'content': content})
+            message = 'a passing HTML output must be an eligible document'
+        draft = published.model_copy(
+            update={'outputs': (changed, *published.outputs[1:])}
+        )
+        invalid_file = draft.model_copy(update={'id': draft.identity()})
+        path = tmp_path / 'publication.json'
+        path.write_text(invalid_file.model_dump_json())
+
+        with pytest.raises(ValueError, match=message):
+            publication.read(path)
+
     def test_refuses_an_edited_file_naming_both_ids(self, tmp_path: Path) -> None:
         published = text_publication()
         payload = json.loads(published.model_dump_json())
@@ -773,15 +811,20 @@ class TestPublicationPairCases:
                 )
                 == expected
             )
-            assert (
-                '\n'.join(
-                    line
-                    for line in dump(connection).splitlines()
-                    if not line.startswith('INSERT INTO publication_pair_cases')
+            for table, order in (
+                ('publications', 'id'),
+                ('cases', 'publication_id, case_key'),
+                ('outputs', 'publication_id, output_key'),
+                ('active', 'family'),
+            ):
+                current = arena_store.connection.execute(
+                    f'SELECT * FROM {table} ORDER BY {order}'
                 )
-                + '\n'
-                == existing
-            )
+                columns = ', '.join(column[0] for column in current.description)
+                preserved = connection.execute(
+                    f'SELECT {columns} FROM {table} ORDER BY {order}'
+                )
+                assert preserved.fetchall() == current.fetchall(), table
 
     def test_completes_staging_after_backfilling_a_partial_inactive_publication(
         self, arena_store: SQLiteDatabase
