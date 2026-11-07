@@ -10,6 +10,7 @@ import pytest
 
 from assistant_bench.arena import d1
 from assistant_bench.arena.d1 import D1Error, RestDatabase, Result
+from assistant_bench.messages import InputError
 
 
 ACCOUNT = 'synthetic-account'
@@ -149,7 +150,8 @@ class TestConnect:
             (
                 d1.ENV_FILE_VAR,
                 'CLOUDFLARE_API_TOKEN="synthetic-${TOKEN_SUFFIX}"\n'
-                'D1_UNRELATED_SETTING=from-file\n',
+                'D1_UNRELATED_SETTING=from-file\n'
+                'D1_ABSENT_SETTING=from-file\n',
                 'synthetic-${TOKEN_SUFFIX}',
             ),
         ],
@@ -170,6 +172,7 @@ class TestConnect:
         monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'ambient-token')
         monkeypatch.setenv('TOKEN_SUFFIX', 'expanded')
         monkeypatch.setenv('D1_UNRELATED_SETTING', 'from-process')
+        monkeypatch.delenv('D1_ABSENT_SETTING', raising=False)
         requests: list[httpx.Request] = []
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -193,6 +196,7 @@ class TestConnect:
         )
         assert os.environ['CLOUDFLARE_API_TOKEN'] == 'ambient-token'
         assert os.environ['D1_UNRELATED_SETTING'] == 'from-process'
+        assert 'D1_ABSENT_SETTING' not in os.environ
 
     def test_names_the_create_command_for_a_target_without_an_id(
         self, config: Path
@@ -286,3 +290,42 @@ class TestConnect:
         assert str(raised.value) == (
             f'`{variable}` names `{token}`, which needs {expected}.'
         )
+
+    @pytest.mark.parametrize('variable', [d1.TOKEN_FILE_VAR, d1.ENV_FILE_VAR])
+    @pytest.mark.parametrize(
+        'separator',
+        ['\n', '\r', '\t', '\x00', '\x7f', '\N{LATIN SMALL LETTER E WITH ACUTE}'],
+        ids=['newline', 'carriage-return', 'tab', 'nul', 'delete', 'non-ascii'],
+    )
+    def test_refuses_unsafe_header_characters_without_exposing_the_token(
+        self,
+        config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        variable: str,
+        separator: str,
+    ) -> None:
+        token = f'synthetic-secret{separator}second'
+        content = (
+            f'CLOUDFLARE_API_TOKEN="{token}"\n'
+            if variable == d1.ENV_FILE_VAR
+            else token
+        )
+        path = tmp_path / 'd1-token'
+        path.write_text(content)
+        monkeypatch.setenv(variable, str(path))
+
+        def unopened(**kwargs: Any) -> httpx.Client:
+            pytest.fail('A client opened for an invalid token')
+
+        monkeypatch.setattr(httpx, 'Client', unopened)
+
+        with pytest.raises(InputError) as raised, d1.connect('staging'):
+            pass
+
+        assert str(raised.value) == (
+            f'`{variable}` names `{path}`, whose token contains characters that '
+            'cannot be used in an HTTP header.'
+        )
+        assert token not in str(raised.value)
+        assert raised.value.__cause__ is None

@@ -202,7 +202,14 @@ def _token() -> str:
         )
         raise InputError(f'`{name}` names `{path}`, which needs {expected}.')
 
-    return token.strip()
+    token = token.strip()
+    if any(not ' ' <= character <= '~' for character in token):
+        raise InputError(
+            f'`{name}` names `{path}`, whose token contains characters that '
+            'cannot be used in an HTTP header.'
+        )
+
+    return token
 
 
 def _config() -> _Config:
