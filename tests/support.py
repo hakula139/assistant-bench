@@ -1441,6 +1441,7 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         inventory=inventory,
         votes=tuple(votes),
         excluded=2 * days,
+        output_generation='round-generation',
     )
     snapshot = Snapshot(
         family='arena',
