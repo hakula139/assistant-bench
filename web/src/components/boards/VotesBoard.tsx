@@ -160,12 +160,12 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
       <SnapshotStatus family={round.family} closedAt={round.closed_at} cutoffs={results.cutoffs} />
       <details className={note}>
         <summary>Public and held-out comparison</summary>
-        <p>
-          Descriptive score differences compare public and held-out cases on their common system
-          field, centered on that field&apos;s mean. Private cases are excluded. This comparison
-          cannot establish whether a model trained on a case.
+        <p className="text-pretty">
+          Scores compare public and held-out cases after centering each split on the common system
+          field&apos;s mean. Private cases are excluded. This diagnostic cannot establish training
+          contamination.
         </p>
-        <p>
+        <p className="text-pretty">
           {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
           {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
           {results.public_held_out.unavailable === 'insufficient_cases'
