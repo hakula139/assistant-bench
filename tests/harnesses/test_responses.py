@@ -9,6 +9,9 @@ from assistant_bench.harnesses.responses import ResponseResult, response_input
 from support import StubEndpoint, response
 
 
+pytestmark = pytest.mark.usefixtures('begun_trial')
+
+
 class TestResponseInput:
     def test_round_trips_sdk_items_and_tool_call_ids_without_flattening(
         self, endpoint: StubEndpoint
@@ -51,7 +54,7 @@ class TestResponseInput:
         configured = Endpoint.read(endpoint.env.get, 'openai-responses')
 
         async def replay() -> None:
-            async with configured.client() as client:
+            async with configured.client('openai-responses') as client:
                 await client.responses.create(
                     model='acme/large', input=restored, store=False
                 )

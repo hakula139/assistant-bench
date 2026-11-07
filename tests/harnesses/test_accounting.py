@@ -26,7 +26,7 @@ def receipt(*, usage: MeasuredUsage | None = USAGE) -> RequestReceipt:
 
 class TestTrialAccounting:
     class TestBegin:
-        def test_records_the_exact_start_before_admitting_requests(
+        def test_admission_requires_a_confirmed_attempt_start(
             self, private_state: State
         ) -> None:
             with accounted_trial(private_state) as recorder:

@@ -14,10 +14,11 @@ from harbor.models.agent.context import AgentContext
 from assistant_bench import jobs
 from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.installed import ClaudeCode, Codex
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.state import State
 from support import (
     VOTES,
     StubEndpoint,
+    accounted_trial,
     make_system,
     message,
     message_stream,
@@ -81,6 +82,7 @@ class TestInstalled:
     @pytest.mark.parametrize('cancelled', [False, True], ids=['finished', 'cancelled'])
     def test_records_each_completed_response_and_keeps_endpoint_credentials_on_the_host(
         self,
+        private_state: State,
         endpoint: StubEndpoint,
         logs_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -149,11 +151,17 @@ class TestInstalled:
         monkeypatch.setattr(parent_type, 'run', run)
         monkeypatch.setattr(parent_type, 'populate_context_post_run', populate)
 
-        if cancelled:
-            with pytest.raises(asyncio.CancelledError):
+        with accounted_trial(
+            private_state,
+            system=system.name,
+            fingerprint=fingerprint(system),
+            trial=logs_dir.parent.name,
+        ) as recorder:
+            if cancelled:
+                with pytest.raises(asyncio.CancelledError):
+                    asyncio.run(agent.run('Write the greeting.', environment, context))
+            else:
                 asyncio.run(agent.run('Write the greeting.', environment, context))
-        else:
-            asyncio.run(agent.run('Write the greeting.', environment, context))
 
         assert received_keys[0] and received_keys[0] != 'test-key'
         assert context.n_input_tokens == (260 if harness == 'claude-code' else 240)
@@ -163,12 +171,8 @@ class TestInstalled:
             20 if harness == 'claude-code' else 0
         )
         assert context.metadata['binary_sha256'] == 'binary-digest'
-        (attempt,) = [
-            Attempt.model_validate_json(line)
-            for line in (logs_dir.parent.parent / ATTEMPTS_FILE)
-            .read_text()
-            .splitlines()
-        ]
+        attempt = recorder.attempt()
+        assert attempt is not None
         assert attempt.system == system.name
         assert attempt.fingerprint == fingerprint(system)
         assert all(usage and usage.output_tokens == 40 for usage in attempt.responses)

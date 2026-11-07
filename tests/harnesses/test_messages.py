@@ -26,6 +26,9 @@ from assistant_bench.harnesses.native import (
 from support import StubEndpoint, message, message_stream
 
 
+pytestmark = pytest.mark.usefixtures('begun_trial')
+
+
 def request(endpoint: StubEndpoint, result: MessageResult, artifact: Path) -> None:
     async def run() -> None:
         async with Endpoint.read(

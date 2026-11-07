@@ -132,6 +132,7 @@ class TestConnect:
         'ending', [b'\n', b'\r\n', b'\r'], ids=['lf', 'crlf', 'cr']
     )
     @pytest.mark.parametrize('split', [1, 7, 4096], ids=['byte', 'small', 'whole'])
+    @pytest.mark.parametrize('compressed', [False, True], ids=['plain', 'gzip'])
     def test_preserves_complete_frame_bytes_with_a_durable_terminal_receipt(
         self,
         endpoint: StubEndpoint,
@@ -139,6 +140,7 @@ class TestConnect:
         private_state: State,
         ending: bytes,
         split: int,
+        compressed: bool,
     ) -> None:
         payload = response('Hello, 世界.')
         event = {'type': 'response.completed', 'response': payload}
@@ -154,6 +156,7 @@ class TestConnect:
         endpoint.stream = [
             raw[index : index + split] for index in range(0, len(raw), split)
         ]
+        endpoint.gzip = compressed
         configured = Endpoint.read(endpoint.env.get, 'openai-responses')
 
         async def request() -> bytes:
