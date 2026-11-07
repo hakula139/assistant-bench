@@ -189,43 +189,49 @@ class SplitDifference:
     half_width: Floats
 
 
+@dataclass(frozen=True)
+class SplitComparison:
+    """Case counts on the common field, or available counts when none exists."""
+
+    cases: tuple[int, int]
+    difference: SplitDifference | None = None
+    unavailable: str | None = None
+
+
 def split_difference(
     public: Sequence[Comparison], held_out: Sequence[Comparison]
-) -> tuple[SplitDifference | None, str | None]:
+) -> SplitComparison:
     """Compare centered strengths on one common field with independent case clusters."""
-    if any(
-        len({row.case for row in rows if row.weight > 0}) < 30
-        for rows in (public, held_out)
-    ):
-        return None, 'insufficient_cases'
+    splits = [[row for row in split if row.weight > 0] for split in (public, held_out)]
+    counts = [len({row.case for row in split}) for split in splits]
     fields = [
-        {system for row in rows if row.weight > 0 for system in (row.left, row.right)}
-        for rows in (public, held_out)
+        {system for row in split for system in (row.left, row.right)}
+        for split in splits
     ]
     common = fields[0] & fields[1]
     if len(common) < 2:
-        return None, 'no_common_field'
-    matchups = [
-        Matchups.build(
-            [row for row in rows if row.weight > 0 and {row.left, row.right} <= common]
-        )
-        for rows in (public, held_out)
+        return SplitComparison((counts[0], counts[1]), unavailable='no_common_field')
+    splits = [
+        [row for row in split if {row.left, row.right} <= common] for split in splits
     ]
+    counts = [len({row.case for row in split}) for split in splits]
+    cases = counts[0], counts[1]
+    if min(cases) < 30:
+        return SplitComparison(cases, unavailable='insufficient_cases')
+    matchups = [Matchups.build(split) for split in splits]
     if any(set(rows.systems) != common for rows in matchups):
-        return None, 'disconnected_field'
+        return SplitComparison(cases, unavailable='disconnected_field')
     if any(
         len(rows.component(rows.systems[0]).systems) != len(common) for rows in matchups
     ):
-        return None, 'disconnected_field'
-    if any(_weighted_cases(rows) < 30 for rows in matchups):
-        return None, 'insufficient_cases'
+        return SplitComparison(cases, unavailable='disconnected_field')
     for rows in matchups:
         design = _design(rows.left, rows.right, rows.sided, len(common), [])
         required_rank = len(common) - 1 + int(bool(np.any(rows.sided)))
         if np.linalg.matrix_rank(design) < required_rank:
-            return None, 'unidentifiable_field'
+            return SplitComparison(cases, unavailable='unidentifiable_field')
         if _separated(rows):
-            return None, 'separated_fit'
+            return SplitComparison(cases, unavailable='separated_fit')
     points = [fit(rows) for rows in matchups]
     covariance = sum(
         (_covariance(rows, point) for rows, point in zip(matchups, points, strict=True))
@@ -236,11 +242,14 @@ def split_difference(
             min(_weighted_cases(rows) for rows in matchups) - 1,
         )
     )
-    return SplitDifference(
-        matchups[0].systems,
-        ELO_PER_LOGIT * (points[0].strength - points[1].strength),
-        critical * ELO_PER_LOGIT * np.sqrt(np.diag(covariance)),
-    ), None
+    return SplitComparison(
+        cases,
+        SplitDifference(
+            matchups[0].systems,
+            ELO_PER_LOGIT * (points[0].strength - points[1].strength),
+            critical * ELO_PER_LOGIT * np.sqrt(np.diag(covariance)),
+        ),
+    )
 
 
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:

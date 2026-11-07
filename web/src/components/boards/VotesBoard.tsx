@@ -166,6 +166,9 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
           contamination.
         </p>
         <p className="text-pretty">
+          {results.public_held_out.unavailable === 'no_common_field'
+            ? 'Available cases: '
+            : 'Cases in the common field: '}
           {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
           {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
           {results.public_held_out.unavailable === 'insufficient_cases'

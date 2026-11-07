@@ -613,7 +613,7 @@
     "public_held_out": {
       "public_cases": 30,
       "held_out_cases": 0,
-      "unavailable": "insufficient_cases",
+      "unavailable": "no_common_field",
       "scores": []
     }
   }

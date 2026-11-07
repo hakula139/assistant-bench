@@ -350,6 +350,21 @@ class TestReport:
         [
             (('reference',), 'unknown-reference'),
             (('anchor',), 'unknown-anchor'),
+            (
+                ('public_held_out',),
+                {
+                    'public_cases': 30,
+                    'held_out_cases': 30,
+                    'unavailable': None,
+                    'scores': [
+                        {
+                            'system': 'unlisted-system',
+                            'difference': 0,
+                            'interval': {'lower': -1, 'upper': 1},
+                        }
+                    ],
+                },
+            ),
             (('anchor',), 'acme-edge'),
             (('unranked',), ['acme-large']),
             (('categories', 0, 'unranked'), ['acme-large']),
@@ -366,6 +381,7 @@ class TestReport:
         ids=[
             'reference',
             'anchor',
+            'diagnostic-system',
             'unranked-anchor',
             'duplicate-membership',
             'category-duplicate-membership',

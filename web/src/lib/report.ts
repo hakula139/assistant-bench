@@ -200,6 +200,7 @@ export const reportSchema = z
     if (results.scorer === 'votes') {
       referenced.add(results.reference);
       referenced.add(results.anchor);
+      results.public_held_out.scores.forEach(({ system }) => referenced.add(system));
 
       if (results.standings.some((row) => row.cost_gap !== null && row.mean_cost_usd !== null)) {
         reject('A cost gap is present only without a mean cost');

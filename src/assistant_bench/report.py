@@ -458,6 +458,7 @@ def _referenced_systems(results: Results) -> set[str]:
         case VotesResults():
             systems.update((results.reference, results.anchor))
             systems.update(results.unranked)
+            systems.update(row.system for row in results.public_held_out.scores)
             for row in results.head_to_head:
                 systems.update((row.system, row.opponent))
             for board in results.categories:
@@ -746,12 +747,13 @@ def _split_diagnostic(
         [row for row in comparisons if splits[row.case] == split and row.weight > 0]
         for split in ('public', 'held-out')
     ]
-    difference, reason = ranking.split_difference(*rows)
+    compared = ranking.split_difference(*rows)
+    difference = compared.difference
     return SplitDiagnostic.model_validate(
         {
-            'public_cases': len({row.case for row in rows[0]}),
-            'held_out_cases': len({row.case for row in rows[1]}),
-            'unavailable': reason,
+            'public_cases': compared.cases[0],
+            'held_out_cases': compared.cases[1],
+            'unavailable': compared.unavailable,
             'scores': []
             if difference is None
             else [

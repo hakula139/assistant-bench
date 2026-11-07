@@ -519,12 +519,14 @@ def voting_input(
         }
     )
     published = {output.key: output for output in inventory.outputs}
-    counted = [
-        vote.model_copy(update={'actor': f'{store}:{vote.actor}'})
-        for store, cut in cuts
-        for vote in cut.votes
-        if _counts(vote, {output.key: output for output in cut.inventory.outputs})
-    ]
+    counted: list[Vote] = []
+    for store, cut in cuts:
+        eligible = {output.key: output for output in cut.inventory.outputs}
+        counted.extend(
+            vote.model_copy(update={'actor': f'{store}:{vote.actor}'})
+            for vote in cut.votes
+            if _counts(vote, eligible)
+        )
     actors = [vote.actor for vote in counted]
     ordinary = tuple(
         HumanEvidence(

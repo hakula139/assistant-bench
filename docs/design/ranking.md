@@ -45,7 +45,7 @@ With case effects, widths stop shrinking like 1 / √votes once votes per case g
 
 Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed votes alone.
 
-`public_held_out` compares public-minus-held-out scores on the systems present in both splits, with each split centered on their common field mean. Private cases are excluded. It requires at least 30 independent cases in each split after restricting comparisons to that common field, a connected identifiable fit in each, and non-separated outcomes. Otherwise it records why estimates are unavailable. Its intervals add the two independent case-cluster covariance matrices and use the smaller case count minus one as the t degrees of freedom. These differences describe the observed cases and cannot establish training contamination.
+`public_held_out` compares public-minus-held-out scores on the systems present in both splits, with each split centered on their common field mean. Private cases are excluded. It requires at least 30 independent cases in each split after restricting comparisons to that common field, a connected identifiable fit in each, and non-separated outcomes. Its case counts describe the restricted comparisons. When no common field exists, the counts describe the available cases and no estimate is reported. Otherwise it records why estimates are unavailable. Its intervals add the two independent case-cluster covariance matrices and use the smaller case count minus one as the t degrees of freedom. These differences describe the observed cases and cannot establish training contamination.
 
 ## Test Pass Rates
 

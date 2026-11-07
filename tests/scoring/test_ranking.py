@@ -24,38 +24,79 @@ from assistant_bench.scoring.ranking import (
 STRENGTHS = {'large': 0.8, 'medium': 0.3, 'small': -0.4}
 
 
-def test_split_difference_uses_case_clusters_and_centered_common_scores() -> None:
-    public = [
-        Comparison(
-            'a', 'b', 0.0 if case % 3 == 0 else 1.0, f'public-{case}', sided=False
+class TestSplitDifference:
+    def test_uses_case_clusters_and_centered_common_scores(self) -> None:
+        public = [
+            Comparison(
+                'a', 'b', 0.0 if case % 3 == 0 else 1.0, f'public-{case}', sided=False
+            )
+            for case in range(30)
+        ]
+        held = [
+            Comparison(
+                'a', 'b', 1.0 if case % 3 == 0 else 0.0, f'held-{case}', sided=False
+            )
+            for case in range(30)
+        ]
+
+        compared = ranking.split_difference(public, held)
+
+        result = compared.difference
+        assert compared.unavailable is None and result is not None
+        assert compared.cases == (30, 30)
+        assert result.systems == ('a', 'b')
+        assert result.difference[0] > 100
+        assert result.difference.sum() == pytest.approx(0)
+        assert result.half_width[0] == pytest.approx(result.half_width[1])
+        assert 90 < result.half_width[0] < 105
+
+        duplicated = ranking.split_difference(public * 100, held * 100).difference
+        assert duplicated is not None
+        assert duplicated.half_width == pytest.approx(result.half_width, rel=0.01)
+
+        repeated = [row._replace(case='same') for row in held]
+        assert (
+            ranking.split_difference(public, repeated).unavailable
+            == 'insufficient_cases'
         )
-        for case in range(30)
-    ]
-    held = [
-        Comparison('a', 'b', 1.0 if case % 3 == 0 else 0.0, f'held-{case}', sided=False)
-        for case in range(30)
-    ]
+        separated = [row._replace(score=1.0) for row in held]
+        assert (
+            ranking.split_difference(public, separated).unavailable == 'separated_fit'
+        )
+        identical = ranking.split_difference(public, public).difference
+        assert identical is not None
+        assert identical.difference == pytest.approx([0, 0])
 
-    result, reason = ranking.split_difference(public, held)
+    @pytest.mark.parametrize('common_cases', [5, 30])
+    def test_counts_only_cases_used_by_the_common_field(
+        self, common_cases: int
+    ) -> None:
+        common = [
+            Comparison('a', 'b', float(case % 2), f'common-{case}', sided=False)
+            for case in range(common_cases)
+        ]
+        public = common + [
+            Comparison('a', 'c', 0.5, f'extra-{case}') for case in range(70)
+        ]
+        held = common + [
+            Comparison('a', 'd', 0.5, f'extra-{case}') for case in range(80)
+        ]
 
-    assert reason is None and result is not None
-    assert result.systems == ('a', 'b')
-    assert result.difference[0] > 100
-    assert result.difference.sum() == pytest.approx(0)
-    assert result.half_width[0] == pytest.approx(result.half_width[1])
-    assert 90 < result.half_width[0] < 105
+        result = ranking.split_difference(public, held)
 
-    duplicated, _ = ranking.split_difference(public * 100, held * 100)
-    assert duplicated is not None
-    assert duplicated.half_width == pytest.approx(result.half_width, rel=0.01)
+        assert result.cases == (common_cases, common_cases)
+        assert result.unavailable == (
+            'insufficient_cases' if common_cases < 30 else None
+        )
 
-    repeated = [row._replace(case='same') for row in held]
-    assert ranking.split_difference(public, repeated) == (None, 'insufficient_cases')
-    separated = [row._replace(score=1.0) for row in held]
-    assert ranking.split_difference(public, separated) == (None, 'separated_fit')
-    identical, _ = ranking.split_difference(public, public)
-    assert identical is not None
-    assert identical.difference == pytest.approx([0, 0])
+    def test_keeps_available_counts_when_no_common_field_exists(self) -> None:
+        public = [Comparison('a', 'b', 0.5, f'public-{case}') for case in range(30)]
+        held = [Comparison('c', 'd', 0.5, f'held-{case}') for case in range(17)]
+
+        result = ranking.split_difference(public, held)
+
+        assert result.cases == (30, 17)
+        assert result.unavailable == 'no_common_field'
 
 
 def simulate(
