@@ -193,18 +193,14 @@ class TrialManifest(_Model):
             raise ValueError(
                 'a trial needs its job config and trial config, lock, and result'
             )
-        seen: set[str] = set()
         for entry in self.files:
             parts = _path_parts(entry.path)
             if not _selected_path(parts, self.trial_name):
                 raise ValueError(
                     'manifest files must belong to the selected job and trial'
                 )
-            if any('/'.join(parts[:index]) in seen for index in range(1, len(parts))):
-                raise ValueError("a manifest file cannot be another file's parent")
             if entry.path in required and entry.mode == '120000':
                 raise ValueError('required trial records must be regular files')
-            seen.add(entry.path)
         return self
 
 
