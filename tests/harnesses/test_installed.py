@@ -16,6 +16,7 @@ from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.installed import ClaudeCode, Codex
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
 from support import (
+    VOTES,
     StubEndpoint,
     make_system,
     message,
@@ -176,6 +177,12 @@ class TestInstalled:
 
 
 class TestJobConfiguration:
+    def test_requires_a_task_environment_for_an_installed_agent(self) -> None:
+        system = make_system(harness='codex', version='1.2.3', api='openai-responses')
+
+        with pytest.raises(ValueError, match='requires a task environment'):
+            jobs.check_systems(VOTES, [system])
+
     def test_lists_only_the_trial_proxy_in_a_mixed_harness_job(
         self, families_dir: Path
     ) -> None:
