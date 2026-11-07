@@ -48,6 +48,7 @@ class RunContext:
     _sources: dict[str, tuple[tuple[SourceJobConfig, Path], ...]] = field(
         default_factory=dict, init=False, repr=False
     )
+    _revisions: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     def sources(self, family: Family) -> list[tuple[SourceJobConfig, Path]]:
         if family.name not in self._sources:
@@ -62,6 +63,7 @@ class RunContext:
                 load_cases(family, private_root=self.private_root),
                 root=self.root,
             )
+        generation = self.state.artifact_generation(family.name)
         self._sources[family.name] = tuple(
             jobs.materialize_sources(
                 family,
@@ -69,8 +71,14 @@ class RunContext:
                 self.artifacts,
                 self.root,
                 private_root=self.private_root,
+                generation=generation,
             )
         )
+        self._revisions[family.name] = generation.revision
+
+    def source_revision(self, family: Family) -> int:
+        self.sources(family)
+        return self._revisions[family.name]
 
     def closing_sources(self, collection_id: str) -> ClosingSources:
         """Materialize the exact public and private inputs frozen by collection."""

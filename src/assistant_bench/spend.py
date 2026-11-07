@@ -22,26 +22,11 @@ class Entry(Attempt):
 
     job: str
     price: Price | None
-    """The price frozen when the attempt entered the ledger or its probe started."""
+    """The price frozen before the attempt's claim admitted requests."""
 
     ceiling_usd: float | None
     """The cost of one response at a full context window and completion allowance,
     at `price` and its dearest input rate, `None` when unpriced."""
-
-    @classmethod
-    def of(cls, attempt: Attempt, job: str, system: System | None) -> Self:
-        """Return the attempt priced as the system's catalog entry prices it now."""
-        price = system.price if system else None
-        ceiling = (
-            (
-                system.context_window * max(price.input, price.cache_write or 0)
-                + system.max_output_tokens * price.output
-            )
-            / 1_000_000
-            if system and price
-            else None
-        )
-        return cls(**attempt.model_dump(), job=job, price=price, ceiling_usd=ceiling)
 
 
 class Accounting(BaseModel):

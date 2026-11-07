@@ -25,6 +25,7 @@ class Run:
     code_revision: str | None
     case_revision: str | None
     created_at: str
+    max_requests: int | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,22 @@ class OutputGeneration:
     outputs: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class TrialArtifact:
+    run_id: str
+    trial_id: str
+    source_trial_id: str
+    commit_sha: str
+    path: str
+    manifest_digest: str
+
+
+@dataclass(frozen=True)
+class ArtifactGeneration:
+    revision: int
+    artifacts: tuple[TrialArtifact, ...]
+
+
 class State:
     """Conditional claims and immutable domain-validated JSON records.
 
@@ -90,8 +107,9 @@ class State:
     def create_run(self, run: Run) -> None:
         self._database.execute(
             """
-            INSERT INTO runs (id, scope, job, code_revision, case_revision, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO runs (
+                id, scope, job, code_revision, case_revision, created_at, max_requests
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             """,
             (
@@ -101,6 +119,7 @@ class State:
                 run.code_revision,
                 run.case_revision,
                 run.created_at,
+                run.max_requests,
             ),
         )
         if self._run(run.id) != run:
@@ -255,7 +274,16 @@ class State:
             INSERT INTO request_admissions (id, attempt_id, created_at)
             SELECT ?, starts.id, ? FROM attempt_starts AS starts
             JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            JOIN runs ON runs.id = claims.run_id
             WHERE starts.id = ? AND claims.state = 'claimed'
+                AND (runs.max_requests IS NULL OR (
+                    SELECT COUNT(*) FROM request_admissions AS admissions
+                    JOIN attempt_starts AS admitted_starts
+                        ON admitted_starts.id = admissions.attempt_id
+                    JOIN attempt_claims AS admitted_claims
+                        ON admitted_claims.id = admitted_starts.claim_id
+                    WHERE admitted_claims.run_id = runs.id
+                ) < runs.max_requests)
                 AND NOT EXISTS (
                     SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
                 )
@@ -480,15 +508,38 @@ class State:
             raise InputError(f'Trial `{trial_id}` has no registered artifacts.')
         return rows[0]
 
-    def artifacts(self, scope: str) -> list[Row]:
-        return self._database.execute(
+    def artifact_generation(self, scope: str) -> ArtifactGeneration:
+        """Read the registry and its admission fence in one statement snapshot."""
+        rows = self._database.execute(
             """
-            SELECT artifacts.* FROM trial_artifacts AS artifacts
-            JOIN runs ON runs.id = artifacts.run_id
-            WHERE runs.scope = ? ORDER BY runs.created_at, runs.id, artifacts.trial_id
+            WITH head AS (
+                SELECT COALESCE((
+                    SELECT revision FROM source_heads WHERE scope = ?
+                ), 0) AS revision
+            ), selected AS (
+                SELECT artifacts.*, runs.created_at FROM trial_artifacts AS artifacts
+                JOIN runs ON runs.id = artifacts.run_id WHERE runs.scope = ?
+            )
+            SELECT head.revision, selected.* FROM head LEFT JOIN selected ON 1 = 1
+            ORDER BY selected.created_at, selected.run_id, selected.trial_id
             """,
-            (scope,),
+            (scope, scope),
         ).rows
+        return ArtifactGeneration(
+            revision=cast(int, rows[0]['revision']),
+            artifacts=tuple(
+                TrialArtifact(
+                    run_id=cast(str, row['run_id']),
+                    trial_id=cast(str, row['trial_id']),
+                    source_trial_id=cast(str, row['source_trial_id']),
+                    commit_sha=cast(str, row['commit_sha']),
+                    path=cast(str, row['path']),
+                    manifest_digest=cast(str, row['manifest_digest']),
+                )
+                for row in rows
+                if row['run_id'] is not None
+            ),
+        )
 
     def complete_run(self, run_id: str) -> bool:
         """Close a run whose claims settled or were cancelled before execution.
@@ -717,27 +768,27 @@ class State:
             ).rows
         ]
 
-    def baseline(self, system: str) -> str | None:
+    def baseline(self, system: str, context_key: str) -> str | None:
         rows = self._database.execute(
             """
             SELECT records.record_json FROM canary_records AS records
             JOIN canary_baselines AS baselines ON baselines.run_id = records.run_id
-            WHERE baselines.system = ?
+            WHERE baselines.system = ? AND baselines.context_key = ?
             """,
-            (system,),
+            (system, context_key),
         ).rows
         return cast(str, rows[0]['record_json']) if rows else None
 
-    def establish_baseline(self, system: str, run: str) -> bool:
+    def establish_baseline(self, system: str, context_key: str, run: str) -> bool:
         """Keep the first baseline the caller has accepted as successful."""
         return bool(
             self._database.execute(
                 """
-            INSERT INTO canary_baselines (system, run_id)
-            SELECT system, run_id FROM canary_records WHERE system = ? AND run_id = ?
-            ON CONFLICT (system) DO NOTHING RETURNING run_id
+            INSERT INTO canary_baselines (system, context_key, run_id)
+            SELECT system, ?, run_id FROM canary_records WHERE system = ? AND run_id = ?
+            ON CONFLICT (system, context_key) DO NOTHING RETURNING run_id
             """,
-                (system, run),
+                (context_key, system, run),
             ).rows
         )
 
@@ -763,6 +814,7 @@ class State:
             code_revision=cast(str | None, row['code_revision']),
             case_revision=cast(str | None, row['case_revision']),
             created_at=cast(str, row['created_at']),
+            max_requests=cast(int | None, row['max_requests']),
         )
 
     def _claim_row(self, claim_id: str) -> Row:

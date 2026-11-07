@@ -261,6 +261,7 @@ def _run_families(
                 {system.name: Accounting.of(system) for system in selected},
                 scope=family.name,
                 run_id=str(uuid4()),
+                expected_source_revision=context.source_revision(family),
             )
         finally:
             context.refresh_sources(family)
@@ -529,7 +530,11 @@ def _named_systems(
 
 
 def _families_with_jobs(context: RunContext) -> list[str]:
-    return [name for name in family_names() if context.state.artifacts(name)]
+    return [
+        name
+        for name in family_names()
+        if context.state.artifact_generation(name).artifacts
+    ]
 
 
 def _prepare(

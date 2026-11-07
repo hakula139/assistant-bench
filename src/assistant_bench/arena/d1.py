@@ -48,7 +48,9 @@ class _Config(BaseModel):
 
 
 @contextmanager
-def connect(target: TargetName) -> Generator[database.Database]:
+def connect(
+    target: TargetName, *, credential: str | None = None
+) -> Generator[database.Database]:
     """Open the target's database with the token in the file `.env` names.
 
     Raises
@@ -76,9 +78,10 @@ def connect(target: TargetName) -> Generator[database.Database]:
             'record its ID there.'
         )
 
+    credential = credential if credential is not None else token()
     with httpx.Client(
         base_url=database.API_BASE_URL,
-        headers={'Authorization': f'Bearer {token()}'},
+        headers={'Authorization': f'Bearer {credential}'},
         timeout=database.TIMEOUT_SEC,
     ) as client:
         yield database.RestDatabase(client, config.account_id, binding.database_id)

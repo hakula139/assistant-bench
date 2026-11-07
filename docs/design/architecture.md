@@ -12,9 +12,7 @@ src/assistant_bench/
 ├── arena/
 │   ├── commands.py                         # Publication, status and moderation commands
 │   ├── d1.py                               # Each hosted target's database and credential sources
-│   ├── local.py                            # The local SQLite store, lock, signing keys and Worker lifecycle
-│   ├── publication.py                      # Publications of current outputs and their idempotent activation
-│   ├── stores.py                           # Connections to hosted and local vote stores
+│   ├── publication.py                      # Immutable reviewed publications and their conditional activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
 ├── canaries.py                             # Route probes, their baseline comparison, and independent attempt records
@@ -23,7 +21,7 @@ src/assistant_bench/
 ├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
-├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, each system's one fingerprint, and pool conflicts
+├── outputs.py                              # Output records, immutable cloud generations, fingerprints and pool conflicts
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
 │   ├── accounting.py                       # Paid request admission and durable usage receipts
@@ -47,7 +45,7 @@ src/assistant_bench/
 │   ├── pass_rates.py                       # Task-clustered pass-rate intervals, pass^k, and the paired leader test
 │   ├── ranking.py                          # Bradley-Terry point fit and its descriptive diagnostics
 │   └── weighting.py                        # Family-wide cumulative actor caps
-├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
+├── families.py                             # Family, gate, case and vote models with explicit pinned source roots
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
 ├── state.py                                # Private run claims, immutable records and active collection pointers
 ├── artifacts.py                            # Pinned private Git cases and immutable raw trial archives
