@@ -14,7 +14,7 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     devkit = {
-      url = "github:hakula139/devkit/v1.0.0-rc.3";
+      url = "github:hakula139/devkit/88f619538cc3a79bf223e538504251264e02b4e9";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -87,6 +87,7 @@
         # Pre-commit Hooks
         # ------------------------------------------------------------------------------------------
         hooks = {
+          dprint.enable = false;
           # The patch adds `concurrency.queue`, unreleased as of v1.7.12. Drop it once Nixpkgs ships
           # a newer actionlint.
           actionlint = {
