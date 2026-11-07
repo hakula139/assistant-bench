@@ -143,7 +143,7 @@ describe('GET /api/pair', () => {
       const random = vi.spyOn(crypto, 'randomUUID').mockReturnValue(actor);
       const from = await admitted();
       random.mockRestore();
-      const rank = ranker(env.ACTOR_KEY, await actorOf(from), SYNTHETIC);
+      const rank = ranker('test-actor-key', await actorOf(from), SYNTHETIC);
       const outputs = (
         await env.DB.prepare(
           "SELECT output_key, system, content_digest FROM outputs WHERE verdict = 'pass' AND publication_id = ?",
@@ -266,6 +266,47 @@ describe('GET /api/pair', () => {
     expect(state.pair?.id).not.toBe(pair?.id);
     expect(state.pair?.instruction).toMatch(/^Instruction case-\d$/);
     expect(state.remaining).toBe(6);
+  });
+
+  test('rejects a draw superseded during sample loading and preserves the newer pending pair', async () => {
+    await publish(SYNTHETIC, threeWay(2));
+    const from = await admitted();
+    const prepare = env.DB.prepare.bind(env.DB);
+    let replacement: string | undefined;
+    let switched = false;
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      const statement = prepare(query);
+      if (query.includes('system IN (?, ?)')) {
+        const bind = statement.bind.bind(statement);
+        vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+          const bound = bind(...values);
+          const all = bound.all.bind(bound);
+          vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
+            const result = await all<T>();
+            if (!switched) {
+              switched = true;
+              await publish(SYNTHETIC, threeWay(2), 'replacement');
+              replacement = (await pairOf(from, SYNTHETIC)).pair?.id;
+            }
+            return result;
+          });
+          return bound;
+        });
+      }
+      return statement;
+    });
+
+    const response = await call(from, 'GET', `/pair?family=${SYNTHETIC}`);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'stale_pair' });
+    expect(replacement).toEqual(expect.any(String));
+    expect(
+      await env.DB.prepare('SELECT id, publication_id FROM pairs WHERE family = ?')
+        .bind(SYNTHETIC)
+        .all(),
+    ).toMatchObject({ results: [{ id: replacement, publication_id: 'replacement' }] });
+    expect((await pairOf(from, SYNTHETIC)).pair?.id).toBe(replacement);
   });
 
   test('answers null once the actor has voted on every comparison', async () => {

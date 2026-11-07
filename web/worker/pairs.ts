@@ -88,7 +88,8 @@ const COVERAGE = `
 /** Keeps a pair that another request issued on the same publication meanwhile. */
 const ISSUE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?
+  WHERE EXISTS (SELECT 1 FROM active WHERE family = ? AND publication_id = ?)
   ON CONFLICT (actor_id, family) DO UPDATE SET
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at
@@ -302,10 +303,25 @@ async function issue(
   const [, pending] = await db.batch([
     db
       .prepare(ISSUE)
-      .bind(crypto.randomUUID(), actor, family, publication, drawn.caseKey, drawn.a, drawn.b, now),
+      .bind(
+        crypto.randomUUID(),
+        actor,
+        family,
+        publication,
+        drawn.caseKey,
+        drawn.a,
+        drawn.b,
+        now,
+        family,
+        publication,
+      ),
     db.prepare(PENDING).bind(actor, family),
   ]);
-  return (pending.results as PendingRow[]).at(0);
+  const current = (pending.results as PendingRow[]).at(0);
+  if (current?.publication_id !== publication) {
+    throw new ApiError(409, 'stale_pair');
+  }
+  return current;
 }
 
 /**

@@ -463,6 +463,12 @@ class TestPublish:
                     'first', 'acme-large', text='Distinct.', trial='first__large__2'
                 ),
                 make_trial('first', 'acme-small', text='Shared.'),
+                make_trial(
+                    'first',
+                    'acme-small',
+                    text='Small distinct.',
+                    trial='first__small__2',
+                ),
                 make_trial('first', 'acme-pro', [Gate.EMPTY], text=''),
                 *(make_trial('second', system) for system in ARENA_SYSTEMS),
                 make_trial('same', 'acme-large', text='Same.'),
