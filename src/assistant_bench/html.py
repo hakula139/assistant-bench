@@ -59,11 +59,7 @@ def _document(text: str) -> str | None:
     if len(tokens) != 1 or tokens[0].type != 'fence':
         return text
     token = tokens[0]
-    if (
-        token.type != 'fence'
-        or token.info.strip().lower() != 'html'
-        or token.map is None
-    ):
+    if token.info.strip().lower() != 'html' or token.map is None:
         return None
 
     lines = re.findall(r'[^\r\n]*(?:\r\n|\r|\n|$)', text)

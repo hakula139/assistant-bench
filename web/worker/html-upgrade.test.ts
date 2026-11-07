@@ -16,13 +16,13 @@ const tables = [
   'publications',
 ] as const;
 
-async function storedRows() {
+async function storedRows(): Promise<Record<string, Record<string, unknown>[]>> {
   return Object.fromEntries(
     await Promise.all(
-      tables.map(async (table) => [
-        table,
-        (await env.DB.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).results,
-      ]),
+      tables.map(async (table) => {
+        const { results } = await env.DB.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+        return [table, results] as const;
+      }),
     ),
   );
 }
