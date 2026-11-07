@@ -9,7 +9,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,9 @@ from assistant_bench.artifacts import (
     FileEntry,
     MaterializedTrial,
     TrialManifest,
+    audit_trial,
     build_manifest,
+    snapshot_trial,
 )
 from assistant_bench.families import Family, load_family
 from assistant_bench.messages import InputError
@@ -151,6 +153,17 @@ def contents(path: Path) -> bytes:
     return os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes()
 
 
+class TestAuditTrial:
+    def test_refuses_a_known_credential_in_an_empty_directory_name(
+        self, tmp_path: Path
+    ) -> None:
+        marker = 'sensitive-marker-for-test'
+        (tmp_path / 'artifacts' / marker).mkdir(parents=True)
+
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(tmp_path, {marker})
+
+
 class TestFileEntry:
     @pytest.mark.parametrize(
         'path',
@@ -179,6 +192,53 @@ class TestFileEntry:
 
 
 class TestTrialManifest:
+    @pytest.mark.parametrize(
+        'directory',
+        [
+            '/outside',
+            '../outside',
+            'job/other/artifacts',
+            'job/{trial}/artifacts/app/__pycache__',
+            'job/{trial}/artifacts/app/answer.txt',
+            'job/{trial}/artifacts/app/link/child',
+            'job/{trial}/artifacts/app/LINK',
+        ],
+        ids=['absolute', 'parent', 'other-trial', 'cache', 'file', 'symlink', 'alias'],
+    )
+    def test_directories_cannot_escape_or_collide_with_retained_files(
+        self, trial: Trial, directory: str
+    ) -> None:
+        directories = tuple(
+            sorted(
+                [
+                    *trial.manifest.directories,
+                    directory.format(trial=trial.result.trial_name),
+                ]
+            )
+        )
+
+        with pytest.raises(ValidationError):
+            TrialManifest.model_validate(
+                {**trial.manifest.model_dump(), 'directories': directories}
+            )
+
+    @pytest.mark.parametrize('failure', ['missing', 'repeated', 'unsorted'])
+    def test_directories_are_required_unique_and_canonical(
+        self, trial: Trial, failure: str
+    ) -> None:
+        payload = trial.manifest.model_dump()
+        if failure == 'missing':
+            del payload['directories']
+        elif failure == 'repeated':
+            payload['directories'] = tuple(
+                sorted([*trial.manifest.directories, trial.manifest.directories[0]])
+            )
+        else:
+            payload['directories'] = tuple(reversed(trial.manifest.directories))
+
+        with pytest.raises(ValidationError):
+            TrialManifest.model_validate(payload)
+
     @pytest.mark.parametrize('root', ['agent', 'verifier', 'artifacts'])
     @pytest.mark.parametrize('mode', ['100644', '120000'])
     def test_artifact_roots_must_be_directories(
@@ -650,13 +710,16 @@ class TestArtifactRepository:
 
             assert git(repository.remote, 'rev-parse', 'main') == reference.commit_sha
 
-        def test_rechecks_selected_files_after_the_manifest_was_built(
-            self, repository: PrivateRepository, trial: Trial
+        @pytest.mark.parametrize('change', ['file', 'directory'])
+        def test_rechecks_selected_files_and_directories_after_the_manifest_was_built(
+            self, repository: PrivateRepository, trial: Trial, change: str
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
-            (trial.job / trial.result.trial_name / 'agent' / 'output.txt').write_text(
-                'Changed after audit.\n'
-            )
+            root = trial.job / trial.result.trial_name
+            if change == 'file':
+                (root / 'agent' / 'output.txt').write_text('Changed after audit.\n')
+            else:
+                (root / 'artifacts' / 'new-empty').mkdir()
 
             with pytest.raises(InputError):
                 publish(repository, trial)
@@ -725,6 +788,41 @@ class TestArtifactRepository:
             )
 
     class TestMaterialize:
+        def test_preserves_frozen_empty_directories_after_the_original_client_is_gone(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            root = trial.job / trial.result.trial_name
+            shutil.rmtree(root / 'artifacts')
+            empty = ('artifacts', 'agent/logs/artifacts', 'verifier/logs')
+            for relative in empty:
+                (root / relative).mkdir(parents=True, exist_ok=True)
+            frozen = tmp_path / 'frozen'
+            snapshot_trial(trial.job, frozen, trial.result.trial_name)
+            manifest = snapshot(replace(trial, job=frozen))
+            shutil.rmtree(trial.job.parent)
+
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(frozen, manifest)]
+            )
+            shutil.rmtree(frozen)
+            restored = repository.client.materialize(reference, tmp_path / 'fresh')
+
+            assert restored.manifest == manifest
+            for relative in empty:
+                directory = restored.job / trial.result.trial_name / relative
+                assert directory.is_dir() and not directory.is_symlink(), relative
+                assert list(directory.iterdir()) == [], relative
+                assert (
+                    f'job/{trial.result.trial_name}/{relative}' in manifest.directories
+                )
+            for directory in manifest.directories:
+                assert (restored.job / Path(directory).relative_to('job')).is_dir()
+            assert {
+                path.relative_to(restored.job).as_posix()
+                for path in restored.job.rglob('*')
+                if path.is_file() or path.is_symlink()
+            } == {entry.path.removeprefix('job/') for entry in manifest.files}
+
         def test_unknown_historical_revisions_survive_publication_and_restoration(
             self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
@@ -767,10 +865,6 @@ class TestArtifactRepository:
             (outside / 'sentinel.txt').write_bytes(
                 b'Leave this external tree unchanged.\n'
             )
-            probe = tmp_path / 'case-probe'
-            probe.mkdir()
-            (probe / 'A').touch()
-            aliases = (probe / 'a').exists()
             reference = publish(repository, trial)
             prefix = f'job/{trial.result.trial_name}/artifacts/app'
             additions = {
@@ -787,18 +881,15 @@ class TestArtifactRepository:
                 )
                 for path, (mode, content) in additions.items()
             ]
-            manifest = TrialManifest.model_validate(
-                {
-                    **trial.manifest.model_dump(),
-                    'files': tuple(
-                        sorted(
-                            [*trial.manifest.files, *entries],
-                            key=lambda item: item.path,
-                        )
-                    ),
-                }
-            )
-            additions['manifest.json'] = ('100644', manifest.content())
+            payload = trial.manifest.model_dump(mode='json')
+            payload['files'] = [
+                entry.model_dump(mode='json')
+                for entry in sorted(
+                    [*trial.manifest.files, *entries], key=lambda item: item.path
+                )
+            ]
+            content = f'{json.dumps(payload, indent=2)}\n'.encode()
+            additions['manifest.json'] = ('100644', content)
             git(repository.remote, 'read-tree', reference.commit_sha)
             for path, (mode, content) in additions.items():
                 blob = (
@@ -839,27 +930,17 @@ class TestArtifactRepository:
             changed = ArtifactRef(
                 commit_sha=commit,
                 path=reference.path,
-                manifest_digest=hashlib.sha256(manifest.content()).hexdigest(),
+                manifest_digest=hashlib.sha256(content).hexdigest(),
             )
 
-            restored = None
-            error = None
-            try:
-                restored = repository.client.materialize(changed, tmp_path / 'restored')
-            except InputError as failure:
-                error = failure
+            with pytest.raises(InputError):
+                repository.client.materialize(changed, tmp_path / 'restored')
 
             assert sorted(path.name for path in outside.iterdir()) == ['sentinel.txt']
             assert (
                 outside / 'sentinel.txt'
             ).read_bytes() == b'Leave this external tree unchanged.\n'
-            assert (error is not None) == aliases, error
-            if restored is not None:
-                workspace = restored.job / trial.result.trial_name / 'artifacts' / 'app'
-                assert (
-                    workspace / 'a' / 'file.txt'
-                ).read_bytes() == b'Keep these artifact bytes.\n'
-                assert (workspace / 'A').is_symlink()
+            assert not (tmp_path / 'restored').exists()
 
         @pytest.mark.parametrize(
             'failure', ['bytes', 'mode', 'manifest', 'extra', 'missing']
