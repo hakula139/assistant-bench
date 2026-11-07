@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
@@ -13,29 +13,32 @@ from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.spend import Entry, PendingAttempt, read_ledger
-from assistant_bench.state import AttemptStart, RequestAdmission, State
+from assistant_bench.state import (
+    ArtifactGeneration,
+    AttemptStart,
+    RequestAdmission,
+    Run,
+    State,
+    TrialArtifact,
+)
 from support import START, accounted_trial, private_database
 
 
-class FinalizeAfterRead:
+class CommitAfterRead:
     def __init__(
         self,
         reader: SQLiteDatabase,
-        writer: State,
-        claim_id: str,
-        entry: Entry,
+        commit: Callable[[], None],
     ) -> None:
         self.reader = reader
-        self.writer = writer
-        self.claim_id = claim_id
-        self.entry = entry
+        self.commit = commit
         self.finished = False
 
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
         result = self.reader.execute(sql, params)
         if not self.finished:
             self.finished = True
-            self.writer.record_entry(self.claim_id, self.entry.model_dump_json())
+            self.commit()
         return result
 
 
@@ -73,7 +76,12 @@ class TestAccountingSnapshot:
                 entry = Entry(
                     **attempt.model_dump(), job=run.job, price=None, ceiling_usd=None
                 )
-                database = FinalizeAfterRead(reader, state, recorder.claim_id, entry)
+                database = CommitAfterRead(
+                    reader,
+                    lambda: state.record_entry(
+                        recorder.claim_id, entry.model_dump_json()
+                    ),
+                )
 
                 during = read_ledger('sample', State(database))
                 after = read_ledger('sample', State(reader))
@@ -89,6 +97,44 @@ class TestAccountingSnapshot:
                     )
                 ]
                 assert after == [entry]
+
+    def test_artifact_inventory_and_revision_cannot_straddle_registration(
+        self, tmp_path: Path
+    ) -> None:
+        with (
+            private_database(tmp_path / 'state.sqlite') as reader,
+            private_database(tmp_path / 'state.sqlite') as writer,
+        ):
+            state = State(writer)
+            state.create_run(
+                Run('run-a', 'sample', 'job-a', '1' * 40, '2' * 40, START.isoformat())
+            )
+            artifact = TrialArtifact(
+                run_id='run-a',
+                trial_id='trial-a',
+                source_trial_id='source-trial-a',
+                commit_sha='a' * 40,
+                path='runs/run-a/trials/artifact-a',
+                manifest_digest='b' * 64,
+            )
+
+            def register() -> None:
+                state.record_trial_artifact(
+                    artifact.run_id,
+                    artifact.trial_id,
+                    artifact.source_trial_id,
+                    artifact.commit_sha,
+                    artifact.path,
+                    artifact.manifest_digest,
+                )
+
+            during = State(CommitAfterRead(reader, register)).artifact_generation(
+                'sample'
+            )
+            after = State(reader).artifact_generation('sample')
+
+            assert during == ArtifactGeneration(revision=0, artifacts=())
+            assert after == ArtifactGeneration(revision=1, artifacts=(artifact,))
 
 
 class TestBoundedAdmission:

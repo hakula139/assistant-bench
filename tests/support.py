@@ -937,6 +937,7 @@ class StubEndpoint:
     status: int = 200
     statuses: list[int] = field(default_factory=list)
     response_headers: dict[str, str] = field(default_factory=dict)
+    content_type: str | None = None
     response: dict[str, Any] = field(default_factory=completion)
     responses: list[dict[str, Any]] = field(default_factory=list)
     stream: list[bytes] | None = None
@@ -1002,7 +1003,8 @@ def serve_stub(
             self.send_response(stub.statuses.pop(0) if stub.statuses else stub.status)
             self.send_header(
                 'Content-Type',
-                'text/event-stream' if stream is not None else 'application/json',
+                stub.content_type
+                or ('text/event-stream' if stream is not None else 'application/json'),
             )
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
