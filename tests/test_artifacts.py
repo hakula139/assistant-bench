@@ -173,7 +173,7 @@ def trial(
         job,
         scope='sample',
         run_id='run-a',
-        claim_id='claim-a',
+        artifact_id='artifact-a',
         trial_id=str(result.id),
         job_name=job.name,
         trial_name=result.trial_name,
@@ -185,7 +185,7 @@ def trial(
 
 def publish(repository: Repository, trial: Trial) -> ArtifactRef:
     return repository.client.publish_trial(
-        'run-a', 'claim-a', trial.job, trial.manifest
+        'run-a', 'artifact-a', trial.job, trial.manifest
     )
 
 
@@ -194,7 +194,7 @@ def snapshot(trial: Trial) -> TrialManifest:
         trial.job,
         scope=trial.manifest.scope,
         run_id=trial.manifest.run_id,
-        claim_id=trial.manifest.claim_id,
+        artifact_id=trial.manifest.artifact_id,
         trial_id=trial.manifest.trial_id,
         job_name=trial.manifest.job_name,
         trial_name=trial.manifest.trial_name,
@@ -442,7 +442,7 @@ class TestArtifactRepository:
             manifest = snapshot(trial)
 
             reference = repository.client.publish_trial(
-                manifest.run_id, manifest.claim_id, trial.job, manifest
+                manifest.run_id, manifest.artifact_id, trial.job, manifest
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
@@ -490,7 +490,7 @@ class TestArtifactRepository:
 
             assert git(repository.remote, 'rev-parse', 'main') == before
 
-        def test_refuses_overwriting_a_claim_with_different_content(
+        def test_refuses_overwriting_an_artifact_with_different_content(
             self, repository: Repository, trial: Trial
         ) -> None:
             reference = publish(repository, trial)
@@ -500,7 +500,7 @@ class TestArtifactRepository:
                 trial.job,
                 scope='sample',
                 run_id='run-a',
-                claim_id='claim-a',
+                artifact_id='artifact-a',
                 trial_id=str(trial.result.id),
                 job_name=trial.job.name,
                 trial_name=trial.result.trial_name,
@@ -509,7 +509,9 @@ class TestArtifactRepository:
             )
 
             with pytest.raises(InputError):
-                repository.client.publish_trial('run-a', 'claim-a', trial.job, changed)
+                repository.client.publish_trial(
+                    'run-a', 'artifact-a', trial.job, changed
+                )
 
             assert git(repository.remote, 'rev-parse', 'main') == reference.commit_sha
 
@@ -546,13 +548,13 @@ class TestArtifactRepository:
                 {
                     **trial.manifest.model_dump(),
                     'run_id': 'run-b',
-                    'claim_id': 'claim-b',
+                    'artifact_id': 'artifact-b',
                 }
             )
 
             def push(manifest: TrialManifest) -> ArtifactRef:
                 return ArtifactRepository(SLUG).publish_trial(
-                    manifest.run_id, manifest.claim_id, trial.job, manifest
+                    manifest.run_id, manifest.artifact_id, trial.job, manifest
                 )
 
             with ThreadPoolExecutor(max_workers=2) as writers:
@@ -596,7 +598,7 @@ class TestArtifactRepository:
                     )
 
             reference = repository.client.publish_trial(
-                manifest.run_id, manifest.claim_id, trial.job, manifest
+                manifest.run_id, manifest.artifact_id, trial.job, manifest
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
@@ -760,7 +762,7 @@ class TestArtifactRepository:
             (workspace / 'external').symlink_to(outside)
             manifest = snapshot(trial)
             reference = repository.client.publish_trial(
-                manifest.run_id, manifest.claim_id, trial.job, manifest
+                manifest.run_id, manifest.artifact_id, trial.job, manifest
             )
 
             restored = repository.client.materialize(reference, tmp_path / 'restored')

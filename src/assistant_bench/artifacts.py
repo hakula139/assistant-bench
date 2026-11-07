@@ -63,7 +63,7 @@ class ArtifactRef(_Model):
     def _trial_path(self) -> Self:
         parts = _path_parts(self.path)
         if len(parts) != 4 or parts[0] != 'runs' or parts[2] != 'trials':
-            raise ValueError('an artifact reference names runs/<run>/trials/<claim>')
+            raise ValueError('an artifact reference names runs/<run>/trials/<artifact>')
         return self
 
 
@@ -72,7 +72,7 @@ class TrialManifest(_Model):
 
     scope: Component
     run_id: Component
-    claim_id: Component
+    artifact_id: Component
     trial_id: Component
     job_name: Component
     trial_name: Component
@@ -82,7 +82,7 @@ class TrialManifest(_Model):
 
     @property
     def path(self) -> str:
-        return f'runs/{self.run_id}/trials/{self.claim_id}'
+        return f'runs/{self.run_id}/trials/{self.artifact_id}'
 
     def content(self) -> bytes:
         """Return the canonical UTF-8 bytes identified by the manifest digest."""
@@ -124,7 +124,7 @@ def build_manifest(
     *,
     scope: str,
     run_id: str,
-    claim_id: str,
+    artifact_id: str,
     trial_id: str,
     job_name: str,
     trial_name: str,
@@ -141,7 +141,7 @@ def build_manifest(
         return TrialManifest(
             scope=scope,
             run_id=run_id,
-            claim_id=claim_id,
+            artifact_id=artifact_id,
             trial_id=trial_id,
             job_name=job_name,
             trial_name=trial_name,
@@ -199,7 +199,7 @@ class ArtifactRepository:
     def publish_trial(
         self,
         run_id: str,
-        claim_id: str,
+        artifact_id: str,
         source_job_dir: Path,
         manifest: TrialManifest,
     ) -> ArtifactRef:
@@ -209,7 +209,7 @@ class ArtifactRepository:
         A competing writer is reconciled only by adding this trial's new path.
         A returned reference never names an unconfirmed local commit.
         """
-        if (run_id, claim_id) != (manifest.run_id, manifest.claim_id):
+        if (run_id, artifact_id) != (manifest.run_id, manifest.artifact_id):
             raise InputError('The publication identifiers do not match the manifest.')
         selected = list(_selected_files(source_job_dir, manifest.trial_name))
         if tuple(entry for entry, _ in selected) != manifest.files:
