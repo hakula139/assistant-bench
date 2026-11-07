@@ -6,7 +6,7 @@ import re
 import stat
 import subprocess
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -516,9 +516,12 @@ def _command(
     cwd: Path | None = None,
     content: bytes | None = None,
     check: bool = True,
+    environment: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     try:
-        result = subprocess.run(arguments, cwd=cwd, input=content, capture_output=True)
+        result = subprocess.run(
+            arguments, cwd=cwd, input=content, capture_output=True, env=environment
+        )
     except FileNotFoundError as error:
         raise InputError('Private artifacts require `git` and `gh` on PATH.') from error
     if check and result.returncode:
@@ -533,21 +536,32 @@ def _git(
     content: bytes | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    return _command(['git', '-C', str(root), *arguments], content=content, check=check)
+    variables = (
+        _command(['git', 'rev-parse', '--local-env-vars']).stdout.decode().splitlines()
+    )
+    environment = {
+        name: value for name, value in os.environ.items() if name not in variables
+    }
+    return _command(
+        ['git', '-C', str(root), *arguments],
+        content=content,
+        check=check,
+        environment=environment,
+    )
 
 
 def _clone(repository: _Repository, root: Path) -> Path:
     clone = root / 'repository'
-    _command(
+    _git(
+        root,
         [
-            'git',
             'clone',
             '--filter=blob:none',
             '--no-checkout',
             '--',
             repository.ssh_url,
             str(clone),
-        ]
+        ],
     )
     return clone
 
