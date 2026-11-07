@@ -86,6 +86,7 @@ const errorCode = z.enum([
   'not_found',
   'too_large',
   'admission_required',
+  'reload_required',
   'challenge_failed',
   'no_round',
   'stale_pair',

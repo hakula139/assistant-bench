@@ -189,7 +189,7 @@ export async function freshness(
   store: Bindings['STORE'],
   query: FreshnessQuery,
 ): Promise<Freshness> {
-  if (store === 'staging' || query[store] === undefined) {
+  if (store === 'staging' || store === 'private' || query[store] === undefined) {
     return 'unknown';
   }
   const row = await db

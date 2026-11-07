@@ -91,6 +91,48 @@ name = "RATE_LIMIT"
 namespace_id = "91272530491927"
 simple = { limit = 60, period = 60 }
 
+# ── Private ──
+
+[env.private]
+name = "assistant-bench-private"
+main = "worker/index.ts"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "bench-private.hakula.xyz", custom_domain = true }]
+
+[env.private.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "404-page"
+run_worker_first = true
+
+[env.private.vars]
+APP_ORIGIN = "https://bench-private.hakula.xyz"
+STORE = "private"
+
+[env.private.secrets]
+required = [
+  "ACTOR_KEY",
+  "IP_TAG_KEY",
+  "ACCESS_ISSUER",
+  "ACCESS_AUDIENCE",
+  "PRIVATE_OWNER_EMAILS",
+  "PRIVATE_ACTOR_ID",
+]
+
+[env.private.triggers]
+crons = ["0 3 * * *"]
+
+[[env.private.d1_databases]]
+binding = "DB"
+database_name = "assistant-bench-private"
+database_id = "b49c3a73-e91a-4f29-9c60-16c98e0238cb"
+
+[[env.private.ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "38912473908615"
+simple = { limit = 60, period = 60 }
+
 # ── Local ──
 
 [env.local]
