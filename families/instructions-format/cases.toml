@@ -96,3 +96,428 @@ language = "zh"
 rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
 targets = ["han-punctuation", "ellipsis"]
 quoted_input = ["山间,晨雾…"]
+
+[[cases]]
+id = "library-booking"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write an English email confirming a fictional library's map-room booking from 2 pm to 4 pm on Thursday. Explain the key pickup procedure in a second paragraph. Keep each Markdown paragraph on one physical source line. Use straight quotation marks and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "ferry-delay"
+category = "message"
+source = "synthetic"
+instruction = '''
+Rewrite this fictional ferry announcement in natural English: “The crossing is delayed… Please wait near Gate B.” State that the next update is at noon. Write your own notice without quoting the original. Use straight quotes, three periods for an ellipsis, and one physical source line per Markdown paragraph.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["ellipsis", "curly-quotes"]
+
+[[cases]]
+id = "pottery-workshop"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write a two-paragraph English welcome message for a fictional pottery workshop. The first paragraph explains that beginners share tools, and the second explains that finished pieces are collected the following week. Keep every paragraph on a single physical source line. Use straight quotes and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "sensor-setup"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write a short English setup guide for a fictional room-temperature sensor. Use an ordered Markdown list with three single-paragraph items: insert the battery, place the sensor away from sunlight, and record the first reading. Leave no blank lines between these simple items. Keep each paragraph on one physical source line, use straight quotes, and write an ellipsis as three periods.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "seed-bank-transfer"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Explain in English how volunteers transfer a fictional seed collection to new shelves. Use two top-level Markdown bullet items. The first contains a simple nested list for checking labels and envelopes, and the second contains two separate paragraphs about recording the transfer. Separate every top-level item and each nested part with a blank line, while keeping simple nested items tight. Keep each paragraph on one physical source line, use straight quotes, and use three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing", "paragraph-lines"]
+
+[[cases]]
+id = "tide-calendar-tree"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Describe a fictional tide-calendar project in one short English paragraph, followed by one code block containing its directory tree. Include data/, notebooks/, and README.md, with a # comment explaining each entry. Align every # at the same source column and leave at least three spaces after the longest path. Keep the prose paragraph on one physical source line, use straight quotes, and use three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+kind = "directory-tree"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "tree-comments"]
+targets = ["tree-comments"]
+
+[[cases]]
+id = "field-notes-tree"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English handover note for a fictional field-notes repository. Include a fenced directory tree with observations/, calibration-records/, and index.md. Put an explanatory # comment after each path, align all comment markers in one source column, and leave at least three spaces after every path. Keep any prose paragraph on one physical source line, with straight quotes and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+kind = "directory-tree"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "tree-comments"]
+targets = ["tree-comments"]
+
+[[cases]]
+id = "train-museum-citation"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write an English reply about a fictional railway museum's damaged caption. The following literal input includes both surrounding curly quote characters:
+
+```text
+“Platform…seven”
+```
+
+Copy that entire line into a Markdown blockquote, preserving both curly quote characters and the ellipsis exactly. Then write a paragraph explaining that the caption's intended location is uncertain. In your own prose, use straight quotes and three periods for an ellipsis. Keep every paragraph on one physical source line.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["ellipsis", "curly-quotes"]
+quoted_input = ["“Platform…seven”"]
+
+[[cases]]
+id = "draft-label"
+category = "message"
+source = "synthetic"
+instruction = '''
+Turn this fictional volunteer record into a public English announcement: the riverbank cleanup starts at 9 am, gloves are provided, and the record's internal marker is RIVER_DRAFT_482. Omit that marker everywhere in your response. Keep Markdown paragraphs on one physical source line, use straight quotes, and write an ellipsis with three periods.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+targets = ["forbidden-marker"]
+forbidden_marker = "RIVER_DRAFT_482"
+
+[[cases]]
+id = "audit-export"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English summary of a fictional archive export: 120 public records were copied and two unreadable records were skipped. The source metadata contains the internal marker ARCHIVE_CHECK_906. Exclude that marker from all text and code in your response. Use one physical source line per Markdown paragraph, straight quotes, and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+targets = ["forbidden-marker", "paragraph-lines"]
+forbidden_marker = "ARCHIVE_CHECK_906"
+
+[[cases]]
+id = "rain-gauge-warning"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write a brief English note explaining that a fictional garden's rain gauge is being cleaned and its readings should be ignored until Monday. Include one sentence reassuring volunteers that the watering schedule is unchanged. Write one Markdown paragraph on one physical source line. Use straight quotes and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "radio-manual"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Explain the imaginary radio controls called “Listen” and “Send” in simple English. Rewrite these labels using straight quotation marks in your explanation. Use two concise paragraphs, each on one physical source line in Markdown. If you use an ellipsis, write three periods. Any simple list must have no blank lines between its items.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["curly-quotes"]
+
+[[cases]]
+id = "recorder-battery-guide"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English guide for a fictional audio recorder using two top-level Markdown bullet items. The first explains battery replacement and includes a fenced code block containing battery_status(). The second explains safe storage. Because one item has a code block, leave a blank line between every item and before the code block. Keep each prose paragraph on one physical source line, use straight quotes, and write ellipses as three periods.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "support-popup"
+category = "message"
+source = "synthetic"
+instruction = '''
+Draft an English message for a fictional file-copy dialog. The copy has paused, the files already copied are safe, and the user can resume after reconnecting a drive. Do not quote the draft text “Working…”. Write fresh wording with straight quotes and three periods for any ellipsis. Keep each Markdown paragraph on one physical source line.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["ellipsis", "curly-quotes"]
+
+[[cases]]
+id = "archive-link"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English note introducing a fictional online catalog. Include the Markdown link [catalog](https://example.com/catalog/…) with its destination unchanged, then explain in your own words that the displayed collection is incomplete. Outside the link destination, use three periods for an ellipsis and straight quotes. Keep each Markdown paragraph on one physical source line.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["ellipsis"]
+
+[[cases]]
+id = "decimal-measurements"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Explain in English why a fictional terrarium log distinguishes 2.5 litres from 25 litres. Use a short paragraph followed by a simple two-item Markdown list of recording tips. Keep the list tight, with no blank lines between its items, and keep each paragraph on one physical source line. Use straight quotes and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing", "paragraph-lines"]
+
+[[cases]]
+id = "revision-summary"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English summary of three fictional handbook revisions: the pickup desk moved upstairs, paper forms were replaced by reusable cards, and a weekend contact number was added. Use two connected paragraphs with each paragraph occupying one physical source line in Markdown. Use straight quotes and three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "night-observatory"
+category = "message"
+source = "synthetic"
+instruction = '''
+为虚构的社区观星台写一则中文通知，说明本周六的活动因云层过厚而取消，预约者可以改约下周。写两个自然段，每段在 Markdown 源码中只占一行。自己写的中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines", "han-punctuation"]
+
+[[cases]]
+id = "puzzle-club"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文给虚构的拼图社团写三项器材归还规则，使用简单 Markdown 有序列表，每项只含一个自然段，项与项之间不留空行。每段源码只占一行。中文之间用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "herbarium-lending"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文说明虚构植物标本室的借阅流程。使用两个顶层 Markdown 无序列表项，第一项内嵌一个列出两种凭证的简单列表，第二项分成两个自然段解释归还与登记。整个顶层列表的项之间，以及嵌套部分之前，都留一行空白，简单嵌套列表自身保持紧凑。每段源码只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing", "paragraph-lines"]
+
+[[cases]]
+id = "canal-audio-tree"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用一段中文介绍虚构的运河声音资料项目，再在代码块中列出包含 clips/、transcripts/ 和 index.md 的目录树。每一项后写以 # 开头的中文注释，让所有 # 位于相同源码列，并在每条路径后至少留三个空格。说明段落在源码中只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+kind = "directory-tree"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+targets = ["tree-comments"]
+
+[[cases]]
+id = "mineral-index-tree"
+category = "docs"
+source = "synthetic"
+instruction = '''
+给虚构的矿物照片索引写一份简短中文交接说明，并用一个代码块展示 raw/、processed-images/ 和 catalog.md 的目录树。每条路径后都写以 # 开头的说明，所有 # 对齐在同一源码列，每条路径后至少留三个空格。自己写的中文段落在源码中各占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+kind = "directory-tree"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+targets = ["tree-comments"]
+
+[[cases]]
+id = "bus-stop-sign"
+category = "message"
+source = "synthetic"
+instruction = '''
+用中文解释一块虚构站牌的排版问题。先在 Markdown 引用块中逐字引用原文「车辆,暂缓…」，再另写一个自然段给出更清楚的措辞建议。引用保留原样，自己写的中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点，每段源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis"]
+quoted_input = ["车辆,暂缓…"]
+
+[[cases]]
+id = "tide-label-quotation"
+category = "message"
+source = "synthetic"
+instruction = '''
+用中文回应虚构海洋展馆的标签修订请求。把原标签「潮起:岸边…」原样放在 Markdown 引用块中，然后用自己的话解释如何让读者理解观测时间。引用之外，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点，每段源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis"]
+quoted_input = ["潮起:岸边…"]
+
+[[cases]]
+id = "clay-studio-window"
+category = "message"
+source = "synthetic"
+instruction = '''
+把虚构陶艺室的旧提示「通风,请开窗.离开:请关灯…」改写成自然的中文通知，不要引用旧提示。说明只有值班人员可以调整窑炉。自己写的中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点，每段 Markdown 源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis"]
+
+[[cases]]
+id = "festival-poster"
+category = "message"
+source = "synthetic"
+instruction = '''
+根据虚构活动记录写一则中文海报文案，内容是周日下午两点举办旧书交换会，参与者最多带五本书。记录还含内部标记 BOOK_FAIR_264，最终回复的任何部分都不要出现这个标记。每段源码只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "forbidden-marker"]
+targets = ["forbidden-marker"]
+forbidden_marker = "BOOK_FAIR_264"
+
+[[cases]]
+id = "seed-packet-inventory"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文概述虚构种子柜的盘点结果：登记了八十袋种子，三袋需要更换标签。输入记录中的内部标记 SEED_AUDIT_815 不能出现在回复的正文、引用或代码块中。用两个自然段说明结果与下一步，每段源码只占一行，中文之间用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "forbidden-marker"]
+targets = ["forbidden-marker", "paragraph-lines"]
+forbidden_marker = "SEED_AUDIT_815"
+
+[[cases]]
+id = "weather-kite"
+category = "message"
+source = "synthetic"
+instruction = '''
+为虚构的风筝观察小组写一段中文说明，提醒大家在记录风向时写明时间，并在风力突然增强时停止活动。整段在 Markdown 源码中只占一行。中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "photography-walk"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文介绍虚构的街区摄影路线，并保留 Markdown 链接 [路线](https://example.com/walk/…) 的目标地址。说明路线地图只记录公共通道。链接地址之外，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点，每段 Markdown 源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["ellipsis", "han-punctuation"]
+
+[[cases]]
+id = "book-repair-parts"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文给虚构的书籍修补工作台写两项准备步骤。用两个顶层 Markdown 无序列表项，第一项内含一个代码块，代码块中只有 check_supplies()，第二项说明清理桌面的要求。因为列表项包含代码块，所有顶层项之间及代码块之前都留空行。每段源码只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "trail-cleaning"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文写一份虚构步道清理活动的说明，使用两个顶层 Markdown 有序列表项。第一项包含一段说明和一个列举两件工具的嵌套列表，第二项包含两个自然段。所有顶层列表项之间以及嵌套部分之前都留空行，简单嵌套列表的项之间不留空行。每段源码只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing", "paragraph-lines"]
+
+[[cases]]
+id = "municipal-clock"
+category = "message"
+source = "synthetic"
+instruction = '''
+为虚构钟表展写一段中文说明，解释两只演示钟的误差分别是 2.5 秒与 25 秒，工作人员会在闭馆后校准。保留数字的小数点，中文之间的逗号、句号和冒号使用全角形式。省略号只用三个半角句点，每段 Markdown 源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation"]
+
+[[cases]]
+id = "translation-workshop"
+category = "docs"
+source = "synthetic"
+instruction = '''
+将虚构翻译活动的草稿「签到,领纸.分组:讨论…」改写成三个中文步骤，使用简单 Markdown 无序列表，每项只含一个自然段，项与项之间不留空行。不要引用草稿。中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点，每段源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis", "list-spacing"]
+
+[[cases]]
+id = "archive-hours"
+category = "message"
+source = "synthetic"
+instruction = '''
+用两个中文自然段介绍虚构地方资料室的开放安排：周二到周五下午开放，预约阅览需要提前一天登记，扫描服务只在周三提供，闭馆前十五分钟停止取件。每段在 Markdown 源码中只占一行。中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
