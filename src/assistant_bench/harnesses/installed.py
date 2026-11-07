@@ -26,10 +26,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from assistant_bench.catalog import load_export
 from assistant_bench.harnesses import cache, proxy
+from assistant_bench.harnesses.accounting import current_trial
 from assistant_bench.harnesses.docker import check_local_context
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
-from assistant_bench.harnesses.usage import append_attempt, record_calls
+from assistant_bench.harnesses.usage import record_calls
 
 
 class PinnedVersion(BaseModel):
@@ -117,12 +118,14 @@ class ClaudeCode(HarborClaudeCode):
         endpoint = Endpoint.read(self._get_env, 'anthropic-messages')
         assert isinstance(self.options, ClaudeCodeOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
         model = self.model_name.removeprefix('anthropic/') if self.model_name else ''
         calls: list[dict[str, Any]] = []
         failed = True
         try:
             async with proxy.connect(
-                endpoint, 'anthropic-messages', model
+                endpoint, 'anthropic-messages', model, recorder=recorder
             ) as connection:
                 calls = connection.calls
                 self._base_url = connection.url
@@ -135,7 +138,10 @@ class ClaudeCode(HarborClaudeCode):
                 await super().run(instruction, environment, context)
             failed = False
         finally:
-            await _finish(self, environment, context, started_at, calls, failed=failed)
+            try:
+                await _finish(self, environment, context, calls, failed=failed)
+            finally:
+                recorder.finish(datetime.now(UTC))
 
 
 class Codex(HarborCodex):
@@ -171,11 +177,15 @@ class Codex(HarborCodex):
         endpoint = Endpoint.read(self._get_env, 'openai-responses')
         assert isinstance(self.options, CodexOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
         model = self.model_name.removeprefix('openai/') if self.model_name else ''
         calls: list[dict[str, Any]] = []
         failed = True
         try:
-            async with proxy.connect(endpoint, 'openai-responses', model) as connection:
+            async with proxy.connect(
+                endpoint, 'openai-responses', model, recorder=recorder
+            ) as connection:
                 calls = connection.calls
                 self._base_url = f'{connection.url}/v1'
                 self._extra_env.update(
@@ -187,14 +197,16 @@ class Codex(HarborCodex):
                 await super().run(instruction, environment, context)
             failed = False
         finally:
-            await _finish(self, environment, context, started_at, calls, failed=failed)
+            try:
+                await _finish(self, environment, context, calls, failed=failed)
+            finally:
+                recorder.finish(datetime.now(UTC))
 
 
 async def _finish(
     agent: ClaudeCode | Codex,
     environment: BaseEnvironment,
     context: AgentContext,
-    started_at: datetime,
     calls: list[dict[str, Any]],
     *,
     failed: bool,
@@ -211,13 +223,12 @@ async def _finish(
             'Native agent logs could not be synchronized after a failed run.'
         )
     finally:
-        _record(agent, context, started_at, calls)
+        _record(agent, context, calls)
 
 
 def _record(
     agent: ClaudeCode | Codex,
     context: AgentContext,
-    started_at: datetime,
     calls: list[dict[str, Any]],
 ) -> None:
     assert isinstance(agent.options, ClaudeCodeOptions | CodexOptions)
@@ -228,4 +239,3 @@ def _record(
         'harbor_version': metadata.version('harbor'),
     }
     record_calls(context, calls)
-    append_attempt(agent.logs_dir, agent.options, started_at, calls)
