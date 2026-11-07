@@ -1175,5 +1175,5 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         votes=tuple(votes),
         excluded=2 * days,
     )
-    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut)
+    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
     return snapshot, outputs

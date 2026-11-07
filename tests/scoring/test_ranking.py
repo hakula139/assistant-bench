@@ -24,6 +24,35 @@ from assistant_bench.scoring.ranking import (
 STRENGTHS = {'large': 0.8, 'medium': 0.3, 'small': -0.4}
 
 
+def test_split_difference_uses_case_clusters_and_centered_common_scores() -> None:
+    public = [
+        Comparison('a', 'b', score, f'public-{case}', sided=False)
+        for case in range(30)
+        for score in (1.0, 1.0, 0.0)
+    ]
+    held = [
+        Comparison('a', 'b', score, f'held-{case}', sided=False)
+        for case in range(30)
+        for score in (0.0, 0.0, 1.0)
+    ]
+
+    result, reason = ranking.split_difference(public, held)
+
+    assert reason is None and result is not None
+    assert result.systems == ('a', 'b')
+    assert result.difference[0] > 100
+    assert result.difference.sum() == pytest.approx(0)
+    assert result.half_width[0] == pytest.approx(result.half_width[1])
+
+    repeated = [row._replace(case='same') for row in held]
+    assert ranking.split_difference(public, repeated) == (None, 'insufficient_cases')
+    separated = [row._replace(score=1.0) for row in held]
+    assert ranking.split_difference(public, separated) == (None, 'separated_fit')
+    identical, _ = ranking.split_difference(public, public)
+    assert identical is not None
+    assert identical.difference == pytest.approx([0, 0])
+
+
 def simulate(
     n: int, seed: int = 0, position: float = 0.25, cases: int = 40
 ) -> list[Comparison]:

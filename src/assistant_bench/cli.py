@@ -16,7 +16,7 @@ from harbor.models.job.config import JobConfig
 from typer.core import TyperGroup
 
 from assistant_bench import collection, jobs, report
-from assistant_bench.arena import commands, votes
+from assistant_bench.arena import commands, local, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import D1Error, connect
 from assistant_bench.arguments import (
@@ -272,27 +272,32 @@ def close(
 
 
 def _take_snapshot(family: Family) -> Path:
-    """Save production's cut of the family's votes and return the snapshot's path."""
+    """Save the family's available store cuts at one closing timestamp."""
     assert isinstance(family.settings, VotesSettings)
-    if not family.settings.public_voting:
-        raise InputError(
-            f'Family `{family.name}` sets no `public_voting`, so no store holds its '
-            'votes.'
-        )
-
     taken_at = datetime.now(UTC)
-    with connect('production') as database:
-        cut = votes.read_cut(database, family.name, taken_at)
+    production = None
+    local_cut = None
+    with local.lock():
+        if family.settings.public_voting:
+            with connect('production') as database:
+                production = votes.read_cut(database, family.name, taken_at)
+        if local.exists():
+            with local.database() as database:
+                local_cut = votes.read_cut(database, family.name, taken_at)
 
-    if cut is None:
+    if production is None and local_cut is None:
         raise InputError(
-            f'Family `{family.name}` has no active publication in production, so it '
-            'has no votes to close. Publish one with `uv run bench arena publish '
-            'production <file>`.'
+            f'Family `{family.name}` has no active voting publication. '
+            'Publish production cases or run `uv run bench serve` first.'
         )
 
     path = votes.write_snapshot(
-        votes.Snapshot(family=family.name, taken_at=taken_at, production=cut)
+        votes.Snapshot(
+            family=family.name,
+            taken_at=taken_at,
+            production=production,
+            local=local_cut,
+        )
     )
     typer.echo(f'Votes saved to `{path}`.')
     return path
@@ -304,7 +309,7 @@ def _close_votes(family: Family, path: Path) -> report.Report:
         votes.voting_input(snapshot, family, read_outputs(family.name)),
         datetime.now(UTC),
         fingerprints=votes.fingerprints(snapshot),
-        system_names=snapshot.production.inventory.systems,
+        system_names=votes.system_names(snapshot),
     )
 
 

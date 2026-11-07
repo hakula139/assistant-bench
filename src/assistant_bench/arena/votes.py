@@ -9,7 +9,14 @@ from pathlib import Path
 from statistics import median
 from typing import Literal, Protocol, get_args
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Json, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Json,
+    ValidationError,
+    model_validator,
+)
 
 from assistant_bench.arena.d1 import Database, Param, Row
 from assistant_bench.arena.publication import (
@@ -83,7 +90,63 @@ class Snapshot(_Model):
 
     family: FamilyName
     taken_at: AwareDatetime
-    production: Cut
+    production: Cut | None
+    local: Cut | None
+
+    @model_validator(mode='after')
+    def validate_cuts(self) -> Snapshot:
+        cuts = self.cuts()
+        if not cuts:
+            raise ValueError('A snapshot requires at least one store cut.')
+        cases: set[str] = set()
+        outputs: set[str] = set()
+        fingerprints: dict[str, str] = {}
+        first = cuts[0][1].inventory
+        for _, cut in cuts:
+            inventory = cut.inventory
+            if inventory.family != self.family:
+                raise ValueError('Every cut must belong to the snapshot family.')
+            if (
+                inventory.reference != first.reference
+                or inventory.systems != first.systems
+                or inventory.defects != first.defects
+            ):
+                raise ValueError('Store cuts disagree on their frozen family settings.')
+            case_keys = {case.key for case in inventory.cases}
+            output_keys = {output.key for output in inventory.outputs}
+            if len(case_keys) != len(inventory.cases) or len(output_keys) != len(
+                inventory.outputs
+            ):
+                raise ValueError('A cut contains duplicate case or output keys.')
+            if cases & case_keys or outputs & output_keys:
+                raise ValueError('Store cuts must have disjoint case and output keys.')
+            for output in inventory.outputs:
+                if (
+                    output.case_key not in case_keys
+                    or output.system not in inventory.systems
+                ):
+                    raise ValueError(
+                        'A cut output must belong to its case and system inventory.'
+                    )
+                if (
+                    output.system in fingerprints
+                    and fingerprints[output.system] != output.fingerprint
+                ):
+                    raise ValueError('Store cuts disagree on a system fingerprint.')
+                fingerprints[output.system] = output.fingerprint
+            if any(vote.id > cut.cutoff for vote in cut.votes):
+                raise ValueError('A cut contains a vote beyond its cutoff.')
+            cases.update(case_keys)
+            outputs.update(output_keys)
+        return self
+
+    def cuts(self) -> tuple[tuple[Literal['production', 'local'], Cut], ...]:
+        cuts: list[tuple[Literal['production', 'local'], Cut]] = []
+        if self.production is not None:
+            cuts.append(('production', self.production))
+        if self.local is not None:
+            cuts.append(('local', self.local))
+        return tuple(cuts)
 
 
 # ── Reading a Store ──
@@ -439,10 +502,22 @@ def voting_input(
             f'The snapshot belongs to family `{snapshot.family}`, not `{family.name}`.'
         )
 
-    cut = snapshot.production
-    inventory = cut.inventory
+    cuts = snapshot.cuts()
+    inventory = cuts[0][1].inventory.model_copy(
+        update={
+            'cases': tuple(case for _, cut in cuts for case in cut.inventory.cases),
+            'outputs': tuple(
+                output for _, cut in cuts for output in cut.inventory.outputs
+            ),
+        }
+    )
     published = {output.key: output for output in inventory.outputs}
-    counted = [vote for vote in cut.votes if _counts(vote, published)]
+    counted = [
+        vote.model_copy(update={'actor': f'{store}:{vote.actor}'})
+        for store, cut in cuts
+        for vote in cut.votes
+        if _counts(vote, {output.key: output for output in cut.inventory.outputs})
+    ]
     actors = [vote.actor for vote in counted]
     ordinary = tuple(
         HumanEvidence(
@@ -469,7 +544,16 @@ def voting_input(
         reference=inventory.reference,
         systems=tuple(inventory.systems),
         defects=inventory.defects,
-        cutoffs=Cutoffs(production=Cutoff(id=cut.cutoff, votes=len(cut.votes))),
+        cutoffs=Cutoffs(
+            production=None
+            if snapshot.production is None
+            else Cutoff(
+                id=snapshot.production.cutoff, votes=len(snapshot.production.votes)
+            ),
+            local=None
+            if snapshot.local is None
+            else Cutoff(id=snapshot.local.cutoff, votes=len(snapshot.local.votes)),
+        ),
         declared_categories=tuple(family.settings.categories),
         categories=tuple((case.key, case.category) for case in inventory.cases),
         ordinary=ordinary,
@@ -477,15 +561,21 @@ def voting_input(
         outputs=tuple(
             _measurement(row, measured.get(row.key)) for row in inventory.outputs
         ),
-        dropped=len(cut.votes) - len(counted) + cut.excluded,
+        dropped=sum(len(cut.votes) + cut.excluded for _, cut in cuts) - len(counted),
+        splits=tuple((case.key, case.split) for case in inventory.cases),
     )
 
 
 def fingerprints(snapshot: Snapshot) -> dict[str, str]:
     return {
         output.system: output.fingerprint
-        for output in snapshot.production.inventory.outputs
+        for _, cut in snapshot.cuts()
+        for output in cut.inventory.outputs
     }
+
+
+def system_names(snapshot: Snapshot) -> dict[str, str]:
+    return snapshot.cuts()[0][1].inventory.systems
 
 
 def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:

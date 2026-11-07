@@ -8,7 +8,7 @@ import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 const closedAt = '2026-01-02T12:00:00Z';
 const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
 const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
-const cutoffs = { production: { id: 337, votes: 330 } };
+const cutoffs = { production: { id: 337, votes: 330 }, local: null };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);

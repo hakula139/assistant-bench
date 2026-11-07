@@ -158,6 +158,33 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
       </dl>
       <SnapshotStatus family={round.family} closedAt={round.closed_at} cutoffs={results.cutoffs} />
       <details className={note}>
+        <summary>Public and held-out comparison</summary>
+        <p>
+          Descriptive score differences compare public and held-out cases on their common system
+          field, centered on that field&apos;s mean. Private cases are excluded. This comparison
+          cannot establish whether a model trained on a case.
+        </p>
+        <p>
+          {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
+          {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
+          {results.public_held_out.unavailable === 'insufficient_cases'
+            ? ' At least 30 independent cases per split are required.'
+            : results.public_held_out.unavailable !== null
+              ? ' Comparable estimates are unavailable because the common system field lacks an identifiable connected fit with non-separated outcomes.'
+              : ' Intervals use independent case clusters at the recorded interval level.'}
+        </p>
+        {results.public_held_out.scores.length > 0 && (
+          <ul>
+            {results.public_held_out.scores.map((row) => (
+              <li key={row.system}>
+                {systemName(reportNames(round.systems), row.system)}: {formatScore(row.difference)}{' '}
+                points ({formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}).
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+      <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>
       </details>

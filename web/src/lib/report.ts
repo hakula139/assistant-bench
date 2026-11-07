@@ -84,7 +84,9 @@ const votesRules = z.strictObject({
 });
 
 const cutoff = z.strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() });
-const cutoffs = z.strictObject({ production: cutoff });
+const cutoffs = z
+  .strictObject({ production: cutoff.nullable(), local: cutoff.nullable() })
+  .refine((value) => value.production !== null || value.local !== null);
 
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
@@ -105,6 +107,26 @@ const votesResults = z.strictObject({
   categories: z.array(categoryBoard),
   length: z.number().nullable(),
   split_half_tau: z.number().nullable(),
+  public_held_out: z.strictObject({
+    public_cases: z.int().nonnegative(),
+    held_out_cases: z.int().nonnegative(),
+    unavailable: z
+      .enum([
+        'insufficient_cases',
+        'no_common_field',
+        'disconnected_field',
+        'unidentifiable_field',
+        'separated_fit',
+      ])
+      .nullable(),
+    scores: z.array(
+      z.strictObject({
+        system: z.string(),
+        difference: z.number(),
+        interval: scoreInterval,
+      }),
+    ),
+  }),
 });
 
 // ── Tests Results ──

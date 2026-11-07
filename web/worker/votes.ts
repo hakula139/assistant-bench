@@ -182,21 +182,19 @@ export async function undo(db: D1Database, actor: string, family: string, now: n
 }
 
 /**
- * Whether the family's counted production votes differ from what a round read, through a counted
- * vote after its cutoff or an exclusion or restore at or below it. Another store, or a round that
- * read no production votes, is `unknown`.
+ * Whether this store's counted votes differ from the round's cut, including moderation changes.
  */
 export async function freshness(
   db: D1Database,
   store: Bindings['STORE'],
   query: FreshnessQuery,
 ): Promise<Freshness> {
-  if (store !== 'production' || !('production' in query)) {
+  if (store === 'staging' || query[store] === undefined) {
     return 'unknown';
   }
   const row = await db
     .prepare(FRESHNESS)
-    .bind(query.family, Number(query.production), Number(query.production_votes))
+    .bind(query.family, Number(query[store]), Number(query[`${store}_votes`]))
     .first<{ stale: number }>();
   return row?.stale ? 'stale' : 'current';
 }

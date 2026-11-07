@@ -182,6 +182,67 @@ class Component:
     comparisons are separated, where the variance collapses toward zero."""
 
 
+@dataclass(frozen=True)
+class SplitDifference:
+    systems: tuple[str, ...]
+    difference: Floats
+    half_width: Floats
+
+
+def split_difference(
+    public: Sequence[Comparison], held_out: Sequence[Comparison]
+) -> tuple[SplitDifference | None, str | None]:
+    """Compare centered strengths on one common field with independent case clusters."""
+    if any(
+        len({row.case for row in rows if row.weight > 0}) < 30
+        for rows in (public, held_out)
+    ):
+        return None, 'insufficient_cases'
+    fields = [
+        {system for row in rows if row.weight > 0 for system in (row.left, row.right)}
+        for rows in (public, held_out)
+    ]
+    common = fields[0] & fields[1]
+    if len(common) < 2:
+        return None, 'no_common_field'
+    matchups = [
+        Matchups.build(
+            [row for row in rows if row.weight > 0 and {row.left, row.right} <= common]
+        )
+        for rows in (public, held_out)
+    ]
+    if any(set(rows.systems) != common for rows in matchups):
+        return None, 'disconnected_field'
+    if any(
+        len(rows.component(rows.systems[0]).systems) != len(common) for rows in matchups
+    ):
+        return None, 'disconnected_field'
+    if any(_weighted_cases(rows) < 30 for rows in matchups):
+        return None, 'insufficient_cases'
+    for rows in matchups:
+        design = _design(rows.left, rows.right, rows.sided, len(common), [])
+        required_rank = len(common) - 1 + int(bool(np.any(rows.sided)))
+        if np.linalg.matrix_rank(design) < required_rank:
+            return None, 'unidentifiable_field'
+        if _separated(rows):
+            return None, 'separated_fit'
+    points = [fit(rows) for rows in matchups]
+    covariance = sum(
+        (_covariance(rows, point) for rows, point in zip(matchups, points, strict=True))
+    )
+    critical = float(
+        stats.t.ppf(
+            (1 + INTERVAL_LEVEL) / 2,
+            min(_weighted_cases(rows) for rows in matchups) - 1,
+        )
+    )
+    return SplitDifference(
+        matchups[0].systems,
+        ELO_PER_LOGIT * (points[0].strength - points[1].strength),
+        critical * ELO_PER_LOGIT * np.sqrt(np.diag(covariance)),
+    ), None
+
+
 def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     """Fit Bradley-Terry with a left-side intercept by penalized logistic loss.
 

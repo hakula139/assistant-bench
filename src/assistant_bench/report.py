@@ -138,9 +138,16 @@ class Cutoff(_Model):
 
 
 class Cutoffs(_Model):
-    """Production's cutoff at closing."""
+    """Each store's cutoff at closing, null when it contributed no cut."""
 
-    production: Cutoff
+    production: Cutoff | None
+    local: Cutoff | None
+
+    @model_validator(mode='after')
+    def validate_stores(self) -> Cutoffs:
+        if self.production is None and self.local is None:
+            raise ValueError('At least one store cutoff is required.')
+        return self
 
 
 class ScoreInterval(_Model):
@@ -222,6 +229,30 @@ class CategoryBoard(_Model):
     unranked: list[str]
 
 
+class SplitScoreDifference(_Model):
+    system: str
+    difference: float
+    interval: ScoreInterval
+
+
+class SplitDiagnostic(_Model):
+    """Descriptive public-minus-held-out scores centered on the common field mean."""
+
+    public_cases: int
+    held_out_cases: int
+    unavailable: (
+        Literal[
+            'insufficient_cases',
+            'no_common_field',
+            'disconnected_field',
+            'unidentifiable_field',
+            'separated_fit',
+        ]
+        | None
+    )
+    scores: list[SplitScoreDifference]
+
+
 class VotesResults(_Model):
     """Point estimates, their intervals and leader decision, and diagnostics."""
 
@@ -262,6 +293,8 @@ class VotesResults(_Model):
     """Score points per length-difference standard deviation, if identifiable."""
     split_half_tau: float | None
     """Order agreement between alternating eligible votes, when measurable."""
+
+    public_held_out: SplitDiagnostic
 
     @model_validator(mode='after')
     def validate_decision(self) -> VotesResults:
@@ -615,6 +648,8 @@ class AnalysisInput:
     dropped: int
     """Votes left out of `ordinary`, including excluded ones."""
 
+    splits: tuple[tuple[str, Literal['public', 'held-out', 'private']], ...]
+
 
 # ── Votes Results ──
 
@@ -699,6 +734,43 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         split_half_tau=ranking.split_half_tau(
             [row.comparison for row in votes], board.root
         ),
+        public_held_out=_split_diagnostic(comparisons, dict(analysis.splits)),
+    )
+
+
+def _split_diagnostic(
+    comparisons: Sequence[ranking.Comparison],
+    splits: Mapping[str, Literal['public', 'held-out', 'private']],
+) -> SplitDiagnostic:
+    rows = [
+        [row for row in comparisons if splits[row.case] == split and row.weight > 0]
+        for split in ('public', 'held-out')
+    ]
+    difference, reason = ranking.split_difference(*rows)
+    return SplitDiagnostic.model_validate(
+        {
+            'public_cases': len({row.case for row in rows[0]}),
+            'held_out_cases': len({row.case for row in rows[1]}),
+            'unavailable': reason,
+            'scores': []
+            if difference is None
+            else [
+                {
+                    'system': system,
+                    'difference': float(gap),
+                    'interval': {
+                        'lower': float(gap - width),
+                        'upper': float(gap + width),
+                    },
+                }
+                for system, gap, width in zip(
+                    difference.systems,
+                    difference.difference,
+                    difference.half_width,
+                    strict=True,
+                )
+            ],
+        }
     )
 
 

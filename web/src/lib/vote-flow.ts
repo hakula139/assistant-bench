@@ -97,15 +97,16 @@ export const undoVote = (family: string) =>
   request(z.undefined(), 'POST', '/votes/undo', { family });
 
 /**
- * Asks whether the family's counted production votes still match what a round closed at its
- * production cutoff read.
+ * Asks whether this store's counted votes still match the round's cut.
  */
-export function checkFreshness(family: string, { production }: Cutoffs, signal: AbortSignal) {
-  const values: Record<string, string> = {
-    family,
-    production: String(production.id),
-    production_votes: String(production.votes),
-  };
+export function checkFreshness(family: string, cutoffs: Cutoffs, signal: AbortSignal) {
+  const values: Record<string, string> = { family };
+  for (const [store, cutoff] of Object.entries(cutoffs)) {
+    if (cutoff !== null) {
+      values[store] = String(cutoff.id);
+      values[`${store}_votes`] = String(cutoff.votes);
+    }
+  }
   return request(freshnessView, 'GET', `/freshness?${query(values)}`, undefined, signal);
 }
 

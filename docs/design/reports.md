@@ -4,7 +4,7 @@ A report publishes one closed round's aggregates under public system IDs. `repor
 
 ## Closing a Round
 
-`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family first saves a cut of its counted votes, which `--snapshot <path>` recloses later, while a test-scored family collects and aggregates its current trials. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
+`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family first saves cuts of its available production and local votes, which `--snapshot <path>` recloses later, while a test-scored family collects and aggregates its current trials. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
 
 Voted closure uses the cut's active publication, the collected measurements and the current family's labels. It requires eligible human choices or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
 
