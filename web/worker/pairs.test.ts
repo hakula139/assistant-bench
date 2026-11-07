@@ -130,7 +130,7 @@ describe('next', () => {
 describe('GET /api/pair', () => {
   test.each([
     '00000000-0000-4000-8000-000000000001',
-    '00000000-0000-4000-8000-000000000002',
+    '00000000-0000-4000-8000-000000000017',
   ] as const)(
     'draws the lowest-ranked distinct-content sample pair for actor %s',
     async (actor) => {
