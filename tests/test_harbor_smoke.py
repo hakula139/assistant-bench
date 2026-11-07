@@ -15,6 +15,7 @@ from harbor.models.trial.result import TrialResult
 from assistant_bench import collection, execution, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
+from assistant_bench.harnesses import docker
 from assistant_bench.harnesses.endpoint import HEADERS_VAR
 from assistant_bench.messages import InputError
 from assistant_bench.runtime import RunContext
@@ -33,6 +34,17 @@ from support import (
 
 
 pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
+
+
+@pytest.fixture
+def docker_execution(run_context: RunContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use the package resources the pinned Harbor child imports."""
+    resources = run_context.public_root / 'src' / 'assistant_bench' / 'harnesses'
+    monkeypatch.setattr(docker, 'HOST_OVERLAY', resources / 'docker-public.json')
+    monkeypatch.setattr(
+        docker, 'CONTROLLED_HOST_OVERLAY', resources / 'docker-controlled.json'
+    )
+    monkeypatch.setattr(jobs, 'run_job', run_host_job)
 
 
 @pytest.fixture
@@ -157,6 +169,7 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task(
         ),
     ],
 )
+@pytest.mark.usefixtures('docker_execution')
 def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     endpoint: StubEndpoint,
     export: NixosConfigExport,
@@ -171,7 +184,6 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv(HEADERS_VAR, '{"x-trace":"synthetic-docker-trace"}')
-    monkeypatch.setattr(jobs, 'run_job', run_host_job)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
@@ -328,6 +340,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
 )
 @pytest.mark.usefixtures('installed_downloads')
 @pytest.mark.parametrize('cancelled', [False, True], ids=['finished', 'cancelled'])
+@pytest.mark.usefixtures('docker_execution')
 def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     endpoint: StubEndpoint,
     families_dir: Path,
@@ -341,7 +354,6 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setenv(HEADERS_VAR, '{"x-trace":"synthetic-docker-trace"}')
-    monkeypatch.setattr(jobs, 'run_job', run_host_job)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
