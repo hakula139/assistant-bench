@@ -19,7 +19,11 @@ from assistant_bench.families import Gate, VotesSettings, load_cases, load_famil
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.harnesses.accounting import RequestReceipt
-from assistant_bench.harnesses.endpoint import CA_FILE_VAR, LOCAL_ADDRESS_VAR
+from assistant_bench.harnesses.endpoint import (
+    CA_FILE_VAR,
+    HEADERS_VAR,
+    LOCAL_ADDRESS_VAR,
+)
 from assistant_bench.harnesses.generate import OUTPUT_FILE, Generate, GenerateOptions
 from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.harnesses.native import NativeCompletionError
@@ -114,6 +118,9 @@ def collect_reply(
         root=run_context.root,
         sources=[],
     )
+    endpoint_env = endpoint.env | {
+        HEADERS_VAR: '{"x-trace": "synthetic-endpoint-trace"}'
+    }
 
     async def execute() -> AgentContext:
         async with executed_trial(
@@ -124,7 +131,7 @@ def collect_reply(
             agent = Generate(
                 logs_dir=trial.paths.agent_dir,
                 model_name=system.route,
-                extra_env=endpoint.env,
+                extra_env=endpoint_env,
                 **agent_kwargs(system),
             )
             await agent.run(
@@ -134,7 +141,10 @@ def collect_reply(
             )
             return context
 
-    context = asyncio.run(execute())
+    with pytest.MonkeyPatch.context() as environment:
+        for name, value in endpoint_env.items():
+            environment.setenv(name, value)
+        context = asyncio.run(execute())
     run_context.refresh_sources(family)
     (collected,) = collection.collect(
         family, {system.name: system}, run_context

@@ -51,6 +51,39 @@ class TestLoopbackRequestsOnly:
 
 
 class TestEndpoint:
+    def test_request_limit_denies_the_third_post_without_inventing_its_usage(
+        self, endpoint: StubEndpoint, private_state: State
+    ) -> None:
+        endpoint.status = 503
+        endpoint.response = {'error': {'message': 'Unavailable.'}}
+        configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+        with accounted_trial(
+            private_state, scope='bounded', max_requests=2
+        ) as recorder:
+            recorder.begin(START)
+
+            async def request() -> None:
+                async with configured.http_client('openai-responses') as client:
+                    for _ in range(2):
+                        reply = await client.post(
+                            f'{endpoint.url}/v1/responses', json={}
+                        )
+                        assert reply.status_code == 503
+                    with pytest.raises(AccountingError, match='was not granted'):
+                        await client.post(f'{endpoint.url}/v1/responses', json={})
+
+            asyncio.run(request())
+            recorder.finish(START)
+            attempt = recorder.attempt()
+
+        assert [sent.path for sent in endpoint.requests] == ['/v1/responses'] * 2
+        records = private_state.requests('bounded')
+        assert len(records) == 2
+        assert all(record['receipt_json'] is not None for record in records)
+        assert attempt is not None
+        assert attempt.responses == [None, None]
+
     def test_nonbillable_token_counting_needs_no_trial_admission(
         self, endpoint: StubEndpoint, private_state: State
     ) -> None:
