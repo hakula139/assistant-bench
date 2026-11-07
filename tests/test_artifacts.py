@@ -323,7 +323,7 @@ class TestArtifactRepository:
             restored = repository.client.materialize(reference, tmp_path / 'restored')
             source = repository.client.source(repository.revision, tmp_path / 'sources')
 
-        assert (restored / 'config.json').read_bytes() == (
+        assert (restored.job / 'config.json').read_bytes() == (
             trial.job / 'config.json'
         ).read_bytes()
         assert (source / 'sample.toml').read_bytes() == b'cases = []\r\n'
@@ -483,7 +483,7 @@ class TestArtifactRepository:
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
-            archived = restored / trial.result.trial_name / 'artifacts' / 'app'
+            archived = restored.job / trial.result.trial_name / 'artifacts' / 'app'
             assert (archived / 'answer.txt').read_bytes() == b'Answer.\r\n'
             assert (archived / '.gitattributes').read_bytes() == b'* text eol=lf\n'
 
@@ -609,7 +609,7 @@ class TestArtifactRepository:
                     reference, tmp_path / reference.path.split('/')[1]
                 )
                 assert (
-                    restored / trial.result.trial_name / 'agent' / 'output.txt'
+                    restored.job / trial.result.trial_name / 'agent' / 'output.txt'
                 ).read_bytes() == (
                     trial.job / trial.result.trial_name / 'agent' / 'output.txt'
                 ).read_bytes()
@@ -647,7 +647,8 @@ class TestArtifactRepository:
                 )
             )
             assert archived['code_revision'] is archived['case_revision'] is None
-            assert (restored / 'config.json').read_bytes() == (
+            assert restored.manifest == manifest
+            assert (restored.job / 'config.json').read_bytes() == (
                 trial.job / 'config.json'
             ).read_bytes()
 
@@ -747,7 +748,7 @@ class TestArtifactRepository:
             ).read_bytes() == b'Leave this external tree unchanged.\n'
             assert (error is not None) == aliases, error
             if restored is not None:
-                workspace = restored / trial.result.trial_name / 'artifacts' / 'app'
+                workspace = restored.job / trial.result.trial_name / 'artifacts' / 'app'
                 assert (
                     workspace / 'a' / 'file.txt'
                 ).read_bytes() == b'Keep these artifact bytes.\n'
@@ -804,7 +805,13 @@ class TestArtifactRepository:
 
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
-            link = restored / trial.result.trial_name / 'artifacts' / 'app' / 'external'
+            link = (
+                restored.job
+                / trial.result.trial_name
+                / 'artifacts'
+                / 'app'
+                / 'external'
+            )
             assert link.is_symlink()
             assert os.readlink(link) == str(outside)
             assert (
@@ -833,14 +840,14 @@ class TestArtifactRepository:
             )
 
             for item in trial.manifest.files:
-                path = restored / Path(item.path).relative_to('job')
+                path = restored.job / Path(item.path).relative_to('job')
                 assert contents(path) == originals[item.path], item.path
                 assert path.is_symlink() == (item.mode == '120000'), item.path
                 if not path.is_symlink():
                     assert bool(path.stat().st_mode & stat.S_IXUSR) == (
                         item.mode == '100755'
                     ), item.path
-            workspace = restored / trial.result.trial_name / 'artifacts' / 'app'
+            workspace = restored.job / trial.result.trial_name / 'artifacts' / 'app'
             for name in [
                 'Cargo.lock',
                 'yarn.lock',
@@ -876,7 +883,7 @@ class TestArtifactRepository:
                 reference, tmp_path / 'fresh'
             )
             prepared = tmp_path / 'prepared' / trial.manifest.job_name
-            shutil.copytree(restored, prepared, symlinks=True)
+            shutil.copytree(restored.job, prepared, symlinks=True)
             if minor_bump:
                 task = Task(trial.task, disable_verification=True)
                 assert task.config.task is not None
