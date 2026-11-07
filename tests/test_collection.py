@@ -333,6 +333,7 @@ class TestCollect:
             'text': 'Hi.',
             'reward': None,
             'gate_failures': [],
+            'checks': None,
             'finish_reason': 'stop',
             'stop_details': None,
             'input_tokens': 1_000,

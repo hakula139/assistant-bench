@@ -15,6 +15,7 @@ export type ScoredReport<S extends Scorer> = Report & {
 export type VotesReport = ScoredReport<'votes'>;
 
 export type TestsReport = ScoredReport<'tests'>;
+export type CheckersReport = ScoredReport<'checkers'>;
 
 /** A public family scored by `S`, whose config and rounds that scorer types. */
 interface ScoredFamily<S extends Scorer> {
@@ -37,8 +38,9 @@ interface ScoredFamily<S extends Scorer> {
 export type VotesFamily = ScoredFamily<'votes'>;
 
 export type TestsFamily = ScoredFamily<'tests'>;
+export type CheckersFamily = ScoredFamily<'checkers'>;
 
-export type Family = VotesFamily | TestsFamily;
+export type Family = VotesFamily | TestsFamily | CheckersFamily;
 
 /**
  * A family's path segment under its aspect: its ID without the aspect prefix.
@@ -124,7 +126,9 @@ export function publicFamilies(
       return [
         config.scorer === 'votes'
           ? { ...listing, scorer: 'votes', config, rounds: scoredRounds('votes', reports) }
-          : { ...listing, scorer: 'tests', config, rounds: scoredRounds('tests', reports) },
+          : config.scorer === 'tests'
+            ? { ...listing, scorer: 'tests', config, rounds: scoredRounds('tests', reports) }
+            : { ...listing, scorer: 'checkers', config, rounds: scoredRounds('checkers', reports) },
       ];
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));

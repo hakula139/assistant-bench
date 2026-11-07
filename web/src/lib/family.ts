@@ -39,6 +39,7 @@ export const familyConfigSchema = z
       ...shared,
     }),
     z.object({ scorer: z.literal('tests'), ...shared }),
+    z.object({ scorer: z.literal('checkers'), ...shared }),
   ])
   .and(visibility);
 

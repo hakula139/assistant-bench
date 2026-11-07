@@ -18,6 +18,8 @@ from harbor.models.trial.result import TrialResult
 from assistant_bench.catalog import System
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
+    Case,
+    CheckersSettings,
     Family,
     Gate,
     TaskTestsSettings,
@@ -35,6 +37,7 @@ from assistant_bench.jobs import (
     source_trials,
 )
 from assistant_bench.outputs import Output, tests_pass, write_outputs
+from assistant_bench.scoring.checkers import evaluate
 from assistant_bench.scoring.gates import failed_gates
 from assistant_bench.spend import Spend, summarize, update_ledger
 from assistant_bench.tasks import WORKSPACE, current_versions
@@ -159,7 +162,7 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
                 family,
                 candidate,
                 systems.get(candidate.system),
-                cases[candidate.case].instruction,
+                cases[candidate.case],
             )
             for group in groups.values()
             for candidate in group[: family.settings.samples]
@@ -181,7 +184,7 @@ def read_trials(family: Family, job_dir: Path) -> list[Output]:
     """
     cases = {case.id: case for case in load_cases(family)}
     return [
-        _output(family, candidate, None, cases[candidate.case].instruction)
+        _output(family, candidate, None, cases[candidate.case])
         for candidate in _read_trials(family, [job_source(job_dir)])
         if candidate.case in cases
     ]
@@ -253,7 +256,7 @@ def _output(
     family: Family,
     candidate: _Candidate,
     system: System | None,
-    instruction: str,
+    source: Case,
 ) -> Output:
     """Materialize the originating solution with its selected trial's verdict."""
     trial, origin, case = candidate.trial, candidate.origin, candidate.case
@@ -276,9 +279,18 @@ def _output(
         error=candidate.error,
         text=text,
         reward=reward,
+        checks=(
+            evaluate(
+                source.checks,
+                text,
+                completed=exception is None and finish_reason == 'stop',
+            )
+            if source.checks is not None
+            else None
+        ),
         gate_failures=_gate_failures(
             family,
-            instruction,
+            source.instruction,
             text,
             finish_reason,
             reward,
@@ -333,7 +345,7 @@ def _text(
                         case_task(family, case) / 'environment' / 'app',
                         source_host_path(artifacts, WORKSPACE),
                     )
-                case VotesSettings() | TaskTestsSettings():
+                case VotesSettings() | TaskTestsSettings() | CheckersSettings():
                     return None
                 case _:
                     assert_never(family.settings)
@@ -364,7 +376,7 @@ def _gate_failures(
                 return None
 
             return failed_gates(family.settings, text or '', finish_reason, instruction)
-        case TaskTestsSettings():
+        case TaskTestsSettings() | CheckersSettings():
             return None
         case _:
             assert_never(family.settings)

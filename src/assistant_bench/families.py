@@ -180,8 +180,32 @@ class TaskTestsSettings(_Settings):
     scorer: Literal['tests']
 
 
+class PromptPair(BaseModel):
+    """A controlled comparison of the same generation with added instructions."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    bare: str
+    prompted: str
+
+
+class CheckersSettings(_Settings):
+    """A single response per case, ranked by all applicable format checks."""
+
+    scorer: Literal['checkers']
+    samples: int = Field(default=1, ge=1, le=1)
+    pairs: list[PromptPair] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def _check_pairs(self) -> Self:
+        names = [name for pair in self.pairs for name in (pair.bare, pair.prompted)]
+        if len(set(names)) != len(names) or set(names) != set(self.systems):
+            raise ValueError('pairs must cover every listed system exactly once')
+        return self
+
+
 type Settings = Annotated[
-    VotesSettings | TaskTestsSettings, Field(discriminator='scorer')
+    VotesSettings | TaskTestsSettings | CheckersSettings, Field(discriminator='scorer')
 ]
 
 _SETTINGS = TypeAdapter[Settings](Settings)
@@ -191,6 +215,43 @@ _SETTINGS = TypeAdapter[Settings](Settings)
 
 
 type CaseSource = Literal['synthetic', 'public', 'transcript', 'held-out']
+
+type CheckRule = Literal[
+    'ellipsis',
+    'han-punctuation',
+    'curly-quotes',
+    'paragraph-lines',
+    'list-spacing',
+    'tree-comments',
+    'forbidden-marker',
+]
+
+
+class CheckContext(BaseModel):
+    """Scoring-only case facts, excluded from rendered instructions and versions."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    language: Language
+    kind: Literal['prose', 'directory-tree'] = 'prose'
+    rules: Unique[CheckRule] = Field(min_length=1)
+    targets: Unique[CheckRule] = []
+    quoted_input: list[str] = []
+    forbidden_marker: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode='after')
+    def _check_applicability(self) -> Self:
+        if 'han-punctuation' in self.rules and self.language != 'zh':
+            raise ValueError('han-punctuation requires Chinese prose')
+        if 'curly-quotes' in self.rules and self.language != 'en':
+            raise ValueError('curly-quotes requires English prose')
+        if 'tree-comments' in self.rules and self.kind != 'directory-tree':
+            raise ValueError('tree-comments requires a directory tree')
+        if ('forbidden-marker' in self.rules) != (self.forbidden_marker is not None):
+            raise ValueError('forbidden-marker requires exactly one planted marker')
+        if not set(self.targets) <= set(self.rules):
+            raise ValueError('targets must name applicable rules')
+        return self
 
 
 class Family(BaseModel):
@@ -213,6 +274,9 @@ class Case(BaseModel):
     source: CaseSource
     instruction: str
     checklist: list[str] = []
+    checks: CheckContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class _CaseManifest(BaseModel):
@@ -317,7 +381,7 @@ def _check_source_settings(family: Family) -> None:
     settings = family.settings
     prefix = f'Family `{family.name}`'
     if family.source == 'cases':
-        if not isinstance(settings, VotesSettings):
+        if not isinstance(settings, (VotesSettings, CheckersSettings)):
             raise InputError(
                 f'{prefix}: score a `cases.toml` family by `votes`, since only '
                 'a `tasks/` family has tests.'
@@ -328,12 +392,15 @@ def _check_source_settings(family: Family) -> None:
                 'so remove `harness`.'
             )
 
-        if settings.render == 'diff':
+        if isinstance(settings, VotesSettings) and settings.render == 'diff':
             raise InputError(
                 f'{prefix}: a `cases.toml` family yields replies, so set `render` '
                 'to `"text"`.'
             )
         return
+
+    if isinstance(settings, CheckersSettings):
+        raise InputError(f'{prefix}: `checkers` requires a `cases.toml` family.')
 
     if isinstance(settings, VotesSettings):
         gate_keys = [
@@ -376,6 +443,11 @@ def load_cases(family: Family) -> list[Case]:
     cases: dict[str, Case] = {}
     locations: dict[str, str] = {}
     for location, case in entries:
+        if isinstance(family.settings, CheckersSettings) != (case.checks is not None):
+            raise InputError(
+                f'Family `{family.name}`: case `{case.id}` needs scoring context '
+                'exactly when its scorer is `checkers`.'
+            )
         if case.id in cases:
             raise InputError(
                 f'Family `{family.name}`: case `{case.id}` appears at '

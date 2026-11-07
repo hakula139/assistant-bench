@@ -545,7 +545,8 @@ class TestLoadFamily:
                 False,
                 True,
                 "Family `f`: `family.toml`: Input tag 'judges' found using 'scorer' "
-                "does not match any of the expected tags: 'votes', 'tests'.",
+                "does not match any of the expected tags: 'votes', 'tests', "
+                "'checkers'.",
                 id='unknown-scorer',
             ),
             pytest.param(

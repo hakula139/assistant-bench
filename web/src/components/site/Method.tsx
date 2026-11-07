@@ -32,9 +32,17 @@ const stepIcons: Record<MethodStep['step'], LucideIcon> = {
   rate: Percent,
 };
 
-const scorerIcons: Record<Scorer, LucideIcon> = { votes: Vote, tests: FlaskConical };
+const scorerIcons: Record<Scorer, LucideIcon> = {
+  votes: Vote,
+  tests: FlaskConical,
+  checkers: ListChecks,
+};
 
-const aspectIcons: Record<Aspect, LucideIcon> = { writing: PenLine, coding: SquareTerminal };
+const aspectIcons: Record<Aspect, LucideIcon> = {
+  writing: PenLine,
+  coding: SquareTerminal,
+  instructions: ListChecks,
+};
 
 function Glyph({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
   return <Icon aria-hidden="true" className={cn('size-4 shrink-0', className)} />;

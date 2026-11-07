@@ -1,0 +1,36 @@
+---
+import { MethodStrip } from '@/components/site/Method';
+---
+
+<MethodStrip of="checkers" />
+<p>
+  Every system answers every case once. A case passes only when its response passes every applicable
+  deterministic rule. Empty, incomplete, errored and prose-free responses fail every applicable
+  rule. Rule diagnostics report their applicable case and response denominators separately from the
+  strict score.
+</p>
+<p>
+  The format checks cover three-period ellipses in authored prose, fullwidth punctuation between
+  Chinese characters, straight English quotes, one physical source line per Markdown paragraph, list
+  spacing, aligned directory-tree comments and omission of a planted marker. Code, link destinations
+  and exact declared input quotations are excluded from prose checks. Markdown and text fences are
+  parsed recursively.
+</p>
+<p>
+  A list with only single-paragraph items stays tight. If any item contains another paragraph, a
+  nested list or a code block, every item and each nested part is separated by a blank line. Tree
+  comments share a source column, with at least two comments and three spaces after each path. These
+  checks make no judgment about meaning, tone or factual accuracy.
+</p>
+<p>
+  Pass rates use the case as the sampling unit, with exact 95% Clopper-Pearson intervals. The leader
+  comparison uses the same exact paired sign test as the tests scorer. Systems the test cannot
+  separate remain tied.
+</p>
+<p>
+  Prompt effects compare each bare system with its instructed counterpart on the same cases. The
+  only generation difference is the added instruction prompt. Each effect is the mean
+  prompted-minus-bare binary case score, with a paired 95% percentile bootstrap interval when the
+  observed differences vary. An interval is absent when variation cannot be estimated. This is a
+  descriptive comparison.
+</p>

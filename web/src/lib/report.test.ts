@@ -70,7 +70,7 @@ describe('reportSchema', () => {
     expect(reportSchema.safeParse({ ...payload, [field]: value }).success).toBe(false);
   });
 
-  test.each(['report', 'report-early'] as const)(
+  test.each(['report', 'report-early', 'report-checkers'] as const)(
     'parses the %s votes round the pydantic models write',
     async (name) => {
       const payload = await readFixture(name);

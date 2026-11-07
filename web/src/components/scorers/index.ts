@@ -1,5 +1,7 @@
 import type { AstroComponentFactory } from 'astro/runtime/server/index.js';
 
+import CheckersBoard from '@/components/scorers/checkers/Board.astro';
+import CheckersMethod from '@/components/scorers/checkers/Method.astro';
 import TestsBoard from '@/components/scorers/tests/Board.astro';
 import TestsMethod from '@/components/scorers/tests/Method.astro';
 import TestsPanel from '@/components/scorers/tests/Panel.astro';
@@ -12,7 +14,7 @@ import TestsThenVotes from '@/components/scorers/votes/TestsThenVotes.astro';
 import { legendMarks, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import type { RenderSection } from '@/lib/method';
-import type { Family, TestsFamily, VotesFamily } from '@/lib/reports';
+import type { CheckersFamily, Family, TestsFamily, VotesFamily } from '@/lib/reports';
 
 /** How the site renders the families `F` of one scorer. */
 interface ScorerView<F extends Family> {
@@ -60,7 +62,19 @@ export const scorerViews = {
     marks: () => [],
     roundDetail: () => null,
   },
-} satisfies { votes: ScorerView<VotesFamily>; tests: ScorerView<TestsFamily> };
+  checkers: {
+    Board: CheckersBoard,
+    Panel: TestsPanel,
+    Method: CheckersMethod,
+    parts: {},
+    marks: () => [],
+    roundDetail: () => null,
+  },
+} satisfies {
+  votes: ScorerView<VotesFamily>;
+  tests: ScorerView<TestsFamily>;
+  checkers: ScorerView<CheckersFamily>;
+};
 
 /** Returns the views of a family's scorer, typed for the family. */
 export function viewOf<F extends Family>(family: F): ScorerView<F> {

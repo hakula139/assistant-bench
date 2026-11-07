@@ -1,0 +1,22 @@
+---
+import { CheckersBoard } from '@/components/boards/CheckersBoard';
+import Systems from '@/components/scorers/tests/Systems.astro';
+import { note } from '@/components/site/PageParts';
+import type { CheckersFamily, CheckersReport } from '@/lib/reports';
+
+interface Props {
+  family: CheckersFamily;
+  round: CheckersReport | undefined;
+}
+
+const { family, round } = Astro.props;
+---
+
+{round ? (
+  <CheckersBoard client:visible round={round} />
+) : (
+  <div class="flex flex-col gap-4">
+    <p class={note}>No round has closed yet.</p>
+    <Systems family={family} />
+  </div>
+)}

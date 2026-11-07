@@ -1,6 +1,8 @@
 # Ranking
 
-Votes families rank by point scores from pairwise votes, and tests families by [pass rates](#test-pass-rates).
+Votes families rank by point scores from pairwise votes, and tests and checkers families by [pass rates](#test-pass-rates).
+
+The checkers scorer gives a case a binary pass only when every applicable rule passes. It uses the case as its sampling unit, with the same exact pass-rate interval and paired leader comparison as task tests. Per-rule rates retain their applicable case and response denominators and provide no partial credit. Each bare / prompted comparison reports the mean paired case-score difference and a descriptive 95% SciPy paired percentile bootstrap interval. A single case or constant paired differences yield no interval because the observed sample cannot estimate variation.
 
 `scoring/ranking.py` fits a family's point scores. `report.py` records them with the method, rules and descriptive diagnostics. Every vote that [counts](arena.md#publication-and-closing) against the cut's active publication enters the cumulative evaluation. Excluded and other uncounted votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
 

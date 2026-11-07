@@ -1,0 +1,31 @@
+aspect = "instructions"
+display_name = "Format"
+scorer = "checkers"
+samples = 1
+public = false
+categories = ["docs", "message"]
+systems = [
+  "opus-5.5-high",
+  "opus-5.5-high-nixos",
+  "gpt-6-astra-high",
+  "gpt-6-astra-high-nixos",
+  "gpt-6.1-sol-high",
+  "gpt-6.1-sol-high-nixos",
+  "gemini-4-argon-high",
+  "gemini-4-argon-high-nixos",
+  "gemini-3.8-flash-high",
+  "gemini-3.8-flash-high-nixos",
+  "deepseek-v4.1-flash-1017-high",
+  "deepseek-v4.1-flash-1017-high-nixos",
+  "kimi-k3-high",
+  "kimi-k3-high-nixos",
+]
+pairs = [
+  { bare = "opus-5.5-high", prompted = "opus-5.5-high-nixos" },
+  { bare = "gpt-6-astra-high", prompted = "gpt-6-astra-high-nixos" },
+  { bare = "gpt-6.1-sol-high", prompted = "gpt-6.1-sol-high-nixos" },
+  { bare = "gemini-4-argon-high", prompted = "gemini-4-argon-high-nixos" },
+  { bare = "gemini-3.8-flash-high", prompted = "gemini-3.8-flash-high-nixos" },
+  { bare = "deepseek-v4.1-flash-1017-high", prompted = "deepseek-v4.1-flash-1017-high-nixos" },
+  { bare = "kimi-k3-high", prompted = "kimi-k3-high-nixos" },
+]

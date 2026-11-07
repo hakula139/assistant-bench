@@ -21,7 +21,7 @@ A `family.toml` lists its fields in this order:
 
 | Field           | Required                   | Meaning                                                                                                                                                                 |
 | --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`        | yes                        | `votes` for blind pairwise votes, or `tests` for a task family's test rewards. Case families use `votes`                                                                |
+| `scorer`        | yes                        | `votes` for blind pairwise votes, `tests` for task test rewards, or `checkers` for deterministic format checks of rendered cases                                        |
 | `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                     |
 | `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                           |
 | `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                        |

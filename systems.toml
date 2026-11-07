@@ -35,3 +35,48 @@ display_name = "DeepSeek V4.1 Flash 1017 · High"
 model = "kimi-k3"
 effort = "high"
 display_name = "Kimi K3 · High"
+
+["opus-5.5-high-nixos"]
+model = "claude-opus-5-5"
+api = "anthropic-messages"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "Claude Opus 5.5 · High · Instructions"
+
+["gpt-6-astra-high-nixos"]
+model = "gpt-6-astra"
+api = "openai-responses"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6 Astra · High · Instructions"
+
+["gpt-6.1-sol-high-nixos"]
+model = "gpt-6.1-sol"
+api = "openai-responses"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.1 Sol · High · Instructions"
+
+["gemini-4-argon-high-nixos"]
+model = "gemini-4-argon"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "Gemini 4 Argon · High · Instructions"
+
+["gemini-3.8-flash-high-nixos"]
+model = "gemini-3.8-flash"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "Gemini 3.8 Flash · High · Instructions"
+
+["deepseek-v4.1-flash-1017-high-nixos"]
+model = "deepseek-v4.1-flash"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "DeepSeek V4.1 Flash 1017 · High · Instructions"
+
+["kimi-k3-high-nixos"]
+model = "kimi-k3"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "Kimi K3 · High · Instructions"
