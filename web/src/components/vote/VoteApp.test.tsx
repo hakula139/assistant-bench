@@ -767,20 +767,20 @@ describe('VoteApp', () => {
 
     await user.keyboard('a{Enter}');
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(screen.getByTitle('Output A preview').getAttribute('src')).toBe(
         `/api/previews/${pairId(2)}/a`,
-      ),
-    );
+      );
+    });
     expect(api.casts.map(({ pair }) => pair)).toEqual([pairId(1)]);
 
     await user.click(screen.getByRole('button', { name: /Undo/ }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(screen.getByTitle('Output A preview').getAttribute('src')).toBe(
         `/api/previews/${pairId(1)}/a`,
-      ),
-    );
+      );
+    });
     expect(api.undone.map(({ pair }) => pair)).toEqual([pairId(1)]);
   });
 

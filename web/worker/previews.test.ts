@@ -109,17 +109,29 @@ describe('GET /api/previews/:pair/:side', () => {
       let from = await admitted();
       const pair = await htmlPair(from);
       let path = `/previews/${pair.id}/a`;
-      if (scenario === 'invalid-id') path = '/previews/not-a-uuid/a';
-      if (scenario === 'side') path = `/previews/${pair.id}/c`;
-      if (scenario === 'unknown') path = `/previews/${crypto.randomUUID()}/a`;
-      if (scenario === 'actor') from = await admitted('192.0.2.2');
+      if (scenario === 'invalid-id') {
+        path = '/previews/not-a-uuid/a';
+      }
+      if (scenario === 'side') {
+        path = `/previews/${pair.id}/c`;
+      }
+      if (scenario === 'unknown') {
+        path = `/previews/${crypto.randomUUID()}/a`;
+      }
+      if (scenario === 'actor') {
+        from = await admitted('192.0.2.2');
+      }
       if (scenario === 'render') {
         await env.DB.prepare("UPDATE publications SET render = 'text' WHERE family = ?")
           .bind(HTML)
           .run();
       }
-      if (scenario === 'publication') await publishHtml('replacement-publication');
-      if (scenario === 'cookie') from = browser();
+      if (scenario === 'publication') {
+        await publishHtml('replacement-publication');
+      }
+      if (scenario === 'cookie') {
+        from = browser();
+      }
 
       const response = await call(from, 'GET', path);
 
