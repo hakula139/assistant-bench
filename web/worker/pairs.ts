@@ -8,7 +8,7 @@ import { UNDO_MS } from './limits';
 
 interface ActiveRow {
   id: string;
-  render: 'text' | 'diff';
+  render: 'text' | 'diff' | 'html';
   defects: string;
 }
 
@@ -251,9 +251,9 @@ function view(
             instruction: pending.instruction,
             checklist: JSON.parse(pending.checklist) as string[],
             category: pending.category,
-            render: active.render,
-            a: pending.a,
-            b: pending.b,
+            ...(active.render === 'html'
+              ? { render: active.render }
+              : { render: active.render, a: pending.a, b: pending.b }),
             defects: JSON.parse(active.defects) as Defect[],
           },
     votes: voted.length,

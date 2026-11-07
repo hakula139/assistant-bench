@@ -25,6 +25,7 @@ export const admissionRequest = z.strictObject({
 });
 export const familyQuery = z.strictObject({ family: familyName });
 export const skipRequest = z.strictObject({ pair: pairId });
+export const previewRequest = z.strictObject({ pair: pairId, side: z.enum(['a', 'b']) });
 export const voteRequest = z.strictObject({
   pair: pairId,
   choice: choiceSchema,
@@ -61,16 +62,17 @@ export const familiesView = z.strictObject({
     }),
   ),
 });
-export const pairView = z.strictObject({
+const pairFields = {
   id: pairId,
   instruction: z.string(),
   checklist: z.array(z.string()),
   category: z.enum(categories),
-  render: z.enum(['text', 'diff']),
-  a: z.string(),
-  b: z.string(),
   defects: z.array(defectSchema),
-});
+};
+export const pairView = z.discriminatedUnion('render', [
+  z.strictObject({ ...pairFields, render: z.enum(['text', 'diff']), a: z.string(), b: z.string() }),
+  z.strictObject({ ...pairFields, render: z.literal('html') }),
+]);
 export const pairState = z.strictObject({
   pair: z.nullable(pairView),
   votes: count,

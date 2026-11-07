@@ -16,7 +16,7 @@ export function roundMethod(method: VotesMethod, rules: VotesRules): string {
 /** One stage of how a scorer turns outputs into a board, as the method strip draws it. */
 export interface MethodStep {
   /** The stage, where a run's stage names what it yields: text, a page, a diff, or a trial. */
-  step: 'text' | 'diff' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
+  step: 'text' | 'diff' | 'html' | 'trial' | 'gates' | 'pairs' | 'scores' | 'tests' | 'rate';
   title: string;
   detail: string;
   /** What the step means on a family's board, which its detail opens. */
@@ -46,7 +46,7 @@ const joiner = String.fromCodePoint(0x2060);
 const characters = ' characters';
 
 /** What makes a voted output lose its pairs without a vote, the checks `failed_gates` makes. */
-export function gateRule({ language, gates }: VotesConfig): string {
+export function gateRule({ language, gates, render }: VotesConfig): string {
   const { min_chars: min, max_chars: max } = gates;
   const length =
     min !== undefined && max !== undefined
@@ -59,6 +59,7 @@ export function gateRule({ language, gates }: VotesConfig): string {
   const problems = [
     'blank',
     'cut off',
+    render === 'html' ? 'outside the HTML document or isolation contract' : undefined,
     length,
     language && `not in ${languages[language]}`,
     gates.script === 'hans' ? 'written with Traditional characters' : undefined,
@@ -128,6 +129,21 @@ const cases: Omit<RenderView, 'run'> = {
 
 const renders: Record<VotesConfig['render'], RenderView> = {
   text: { run: caseRun, ...cases },
+  html: {
+    ...cases,
+    run: {
+      step: 'html',
+      title: 'Run',
+      detail: 'same briefs for all',
+      rule: () => 'Every system answers each brief with a self-contained HTML and CSS page.',
+    },
+    pair: 'two isolated pages for a brief',
+    labels: {
+      ...cases.labels,
+      unit: 'page',
+      usage: { title: 'Output tokens and latency', note: `${range}.` },
+    },
+  },
   diff: {
     run: { step: 'diff', title: 'Run', detail: 'same tasks for all', rule: agentRule },
     gate: {

@@ -1,0 +1,100 @@
+[[cases]]
+id = "community-event"
+category = "feature"
+source = "synthetic"
+instruction = '''
+Design a finished landing page for a fictional community event, Field Notes Saturday. Its audience is adults curious about drawing and urban nature, including complete beginners. Give the page a welcoming editorial identity that makes the event easy to understand and plan for.
+
+Facts to include:
+- Saturday, May 18, 10:00-16:00, at Linden Community Hall and the adjoining public garden.
+- Entry is free. Visitors can arrive at any time. Materials are provided, and no drawing experience is needed.
+- 10:30: a 45-minute garden observation walk. 12:00: a 60-minute beginner sketching workshop. 14:00: a 30-minute seed exchange. 15:00: a 45-minute shared sketchbook circle.
+- The hall has step-free entry, an accessible toilet, and a quiet room. The garden paths are compact gravel. Children are welcome with an adult. Outdoor activities move into the hall in heavy rain.
+- Bring a water bottle and weather-appropriate clothing. No registration or ticket is required.
+
+Include a clear introduction, a useful schedule, practical access information, and a prominent way to jump to the schedule. Use only these event facts. Invent visual details freely, including decorative artwork made with HTML and CSS.
+
+Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear content hierarchy. Do not include commentary outside the document.
+'''
+checklist = [
+  "Communicates the event's purpose, free entry, beginner access, schedule, and practical details accurately",
+  "Makes the schedule and access information easy to find and distinguishes activities from logistics",
+  "Uses a coherent visual identity and deliberate type, spacing, contrast, and composition",
+  "Remains readable and usable on narrow phones and wide desktops, including keyboard navigation",
+]
+
+[[cases]]
+id = "service-status"
+category = "feature"
+source = "synthetic"
+instruction = '''
+Design a public status dashboard for a fictional file collaboration service called Papertrail. Readers need to understand the current impact quickly, then inspect the incident history without confusing past problems with the present state. Use a calm, precise visual identity.
+
+Snapshot at 14:20 UTC on June 12:
+- Overall: degraded performance. File uploads are delayed in the West region. Existing files remain readable, and no data loss has been observed.
+- Components: Web app operational, File downloads operational, File uploads degraded, Search operational, Notifications operational.
+- Current incident, "West region upload delays": investigating at 13:40 UTC after elevated queue times were detected. Identified at 14:00 UTC as a storage worker backlog. Mitigating at 14:15 UTC by adding worker capacity. Next update by 14:45 UTC. The incident is still open.
+- Last 24 hours: 99.92% availability, median API response 180 ms, 18,420 completed uploads. These figures cover all regions.
+- Previous incidents: June 10, "Search indexing lag", resolved 09:30 UTC after 35 minutes. June 7, "Notification delivery delays", resolved 17:10 UTC after 50 minutes. June 5, no incidents reported.
+
+Include the snapshot time and timezone, component status, current incident timeline, and recent history. Make incident details expandable if useful. Do not imply that the current incident is resolved, add an update subscription that cannot work, or invent additional measurements.
+
+Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and status meanings conveyed beyond color. Do not include commentary outside the document.
+'''
+checklist = [
+  "Makes the active upload degradation, affected region, reader impact, and next update immediately clear",
+  "Accurately separates current component states and incident updates from historical incidents and aggregate measurements",
+  "Uses status labels and visual hierarchy that remain understandable without relying on color alone",
+  "Offers a coherent, readable layout at phone and desktop widths with usable native controls and keyboard focus",
+]
+
+[[cases]]
+id = "plan-comparison"
+category = "feature"
+source = "synthetic"
+instruction = '''
+Design a pricing and plan comparison page for a fictional team knowledge service called Folio. Help a small team choose a plan without obscuring limits or making the most expensive option look necessary. Give the page a considered, trustworthy visual identity.
+
+Plans, billed monthly in USD with no annual option:
+- Starter: $0, up to 3 members, 1 shared workspace, 1 GB storage, 30-day version history, community support.
+- Team: $24 per workspace per month, up to 15 members, 5 shared workspaces, 50 GB storage, 180-day version history, email support within 2 business days.
+- Studio: $64 per workspace per month, up to 50 members, unlimited shared workspaces, 250 GB storage, unlimited version history, email support within 1 business day.
+- Every plan includes unlimited pages, full-text search, Markdown export, and read-only public sharing.
+- Paid plans have a 14-day trial with no payment card required. Teams can export their content on every plan. On downgrade, existing content remains readable, but new uploads stop if the storage limit is exceeded. Taxes are additional where applicable.
+
+Include a concise plan overview, a comparison that makes member and storage limits easy to scan, and answers to likely questions about trials, exports, and downgrades. You may recommend a plan for a concrete team size if the recommendation follows these facts. Any call to action must be a clearly labeled in-page link to relevant details, since signup is unavailable. Do not add discounts, features, guarantees, or fees.
+
+Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear comparison semantics. Do not include commentary outside the document.
+'''
+checklist = [
+  "Presents each monthly workspace price and its member, workspace, storage, version-history, and support limits accurately",
+  "Makes shared features, trial terms, tax qualification, export access, and downgrade behavior discoverable",
+  "Supports an informed plan choice through a clear, balanced comparison and honest in-page actions",
+  "Maintains deliberate typography, contrast, spacing, and usable comparison structure at phone and desktop widths",
+]
+
+[[cases]]
+id = "onboarding-guide"
+category = "feature"
+source = "synthetic"
+instruction = '''
+Design a first-week onboarding guide for volunteers at a fictional neighborhood repair workshop called Morrow Repair Club. A new volunteer should know what to do before arriving, what happens at the first session, and when to ask for help. Make it feel practical and welcoming, with an approachable visual identity.
+
+Use these facts:
+- Sessions run Wednesdays, 18:00-20:30, at the Eastbank Library workshop room. Arrive at 17:45 for a first-session orientation.
+- Before attending, read the safety notes in this guide and bring closed-toe shoes. Tools, eye protection, and a name badge are provided. No prior repair experience is required.
+- At the first session, meet the session coordinator at the welcome table, join the 15-minute safety tour, then shadow an experienced volunteer. Beginners may sort tools, document repairs, or help with fabric mending after the tour.
+- Only trained volunteers may work on mains-powered electrical devices. Never plug in an unknown device. Ask the session coordinator before using an unfamiliar tool, handling a damaged battery, or continuing a repair that feels unsafe.
+- Breaks are welcome at any time. The room has step-free access and an accessible toilet nearby. A quieter table is available for documentation work.
+- Before leaving, return tools, label unfinished repairs with the coordinator, and share one thing learned. After two sessions, volunteers can discuss training interests with the coordinator. There is no required weekly commitment.
+
+Include a short preparation checklist, an ordered first-session guide, conspicuous safety boundaries, and a useful way to navigate the page. Native disclosure sections can hold optional detail. This is a reading guide, so do not suggest checklist choices will be saved or provide working account or registration controls. Do not add safety procedures or obligations beyond the facts.
+
+Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear content hierarchy. Do not include commentary outside the document.
+'''
+checklist = [
+  "Accurately explains preparation, arrival time, orientation, beginner roles, and end-of-session steps",
+  "Makes the electrical-device and unfamiliar-tool boundaries prominent without inventing safety instructions",
+  "Helps a newcomer navigate the guide and understand access options, breaks, training, and flexible attendance",
+  "Uses a welcoming, coherent design with readable phone and desktop layouts and usable keyboard navigation",
+]

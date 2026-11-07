@@ -2,6 +2,7 @@
 export const aspects = {
   writing: { title: 'Writing' },
   coding: { title: 'Coding' },
+  frontend: { title: 'Frontend' },
   instructions: { title: 'Instructions' },
 } satisfies Record<string, { title: string }>;
 

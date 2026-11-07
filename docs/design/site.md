@@ -29,7 +29,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 The server keeps each browser's pending pair, and the tab keeps its draft in `sessionStorage`: the choice, issues, Markdown toggle, collapsed prompt and scroll offsets of that pair. A reload restores the draft only while the server still holds the same pair and never sends a vote. `sessionStorage` keeps two tabs' drafts apart and clears when the tab closes, so a shared device keeps no unsent choices.
 
-The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text or diffs. Only text outputs use the side-by-side prompt layout on wide screens, since a prompt column would squeeze diffs. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
+The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text, diffs, or isolated HTML pages. Only text outputs use the side-by-side prompt layout on wide screens. HTML pages use a fixed responsive iframe viewport, and their internal scroll offsets cannot be restored by the parent page. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 
 Nothing is preselected. Each new pair clears the previous control's focus so the next key acts as a shortcut. The page reveals no system identity, timing, or server error details beyond the API's message.
 

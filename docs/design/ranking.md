@@ -40,10 +40,10 @@ With case effects, widths stop shrinking like 1 / √votes once votes per case g
 
 `votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall count. Category counts use that category's choices with their original weights. Excluded votes and votes on outputs that no longer count stay out of the fit and count in `dropped_votes`.
 
-| Field            | Meaning                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `length`         | Score change per standard deviation of (A − B) / (A + B) over output lengths in ranked human rows. Null when constant or confounded with system or pane identity |
-| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by ID, over systems both halves connect to their root                                     |
+| Field            | Meaning                                                                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `length`         | Score change per standard deviation of (A − B) / (A + B) over ranked human rows with two measured text lengths. HTML lengths are null. Null when constant or confounded with system or pane identity |
+| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by ID, over systems both halves connect to their root                                                                         |
 
 Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed votes alone.
 
