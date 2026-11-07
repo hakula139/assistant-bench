@@ -145,11 +145,11 @@ class Cutoffs(_Model):
     """Each store's cutoff at closing, null when it contributed no cut."""
 
     production: Cutoff | None
-    local: Cutoff | None
+    private: Cutoff | None
 
     @model_validator(mode='after')
     def validate_stores(self) -> Cutoffs:
-        if self.production is None and self.local is None:
+        if self.production is None and self.private is None:
             raise ValueError('At least one store cutoff is required.')
         return self
 

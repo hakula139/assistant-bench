@@ -15,6 +15,7 @@ from uuid import uuid4
 import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
+from pydantic import TypeAdapter
 from typer.core import TyperGroup
 
 from assistant_bench import canaries, collection, execution, jobs, report
@@ -258,7 +259,7 @@ def _run_families(
             )
         finally:
             context.refresh_sources(family)
-            _echo_conflicts(family, _collect(family, systems, export, context))
+            _echo_conflicts(family, _collect(family, systems, export, context).outputs)
 
 
 @app.command()
@@ -294,7 +295,9 @@ def collect(families: FamilyArguments = None) -> None:
         export, systems = _catalog()
         for name in names:
             selected = load_family(name)
-            _echo_conflicts(selected, _collect(selected, systems, export, context))
+            _echo_conflicts(
+                selected, _collect(selected, systems, export, context).outputs
+            )
 
 
 @app.command()
@@ -384,18 +387,27 @@ def _close_votes(family: Family, path: Path) -> report.Report:
 
 
 def _close_tests(family: Family) -> report.Report:
-    export, systems = _catalog()
-    _collect(family, systems, export)
-    close_round = (
-        report.close_checkers
-        if isinstance(family.settings, CheckersSettings)
-        else report.close_tests
-    )
-    return close_round(
-        family,
-        datetime.now(UTC),
-        system_names={name: system.display_name for name, system in systems.items()},
-    )
+    with open_context() as context:
+        export, systems = _catalog()
+        collected = _collect(family, systems, export, context)
+        sources = context.closing_sources(collected.generation)
+        metadata = context.state.collection(collected.generation)
+        if metadata.system_names_json is None:
+            raise InputError('The collection has no frozen public system names.')
+        names = TypeAdapter(dict[str, str]).validate_json(metadata.system_names_json)
+        generation = context.state.collection_generation(collected.generation)
+        close_round = (
+            report.close_checkers
+            if isinstance(sources.family.settings, CheckersSettings)
+            else report.close_tests
+        )
+        return close_round(
+            sources.family,
+            sources.cases,
+            read_outputs(family.name, context.state, generation=generation),
+            datetime.now(UTC),
+            system_names=names,
+        )
 
 
 @app.command()
@@ -648,7 +660,7 @@ def _collect(
     systems: dict[str, System],
     export: NixosConfigExport,
     context: RunContext,
-) -> list[Output]:
+) -> collection.Collection:
     collected = collection.collect(family, systems, context)
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
@@ -697,7 +709,7 @@ def _collect(
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
 
-    return outputs
+    return collected
 
 
 def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
