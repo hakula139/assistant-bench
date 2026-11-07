@@ -228,43 +228,51 @@ class ArtifactRepository:
             _restore(destination, entries)
         return destination / 'cases'
 
-    def publish_trial(
-        self,
-        run_id: str,
-        artifact_id: str,
-        source_job_dir: Path,
-        manifest: TrialManifest,
-    ) -> ArtifactRef:
-        """Publish an audited immutable trial and confirm it exists on remote `main`.
+    def publish_trials(
+        self, archives: Sequence[MaterializedTrial]
+    ) -> tuple[ArtifactRef, ...]:
+        """Publish audited trials in one commit and confirm every remote reference.
 
-        Repeated publication of the same files returns their original commit.
-        A competing writer is reconciled only by adding this trial's new path.
-        A returned reference never names an unconfirmed local commit.
+        Archives must name distinct immutable paths. Existing identical trials
+        retain their original commits. A competing writer is reconciled only by
+        appending missing paths, and no unconfirmed references are returned.
         """
-        if (run_id, artifact_id) != (manifest.run_id, manifest.artifact_id):
-            raise InputError('The publication identifiers do not match the manifest.')
-        selected = list(_selected_files(source_job_dir, manifest.trial_name))
-        if tuple(entry for entry, _ in selected) != manifest.files:
-            raise InputError(
-                'The selected trial files differ from their audited manifest.'
+        if not archives:
+            return ()
+        expected: dict[str, dict[str, tuple[GitMode, bytes]]] = {}
+        contents: dict[str, bytes] = {}
+        for archive in archives:
+            manifest = archive.manifest
+            if manifest.path in expected:
+                raise InputError('A publication batch must name distinct trial paths.')
+            selected = list(_selected_files(archive.job, manifest.trial_name))
+            if tuple(entry for entry, _ in selected) != manifest.files:
+                raise InputError(
+                    'The selected trial files differ from their audited manifest.'
+                )
+            content = manifest.content()
+            contents[manifest.path] = content
+            expected[manifest.path] = {
+                f'{manifest.path}/{entry.path}': (entry.mode, value)
+                for entry, value in selected
+            }
+            expected[manifest.path][f'{manifest.path}/manifest.json'] = (
+                '100644',
+                content,
             )
-        content = manifest.content()
-        digest = sha256(content).hexdigest()
         repository = self._metadata()
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
             clone = _clone(repository, Path(temporary))
             while True:
                 parent = _remote_head(clone)
+                references: dict[str, ArtifactRef] = {}
                 if parent is not None:
                     _git(clone, ['fetch', '--no-tags', 'origin', parent])
-                    existing = _tree_files(clone, parent, manifest.path)
-                    if existing:
-                        expected = {
-                            f'{manifest.path}/{entry.path}': (entry.mode, value)
-                            for entry, value in selected
-                        }
-                        expected[f'{manifest.path}/manifest.json'] = ('100644', content)
-                        if existing != expected:
+                    for path, files in expected.items():
+                        existing = _tree_files(clone, parent, path)
+                        if not existing:
+                            continue
+                        if existing != files:
                             raise InputError(
                                 'The trial path contains different immutable artifacts.'
                             )
@@ -277,17 +285,27 @@ class ArtifactRepository:
                                     '--format=%H',
                                     parent,
                                     '--',
-                                    manifest.path,
+                                    path,
                                 ],
                             )
                             .stdout.decode()
                             .strip()
                         )
-                        return ArtifactRef(
+                        references[path] = ArtifactRef(
                             commit_sha=commit,
-                            path=manifest.path,
-                            manifest_digest=digest,
+                            path=path,
+                            manifest_digest=sha256(contents[path]).hexdigest(),
                         )
+                missing = {
+                    path: files
+                    for path, files in expected.items()
+                    if path not in references
+                }
+                if not missing:
+                    self._confirm(clone, tuple(references.values()), contents)
+                    return tuple(
+                        references[archive.manifest.path] for archive in archives
+                    )
                 _git(
                     clone,
                     [
@@ -295,28 +313,36 @@ class ArtifactRepository:
                         'set',
                         '--cone',
                         '--skip-checks',
-                        manifest.path,
+                        *missing,
                     ],
                 )
                 if parent is not None:
                     _git(clone, ['switch', '--detach', parent])
                 else:
                     _git(clone, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
-                ancestor = clone
-                for component in manifest.path.split('/')[:-1]:
-                    ancestor /= component
-                    if ancestor.is_symlink() or (
-                        ancestor.exists() and not ancestor.is_dir()
-                    ):
-                        raise InputError(
-                            'The trial path cannot traverse a tracked file or symlink.'
-                        )
-                trial_files: dict[str, tuple[GitMode, bytes]] = {
-                    entry.path: (entry.mode, value) for entry, value in selected
+                for path, files in missing.items():
+                    ancestor = clone
+                    for component in path.split('/')[:-1]:
+                        ancestor /= component
+                        if ancestor.is_symlink() or (
+                            ancestor.exists() and not ancestor.is_dir()
+                        ):
+                            raise InputError(
+                                'The trial path cannot traverse a tracked file '
+                                'or symlink.'
+                            )
+                    _restore(
+                        clone / path,
+                        {
+                            name.removeprefix(f'{path}/'): value
+                            for name, value in files.items()
+                        },
+                    )
+                staged = {
+                    name: value
+                    for files in missing.values()
+                    for name, value in files.items()
                 }
-                trial_files['manifest.json'] = ('100644', content)
-                _restore(clone / manifest.path, trial_files)
-                staged_paths = [f'{manifest.path}/{path}' for path in trial_files]
                 _git(
                     clone,
                     [
@@ -326,20 +352,17 @@ class ArtifactRepository:
                         '--pathspec-from-file=-',
                         '--pathspec-file-nul',
                     ],
-                    content=b''.join(
-                        os.fsencode(path) + b'\0' for path in staged_paths
-                    ),
+                    content=b''.join(os.fsencode(path) + b'\0' for path in staged),
                 )
-                _git(clone, ['commit', '-m', 'feat(artifacts): record immutable trial'])
+                _git(
+                    clone, ['commit', '-m', 'feat(artifacts): record immutable trials']
+                )
                 commit = _git(clone, ['rev-parse', 'HEAD']).stdout.decode().strip()
-                expected = {
-                    f'{manifest.path}/{path}': value
-                    for path, value in trial_files.items()
-                }
-                if _tree_files(clone, commit, manifest.path) != expected:
-                    raise InputError(
-                        'The artifact commit changed the audited trial files.'
-                    )
+                for path, files in missing.items():
+                    if _tree_files(clone, commit, path) != files:
+                        raise InputError(
+                            'The artifact commit changed the audited trial files.'
+                        )
                 changed = _git(
                     clone,
                     [
@@ -353,10 +376,10 @@ class ArtifactRepository:
                     ],
                 ).stdout
                 if {os.fsdecode(path) for path in changed.split(b'\0') if path} != set(
-                    expected
+                    staged
                 ):
                     raise InputError(
-                        'The artifact commit changed paths outside this trial.'
+                        'The artifact commit changed paths outside this batch.'
                     )
                 self._metadata()
                 pushed = _git(
@@ -368,10 +391,14 @@ class ArtifactRepository:
                     raise InputError(
                         'The immutable trial could not be pushed to the repository.'
                     )
-                self._confirm(clone, commit, manifest, content)
-                return ArtifactRef(
-                    commit_sha=commit, path=manifest.path, manifest_digest=digest
-                )
+                for path in missing:
+                    references[path] = ArtifactRef(
+                        commit_sha=commit,
+                        path=path,
+                        manifest_digest=sha256(contents[path]).hexdigest(),
+                    )
+                self._confirm(clone, tuple(references.values()), contents)
+                return tuple(references[archive.manifest.path] for archive in archives)
 
     def materialize(
         self, reference: ArtifactRef, destination: Path
@@ -440,24 +467,30 @@ class ArtifactRepository:
         return repository
 
     def _confirm(
-        self, clone: Path, commit: str, manifest: TrialManifest, content: bytes
+        self,
+        clone: Path,
+        references: Sequence[ArtifactRef],
+        contents: Mapping[str, bytes],
     ) -> None:
         head = _remote_head(clone)
         if head is None:
-            raise InputError('The published trial is missing from remote `main`.')
+            raise InputError('The published trials are missing from remote `main`.')
         _git(clone, ['fetch', '--no-tags', 'origin', head])
-        ancestor = _git(
-            clone, ['merge-base', '--is-ancestor', commit, head], check=False
-        )
-        if ancestor.returncode:
-            raise InputError('The published trial is not retained by remote `main`.')
-        confirmed = _git(
-            clone, ['show', f'{commit}:{manifest.path}/manifest.json']
-        ).stdout
-        if confirmed != content:
-            raise InputError(
-                'The remote trial manifest differs from the published manifest.'
+        for commit in {reference.commit_sha for reference in references}:
+            ancestor = _git(
+                clone, ['merge-base', '--is-ancestor', commit, head], check=False
             )
+            if ancestor.returncode:
+                raise InputError('A published trial is not retained by remote `main`.')
+        for reference in references:
+            confirmed = _git(
+                clone,
+                ['show', f'{reference.commit_sha}:{reference.path}/manifest.json'],
+            ).stdout
+            if confirmed != contents[reference.path]:
+                raise InputError(
+                    'The remote trial manifest differs from the published manifest.'
+                )
 
 
 # ── File Selection ──
