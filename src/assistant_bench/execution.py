@@ -3,8 +3,6 @@
 import asyncio
 import json
 import os
-import subprocess
-import tempfile
 from contextlib import ExitStack
 from contextvars import Token
 from datetime import UTC, datetime
@@ -27,6 +25,7 @@ from assistant_bench.arena.d1 import connect, token as d1_token
 from assistant_bench.artifacts import (
     ArtifactRepository,
     MaterializedTrial,
+    audit_trial,
     build_manifest,
     snapshot_trial,
 )
@@ -263,7 +262,7 @@ class ExecutionPlugin(BaseJobPlugin):
 
         def publish() -> tuple[str, str, str]:
             snapshot_trial(source, destination, event.trial_name)
-            _audit(destination, known)
+            audit_trial(destination, known)
             manifest = build_manifest(
                 destination,
                 scope=run.scope,
@@ -287,64 +286,6 @@ class ExecutionPlugin(BaseJobPlugin):
 
     async def on_job_end(self, job_result: JobResult) -> None:
         self._stack.close()
-
-
-def _audit(root: Path, secrets: set[str]) -> None:
-    known = [value.encode() for value in secrets if value]
-    selected: list[tuple[Path, bytes]] = []
-    for path in root.rglob('*'):
-        if path.is_symlink():
-            content = os.fsencode(os.readlink(path))
-        elif path.is_file():
-            content = path.read_bytes()
-        else:
-            continue
-        location = os.fsencode(path.relative_to(root))
-        if any(value in content or value in location for value in known):
-            raise InputError(
-                'A selected artifact contains a known credential. Publication refused.'
-            )
-        selected.append((path.relative_to(root), content))
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in ('GITLEAKS_CONFIG', 'GITLEAKS_CONFIG_TOML')
-    }
-    try:
-        with tempfile.TemporaryDirectory(prefix='bench-audit-') as temporary:
-            directory = Path(temporary)
-            audit = directory / 'files'
-            for relative, content in selected:
-                path = audit / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-            result = subprocess.run(
-                [
-                    'gitleaks',
-                    'dir',
-                    '--redact=100',
-                    '--no-banner',
-                    '--no-color',
-                    '--ignore-gitleaks-allow',
-                    '--exit-code=42',
-                    '--max-target-megabytes=0',
-                    str(audit),
-                ],
-                cwd=directory,
-                env=environment,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-                check=False,
-            )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise InputError(
-            'The artifact audit could not run `gitleaks` from the development shell.'
-        ) from error
-    if result.returncode:
-        raise InputError(
-            'The artifact credential scan did not pass. Publication refused.'
-        )
 
 
 def _cancel_unstarted(state: State, run_id: str, error: BaseException) -> None:

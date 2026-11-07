@@ -97,6 +97,8 @@ class TrialAccounting:
         except Exception:
             self._fail('The model request admission could not be confirmed.')
         if not admitted:
+            del self._requests[request_id]
+            del self._apis[request_id]
             self._fail('The model request admission was not granted.')
         return request_id
 
