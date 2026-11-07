@@ -1,6 +1,7 @@
 import asyncio
 import os
 import ssl
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anthropic
@@ -10,7 +11,9 @@ import openai
 import pytest
 from pydantic import ValidationError
 
+from assistant_bench import jobs
 from assistant_bench.catalog import EXPORT_VAR, Api
+from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.accounting import (
     AccountingError,
     RequestReceipt,
@@ -27,11 +30,41 @@ from assistant_bench.harnesses.endpoint import (
     Endpoint,
     preflight,
 )
+from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Entry
 from assistant_bench.state import State
-from support import START, StubEndpoint, accounted_trial, completion, message, response
+from assistant_bench.tasks import render_tasks
+from support import (
+    START,
+    StubEndpoint,
+    accounted_trial,
+    completion,
+    executed_trial,
+    make_system,
+    message,
+    response,
+)
 
 
 pytestmark = pytest.mark.usefixtures('export')
+
+
+async def request_native(
+    client: openai.AsyncOpenAI | anthropic.AsyncAnthropic, api: Api
+) -> None:
+    if isinstance(client, anthropic.AsyncAnthropic):
+        await client.messages.create(
+            model='acme/large',
+            max_tokens=64,
+            messages=[{'role': 'user', 'content': 'Hello.'}],
+        )
+    elif api == 'openai-responses':
+        await client.responses.create(model='acme/large', input='Hello.')
+    else:
+        await client.chat.completions.create(
+            model='acme/large', messages=[{'role': 'user', 'content': 'Hello.'}]
+        )
 
 
 class TestLoopbackRequestsOnly:
@@ -110,6 +143,90 @@ class TestEndpoint:
 
     @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
+        @pytest.mark.parametrize(
+            ('api', 'usage'),
+            [
+                ('openai-chat-completions', MeasuredUsage(120, 100, 0, 40, 25)),
+                ('openai-responses', MeasuredUsage(120, 100, 0, 40, 25)),
+                ('anthropic-messages', MeasuredUsage(130, 100, 10, 40, None)),
+            ],
+            ids=['chat-completions', 'responses', 'messages'],
+        )
+        def test_provider_metadata_cannot_persist_known_credentials(
+            self,
+            endpoint: StubEndpoint,
+            run_context: RunContext,
+            monkeypatch: pytest.MonkeyPatch,
+            api: Api,
+            usage: MeasuredUsage,
+        ) -> None:
+            key = endpoint.key_file.read_text().strip()
+            endpoint.response = {
+                'openai-chat-completions': completion(),
+                'openai-responses': response(),
+                'anthropic-messages': message(),
+            }[api] | {'id': key, 'model': key}
+            endpoint.response_headers['x-request-id'] = key
+            environment = endpoint.env | {
+                HEADERS_VAR: '{"x-trace": "synthetic-endpoint-trace"}'
+            }
+            for name, value in environment.items():
+                monkeypatch.setenv(name, value)
+            configured = Endpoint.read(environment.get, api)
+            system = make_system(
+                api=api,
+                thinking_mode='anthropic-adaptive'
+                if api == 'anthropic-messages'
+                else None,
+            )
+            family = load_family('smoke-text')
+            tasks = render_tasks(
+                family,
+                load_cases(family, private_root=run_context.private_root)[:1],
+                root=run_context.root,
+            )
+            config = jobs.job(
+                family, [system], tasks, root=run_context.root, sources=[]
+            )
+            config.n_attempts = 1
+
+            async def request() -> None:
+                async with executed_trial(
+                    run_context, config, system, scope='metadata'
+                ) as trial:
+                    trial.recorder.begin(datetime.now(UTC))
+                    try:
+                        client = (
+                            configured.messages_client()
+                            if api == 'anthropic-messages'
+                            else configured.client(api)
+                        )
+                        async with client:
+                            await request_native(client, api)
+                    finally:
+                        trial.recorder.finish(datetime.now(UTC))
+
+            asyncio.run(request())
+
+            (stored,) = run_context.state.requests('metadata')
+            assert isinstance(stored['receipt_json'], str)
+            (entry_json,) = run_context.state.entries('metadata')
+            credential_is_absent = all(
+                key not in value for value in (stored['receipt_json'], entry_json)
+            )
+            assert credential_is_absent
+            saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+            assert saved.usage == usage
+            assert saved.http_status == 200
+            assert saved.outcome == 'completed'
+            assert (
+                saved.response_id,
+                saved.response_model,
+                saved.provider_request_id,
+            ) == (None, None, None)
+            entry = Entry.model_validate_json(entry_json)
+            assert entry.responses == [usage]
+
         @pytest.mark.parametrize('api', ['openai-responses', 'anthropic-messages'])
         def test_remembers_sent_credentials_after_key_and_header_rotation(
             self,
@@ -139,21 +256,9 @@ class TestEndpoint:
                 HEADERS_VAR, f'{{"x-rotated-token": "{rotated_header}"}}'
             )
 
-            async def send(
-                client: openai.AsyncOpenAI | anthropic.AsyncAnthropic,
-            ) -> None:
-                if isinstance(client, anthropic.AsyncAnthropic):
-                    await client.messages.create(
-                        model='acme/large',
-                        max_tokens=64,
-                        messages=[{'role': 'user', 'content': 'Hello.'}],
-                    )
-                else:
-                    await client.responses.create(model='acme/large', input='Hello.')
-
             async def request() -> None:
                 async with first_client:
-                    await send(first_client)
+                    await request_native(first_client, api)
                 remembered_original = all(
                     value in begun_trial.secrets()
                     for value in (original_key, original_header)
@@ -167,7 +272,7 @@ class TestEndpoint:
                     else rotated.client(api)
                 )
                 async with second_client:
-                    await send(second_client)
+                    await request_native(second_client, api)
 
             asyncio.run(request())
 
@@ -330,24 +435,13 @@ class TestEndpoint:
             configured = Endpoint.read(endpoint.env.get, api)
 
             async def request() -> None:
-                if api == 'anthropic-messages':
-                    async with configured.messages_client() as client:
-                        await client.messages.create(
-                            model='acme/large',
-                            max_tokens=64,
-                            messages=[{'role': 'user', 'content': 'Hello.'}],
-                        )
-                else:
-                    async with configured.client(api) as client:
-                        if api == 'openai-responses':
-                            await client.responses.create(
-                                model='acme/large', input='Hello.'
-                            )
-                        else:
-                            await client.chat.completions.create(
-                                model='acme/large',
-                                messages=[{'role': 'user', 'content': 'Hello.'}],
-                            )
+                client = (
+                    configured.messages_client()
+                    if api == 'anthropic-messages'
+                    else configured.client(api)
+                )
+                async with client:
+                    await request_native(client, api)
                 (stored,) = private_state.requests('sample')
                 assert isinstance(stored['receipt_json'], str)
                 saved = RequestReceipt.model_validate_json(stored['receipt_json'])
