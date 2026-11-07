@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.arena.publication import CaseFacts, Inventory, OutputFacts
 from assistant_bench.arena.votes import (
     Cut,
@@ -19,6 +18,7 @@ from assistant_bench.arena.votes import (
     TaggedDefects,
     Vote,
 )
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import Choice
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.report import Cutoff, Cutoffs

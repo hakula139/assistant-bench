@@ -18,13 +18,13 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench.arena.d1 import Database, Param, Row
 from assistant_bench.arena.publication import (
     CaseFacts,
     Inventory,
     OutputFacts,
     output_key,
 )
+from assistant_bench.database import Database, Param, Row
 from assistant_bench.families import Choice, Defect, Family, FamilyName
 from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output

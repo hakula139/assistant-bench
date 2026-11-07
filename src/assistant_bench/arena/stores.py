@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Literal
 
 from assistant_bench.arena import d1, local
-from assistant_bench.arena.d1 import Database
+from assistant_bench.database import Database
 
 
 TargetName = Literal['staging', 'production', 'local']

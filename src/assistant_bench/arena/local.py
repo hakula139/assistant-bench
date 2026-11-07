@@ -14,7 +14,7 @@ from types import FrameType
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from assistant_bench.arena.d1 import SQLiteDatabase
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT, data_dir
 

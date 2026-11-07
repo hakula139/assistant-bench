@@ -11,7 +11,7 @@ src/assistant_bench/
 ├── task_assets.py                          # Regeneration of each coding task's shared files
 ├── arena/
 │   ├── commands.py                         # Publication, status and moderation commands
-│   ├── d1.py                               # The D1 REST client and each target's database
+│   ├── d1.py                               # Each hosted target's database and credential sources
 │   ├── local.py                            # The local SQLite store, lock, signing keys and Worker lifecycle
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
 │   ├── stores.py                           # Connections to hosted and local vote stores
@@ -48,6 +48,7 @@ src/assistant_bench/
 │   └── weighting.py                        # Family-wide cumulative actor caps
 ├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
+├── database.py                             # The SQL protocol, SQLite adapter and D1 REST client
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
 ├── paths.py                                # Repo and data directory locations, and atomic file writes
@@ -67,7 +68,7 @@ Imports point downward through these layers, so a module never imports one above
 7. `report`
 8. `outputs`, `harnesses`, and `scoring`
 9. `families` and `catalog`
-10. `generation`, `messages`, `paths`, and `diffs`
+10. `database`, `generation`, `messages`, `paths`, and `diffs`
 
 `families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
