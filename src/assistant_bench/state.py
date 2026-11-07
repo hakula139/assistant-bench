@@ -634,9 +634,6 @@ class State:
             raise InputError(f'Collection `{collection}` is not sealed.')
         return _generation(rows)
 
-    def outputs(self, family: str) -> list[str]:
-        return list(self.output_generation(family).outputs)
-
     # ── Canary History and Baselines ──
 
     def append_canary(self, run: str, record_json: str) -> None:
