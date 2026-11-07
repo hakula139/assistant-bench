@@ -77,9 +77,9 @@ function markInlineCode(state: StateCore) {
 export const markdown = new MarkdownIt({ html: false, linkify: false })
   .disable('image')
   .use(tasklist, {
-    itemClass: 'task-list-item list-none ps-0',
-    labelClass: 'relative block pl-6',
-    checkboxClass: 'not-prose absolute top-[0.375em] left-0 m-0 size-4 accent-primary',
+    itemClass: 'task-list-item list-none',
+    labelClass: 'relative block',
+    checkboxClass: 'not-prose absolute top-[0.375em] -left-6 m-0 size-4 accent-primary',
   });
 markdown.core.ruler.push('keep_tails', keepTails);
 markdown.core.ruler.push('mark_inline_code', markInlineCode);
