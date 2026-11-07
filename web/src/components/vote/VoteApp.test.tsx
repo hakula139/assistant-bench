@@ -194,6 +194,25 @@ function override(api: ReturnType<typeof stubApi>, path: string, answer: () => P
   );
 }
 
+function stubReload() {
+  const reload = vi.fn();
+  const location = window.location;
+  const browserLocation = new Proxy(
+    {},
+    {
+      get: (_target, key): unknown => (key === 'reload' ? reload : Reflect.get(location, key)),
+    },
+  );
+  vi.stubGlobal(
+    'window',
+    new Proxy(window, {
+      get: (target, key, receiver): unknown =>
+        key === 'location' ? browserLocation : Reflect.get(target, key, receiver),
+    }),
+  );
+  return reload;
+}
+
 const statusLine = () =>
   screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
 
@@ -332,20 +351,57 @@ describe('VoteApp', () => {
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toHaveLength(1);
   });
 
-  test('keeps the private family selected and asks to reload without opening Turnstile', async () => {
+  test.each([null, FAMILY.family])(
+    'reloads private voting at the same URL without retrying its API for family %s',
+    async (family) => {
+      const api = stubApi();
+      override(api, family === null ? '/api/families' : '/api/pair', () =>
+        Promise.resolve(Response.json({ error: 'reload_required' }, { status: 401 })),
+      );
+      const query = new URLSearchParams({ view: 'reading' });
+      if (family !== null) {
+        query.set('family', family);
+      }
+      history.replaceState(null, '', `/vote/?${query}#outputs`);
+      const href = location.href;
+      const reload = stubReload();
+      const user = userEvent.setup();
+
+      render(<VoteApp />);
+      const alert = await screen.findByRole('alert');
+      const requests = api.fetch.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: 'Reload page' }));
+
+      expect(alert.textContent).toContain('Reload this page to resume private voting.');
+      expect(reload).toHaveBeenCalledExactlyOnceWith();
+      expect(location.href).toBe(href);
+      expect(api.fetch).toHaveBeenCalledTimes(requests);
+      expect(screen.queryByTestId('turnstile')).toBeNull();
+      expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toEqual([]);
+    },
+  );
+
+  test('reloads private voting after admission is lost while reading and keeps its draft', async () => {
     const api = stubApi();
-    override(api, '/api/pair', () =>
+    const user = await startVoting();
+    await user.click(screen.getByRole('radio', { name: 'A is better' }));
+    const href = location.href;
+    const draft = sessionStorage.getItem('bench-vote');
+    const reload = stubReload();
+    override(api, '/api/pair/skip', () =>
       Promise.resolve(Response.json({ error: 'reload_required' }, { status: 401 })),
     );
-    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
 
-    render(<VoteApp />);
-    const alert = await screen.findByRole('alert');
+    await user.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('alert');
+    const requests = api.fetch.mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Reload page' }));
 
-    expect(alert.textContent).toBe('Reload this page to resume private voting.');
-    expect(location.search).toBe(`?family=${FAMILY.family}`);
-    expect(screen.queryByTestId('turnstile')).toBeNull();
-    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toEqual([]);
+    expect(reload).toHaveBeenCalledExactlyOnceWith();
+    expect(location.href).toBe(href);
+    expect(api.fetch).toHaveBeenCalledTimes(requests);
+    expect(sessionStorage.getItem('bench-vote')).toBe(draft);
+    expect(screen.getByText('Output A1')).toBeDefined();
   });
 
   test('reports a challenge the Worker rejects without admitting the browser', async () => {
