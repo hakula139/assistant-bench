@@ -188,7 +188,13 @@ id = "train-museum-citation"
 category = "message"
 source = "synthetic"
 instruction = '''
-Write an English reply about a fictional railway museum's damaged caption. Quote the exact caption “Platform…seven” in a Markdown blockquote, then write a paragraph explaining that the caption's intended location is uncertain. Preserve the quoted input exactly. In your own prose, use straight quotes and three periods for an ellipsis. Keep every paragraph on one physical source line.
+Write an English reply about a fictional railway museum's damaged caption. The following literal input includes both surrounding curly quote characters:
+
+```text
+“Platform…seven”
+```
+
+Copy that entire line into a Markdown blockquote, preserving both curly quote characters and the ellipsis exactly. Then write a paragraph explaining that the caption's intended location is uncertain. In your own prose, use straight quotes and three periods for an ellipsis. Keep every paragraph on one physical source line.
 '''
 [cases.checks]
 language = "en"
