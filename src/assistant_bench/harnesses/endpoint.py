@@ -179,7 +179,9 @@ class _Client(httpx2.AsyncClient):
         request_id = response.request.extensions.get(REQUEST_ID)
         if not isinstance(request_id, str):
             return
-        if 'text/event-stream' in response.headers.get('content-type', ''):
+        if response.is_success and 'text/event-stream' in response.headers.get(
+            'content-type', ''
+        ):
             return
         await response.aread()
         try:
