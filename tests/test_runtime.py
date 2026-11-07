@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -12,11 +13,57 @@ from assistant_bench import cli, runtime
 from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.messages import InputError
-from support import make_system, write_votes_family
+from assistant_bench.outputs import write_outputs
+from assistant_bench.runtime import RunContext
+from support import (
+    PrivateRepository,
+    commit_all,
+    git,
+    make_system,
+    new_repository,
+    write_votes_family,
+)
 
 
 REVISION = 'a' * 40
 runner = CliRunner()
+
+
+@dataclass(frozen=True)
+class CanonicalRepository:
+    root: Path
+    seed: Path
+    remote: Path
+    revision: str
+
+
+@pytest.fixture
+def canonical_repository(
+    private_repository: PrivateRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> CanonicalRepository:
+    seed = private_repository.seed
+    write_votes_family(seed / 'families', ['acme-large'], {'greeting': 'message'})
+    revision = commit_all(seed, 'Add public cases')
+    git(seed, 'push', '--quiet', 'origin', 'main')
+    root = tmp_path / 'implementation'
+    git(tmp_path, 'clone', '--quiet', str(private_repository.remote), str(root))
+    unrelated = tmp_path / 'unrelated.git'
+    git(tmp_path, 'init', '--quiet', '--bare', '--initial-branch=main', str(unrelated))
+    git(root, 'remote', 'set-url', 'origin', str(unrelated))
+    config = tmp_path / 'canonical.gitconfig'
+    git(
+        tmp_path,
+        'config',
+        '--file',
+        str(config),
+        f'url.{private_repository.remote}.insteadOf',
+        runtime.PUBLIC_REPOSITORY,
+    )
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(config))
+    monkeypatch.setattr(runtime, 'REPO_ROOT', root)
+    return CanonicalRepository(root, seed, private_repository.remote, revision)
 
 
 @pytest.fixture
@@ -149,6 +196,7 @@ class TestCheckSources:
         assert expected in result.output
         head.assert_not_called()
         source.assert_not_called()
+
         send.assert_not_called()
 
     @pytest.mark.usefixtures('catalog')
@@ -193,3 +241,66 @@ class TestCheckSources:
         assert 'Private repository authentication failed.' in result.output
         assert 'valid case' not in result.output
         source.assert_not_called()
+
+
+class TestImplementationRevision:
+    @pytest.mark.parametrize(
+        'candidate', ['published-ancestor', 'unpublished', 'unrelated']
+    )
+    def test_requires_the_clean_head_to_be_reachable_from_canonical_main(
+        self,
+        canonical_repository: CanonicalRepository,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        candidate: str,
+    ) -> None:
+        source = canonical_repository
+        (source.seed / 'NOTICE').write_text('A later canonical commit.\n')
+        current = commit_all(source.seed, 'Advance canonical main')
+        git(source.seed, 'push', '--quiet', 'origin', 'main')
+        assert current != source.revision
+        root = source.root
+        if candidate == 'unpublished':
+            (root / 'unpublished.txt').write_text('A clean local commit.\n')
+            commit_all(root, 'Add an unpublished change')
+            git(root, 'push', '--quiet', 'origin', 'HEAD:main')
+        elif candidate == 'unrelated':
+            root = tmp_path / 'unrelated-implementation'
+            new_repository(root, {'NOTICE': 'An unrelated history.\n'})
+            git(root, 'remote', 'add', 'origin', str(source.remote))
+            monkeypatch.setattr(runtime, 'REPO_ROOT', root)
+        assert git(root, 'status', '--porcelain') == ''
+
+        if candidate == 'published-ancestor':
+            assert runtime.implementation_revision() == source.revision
+        else:
+            with pytest.raises(InputError):
+                runtime.implementation_revision()
+
+
+class TestClosingSources:
+    def test_fetches_the_frozen_public_case_from_the_canonical_repository(
+        self, canonical_repository: CanonicalRepository, run_context: RunContext
+    ) -> None:
+        source = canonical_repository
+        document = source.seed / 'families' / 'f' / 'cases.toml'
+        expected = document.read_text().replace(
+            'Write about greeting.', 'Pinned greeting.'
+        )
+        document.write_text(expected)
+        revision = commit_all(source.seed, 'Pin a public case revision')
+        git(source.seed, 'push', '--quiet', 'origin', 'main')
+        generation = write_outputs(
+            'f',
+            [],
+            run_context.state,
+            previous=None,
+            code_revision=revision,
+            case_revision=run_context.case_revision,
+            system_names={'acme-large': 'Acme Large'},
+        )
+
+        sources = run_context.closing_sources(generation)
+
+        assert [case.instruction for case in sources.cases] == ['Pinned greeting.']
+        assert document.read_text() == expected
