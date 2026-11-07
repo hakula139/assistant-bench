@@ -298,7 +298,7 @@ async function issue(
   const comparison = await draw(
     rank,
     comparisons,
-    new Map(coverage.results.map(({ low, high, votes }) => [key(low, high), votes])),
+    new Map(coverage.results.map(({ low, high, votes }) => [key(...sorted(low, high)), votes])),
   );
   const drawn = await place(db, publication, rank, comparison);
   const [, pending] = await db.batch([

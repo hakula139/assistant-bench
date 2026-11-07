@@ -208,6 +208,26 @@ describe('GET /api/pair', () => {
     expect(systemsOf(await pendingRow(pair?.id ?? ''))).toEqual(['acme-pro', 'acme-small']);
   });
 
+  test('counts votes on Unicode system pairs before drawing the less covered alternative', async () => {
+    const bmp = 'system-\ue000';
+    const astral = 'system-\u{10000}';
+    await publish(SYNTHETIC, {
+      first: { [bmp]: ['First BMP.'], [astral]: ['First astral.'] },
+      second: { 'acme-large': ['Second large.'], 'acme-small': ['Second small.'] },
+    });
+    await seedVote(SYNTHETIC, 'first', [bmp, astral]);
+    const random = vi
+      .spyOn(crypto, 'randomUUID')
+      .mockReturnValue('00000000-0000-4000-8000-000000000001');
+    const from = await admitted();
+    random.mockRestore();
+
+    const { pair } = await pairOf(from, SYNTHETIC);
+
+    expect(systemsOf(await pendingRow(pair?.id ?? ''))).toEqual(['acme-large', 'acme-small']);
+    expect(pair?.instruction).toBe('Instruction second');
+  });
+
   test('shows the pair with its prompt, panes and defects, counting the remaining comparisons', async () => {
     const from = await admitted();
 
