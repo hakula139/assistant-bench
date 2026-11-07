@@ -813,7 +813,9 @@ def write_report(report: Report) -> Path:
     return path
 
 
-def reported_fingerprints(family: str) -> dict[str, str | None]:
+def reported_fingerprints(
+    family: str, *, root: Path | None = None
+) -> dict[str, str | None]:
     """Map each system a closed report of the family names to the fingerprint it froze.
 
     A system maps to null when no report recorded its fingerprint.
@@ -824,7 +826,7 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
         Two closed reports froze different fingerprints under one system.
     """
     frozen: dict[str, str | None] = {}
-    for report in _closed(family):
+    for report in _closed(family, REPORTS_DIR if root is None else root):
         for system, metadata in report.systems.items():
             known = frozen.get(system)
             if metadata.fingerprint is None:
@@ -838,9 +840,9 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
     return frozen
 
 
-def _closed(family: str) -> list[Report]:
+def _closed(family: str, root: Path) -> list[Report]:
     reports: list[Report] = []
-    for path in sorted((REPORTS_DIR / family).glob('*.json')):
+    for path in sorted((root / family).glob('*.json')):
         report = Report.model_validate_json(path.read_text())
         if report.family != family or report.round != path.stem:
             raise InputError(
