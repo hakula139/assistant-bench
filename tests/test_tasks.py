@@ -7,11 +7,12 @@ import pytest
 import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
-from harbor.models.job.config import JobConfig
+from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.task import Task
 
-from assistant_bench import collection, jobs
+import assistant_bench.collection as collection
+from assistant_bench import jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import (
     Family,
@@ -51,7 +52,7 @@ def installed_version(path: Path) -> str:
 def planned_actions(job: JobConfig) -> list[tuple[str, DiffAction]]:
     """Return the action Harbor plans for each trial against the family's jobs."""
     plan = asyncio.run(JobPlan.from_config(job))
-    sources = []
+    sources: list[tuple[SourceJobConfig, Path]] = []
     for source in job.source_jobs:
         assert source.path is not None
         sources.append((source, source.path))

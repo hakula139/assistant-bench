@@ -12,7 +12,8 @@ from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from openai import AsyncOpenAI
 
-from assistant_bench import collection, execution, jobs
+import assistant_bench.collection as collection
+from assistant_bench import execution, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.endpoint import HEADERS_VAR
