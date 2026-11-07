@@ -2,13 +2,17 @@
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import cast
+from uuid import UUID
 
 from harbor.job_diff import (
     DiffAction,
@@ -21,9 +25,21 @@ from harbor.job_plan import JobPlan
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.trial import config as trial_config
+from harbor.models.trial.result import TrialResult
 
+from assistant_bench.artifacts import (
+    ArtifactRef,
+    ArtifactRepository,
+)
 from assistant_bench.catalog import SYSTEMS_FILE, System
-from assistant_bench.families import CheckersSettings, Family, family_names, load_family
+from assistant_bench.families import (
+    CheckersSettings,
+    Family,
+    case_task,
+    family_names,
+    load_cases,
+    load_family,
+)
 from assistant_bench.harnesses import (
     HARNESSES,
     HOST_ENVIRONMENT,
@@ -35,7 +51,7 @@ from assistant_bench.harnesses.docker import HOST_OVERLAY, check_local_context
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.messages import InputError, code
-from assistant_bench.paths import data_dir
+from assistant_bench.state import State
 
 
 N_CONCURRENT_TRIALS = 8
@@ -168,7 +184,9 @@ def runnable_systems(systems: Mapping[str, System]) -> dict[str, list[System]]:
 
 
 def drifted_systems(
-    family: Family, systems: list[System]
+    family: Family,
+    systems: list[System],
+    sources: list[tuple[SourceJobConfig, Path]],
 ) -> list[tuple[str, str, str]]:
     """Return each selected system whose earlier trials recorded another fingerprint.
 
@@ -184,7 +202,7 @@ def drifted_systems(
     """
     current = {system.name: fingerprint(system) for system in systems}
     recorded: defaultdict[str, set[str]] = defaultdict(set)
-    for trial in source_trials(family_sources(family)):
+    for trial in source_trials(sources):
         kwargs = trial.result.config.agent.kwargs
         name = kwargs.get('system')
         label = kwargs.get('fingerprint')
@@ -214,7 +232,14 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     )
 
 
-def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
+def job(
+    family: Family,
+    systems: list[System],
+    tasks: list[Path],
+    *,
+    root: Path,
+    sources: list[tuple[SourceJobConfig, Path]],
+) -> JobConfig:
     """Build a job that runs every system on every task of the family.
 
     The systems are as `family_systems` returns them. The job diffs against the
@@ -226,13 +251,13 @@ def job(family: Family, systems: list[System], tasks: list[Path]) -> JobConfig:
     starts no container, and any other job runs in Harbor's Docker environment.
     """
     agents = [_agent_config(system) for system in systems]
-    sources = [config for config, _ in family_sources(family)]
+    source_jobs = [config for config, _ in sources]
     tasks_source = family.source == 'tasks'
     return _job(
-        jobs_dir(family),
+        jobs_dir(family, root=root),
         agents,
         tasks,
-        sources,
+        source_jobs,
         environment=_environment(systems),
         n_attempts=family.settings.samples,
         n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
@@ -290,7 +315,7 @@ def current_inputs(
     }
 
 
-def check_job(family: Family, tasks: list[Path]) -> JobConfig:
+def check_job(family: Family, tasks: list[Path], *, root: Path) -> JobConfig:
     """Build a job that runs the oracle and the nop on every task of the family.
 
     The oracle must pass every task while the untouched repository must fail it.
@@ -299,7 +324,7 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     jobs that `collect` reads.
     """
     return _job(
-        data_dir() / 'checks' / family.name,
+        root / 'checks' / family.name,
         [trial_config.AgentConfig(name=agent) for agent in ('oracle', 'nop')],
         tasks,
         [],
@@ -310,24 +335,143 @@ def check_job(family: Family, tasks: list[Path]) -> JobConfig:
     )
 
 
-def has_jobs(family: Family) -> bool:
-    return bool(_family_jobs(family))
-
-
-def _family_jobs(family: Family) -> list[Path]:
-    return sorted(result.parent for result in jobs_dir(family).glob('*/result.json'))
-
-
-def jobs_dir(family: Family) -> Path:
-    return data_dir() / 'jobs' / family.name
-
-
-def family_sources(family: Family) -> list[tuple[SourceJobConfig, Path]]:
-    return [job_source(job_dir) for job_dir in _family_jobs(family)]
+def jobs_dir(family: Family, *, root: Path) -> Path:
+    return root / 'jobs' / family.name
 
 
 def job_source(job_dir: Path) -> tuple[SourceJobConfig, Path]:
     return SourceJobConfig(action='diff', type='local', path=job_dir), job_dir
+
+
+@dataclass(frozen=True)
+class _SourceView:
+    job: JobConfig
+    result: TrialResult
+    config: trial_config.TrialConfig
+    directory: Path
+
+
+def materialize_sources(
+    family: Family,
+    state: State,
+    repository: ArtifactRepository,
+    root: Path,
+    *,
+    private_root: Path,
+) -> list[tuple[SourceJobConfig, Path]]:
+    """Restore registered trials and prepare separate portable Harbor views."""
+    tasks = {
+        f'{family.name}/{case.id}': (
+            root / 'tasks' / family.name / case.id
+            if family.source == 'cases'
+            else case_task(family, case.id, private_root=private_root)
+        )
+        for case in load_cases(family, private_root=private_root)
+    }
+    directory = root / 'sources' / family.name
+    directory.mkdir(parents=True, exist_ok=True)
+    views: dict[UUID, _SourceView] = {}
+    references: dict[UUID, ArtifactRef] = {}
+    jobs: dict[Path, list[Path]] = {}
+    for row in state.artifacts(family.name):
+        run = state.run(cast(str, row['run_id']))
+        reference = ArtifactRef(
+            commit_sha=cast(str, row['commit_sha']),
+            path=cast(str, row['path']),
+            manifest_digest=cast(str, row['manifest_digest']),
+        )
+        archive = repository.materialize(
+            reference, Path(tempfile.mkdtemp(prefix='raw-', dir=directory))
+        )
+        manifest = archive.manifest
+        job = JobConfig.model_validate_json((archive.job / 'config.json').read_text())
+        result = TrialResult.model_validate_json(
+            (archive.job / manifest.trial_name / 'result.json').read_text()
+        )
+        if (
+            manifest.scope != family.name
+            or manifest.run_id != run.id
+            or manifest.job_name != run.job
+            or job.job_name != run.job
+            or manifest.code_revision != run.code_revision
+            or manifest.case_revision != run.case_revision
+            or manifest.trial_id != str(result.id)
+            or str(result.id) != row['source_trial_id']
+            or manifest.trial_name != row['trial_id']
+            or result.trial_name != manifest.trial_name
+        ):
+            raise InputError('Registered trial artifacts have conflicting identities.')
+        if result.id in references:
+            if references[result.id] != reference:
+                raise InputError('A source trial has conflicting artifact references.')
+            continue
+        references[result.id] = reference
+        if result.task_name not in tasks:
+            continue
+        config = trial_config.TrialConfig.model_validate_json(
+            (archive.job / manifest.trial_name / 'config.json').read_text()
+        )
+        view_dir = Path(tempfile.mkdtemp(prefix='view-', dir=directory)) / run.job
+        shutil.copytree(archive.job, view_dir, symlinks=True)
+        views[result.id] = _SourceView(job, result, config, view_dir)
+        jobs.setdefault(result.config.trials_dir, []).append(view_dir)
+
+    paths = {
+        trial_id: view.directory / view.result.trial_name
+        for trial_id, view in views.items()
+    }
+    for view in views.values():
+        _relocate_source(view, tasks[view.result.task_name], paths, jobs)
+    return [job_source(view.directory) for view in views.values()]
+
+
+def _relocate_source(
+    view: _SourceView,
+    task: Path,
+    trials: dict[UUID, Path],
+    jobs: dict[Path, list[Path]],
+) -> None:
+    def relocate(config: trial_config.TrialConfig) -> trial_config.TrialConfig:
+        source = config.source_trial
+        if source is not None:
+            if source.trial_id is None or source.trial_id not in trials:
+                raise InputError('A regraded trial has no registered source artifact.')
+            source = source.model_copy(
+                update={'type': 'local', 'path': trials[source.trial_id]}
+            )
+        return config.model_copy(
+            update={
+                'task': config.task.model_copy(update={'path': task}),
+                'trials_dir': view.directory,
+                'source_trial': source,
+            }
+        )
+
+    config = relocate(view.config)
+    result = view.result.model_copy(
+        update={
+            'config': relocate(view.result.config),
+            'task_id': config.task.get_task_id(),
+            'trial_uri': (view.directory / view.result.trial_name).as_uri(),
+        }
+    )
+    job = view.job.model_copy(
+        update={
+            'jobs_dir': view.directory.parent,
+            'tasks': [result.config.task],
+            'agents': [result.config.agent],
+            'source_jobs': [
+                source.model_copy(update={'type': 'local', 'path': path})
+                for source in view.job.source_jobs
+                if source.path is not None
+                for path in jobs.get(source.path, [])
+            ],
+        }
+    )
+    (view.directory / 'config.json').write_text(job.model_dump_json(indent=2))
+    trial = view.directory / result.trial_name
+    (trial / 'config.json').write_text(config.model_dump_json(indent=2))
+    (trial / 'result.json').write_text(result.model_dump_json(indent=2))
 
 
 def source_trials(sources: list[tuple[SourceJobConfig, Path]]) -> list[SourceTrial]:
@@ -355,7 +499,7 @@ def _job(
     n_concurrent: int,
     verify: bool,
 ) -> JobConfig:
-    retry = RetryConfig(max_retries=1)
+    retry = RetryConfig(max_retries=0)
     retry.exclude_exceptions = (retry.exclude_exceptions or set()) | {
         NativeCompletionError.__name__
     }
@@ -402,7 +546,12 @@ def job_path(config: JobConfig) -> Path:
     return config.jobs_dir / config.job_name
 
 
-def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
+def run_job(
+    config: JobConfig,
+    *,
+    log: Path | None = None,
+    plugin_context: Path | None = None,
+) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
     Harbor receives endpoint settings and the host tools' environment without
@@ -434,6 +583,13 @@ def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
         file.write(config.model_dump_json())
         file.close()
         command: list[str | Path] = [harbor, 'run', '--config', file.name, '--yes']
+        if plugin_context is not None:
+            command += [
+                '--plugin',
+                'assistant_bench.execution:ExecutionPlugin',
+                '--plugin-kwarg',
+                f'context_file={plugin_context}',
+            ]
         if log is None:
             subprocess.run(command, check=True, env=harbor_environment())
         else:
@@ -461,6 +617,9 @@ def harbor_environment() -> dict[str, str]:
         'LANG',
         'BENCH_NIXOS_CONFIG',
         'BENCH_DATA_DIR',
+        'BENCH_DATA_REPOSITORY',
+        'BENCH_D1_TOKEN_FILE',
+        'BENCH_D1_ENV_FILE',
         *ENDPOINT_VARS,
     }
     return {

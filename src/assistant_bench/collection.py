@@ -33,14 +33,14 @@ from assistant_bench.html import extract_html
 from assistant_bench.jobs import (
     check_harness,
     current_inputs,
-    family_sources,
     job_source,
     source_trials,
 )
 from assistant_bench.outputs import Output, tests_pass, write_outputs
+from assistant_bench.runtime import RunContext
 from assistant_bench.scoring.checkers import evaluate
 from assistant_bench.scoring.gates import failed_gates
-from assistant_bench.spend import Spend, summarize, update_ledger
+from assistant_bench.spend import Entry, Spend, read_ledger, summarize
 from assistant_bench.tasks import WORKSPACE, current_versions
 
 
@@ -89,8 +89,10 @@ class Collection:
     spend: list[Spend]
 
 
-def collect(family: Family, systems: dict[str, System]) -> Collection:
-    """Read the family's trials into `outputs/<family>.jsonl`, and its spend.
+def collect(
+    family: Family, systems: dict[str, System], context: RunContext
+) -> Collection:
+    """Seal the family's outputs from its pinned trial inventory and sources.
 
     A case family requires the current source and render contract. A task family
     keeps only trials of its current tasks at a version Harbor would reuse, so a
@@ -99,16 +101,12 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
     keeping only trials whose recorded generation, environment, and verifier
     settings match the current job. A successful trial comes first, then an
     errored trial its tests graded, then one they never graded, with the oldest
-    first within each tier whatever its reward. Costs come from the current
-    catalog price, and a system without a price reports as unpriced.
+    first within each tier whatever its reward. Usage and costs come from the
+    originating attempt's confirmed accounting and frozen price.
 
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor
     can regrade one trial twice, so each solution keeps only its first output.
-
-    The spend summarizes the family's ledger once `update_ledger` has added the
-    attempts of its jobs, which it does first, so a refusal leaves no attempt
-    unrecorded.
 
     Raises
     ------
@@ -116,14 +114,23 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
         A source job is not a job directory, a trial record is unreadable, a
         task is invalid, or the harness is one `check_harness` refuses.
     """
-    entries = update_ledger(family, systems)
+    previous = context.state.output_generation(family.name)
+    entries = read_ledger(family.name, context.state)
+    by_trial: defaultdict[tuple[str, str], list[Entry]] = defaultdict(list)
+    for entry in entries:
+        if isinstance(entry, Entry):
+            by_trial[(entry.job, entry.trial)].append(entry)
     check_harness(family)
-    cases = {case.id: case for case in load_cases(family)}
+    cases = {
+        case.id: case for case in load_cases(family, private_root=context.private_root)
+    }
     expected = current_inputs(family, list(systems.values()))
     candidates = [
         candidate
         for candidate in _read_trials(
-            family, family_sources(family), current_versions(family, cases)
+            family,
+            context.sources(family),
+            current_versions(family, cases, private_root=context.private_root),
         )
         if (
             candidate.trial.lock.agent,
@@ -162,8 +169,13 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
             _output(
                 family,
                 candidate,
-                systems.get(candidate.system),
                 cases[candidate.case],
+                entry=(
+                    matching[0]
+                    if len(matching := by_trial[(candidate.job, candidate.name)]) == 1
+                    else None
+                ),
+                private_root=context.private_root,
             )
             for group in groups.values()
             for candidate in group[: family.settings.samples]
@@ -171,11 +183,21 @@ def collect(family: Family, systems: dict[str, System]) -> Collection:
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )
 
-    write_outputs(family.name, outputs)
+    write_outputs(
+        family.name,
+        outputs,
+        context.state,
+        previous=previous.id,
+        code_revision=context.code_revision,
+        case_revision=context.case_revision,
+        system_names={name: system.display_name for name, system in systems.items()},
+    )
     return Collection(outputs, summarize(entries))
 
 
-def read_trials(family: Family, job_dir: Path) -> list[Output]:
+def read_trials(
+    family: Family, job_dir: Path, *, private_root: Path | None = None
+) -> list[Output]:
     """Return one output per finished trial of a case the family still has.
 
     Raises
@@ -183,9 +205,9 @@ def read_trials(family: Family, job_dir: Path) -> list[Output]:
     InputError
         The directory is not a job directory, or a trial record is unreadable.
     """
-    cases = {case.id: case for case in load_cases(family)}
+    cases = {case.id: case for case in load_cases(family, private_root=private_root)}
     return [
-        _output(family, candidate, None, cases[candidate.case])
+        _output(family, candidate, cases[candidate.case], private_root=private_root)
         for candidate in _read_trials(family, [job_source(job_dir)])
         if candidate.case in cases
     ]
@@ -256,8 +278,10 @@ def _origin(trial: SourceTrial, trials: dict[UUID, SourceTrial]) -> SourceTrial:
 def _output(
     family: Family,
     candidate: _Candidate,
-    system: System | None,
     source: Case,
+    *,
+    entry: Entry | None = None,
+    private_root: Path | None = None,
 ) -> Output:
     """Materialize the originating solution with its selected trial's verdict."""
     trial, origin, case = candidate.trial, candidate.origin, candidate.case
@@ -266,8 +290,9 @@ def _output(
     metadata = context.metadata or {}
     exception = trial.result.exception_info
     reward = _reward(trial.result)
-    text = _text(family, origin, case, reward)
+    text = _text(family, origin, case, reward, private_root=private_root)
     finish_reason = metadata.get('finish_reason')
+    usage = _usage(entry)
 
     return Output(
         trial=candidate.name,
@@ -299,12 +324,12 @@ def _output(
         ),
         finish_reason=finish_reason,
         stop_details=metadata.get('stop_details'),
-        input_tokens=context.n_input_tokens,
-        cached_tokens=context.n_cache_tokens,
-        cache_write_tokens=metadata.get('cache_write_tokens'),
-        output_tokens=context.n_output_tokens,
-        reasoning_tokens=metadata.get('reasoning_tokens'),
-        cost_usd=_cost(system, context),
+        input_tokens=usage.input_tokens if usage else None,
+        cached_tokens=usage.cache_tokens if usage else None,
+        cache_write_tokens=usage.cache_write_tokens if usage else None,
+        output_tokens=usage.output_tokens if usage else None,
+        reasoning_tokens=usage.reasoning_tokens if usage else None,
+        cost_usd=usage.cost(entry.price) if usage and entry and entry.price else None,
         latency_sec=_latency(result, metadata),
         response_models=_response_models(metadata),
         request_id=metadata.get('request_id'),
@@ -331,7 +356,12 @@ def _reward(result: TrialResult) -> float | None:
 
 
 def _text(
-    family: Family, origin: SourceTrial, case: str, reward: float | None
+    family: Family,
+    origin: SourceTrial,
+    case: str,
+    reward: float | None,
+    *,
+    private_root: Path | None,
 ) -> str | None:
     """Return a case's reply, or the diff of a graded solution on a voted task."""
     match family.source:
@@ -352,7 +382,9 @@ def _text(
                 case VotesSettings() if reward is not None:
                     artifacts = TrialPaths(origin.trial_dir).artifacts_dir
                     return workspace_diff(
-                        case_task(family, case) / 'environment' / 'app',
+                        case_task(family, case, private_root=private_root)
+                        / 'environment'
+                        / 'app',
                         source_host_path(artifacts, WORKSPACE),
                     )
                 case VotesSettings() | TaskTestsSettings() | CheckersSettings():
@@ -403,20 +435,20 @@ def _latency(result: TrialResult, metadata: dict[str, Any]) -> float | None:
     return round((timing.finished_at - timing.started_at).total_seconds(), 3)
 
 
-def _cost(system: System | None, context: AgentContext) -> float | None:
-    if (
-        system is None
-        or system.price is None
-        or context.n_input_tokens is None
-        or context.n_output_tokens is None
-    ):
+def _usage(entry: Entry | None) -> MeasuredUsage | None:
+    if entry is None or any(usage is None for usage in entry.responses):
         return None
-    metadata = context.metadata or {}
+    measured = [usage for usage in entry.responses if usage is not None]
+    reasoning = [usage.reasoning_tokens for usage in measured]
     return MeasuredUsage(
-        input_tokens=context.n_input_tokens,
-        cache_tokens=context.n_cache_tokens or 0,
-        cache_write_tokens=metadata.get('cache_write_tokens', 0),
-        output_tokens=context.n_output_tokens,
-        reasoning_tokens=metadata.get('reasoning_tokens'),
-        cache_write_unpriced=metadata.get('cache_write_unpriced', False),
-    ).cost(system.price)
+        input_tokens=sum(usage.input_tokens for usage in measured),
+        cache_tokens=sum(usage.cache_tokens for usage in measured),
+        cache_write_tokens=sum(usage.cache_write_tokens for usage in measured),
+        output_tokens=sum(usage.output_tokens for usage in measured),
+        reasoning_tokens=(
+            sum(value for value in reasoning if value is not None)
+            if all(value is not None for value in reasoning)
+            else None
+        ),
+        cache_write_unpriced=any(usage.cache_write_unpriced for usage in measured),
+    )

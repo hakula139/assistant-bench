@@ -64,6 +64,9 @@ class Collection:
     expected_count: int
     manifest_digest: str
     created_at: str
+    code_revision: str | None
+    case_revision: str | None
+    system_names_json: str | None
 
 
 @dataclass(frozen=True)
@@ -356,6 +359,34 @@ class State:
             ).rows
         ]
 
+    def accounting(self, scope: str) -> list[Row]:
+        """Read final entries and uncovered admitted requests in one snapshot."""
+        return self._database.execute(
+            """
+            SELECT 'entry' AS kind, entries.entry_json, NULL AS attempt_id,
+                entries.job, entries.trial, NULL AS accounting_json,
+                NULL AS receipt_json, entries.started_at AS started_at,
+                '' AS request_id
+            FROM attempt_entries AS entries WHERE entries.scope = ?
+            UNION ALL
+            SELECT 'request', NULL, starts.id, runs.job, claims.trial,
+                claims.accounting_json, receipts.receipt_json, starts.started_at,
+                requests.id
+            FROM request_admissions AS requests
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            JOIN runs ON runs.id = claims.run_id
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            WHERE claims.scope = ? AND NOT EXISTS (
+                SELECT 1 FROM attempt_entries AS entries
+                WHERE entries.attempt_id = starts.id
+                    AND entries.started_at = starts.started_at
+            )
+            ORDER BY started_at, job, trial, request_id
+            """,
+            (scope, scope),
+        ).rows
+
     def settle_claim(self, claim_id: str) -> None:
         """Atomically settle recorded work with registered artifacts and receipts.
 
@@ -477,13 +508,17 @@ class State:
 
     # ── Output Generations ──
 
+    def collection(self, collection_id: str) -> Collection:
+        return _collection(self._collection_row(collection_id))
+
     def begin_collection(self, collection: Collection) -> None:
         self._database.execute(
             """
             INSERT INTO collections (
-                id, family, expected_count, manifest_digest, created_at
+                id, family, expected_count, manifest_digest, created_at,
+                code_revision, case_revision, system_names_json
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             """,
             (
@@ -492,6 +527,9 @@ class State:
                 collection.expected_count,
                 collection.manifest_digest,
                 collection.created_at,
+                collection.code_revision,
+                collection.case_revision,
+                collection.system_names_json,
             ),
         )
         if _collection(self._collection_row(collection.id)) != collection:
@@ -761,6 +799,9 @@ def _collection(row: Row) -> Collection:
         expected_count=cast(int, row['expected_count']),
         manifest_digest=cast(str, row['manifest_digest']),
         created_at=cast(str, row['created_at']),
+        code_revision=cast(str | None, row['code_revision']),
+        case_revision=cast(str | None, row['case_revision']),
+        system_names_json=cast(str | None, row['system_names_json']),
     )
 
 

@@ -1,16 +1,19 @@
-"""Output records of a family's trials, collected into the data directory."""
+"""Output records of a family's trials and immutable cloud generations."""
 
+import hashlib
+import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Literal, NamedTuple
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from assistant_bench.families import Family, Gate
 from assistant_bench.messages import InputError, count_of, error_lines, series
-from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.scoring.checkers import Checks
+from assistant_bench.state import Collection, OutputGeneration, State
 
 
 type Verdict = Literal['pass', 'fail', 'ungraded']
@@ -202,7 +205,9 @@ def _token_spreads(pool: Iterable[Output]) -> list[_Spread]:
     return spreads
 
 
-def read_outputs(family: str) -> list[Output]:
+def read_outputs(
+    family: str, state: State, *, generation: OutputGeneration | None = None
+) -> list[Output]:
     """Return the family's outputs, or none before its first collection.
 
     Raises
@@ -211,26 +216,51 @@ def read_outputs(family: str) -> list[Output]:
         A line does not validate as an output, for example one an older
         collection wrote.
     """
-    path = _outputs_file(family)
-    if not path.exists():
-        return []
+    snapshot = state.output_generation(family) if generation is None else generation
     try:
-        return [
-            Output.model_validate_json(line) for line in path.read_text().splitlines()
-        ]
+        return [Output.model_validate_json(line) for line in snapshot.outputs]
     except ValidationError as error:
         raise InputError(
-            f'{error_lines(error, f"Outputs `{path}`")}\n'
+            f'{error_lines(error, f"Outputs of `{family}`")}\n'
             f'Run `uv run bench collect {family}` to rewrite it.'
         ) from error
 
 
-def write_outputs(family: str, outputs: list[Output]) -> None:
-    write_atomically(
-        _outputs_file(family),
-        ''.join(f'{output.model_dump_json()}\n' for output in outputs),
+def write_outputs(
+    family: str,
+    outputs: list[Output],
+    state: State,
+    *,
+    previous: str | None,
+    code_revision: str,
+    case_revision: str,
+    system_names: dict[str, str],
+) -> str:
+    """Seal a complete generation and activate it only against the pinned base."""
+    values = [output.model_dump_json() for output in outputs]
+    generation = str(uuid4())
+    state.begin_collection(
+        Collection(
+            id=generation,
+            family=family,
+            expected_count=len(values),
+            manifest_digest=hashlib.sha256(
+                ''.join(f'{value}\n' for value in values).encode()
+            ).hexdigest(),
+            created_at=datetime.now(UTC).isoformat(),
+            code_revision=code_revision,
+            case_revision=case_revision,
+            system_names_json=json.dumps(
+                system_names, ensure_ascii=False, sort_keys=True
+            ),
+        )
     )
-
-
-def _outputs_file(family: str) -> Path:
-    return data_dir() / 'outputs' / f'{family}.jsonl'
+    for position, value in enumerate(values):
+        state.stage_output(generation, position, value)
+    state.seal_collection(generation)
+    if not state.activate_collection(generation, previous):
+        raise InputError(
+            f'Family `{family}` changed its active outputs during collection. '
+            'Run collection again from the new generation.'
+        )
+    return generation

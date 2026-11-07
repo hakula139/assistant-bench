@@ -9,20 +9,22 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
 from pydantic import BaseModel, ConfigDict
 from pydantic_core import to_jsonable_python
 
-from assistant_bench import jobs
+from assistant_bench import execution, jobs
 from assistant_bench.catalog import System, SystemIdentity
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
-from assistant_bench.paths import data_dir
-from assistant_bench.spend import update_canary_ledger, write_canary_accounting
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Accounting
+from assistant_bench.state import State
 from assistant_bench.tasks import render_task_config
 
 
@@ -84,13 +86,15 @@ class Record(BaseModel):
         )
 
 
-def prepare(configs: Iterable[JobConfig], systems: Mapping[str, System]) -> list[Probe]:
+def prepare(
+    configs: Iterable[JobConfig], systems: Mapping[str, System], *, root: Path
+) -> list[Probe]:
     """Prepare one probe for each selected system with at least one pending trial."""
     pending = {name for config in configs for name in jobs.pending_trials(config)}
     if not pending:
         return []
 
-    root = data_dir() / 'canaries'
+    root = root / 'canaries'
     task = root / 'task'
     task.mkdir(parents=True, exist_ok=True)
     instruction = files('assistant_bench').joinpath('canary.md').read_text()
@@ -141,31 +145,39 @@ def _canonical_config(value: Any) -> Any:
     return to_jsonable_python(value)
 
 
-def run(probes: list[Probe]) -> list[Record]:
+def run(probes: list[Probe], context: RunContext) -> list[Record]:
     """Record every outcome and its spend before refusing a failed or changed probe."""
-    update_canary_ledger()
     records: list[Record] = []
     problems: list[str] = []
     for probe in probes:
-        previous = read_records(probe.original.name)
-        write_canary_accounting(
-            jobs.job_path(probe.config), probe.actual, probe.ceiling_usd
-        )
+        baseline = context.state.baseline(probe.original.name)
+        previous = [Record.model_validate_json(baseline)] if baseline else []
+        run_id = str(uuid4())
         run_error: str | None = 'InterruptedProbe'
         try:
-            jobs.run_job(
+            execution.execute(
+                context,
                 probe.config,
+                {
+                    probe.actual.name: Accounting(
+                        system=probe.actual.name,
+                        price=probe.actual.price,
+                        ceiling_usd=probe.ceiling_usd,
+                    )
+                },
+                scope='canaries',
+                run_id=run_id,
                 log=probe.config.jobs_dir / f'{probe.config.job_name}.log',
             )
             run_error = None
         except subprocess.CalledProcessError as error:
             run_error = type(error).__name__
         finally:
-            try:
-                outcomes = _outcomes(probe, run_error)
-                _append(outcomes)
-            finally:
-                update_canary_ledger()
+            context.state.run(run_id)
+            outcomes = _outcomes(probe, run_error)
+            if len(outcomes) != 1:
+                raise InputError('A canary execution produced more than one outcome.')
+            context.state.append_canary(run_id, outcomes[0].model_dump_json())
 
         records.extend(outcomes)
         problems.extend(
@@ -173,18 +185,15 @@ def run(probes: list[Probe]) -> list[Record]:
             for record in outcomes
             if (problem := _problem(record, previous)) is not None
         )
+        if not problems:
+            context.state.establish_baseline(probe.original.name, run_id)
     if problems:
         raise InputError('\n'.join(problems))
     return records
 
 
-def read_records(system: str) -> list[Record]:
-    path = _records_file(system)
-    return (
-        [Record.model_validate_json(line) for line in path.read_text().splitlines()]
-        if path.exists()
-        else []
-    )
+def read_records(system: str, state: State) -> list[Record]:
+    return [Record.model_validate_json(value) for value in state.records(system)]
 
 
 def _outcomes(probe: Probe, run_error: str | None) -> list[Record]:
@@ -230,19 +239,6 @@ def _record(probe: Probe, result: TrialResult | None, run_error: str | None) -> 
     )
 
 
-def _append(records: list[Record]) -> None:
-    for record in records:
-        path = _records_file(record.system)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('a') as file:
-            file.write(record.model_dump_json() + '\n')
-
-
-def _records_file(system: str) -> Path:
-    key = hashlib.sha256(system.encode()).hexdigest()
-    return data_dir() / 'canaries' / f'{key}.jsonl'
-
-
 def _problem(record: Record, previous: list[Record]) -> str | None:
     if not record.success:
         return (
@@ -272,7 +268,6 @@ def _problem(record: Record, previous: list[Record]) -> str | None:
         f'System `{record.system}`: canary differs from its baseline on '
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
         f'{model_change}The run was refused. Inspect its canary records. '
-        'If the route changed models, delete the stale trials '
-        "and the system's canary file. For a benign template change, delete only "
-        'its canary file, then rerun.'
+        'Give a changed system a new name. Review a benign template change '
+        'before resetting its cloud canary baseline.'
     )

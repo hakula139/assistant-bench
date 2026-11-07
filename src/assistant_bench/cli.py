@@ -3,20 +3,21 @@
 import os
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from collections.abc import Mapping
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-from textwrap import dedent
 from typing import Annotated, Any, assert_never
+from uuid import uuid4
 
 import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 from typer.core import TyperGroup
 
-from assistant_bench import canaries, collection, jobs, report
+from assistant_bench import canaries, collection, execution, jobs, report
 from assistant_bench.arena import commands, local, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import connect
@@ -49,16 +50,17 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
-from assistant_bench.runtime import open_sources
+from assistant_bench.runtime import RunContext, open_context, open_sources
 from assistant_bench.spend import (
+    Accounting,
     Basis,
     Projection,
     Spend,
     budget_problem,
     project,
+    read_ledger,
     summarize,
     total_usd,
-    update_ledger,
 )
 from assistant_bench.tasks import (
     author_vendors,
@@ -134,13 +136,22 @@ def check(
     if task_names and (not families or len(families) != 1):
         raise InputError('Select exactly one task family with `--task`.')
 
-    with open_sources() if private else nullcontext() as sources:
-        _check(families, task_names, sources.root if sources is not None else None)
+    with (
+        tempfile.TemporaryDirectory(prefix='bench-check-') as temporary,
+        open_sources() if private else nullcontext() as sources,
+    ):
+        _check(
+            families,
+            task_names,
+            Path(temporary),
+            sources.root if sources is not None else None,
+        )
 
 
 def _check(
     families: list[str] | None,
     task_names: list[str] | None,
+    root: Path,
     private_root: Path | None,
 ) -> None:
     check_case_entries(private_root=private_root)
@@ -155,7 +166,8 @@ def _check(
                     '`--task`.'
                 )
             cases = count_of(
-                len(_render_tasks(family, private_root=private_root)), 'valid case'
+                len(_render_tasks(family, root=root, private_root=private_root)),
+                'valid case',
             )
             typer.echo(f'Family `{family.name}`: {cases}.')
             continue
@@ -172,7 +184,11 @@ def _check(
 
     failed = False
     for family, tasks in task_families:
-        outputs = collection.read_trials(family, _run(jobs.check_job(family, tasks)))
+        outputs = collection.read_trials(
+            family,
+            _run(jobs.check_job(family, tasks, root=root)),
+            private_root=private_root,
+        )
         problems = _check_problems(tasks, outputs)
         for problem in problems:
             typer.echo(f'Family `{family.name}`: {problem}.', err=True)
@@ -196,18 +212,31 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     run prints each family's projected cost, and one family it would take past its
     `budget_usd` refuses the whole run.
     """
-    export, systems = _catalog()
-    prepared = _prepare(families, names, export, systems)
+    with open_context() as context:
+        export, systems = _catalog()
+        _run_families(families, names, export, systems, context)
+
+
+def _run_families(
+    families: list[str] | None,
+    names: list[str] | None,
+    export: NixosConfigExport,
+    systems: dict[str, System],
+    context: RunContext,
+) -> None:
+    prepared = _prepare(families, names, export, systems, context)
     problems: list[str] = []
     for family, selected, job in prepared:
-        spent, projections = _projection(family, selected, job, systems)
+        spent, projections = _projection(family, selected, job, context)
         _echo_projection(family, spent, projections)
         if (problem := budget_problem(family, spent, projections)) is not None:
             problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
 
-    probes = canaries.prepare((job for _, _, job in prepared), systems)
+    probes = canaries.prepare(
+        (job for _, _, job in prepared), systems, root=context.root
+    )
     for probe in probes:
         ceiling = probe.ceiling_usd
         cost = f'${ceiling:.4f}' if ceiling is not None else 'unknown'
@@ -216,13 +245,20 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
             f'`{probe.actual.max_output_tokens}`-token completion allowance '
             f'including reasoning. Full-context cost ceiling: {cost}.'
         )
-    canaries.run(probes)
+    canaries.run(probes, context)
 
-    for family, _, job in prepared:
+    for family, selected, job in prepared:
         try:
-            _run(job)
+            execution.execute(
+                context,
+                job,
+                {system.name: Accounting.of(system) for system in selected},
+                scope=family.name,
+                run_id=str(uuid4()),
+            )
         finally:
-            _echo_conflicts(family, _collect(family, systems, export))
+            context.refresh_sources(family)
+            _echo_conflicts(family, _collect(family, systems, export, context))
 
 
 @app.command()
@@ -231,31 +267,34 @@ def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None
 
     Nothing runs, and no request reaches the endpoint.
     """
-    export, systems = _catalog()
-    for family, selected, job in _prepare(families, names, export, systems):
-        spent, projections = _projection(family, selected, job, systems)
-        for entry in spent:
-            typer.echo(_spend_line(entry))
-        _echo_projection(family, spent, projections)
-        if (problem := budget_problem(family, spent, projections)) is not None:
-            typer.echo(problem)
+    with open_context() as context:
+        export, systems = _catalog()
+        for family, selected, job in _prepare(
+            families, names, export, systems, context
+        ):
+            spent, projections = _projection(family, selected, job, context)
+            for entry in spent:
+                typer.echo(_spend_line(entry))
+            _echo_projection(family, spent, projections)
+            if (problem := budget_problem(family, spent, projections)) is not None:
+                typer.echo(problem)
 
 
 @app.command()
 def collect(families: FamilyArguments = None) -> None:
     """Collect the trials of every family with jobs, or of the named ones.
 
-    The outputs go to outputs/<family>.jsonl in the data directory.
+    The outputs form an immutable generation in private cloud state.
     """
-    names = families if families is not None else _families_with_jobs()
-    if not names:
-        typer.echo('No family has jobs yet. Run `uv run bench run` first.')
-        return
-
-    export, systems = _catalog()
-    for name in names:
-        selected = load_family(name)
-        _echo_conflicts(selected, _collect(selected, systems, export))
+    with open_context() as context:
+        names = families if families is not None else _families_with_jobs(context)
+        if not names:
+            typer.echo('No family has jobs yet. Run `uv run bench run` first.')
+            return
+        export, systems = _catalog()
+        for name in names:
+            selected = load_family(name)
+            _echo_conflicts(selected, _collect(selected, systems, export, context))
 
 
 @app.command()
@@ -381,19 +420,13 @@ def _catalog() -> tuple[NixosConfigExport, dict[str, System]]:
     return export, load_systems(export)
 
 
-def _render_tasks(family: Family, *, private_root: Path | None = None) -> list[Path]:
-    """Render a case family's tasks, refusing any that would abort its job."""
-    tasks = render_tasks(family, load_cases(family, private_root=private_root))
-    changed = changed_tasks(family, tasks)
-    if changed:
-        raise InputError(
-            f'Family `{family.name}` has cases whose rendered task changed under a '
-            f'version a trial recorded: {code([case for case, _ in changed])}. A '
-            'Harbor upgrade that changes a `task.toml` default does this, and '
-            "Harbor aborts the job until the family's earlier job directories "
-            f'are removed, as `{HARBOR_DOC}` describes.'
-        )
-    return tasks
+def _render_tasks(
+    family: Family, *, root: Path, private_root: Path | None = None
+) -> list[Path]:
+    """Render a case family's tasks under this command's temporary root."""
+    return render_tasks(
+        family, load_cases(family, private_root=private_root), root=root
+    )
 
 
 def _task_dirs(
@@ -408,26 +441,6 @@ def _task_dirs(
     if family.settings.systems:
         author_vendors(family, tasks, export, private_root=private_root)
 
-    changed = changed_tasks(family, tasks)
-    if changed:
-        detail = '\n'.join(
-            f'Task `{task}` changed since a trial ran it at version `{version}`.'
-            for task, version in changed
-        )
-        raise InputError(
-            dedent(
-                """
-                Family `{family}` has tasks to bump:
-                {detail}
-                Bump each task's `[task] version`: the patch for a change no trial
-                depends on, such as its solution, the minor for a change to `tests/`
-                alone, which regrades its trials, or the major for anything the agent
-                sees, which reruns them.
-                """
-            )
-            .strip()
-            .format(family=family.name, detail=detail)
-        )
     return tasks
 
 
@@ -486,8 +499,8 @@ def _named_systems(
     return [system for system in systems if system.name in names]
 
 
-def _families_with_jobs() -> list[str]:
-    return [name for name in family_names() if jobs.has_jobs(load_family(name))]
+def _families_with_jobs(context: RunContext) -> list[str]:
+    return [name for name in family_names() if context.state.artifacts(name)]
 
 
 def _prepare(
@@ -495,6 +508,7 @@ def _prepare(
     names: list[str] | None,
     export: NixosConfigExport,
     systems: Mapping[str, System],
+    context: RunContext,
 ) -> list[tuple[Family, list[System], JobConfig]]:
     """Return each family to run with its systems and its job."""
     prepared: list[tuple[Family, list[System], JobConfig]] = []
@@ -504,13 +518,27 @@ def _prepare(
                 f'Family `{family.name}` lists no systems. Add them to `systems` in '
                 f'`families/{family.name}/family.toml`.'
             )
-        _refuse_drift(family, selected)
+        _refuse_drift(family, selected, context)
         tasks = (
-            _render_tasks(family)
+            _render_tasks(family, root=context.root, private_root=context.private_root)
             if family.source == 'cases'
-            else _task_dirs(family, export)
+            else _task_dirs(family, export, private_root=context.private_root)
         )
-        prepared.append((family, selected, jobs.job(family, selected, tasks)))
+        sources = context.sources(family)
+        if changed := changed_tasks(family, tasks, sources):
+            raise InputError(
+                f'Family `{family.name}` changed {code(changed)} '
+                'without a task version bump. '
+                'Bump the patch for reference-only changes, the minor for tests, '
+                'or the major for inputs the agent sees.'
+            )
+        prepared.append(
+            (
+                family,
+                selected,
+                jobs.job(family, selected, tasks, root=context.root, sources=sources),
+            )
+        )
     return prepared
 
 
@@ -565,8 +593,8 @@ def _run_targets(
     return targets
 
 
-def _refuse_drift(family: Family, systems: list[System]) -> None:
-    drifted = jobs.drifted_systems(family, systems)
+def _refuse_drift(family: Family, systems: list[System], context: RunContext) -> None:
+    drifted = jobs.drifted_systems(family, systems, context.sources(family))
     frozen = report.reported_fingerprints(family.name)
     moved = _moved(frozen, systems)
     if not drifted and not moved:
@@ -590,8 +618,7 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         )
     if rerun:
         lines.append(
-            f'Delete the stale trials of {code(rerun)} under `jobs/{family.name}/` '
-            'in the data directory before the next run.'
+            f'Give the changed systems {code(rerun)} new names before the next run.'
         )
     raise InputError('\n'.join(lines))
 
@@ -617,9 +644,12 @@ def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
 
 
 def _collect(
-    family: Family, systems: dict[str, System], export: NixosConfigExport
+    family: Family,
+    systems: dict[str, System],
+    export: NixosConfigExport,
+    context: RunContext,
 ) -> list[Output]:
-    collected = collection.collect(family, systems)
+    collected = collection.collect(family, systems, context)
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(
@@ -653,7 +683,13 @@ def _collect(
         typer.echo(f'No system solved {code(unsolved)}.')
 
     if family.source == 'tasks' and family.settings.systems:
-        _author_rates(family, outputs, _family_systems(family, systems), export)
+        _author_rates(
+            family,
+            outputs,
+            _family_systems(family, systems),
+            export,
+            private_root=context.private_root,
+        )
 
     versions = sorted(
         {output.harness_version for output in outputs if output.harness_version}
@@ -703,9 +739,9 @@ def _projection(
     family: Family,
     selected: list[System],
     job: JobConfig,
-    systems: Mapping[str, System],
+    context: RunContext,
 ) -> tuple[list[Spend], list[Projection]]:
-    spent = summarize(update_ledger(family, systems))
+    spent = summarize(read_ledger(family.name, context.state))
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 
@@ -750,9 +786,14 @@ def _author_rates(
     outputs: list[Output],
     systems: list[System],
     export: NixosConfigExport,
+    *,
+    private_root: Path,
 ) -> None:
-    tasks = [case_task(family, case.id) for case in load_cases(family)]
-    vendors = author_vendors(family, tasks, export)
+    tasks = [
+        case_task(family, case.id, private_root=private_root)
+        for case in load_cases(family, private_root=private_root)
+    ]
+    vendors = author_vendors(family, tasks, export, private_root=private_root)
 
     for system in systems:
         rates: list[str] = []

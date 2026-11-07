@@ -125,6 +125,19 @@ class MaterializedTrial:
     manifest: TrialManifest
 
 
+def snapshot_trial(source_job_dir: Path, destination: Path, trial_name: str) -> None:
+    """Freeze the selected bytes and modes once into an empty scratch job tree."""
+    destination.mkdir(parents=True, exist_ok=False)
+    for entry, content in _selected_files(source_job_dir, trial_name):
+        path = destination / entry.path.removeprefix('job/')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if entry.mode == '120000':
+            path.symlink_to(os.fsdecode(content))
+        else:
+            path.write_bytes(content)
+            path.chmod(0o755 if entry.mode == '100755' else 0o644)
+
+
 def build_manifest(
     source_job_dir: Path,
     *,
