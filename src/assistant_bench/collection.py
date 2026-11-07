@@ -33,6 +33,7 @@ from assistant_bench.html import extract_html
 from assistant_bench.jobs import (
     check_harness,
     current_inputs,
+    environment_inputs,
     job_source,
     source_trials,
 )
@@ -136,12 +137,21 @@ def collect(
         )
         if (
             candidate.trial.lock.agent,
-            candidate.trial.lock.environment,
+            environment_inputs(
+                candidate.trial.lock.environment,
+                candidate.trial.lock.extra_docker_compose,
+            ),
             candidate.trial.lock.verifier.disable,
         )
         == expected.get(candidate.system)
         and candidate.origin.lock.agent == candidate.trial.lock.agent
-        and candidate.origin.lock.environment == candidate.trial.lock.environment
+        and environment_inputs(
+            candidate.origin.lock.environment,
+            candidate.origin.lock.extra_docker_compose,
+        )
+        == environment_inputs(
+            candidate.trial.lock.environment, candidate.trial.lock.extra_docker_compose
+        )
     ]
 
     candidates.sort(
