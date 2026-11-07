@@ -158,6 +158,11 @@ BEGIN
     SELECT RAISE(ABORT, 'Collection identity is immutable');
 END;
 
+CREATE TRIGGER collections_keep_history BEFORE DELETE ON collections
+BEGIN
+    SELECT RAISE(ABORT, 'Collection history is immutable');
+END;
+
 CREATE TABLE collection_outputs (
     collection_id TEXT NOT NULL REFERENCES collections (id),
     position INTEGER NOT NULL CHECK (position >= 0),
