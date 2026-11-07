@@ -363,6 +363,7 @@ def close(
     if snapshot is not None:
         closed = _close_votes(family, snapshot)
     else:
+        known_names([family], family_names(), 'No family named')
         selected = load_family(family)
         match selected.settings:
             case VotesSettings():
