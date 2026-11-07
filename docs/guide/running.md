@@ -122,7 +122,7 @@ When the route serves another model, delete the minority job's trials of that sy
 
 Follow the site's Vote link and choose an available family. [Arena](../design/arena.md#vote-store) describes the production and staging vote stores.
 
-Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml`, and `BENCH_D1_TOKEN_FILE` in `.env` naming a file that holds a Cloudflare API token with D1 Edit:
+Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml` and a Cloudflare API token with D1 Edit. Set exactly one credential source in `.env`: `BENCH_D1_TOKEN_FILE` names a file holding the token, or `BENCH_D1_ENV_FILE` names an existing dotenv file containing `CLOUDFLARE_API_TOKEN`. The dotenv source reads that token without expanding variables or changing the process environment.
 
 ```bash
 uv run bench arena prepare writing-zh

@@ -4,7 +4,7 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 
 ## Publication and Closing
 
-The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API, one statement per request. `web/wrangler.toml` names the account and each target's database, and the token comes from the file that `BENCH_D1_TOKEN_FILE` in `.env` names.
+The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API, one statement per request. `web/wrangler.toml` names the account and each target's database, and `.env` names the [credential source](../guide/running.md#voting).
 
 ```bash
 uv run bench arena prepare writing-zh

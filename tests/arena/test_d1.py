@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
@@ -141,12 +142,34 @@ class TestConnect:
         monkeypatch.setattr(d1, 'WRANGLER_CONFIG', path)
         return path
 
-    def test_queries_the_target_database_with_the_token_from_its_file(
-        self, config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ('variable', 'content', 'expected'),
+        [
+            (d1.TOKEN_FILE_VAR, 'synthetic-token\n', 'synthetic-token'),
+            (
+                d1.ENV_FILE_VAR,
+                'CLOUDFLARE_API_TOKEN="synthetic-${TOKEN_SUFFIX}"\n'
+                'D1_UNRELATED_SETTING=from-file\n',
+                'synthetic-${TOKEN_SUFFIX}',
+            ),
+        ],
+        ids=['token-file', 'dotenv-file'],
+    )
+    def test_queries_with_only_the_token_from_its_credential_file(
+        self,
+        config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        variable: str,
+        content: str,
+        expected: str,
     ) -> None:
         token = tmp_path / 'd1-token'
-        token.write_text('synthetic-token\n')
-        monkeypatch.setenv(d1.TOKEN_FILE_VAR, str(token))
+        token.write_text(content)
+        monkeypatch.setenv(variable, str(token))
+        monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'ambient-token')
+        monkeypatch.setenv('TOKEN_SUFFIX', 'expanded')
+        monkeypatch.setenv('D1_UNRELATED_SETTING', 'from-process')
         requests: list[httpx.Request] = []
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -164,10 +187,12 @@ class TestConnect:
             database.execute('SELECT 1')
 
         (request,) = requests
-        assert request.headers['Authorization'] == 'Bearer synthetic-token'
+        assert request.headers['Authorization'] == f'Bearer {expected}'
         assert request.url.path == (
             f'/client/v4/accounts/{ACCOUNT}/d1/database/{DATABASE}/query'
         )
+        assert os.environ['CLOUDFLARE_API_TOKEN'] == 'ambient-token'
+        assert os.environ['D1_UNRELATED_SETTING'] == 'from-process'
 
     def test_names_the_create_command_for_a_target_without_an_id(
         self, config: Path
@@ -181,20 +206,83 @@ class TestConnect:
             'ID there.'
         )
 
-    def test_names_the_token_variable_when_env_sets_none(self, config: Path) -> None:
-        with pytest.raises(ValueError, match=d1.TOKEN_FILE_VAR), d1.connect('staging'):
-            pass
-
-    def test_names_a_token_file_that_cannot_be_read(
-        self, config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize('conflicting', [False, True], ids=['missing', 'both'])
+    def test_requires_exactly_one_file_source(
+        self, config: Path, monkeypatch: pytest.MonkeyPatch, conflicting: bool
     ) -> None:
-        token = tmp_path / 'd1-token'
-        monkeypatch.setenv(d1.TOKEN_FILE_VAR, str(token))
+        monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'ambient-token')
+        if conflicting:
+            monkeypatch.setenv(d1.TOKEN_FILE_VAR, 'token-file')
+            monkeypatch.setenv(d1.ENV_FILE_VAR, 'dotenv-file')
 
         with pytest.raises(ValueError) as raised, d1.connect('staging'):
             pass
 
         assert str(raised.value) == (
-            f'`{d1.TOKEN_FILE_VAR}` names `{token}`, which cannot be read: '
+            f'Set exactly one of `{d1.TOKEN_FILE_VAR}` and `{d1.ENV_FILE_VAR}` in '
+            '`.env` to the path of a Cloudflare API token file or a dotenv '
+            'file containing `CLOUDFLARE_API_TOKEN` with D1 Edit.'
+        )
+
+    @pytest.mark.parametrize('variable', [d1.TOKEN_FILE_VAR, d1.ENV_FILE_VAR])
+    def test_names_a_credential_file_that_cannot_be_read(
+        self,
+        config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        variable: str,
+    ) -> None:
+        token = tmp_path / 'd1-token'
+        monkeypatch.setenv(variable, str(token))
+
+        with pytest.raises(ValueError) as raised, d1.connect('staging'):
+            pass
+
+        assert str(raised.value) == (
+            f'`{variable}` names `{token}`, which cannot be read: '
             'No such file or directory.'
+        )
+
+    @pytest.mark.parametrize(
+        ('variable', 'content', 'expected'),
+        [
+            (d1.TOKEN_FILE_VAR, '', 'a nonempty Cloudflare API token'),
+            (d1.TOKEN_FILE_VAR, ' \n', 'a nonempty Cloudflare API token'),
+            (
+                d1.ENV_FILE_VAR,
+                'UNRELATED_TOKEN=synthetic-token\n',
+                'a nonempty `CLOUDFLARE_API_TOKEN`',
+            ),
+            (
+                d1.ENV_FILE_VAR,
+                'CLOUDFLARE_API_TOKEN\n',
+                'a nonempty `CLOUDFLARE_API_TOKEN`',
+            ),
+            (
+                d1.ENV_FILE_VAR,
+                'CLOUDFLARE_API_TOKEN=" "\n',
+                'a nonempty `CLOUDFLARE_API_TOKEN`',
+            ),
+        ],
+        ids=['empty-file', 'blank-file', 'missing-key', 'bare-key', 'blank-value'],
+    )
+    def test_refuses_a_file_without_a_token(
+        self,
+        config: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        variable: str,
+        content: str,
+        expected: str,
+    ) -> None:
+        token = tmp_path / 'd1-token'
+        token.write_text(content)
+        monkeypatch.setenv(variable, str(token))
+        monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'ambient-token')
+
+        with pytest.raises(ValueError) as raised, d1.connect('staging'):
+            pass
+
+        assert str(raised.value) == (
+            f'`{variable}` names `{token}`, which needs {expected}.'
         )

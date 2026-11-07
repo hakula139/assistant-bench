@@ -12,7 +12,7 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs, report
-from assistant_bench.arena.d1 import TOKEN_FILE_VAR
+from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
@@ -152,6 +152,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv(SDK_HEADERS_VAR, raising=False)
     monkeypatch.delenv(TOKEN_FILE_VAR, raising=False)
+    monkeypatch.delenv(ENV_FILE_VAR, raising=False)
     for name in PROXY_VARS:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
