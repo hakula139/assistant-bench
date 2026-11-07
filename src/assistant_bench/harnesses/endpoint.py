@@ -171,7 +171,12 @@ class _Client(httpx2.AsyncClient):
             return
         recorder = self._accounting()
         if authorization := request.headers.get('Authorization'):
-            recorder.remember_secret(authorization.removeprefix('Bearer '))
+            scheme, separator, credential = authorization.partition(' ')
+            recorder.remember_secret(
+                credential
+                if separator and scheme.lower() == 'bearer'
+                else authorization
+            )
         if key := request.headers.get('x-api-key'):
             recorder.remember_secret(key)
         for name in self._endpoint.headers or {}:
