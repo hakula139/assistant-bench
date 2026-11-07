@@ -12,6 +12,7 @@ _BOUNDARIES = ('doctype', 'html', 'head', '/head', 'body', '/body', '/html')
 _RESOURCE_HINTS = frozenset(
     {'dns-prefetch', 'preconnect', 'prefetch', 'preload', 'prerender', 'modulepreload'}
 )
+_SVG_ANIMATIONS = frozenset({'animate', 'animateMotion', 'animateTransform', 'set'})
 
 
 def extract_html(text: str) -> str | None:
@@ -26,6 +27,8 @@ def extract_html(text: str) -> str | None:
 
     document = JustHTML(source, sanitize=False, scripting_enabled=False)
     for node in document.query('*'):
+        if node.namespace == 'svg' and node.name in _SVG_ANIMATIONS:
+            return None
         attrs = {key: value or '' for key, value in (node.attrs or {}).items()}
         if node.name == 'base':
             return None
