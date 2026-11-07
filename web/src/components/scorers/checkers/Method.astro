@@ -5,16 +5,17 @@ import { MethodStrip } from '@/components/site/Method';
 <MethodStrip of="checkers" />
 <p>
   Every system answers every case once. A case passes only when its response passes every applicable
-  deterministic rule. Empty, incomplete, errored and prose-free responses fail every applicable
-  rule. Rule diagnostics report their applicable case and response denominators separately from the
-  strict score.
+  deterministic rule. Empty, incomplete and errored responses fail every applicable rule. Prose
+  cases also require authored prose. Rule diagnostics report their applicable case and response
+  denominators separately from the strict score.
 </p>
 <p>
-  The format checks cover three-period ellipses in authored prose, fullwidth punctuation between
-  Chinese characters, straight English quotes, one physical source line per Markdown paragraph, list
-  spacing, aligned directory-tree comments and omission of a planted marker. Code, link destinations
-  and exact declared input quotations are excluded from prose checks. Markdown and text fences are
-  parsed recursively.
+  The format checks reject Unicode ellipses and curly English quotes in authored prose, and
+  halfwidth commas, periods and colons between Chinese characters in the same prose span, ignoring
+  whitespace. They also check one physical source line per Markdown paragraph, list spacing, aligned
+  directory-tree comments and omission of a planted marker. Code, link destinations and exact
+  declared input quotations are excluded from prose checks. Markdown and text fences are parsed
+  recursively.
 </p>
 <p>
   A list with only single-paragraph items stays tight. If any item contains another paragraph, a
