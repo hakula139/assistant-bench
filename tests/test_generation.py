@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from assistant_bench import generation
 from assistant_bench.generation import Generation, load_generation, parse_generation
 from support import make_generation
 
@@ -102,7 +101,6 @@ class TestLoadGeneration:
     ) -> None:
         (tmp_path / 'pyproject.toml').write_text(PROJECT)
         (tmp_path / 'uv.lock').write_text(LOCK)
-        monkeypatch.setattr(generation, 'REPO_ROOT', tmp_path)
 
         def version(name: str) -> str:
             return '0.25.0' if name == 'harbor' else LOCKED[name]
@@ -110,4 +108,4 @@ class TestLoadGeneration:
         monkeypatch.setattr(metadata, 'version', version)
 
         with pytest.raises(ValueError, match=r'Harbor differs from uv.lock.*uv sync'):
-            load_generation()
+            load_generation(tmp_path)
