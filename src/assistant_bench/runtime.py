@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +21,7 @@ class PrivateSources:
 
 
 @contextmanager
-def open_sources() -> Iterator[PrivateSources]:
+def open_sources() -> Generator[PrivateSources]:
     """Pin authenticated private cases for this command and remove them on exit."""
     slug = os.environ.get(REPOSITORY_VAR)
     if not slug:
