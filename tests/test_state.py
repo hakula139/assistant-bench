@@ -17,7 +17,7 @@ from assistant_bench.catalog import Price, SystemIdentity
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
-from assistant_bench.spend import CanaryAccounting, Entry
+from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import (
     AttemptStart,
     Claim,
@@ -78,7 +78,7 @@ def claim(
         trial=identifier,
         system='model-a',
         fingerprint='f' * 12,
-        accounting_json=CanaryAccounting(
+        accounting_json=Accounting(
             system='model-a', price=PRICE, ceiling_usd=0.35
         ).model_dump_json(),
         expected_source_revision=revision,
@@ -160,6 +160,9 @@ def collection(identifier: str, outputs: list[str]) -> Collection:
             ''.join(f'{item}\n' for item in outputs).encode()
         ).hexdigest(),
         created_at=START.isoformat(),
+        code_revision=None,
+        case_revision=None,
+        system_names_json=None,
     )
 
 

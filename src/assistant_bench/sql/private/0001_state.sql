@@ -273,6 +273,9 @@ CREATE TABLE collections (
     expected_count INTEGER NOT NULL CHECK (expected_count >= 0),
     manifest_digest TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    code_revision TEXT,
+    case_revision TEXT,
+    system_names_json TEXT CHECK (system_names_json IS NULL OR json_valid(system_names_json)),
     sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)),
     UNIQUE (id, family)
 ) STRICT;
@@ -283,6 +286,9 @@ WHEN OLD.id IS NOT NEW.id
     OR OLD.expected_count IS NOT NEW.expected_count
     OR OLD.manifest_digest IS NOT NEW.manifest_digest
     OR OLD.created_at IS NOT NEW.created_at
+    OR OLD.code_revision IS NOT NEW.code_revision
+    OR OLD.case_revision IS NOT NEW.case_revision
+    OR OLD.system_names_json IS NOT NEW.system_names_json
     OR (OLD.sealed = 1 AND NEW.sealed != 1)
 BEGIN
     SELECT RAISE(ABORT, 'Collection identity is immutable');

@@ -78,7 +78,11 @@
         # Python Environment
         # ------------------------------------------------------------------------------------------
         pythonEnvironment = {
-          packages = [ pkgs.uv ] ++ nodeTools;
+          packages = [
+            pkgs.uv
+            pkgs.gitleaks
+          ]
+          ++ nodeTools;
           env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 

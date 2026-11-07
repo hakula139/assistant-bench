@@ -20,7 +20,7 @@ from assistant_bench.paths import REPO_ROOT
 WRANGLER_CONFIG = REPO_ROOT / 'web' / 'wrangler.toml'
 TOKEN_FILE_VAR = 'BENCH_D1_TOKEN_FILE'
 ENV_FILE_VAR = 'BENCH_D1_ENV_FILE'
-TargetName = Literal['staging', 'production']
+TargetName = Literal['staging', 'production', 'private']
 
 
 # ── Targets ──
@@ -78,13 +78,14 @@ def connect(target: TargetName) -> Generator[database.Database]:
 
     with httpx.Client(
         base_url=database.API_BASE_URL,
-        headers={'Authorization': f'Bearer {_token()}'},
+        headers={'Authorization': f'Bearer {token()}'},
         timeout=database.TIMEOUT_SEC,
     ) as client:
         yield database.RestDatabase(client, config.account_id, binding.database_id)
 
 
-def _token() -> str:
+def token() -> str:
+    """Read the configured file-backed D1 credential without retaining it."""
     sources = [
         (name, path)
         for name in (TOKEN_FILE_VAR, ENV_FILE_VAR)
