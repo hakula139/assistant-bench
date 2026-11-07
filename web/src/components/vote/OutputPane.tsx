@@ -97,19 +97,24 @@ export function OutputPane({
         </CardTitle>
         <div className="ml-auto min-h-7">{controls}</div>
       </div>
-      {render === 'diff' ? (
-        <CardContent ref={scrollRef} className={cn(scroll, 'px-0')}>
+      <CardContent
+        ref={scrollRef}
+        role="region"
+        aria-label={`Output ${side} contents`}
+        tabIndex={0}
+        className={cn(
+          scroll,
+          render === 'diff' ? 'px-0' : !asMarkdown && 'leading-relaxed whitespace-pre-wrap',
+        )}
+      >
+        {render === 'diff' ? (
           <Diff text={text} />
-        </CardContent>
-      ) : asMarkdown ? (
-        <CardContent ref={scrollRef} className={scroll}>
+        ) : asMarkdown ? (
           <Markdown text={text} />
-        </CardContent>
-      ) : (
-        <CardContent ref={scrollRef} className={cn(scroll, 'leading-relaxed whitespace-pre-wrap')}>
+        ) : (
           <PlainText text={text} />
-        </CardContent>
-      )}
+        )}
+      </CardContent>
     </Card>
   );
 }

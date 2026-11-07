@@ -33,4 +33,4 @@ Letter and digit shortcuts work while the voting panel has focus. Each new pair 
 
 An issue counts against the output you tag, whatever your verdict. Each family lists its own issues. Each output's Issues button explains and toggles them, including on phones. A family that lists none shows no Issues button.
 
-Outputs appear exactly as written. The Markdown toggle renders both text panes as Markdown, with raw HTML shown as text and images left unloaded.
+Outputs appear exactly as written. The Render Markdown toggle renders both text panes as Markdown, with raw HTML shown as text and images left unloaded.

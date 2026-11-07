@@ -1,6 +1,16 @@
 import { cn } from 'cn';
 import { Check, ChevronDown, CircleCheck } from 'lucide-react';
-import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 
 import { AspectTitle } from '@/components/site/Method';
 import { bleed, pageTitle, sectionTitle, wideContainer } from '@/components/site/PageParts';
@@ -149,14 +159,40 @@ function Brief({
   collapsed,
   onCollapsedChange,
   status,
+  scrollRef,
 }: {
   pair: PairView;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   status: ReactNode;
+  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const checklistTitle = useId();
+  const content = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
   const stacked = pair.render !== 'text';
+  const measure = useCallback(() => {
+    const element = scrollRef.current;
+    if (element !== null) {
+      setMoreBelow(element.scrollHeight - element.clientHeight - element.scrollTop > 1);
+    }
+  }, [scrollRef]);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const contents = content.current;
+    if (element === null || contents === null) {
+      return;
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    observer.observe(contents);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [pair.id, collapsed, measure, scrollRef]);
 
   return (
     <Collapsible
@@ -187,34 +223,52 @@ function Brief({
           {status}
         </div>
         <CollapsibleContent asChild>
-          <CardContent
+          <div
             className={cn(
-              scroll,
-              'flex flex-col gap-3 text-base',
+              'relative flex min-h-0 flex-1 flex-col',
               stacked ? 'md:max-h-[25dvh]' : 'md:max-xl:max-h-[25dvh]',
             )}
           >
-            <Hint term={categoryTerms[pair.category]} side="bottom" />
-            <Markdown text={pair.instruction} />
-            {pair.checklist.length > 0 && (
-              <section
-                aria-labelledby={checklistTitle}
-                className="flex flex-col gap-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
+            <CardContent
+              ref={scrollRef}
+              role="region"
+              aria-label="Prompt contents"
+              tabIndex={0}
+              onScroll={measure}
+              className={cn(scroll, 'text-base')}
+            >
+              <div ref={content} className="flex flex-col gap-3">
+                <Hint term={categoryTerms[pair.category]} side="bottom" />
+                <Markdown text={pair.instruction} />
+                {pair.checklist.length > 0 && (
+                  <section
+                    aria-labelledby={checklistTitle}
+                    className="flex flex-col gap-1 rounded-lg bg-muted p-3 ring-1 ring-foreground/10"
+                  >
+                    <h2 id={checklistTitle} className="text-sm font-medium text-muted-foreground">
+                      <Hint term={checklistHint} />
+                    </h2>
+                    <ul className={cn(prose, 'text-muted-foreground')}>
+                      {pair.checklist.map((item) => (
+                        <li key={item} className="flex gap-2 ps-0">
+                          <CircleCheck className="h-lh w-4 shrink-0" aria-hidden="true" />
+                          <InlineMarkdown text={item} />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
+            </CardContent>
+            {moreBelow && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-card from-50% to-transparent pt-6 pb-2 text-xs text-muted-foreground"
               >
-                <h2 id={checklistTitle} className="text-sm font-medium text-muted-foreground">
-                  <Hint term={checklistHint} />
-                </h2>
-                <ul className={cn(prose, 'text-muted-foreground')}>
-                  {pair.checklist.map((item) => (
-                    <li key={item} className="flex gap-2 ps-0">
-                      <CircleCheck className="h-lh w-4 shrink-0" aria-hidden="true" />
-                      <InlineMarkdown text={item} />
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                Scroll for more
+              </div>
             )}
-          </CardContent>
+          </div>
         </CollapsibleContent>
       </Card>
     </Collapsible>
@@ -392,6 +446,7 @@ export function VoteApp() {
     toggleDefect,
   } = useVoteSession();
   const pairView = useRef<HTMLDivElement>(null);
+  const prompt = useRef<HTMLDivElement>(null);
   const panes = useRef<Record<keyof TaggedDefects, HTMLDivElement | null>>({ a: null, b: null });
 
   const title = familyTitle(
@@ -404,7 +459,7 @@ export function VoteApp() {
   /** Focuses a newly shown pair and scrolls it to the draft's offsets. */
   const placePair = useEffectEvent(() => {
     pairView.current?.focus({ preventScroll: true });
-    const offsets = draft?.scroll ?? { window: 0, a: 0, b: 0 };
+    const offsets = draft?.scroll ?? { window: 0, prompt: 0, a: 0, b: 0 };
     window.scrollTo({ top: offsets.window });
     for (const { key } of SIDES) {
       const pane = panes.current[key];
@@ -418,12 +473,23 @@ export function VoteApp() {
     placePair();
   }, [pair?.id]);
 
+  const placePrompt = useEffectEvent(() => {
+    if (prompt.current !== null) {
+      prompt.current.scrollTop = draft?.scroll.prompt ?? 0;
+    }
+  });
+
+  useLayoutEffect(() => {
+    placePrompt();
+  }, [pair?.id, draft?.collapsed]);
+
   const onPageHide = useEffectEvent(() => {
     if (draft !== null) {
       writeDraft({
         ...draft,
         scroll: {
           window: window.scrollY,
+          prompt: prompt.current?.scrollTop ?? draft.scroll.prompt,
           a: panes.current.a?.scrollTop ?? 0,
           b: panes.current.b?.scrollTop ?? 0,
         },
@@ -576,6 +642,7 @@ export function VoteApp() {
       aria-label={`Pair ${state.votes + 1}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
+      <h1 className="sr-only">Compare outputs</h1>
       <div
         className={cn(
           'grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]',
@@ -585,9 +652,13 @@ export function VoteApp() {
       >
         <Brief
           pair={pair}
+          scrollRef={prompt}
           collapsed={draft.collapsed}
           onCollapsedChange={(collapsed) => {
-            update({ collapsed });
+            update({
+              collapsed,
+              scroll: { ...draft.scroll, prompt: prompt.current?.scrollTop ?? draft.scroll.prompt },
+            });
           }}
           status={
             <StatusBand
@@ -636,7 +707,7 @@ export function VoteApp() {
               update({ markdown });
             }}
           >
-            Markdown
+            Render Markdown
           </Toggle>
         </div>
       )}

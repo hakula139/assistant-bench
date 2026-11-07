@@ -208,6 +208,7 @@ async function startVoting(page = <VoteApp />) {
 
 describe('VoteApp', () => {
   let scrollTo: MockInstance<typeof window.scrollTo>;
+  let resize: () => void;
 
   beforeEach(() => {
     localStorage.clear();
@@ -216,6 +217,16 @@ describe('VoteApp', () => {
     turnstile.resets = 0;
     history.replaceState(null, '', '/vote/');
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
   });
 
   afterEach(() => {
@@ -349,35 +360,100 @@ describe('VoteApp', () => {
     expect(localStorage.length).toBe(0);
   });
 
-  test('shows the choice, issues, Markdown, collapsed prompt and scroll again after a reload', async () => {
-    const api = stubApi();
+  test.each([false, true])(
+    'restores the draft and scroll with the prompt collapsed: %s',
+    async (collapsed) => {
+      const api = stubApi();
+      const user = await startVoting();
+      await user.keyboard('b1');
+      await user.click(screen.getByRole('button', { name: 'Render Markdown' }));
+      vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+      const scroller = pane('B').lastElementChild;
+      if (scroller === null) {
+        throw new Error('Expected the scroll container of output B');
+      }
+      scroller.scrollTop = 40;
+      screen.getByRole('region', { name: 'Prompt contents' }).scrollTop = 80;
+      if (collapsed) {
+        await user.click(screen.getByRole('button', { name: 'Prompt' }));
+      }
+      window.dispatchEvent(new Event('pagehide'));
+      cleanup();
+      scrollTo.mockClear();
+
+      render(<VoteApp />);
+      await screen.findByText('Output A1');
+
+      expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
+        'ariaChecked',
+        'true',
+      );
+      expect(within(pane('A')).getByRole('button', { name: 'Issues 1' })).toBeDefined();
+      expect(screen.getByRole('button', { name: 'Render Markdown' })).toHaveProperty(
+        'ariaPressed',
+        'true',
+      );
+      expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty(
+        'ariaExpanded',
+        String(!collapsed),
+      );
+      expect(scrollTo).toHaveBeenLastCalledWith({ top: 120 });
+      expect(pane('B').lastElementChild?.scrollTop).toBe(40);
+      if (collapsed) {
+        await user.click(screen.getByRole('button', { name: 'Prompt' }));
+      }
+      expect(screen.getByRole('region', { name: 'Prompt contents' }).scrollTop).toBe(80);
+      expect(api.casts).toEqual([]);
+    },
+  );
+
+  test('shows more prompt content only while it remains below the reading position', async () => {
+    stubApi();
+    await startVoting();
+    const prompt = screen.getByRole('region', { name: 'Prompt contents' });
+    let height = 500;
+    Object.defineProperties(prompt, {
+      clientHeight: { get: () => 200 },
+      scrollHeight: { get: () => height },
+    });
+
+    act(() => {
+      resize();
+    });
+    expect(screen.getByText('Scroll for more')).toBeDefined();
+
+    prompt.scrollTop = 300;
+    fireEvent.scroll(prompt);
+    expect(screen.queryByText('Scroll for more')).toBeNull();
+
+    prompt.scrollTop = 0;
+    fireEvent.scroll(prompt);
+    expect(screen.getByText('Scroll for more')).toBeDefined();
+
+    height = 180;
+    act(() => {
+      resize();
+    });
+    expect(screen.queryByText('Scroll for more')).toBeNull();
+  });
+
+  test('tabs into the prompt and both output reading regions', async () => {
+    stubApi();
     const user = await startVoting();
-    await user.keyboard('b1');
-    await user.click(screen.getByRole('button', { name: 'Markdown' }));
-    await user.click(screen.getByRole('button', { name: 'Prompt' }));
-    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
-    const scroller = pane('B').lastElementChild;
-    if (scroller === null) {
-      throw new Error('Expected the scroll container of output B');
+    const reached: string[] = [];
+
+    for (let index = 0; index < 12; index += 1) {
+      await user.tab();
+      const label = document.activeElement?.getAttribute('aria-label');
+      if (label?.endsWith(' contents')) {
+        reached.push(label);
+      }
+      if (reached.length === 3) {
+        break;
+      }
     }
-    scroller.scrollTop = 40;
-    window.dispatchEvent(new Event('pagehide'));
-    cleanup();
-    scrollTo.mockClear();
 
-    render(<VoteApp />);
-    await screen.findByText('Output A1');
-
-    expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty(
-      'ariaChecked',
-      'true',
-    );
-    expect(within(pane('A')).getByRole('button', { name: 'Issues 1' })).toBeDefined();
-    expect(screen.getByRole('button', { name: 'Markdown' })).toHaveProperty('ariaPressed', 'true');
-    expect(screen.getByRole('button', { name: 'Prompt' })).toHaveProperty('ariaExpanded', 'false');
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 120 });
-    expect(pane('B').lastElementChild?.scrollTop).toBe(40);
-    expect(api.casts).toEqual([]);
+    expect(reached).toEqual(['Prompt contents', 'Output A contents', 'Output B contents']);
   });
 
   test.each([
@@ -396,7 +472,7 @@ describe('VoteApp', () => {
           defects: { a: ['facts'], b: [] },
           markdown: false,
           collapsed: false,
-          scroll: { window: 0, a: 0, b: 0 },
+          scroll: { window: 0, prompt: 0, a: 0, b: 0 },
         }),
       );
       history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
@@ -765,19 +841,22 @@ describe('VoteApp', () => {
   test('carries the Markdown view to the next pair and through a reload', async () => {
     const api = stubApi();
     const user = await startVoting();
-    await user.click(screen.getByRole('button', { name: 'Markdown' }));
+    await user.click(screen.getByRole('button', { name: 'Render Markdown' }));
     screen.getByRole('group', { name: 'Pair 1' }).focus();
 
     await user.keyboard('a{Enter}');
     await screen.findByText('Output A2');
-    const afterVote = screen.getByRole('button', { name: 'Markdown' }).ariaPressed;
+    const afterVote = screen.getByRole('button', { name: 'Render Markdown' }).ariaPressed;
     api.elsewhere();
     cleanup();
     render(<VoteApp />);
     await screen.findByText('Output A3');
 
     expect(afterVote).toBe('true');
-    expect(screen.getByRole('button', { name: 'Markdown' })).toHaveProperty('ariaPressed', 'true');
+    expect(screen.getByRole('button', { name: 'Render Markdown' })).toHaveProperty(
+      'ariaPressed',
+      'true',
+    );
   });
 
   test('counts the recorded votes and links back to the family list once no pair is left', async () => {
@@ -826,7 +905,7 @@ describe('VoteApp', () => {
     expect(api.casts).toEqual([]);
   });
 
-  test.each(['Issues', 'Prompt', 'Markdown'])(
+  test.each(['Issues', 'Prompt', 'Render Markdown'])(
     'activates the focused %s control on Enter without casting the selected verdict',
     async (name) => {
       const api = stubApi();
@@ -1164,7 +1243,7 @@ describe('VoteApp', () => {
 
     await startVoting();
 
-    expect(screen.queryByRole('button', { name: 'Markdown' }) !== null).toBe(toggle);
+    expect(screen.queryByRole('button', { name: 'Render Markdown' }) !== null).toBe(toggle);
   });
 
   test('leaves keys on focused header controls to those controls', async () => {
