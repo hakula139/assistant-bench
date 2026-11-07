@@ -268,8 +268,11 @@ class TestPairVoteCounts:
         _, published = published_store
         with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
             connection.executescript((MIGRATIONS_DIR / '0001_init.sql').read_text())
+            connection.executescript(
+                (MIGRATIONS_DIR / '0003_case_splits.sql').read_text()
+            )
             database = SQLiteDatabase(connection)
-            publication.publish(database, published, NOW)
+            publication.publish(database, published, NOW, target='production')
             first = record_vote(
                 database, published, NOW, actor='first', age=timedelta(hours=1)
             )
