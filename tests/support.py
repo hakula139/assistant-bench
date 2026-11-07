@@ -14,8 +14,8 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import Generator, Iterator, Mapping
-from contextlib import closing, contextmanager, suppress
+from collections.abc import AsyncGenerator, Generator, Iterator, Mapping
+from contextlib import asynccontextmanager, closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,10 +26,12 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import tomli_w
+from harbor.job import Job
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.job.lock import TaskLock, TrialLock, VerifierLock
+from harbor.models.job.result import JobResult, JobStats
 from harbor.models.task import config as harbor_task_config
 from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import (
@@ -39,6 +41,7 @@ from harbor.models.trial.config import (
     TaskConfig,
     TrialConfig,
 )
+from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import (
     AgentInfo,
     ExceptionInfo,
@@ -46,6 +49,7 @@ from harbor.models.trial.result import (
     TrialResult,
 )
 from harbor.models.verifier.result import VerifierResult
+from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.regrade import local_task_name
 
 from assistant_bench.arena.publication import (
@@ -59,6 +63,7 @@ from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
 from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import Price, System, SystemConfig
 from assistant_bench.database import SQLiteDatabase
+from assistant_bench.execution import ExecutionInput, ExecutionPlugin
 from assistant_bench.families import (
     Case,
     CaseSource,
@@ -75,6 +80,7 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.accounting import (
     TrialAccounting,
     bind_trial,
+    current_trial,
     reset_trial,
 )
 from assistant_bench.harnesses.endpoint import (
@@ -87,6 +93,7 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import runnable_systems
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Accounting
 from assistant_bench.state import Claim, Run, State
 from assistant_bench.tasks import render_task_config
@@ -525,6 +532,106 @@ def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
     (trial_dir / 'lock.json').write_text(lock.model_dump_json())
     (job_dir / 'config.json').touch()
     (job_dir / 'result.json').touch()
+
+
+@dataclass(frozen=True)
+class RecordedTrial:
+    config: TrialConfig
+    paths: TrialPaths
+    result: TrialResult
+    recorder: TrialAccounting
+
+
+@asynccontextmanager
+async def executed_trial(
+    context: RunContext,
+    config: JobConfig,
+    system: System,
+    *,
+    scope: str,
+    run_id: str | None = None,
+) -> AsyncGenerator[RecordedTrial]:
+    """Run one real planned trial's admission and publication around an agent call."""
+    run = Run(
+        id=run_id or str(uuid4()),
+        scope=scope,
+        job=config.job_name,
+        code_revision=context.code_revision,
+        case_revision=context.case_revision,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    context.state.create_run(run)
+    payload = ExecutionInput(
+        run=run,
+        accounting={
+            system.name: Accounting(
+                system=system.name, price=system.price, ceiling_usd=None
+            )
+        },
+    )
+    path = context.root / f'execution-{run.id}.json'
+    path.write_text(payload.model_dump_json())
+    job = await Job.create(config)
+    plugin = ExecutionPlugin(context_file=str(path))
+    started_at = datetime.now(UTC)
+    result: TrialResult | None = None
+    try:
+        await plugin.on_job_start(job)
+        plan = await JobPlan.from_config(
+            job.config.model_copy(deep=True), job_id=job.id
+        )
+        (trial,) = plan.trial_configs
+        (lock,) = plan.trial_locks
+        assert trial.task.path is not None
+        paths = TrialPaths(trial_dir=job.job_dir / trial.trial_name)
+        paths.agent_dir.mkdir(parents=True)
+        result = TrialResult(
+            task_name=local_task_name(trial.task.path),
+            trial_name=trial.trial_name,
+            trial_uri=paths.trial_dir.as_uri(),
+            task_id=trial.task.get_task_id(),
+            task_checksum=lock.task.digest,
+            config=trial,
+            agent_info=AgentInfo(name=system.harness, version='test'),
+            agent_result=AgentContext(),
+            started_at=started_at,
+        )
+        event = TrialHookEvent(
+            event=TrialEvent.START,
+            task_name=result.task_name,
+            config=trial,
+            result=result,
+            lock=lock,
+        )
+        await plugin._started(event)  # pyright: ignore[reportPrivateUsage]
+        try:
+            yield RecordedTrial(trial, paths, result, current_trial())
+        except BaseException as error:
+            result.exception_info = ExceptionInfo(
+                exception_type=type(error).__name__,
+                exception_message=str(error),
+                exception_traceback='',
+                occurred_at=datetime.now(UTC),
+            )
+            raise
+        finally:
+            result.finished_at = datetime.now(UTC)
+            _record_trial(job.job_dir, result, lock)
+            (paths.trial_dir / 'config.json').write_text(trial.model_dump_json())
+            await plugin._ended(  # pyright: ignore[reportPrivateUsage]
+                event.model_copy(update={'event': TrialEvent.END})
+            )
+        assert context.state.complete_run(run.id)
+    finally:
+        await plugin.on_job_end(
+            JobResult(
+                id=job.id,
+                started_at=started_at,
+                n_total_trials=1,
+                stats=JobStats(),
+                trial_results=[] if result is None else [result],
+            )
+        )
 
 
 # ── Git Repositories ──
@@ -1303,5 +1410,13 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         votes=tuple(votes),
         excluded=2 * days,
     )
-    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
+    snapshot = Snapshot(
+        family='arena',
+        taken_at=taken_at,
+        closed_at=taken_at + timedelta(hours=1),
+        category_order=ROUND_CATEGORIES,
+        closing_revision='1' * 40,
+        production=cut,
+        private=None,
+    )
     return snapshot, outputs

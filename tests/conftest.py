@@ -2,7 +2,8 @@ import json
 import os
 import ssl
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -14,7 +15,7 @@ import trustme
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from assistant_bench import families, jobs, report
+from assistant_bench import execution, families, jobs, report
 from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
 from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
@@ -23,6 +24,7 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.accounting import TrialAccounting
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
+from assistant_bench.runtime import REPOSITORY_VAR, RunContext
 from assistant_bench.state import State
 from support import (
     EXPORT_FILE,
@@ -273,6 +275,37 @@ def private_repository(
     monkeypatch.setenv('TEST_GH_METADATA', str(metadata))
     monkeypatch.delenv('TEST_GH_STATUS', raising=False)
     return PrivateRepository(ArtifactRepository(slug), remote, seed, metadata, revision)
+
+
+@pytest.fixture
+def run_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    private_store: SQLiteDatabase,
+    private_state: State,
+    private_repository: PrivateRepository,
+) -> RunContext:
+    @contextmanager
+    def connect(target: str) -> Generator[SQLiteDatabase]:
+        assert target == 'private'
+        yield private_store
+
+    monkeypatch.setattr(execution, 'connect', connect)
+    monkeypatch.setattr(execution, 'd1_token', lambda: 'synthetic-database-credential')
+    monkeypatch.setenv(REPOSITORY_VAR, private_repository.client.repository_slug)
+    root = tmp_path / 'execution'
+    root.mkdir()
+    private_root = private_repository.client.source(
+        private_repository.revision, tmp_path / 'private-source'
+    )
+    return RunContext(
+        root=root,
+        private_root=private_root,
+        code_revision='1' * 40,
+        case_revision=private_repository.revision,
+        state=private_state,
+        artifacts=private_repository.client,
+    )
 
 
 @pytest.fixture
