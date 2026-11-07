@@ -16,6 +16,7 @@ from assistant_bench import collection, execution, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
 from assistant_bench.harnesses.endpoint import HEADERS_VAR
+from assistant_bench.messages import InputError
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Accounting, Entry
 from support import (
@@ -416,7 +417,7 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
 
     try:
         if cancelled:
-            with pytest.raises(ExceptionGroup):
+            with pytest.raises(ExceptionGroup) as failed:
                 execution.execute(
                     run_context,
                     config,
@@ -425,6 +426,16 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
                     run_id='installed-run',
                     expected_source_revision=run_context.source_revision(family),
                 )
+            assert (
+                failed.value.subgroup(
+                    lambda error: (
+                        isinstance(error, InputError)
+                        and str(error)
+                        == 'A trial has uncertain accounting and cannot settle.'
+                    )
+                )
+                is not None
+            )
         else:
             execution.execute(
                 run_context,
@@ -444,6 +455,7 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     if cancelled:
         assert output.error == 'AgentTimeoutError'
         assert endpoint.response_waiting.is_set()
+        assert run_context.state.run_status('installed-run') == 'uncertain'
     else:
         assert output.error is None
         assert output.reward == 1.0
