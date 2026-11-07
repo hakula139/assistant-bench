@@ -22,6 +22,7 @@ from assistant_bench.state import (
     AttemptStart,
     Claim,
     Collection,
+    OutputGeneration,
     RequestAdmission,
     Run,
     State,
@@ -209,6 +210,8 @@ class TestState:
                 state.create_run(replace(parent, case_revision='3' * 40))
 
             state.create_run(parent)
+
+            assert state.run(parent.id) == parent
 
     class TestClaimAttempt:
         def test_two_connections_cannot_both_start_the_same_paid_slot(
@@ -792,7 +795,7 @@ class TestState:
 
             state.seal_collection('next')
             assert state.activate_collection('next', None)
-            assert state.outputs('sample') == [original]
+            assert state.output_generation('sample').outputs == (original,)
 
     class TestSealCollection:
         def test_staging_is_invisible_until_a_complete_generation_is_activated(
@@ -801,16 +804,20 @@ class TestState:
             old = output('old')
             sealed(state, 'old', old)
             assert state.activate_collection('old', None)
+            pinned = state.output_generation('sample')
             first, second = output('first'), output('second')
             state.begin_collection(collection('next', [first, second]))
             state.stage_output('next', 1, second)
-            assert state.outputs('sample') == [old]
+            assert state.output_generation('sample') == pinned
             state.stage_output('next', 0, first)
 
             state.seal_collection('next')
             assert state.activate_collection('next', 'old')
 
-            assert state.outputs('sample') == [first, second]
+            assert state.output_generation('sample') == OutputGeneration(
+                'next', (first, second)
+            )
+            assert state.collection_generation('old') == pinned
 
         @pytest.mark.parametrize('failure', ['missing', 'position', 'digest'])
         def test_refuses_incomplete_or_mismatched_output_generations(
@@ -828,7 +835,7 @@ class TestState:
             with pytest.raises(InputError):
                 state.seal_collection('next')
 
-            assert state.outputs('sample') == []
+            assert state.output_generation('sample').outputs == ()
             with pytest.raises(InputError):
                 state.activate_collection('next', None)
 
@@ -861,7 +868,7 @@ class TestState:
             ):
                 other.execute(statement)
 
-            assert state.outputs('sample') == [original]
+            assert state.output_generation('sample').outputs == (original,)
 
         def test_an_empty_sealed_manifest_cannot_be_deleted_without_child_rows(
             self, state: State, tmp_path: Path
@@ -877,7 +884,7 @@ class TestState:
                 other.execute("DELETE FROM collections WHERE id = 'empty'")
 
             assert state.activate_collection('empty', None)
-            assert state.outputs('sample') == []
+            assert state.output_generation('sample').outputs == ()
 
     class TestActivateCollection:
         def test_two_connections_cannot_overwrite_the_same_observed_generation(
@@ -897,7 +904,7 @@ class TestState:
 
             assert sorted(results) == [False, True]
             winner = 'first' if results[0] else 'second'
-            assert state.outputs('sample') == [output(winner)]
+            assert state.output_generation('sample').outputs == (output(winner),)
 
         def test_a_stale_writer_cannot_replace_a_newer_collection(
             self, state: State
@@ -910,7 +917,40 @@ class TestState:
             accepted = state.activate_collection('stale', 'old')
 
             assert not accepted
-            assert state.outputs('sample') == [output('next')]
+            assert state.output_generation('sample').outputs == (output('next'),)
+
+    class TestOutputGeneration:
+        def test_an_empty_generation_retains_its_compare_and_swap_identity(
+            self, state: State
+        ) -> None:
+            assert state.output_generation('sample') == OutputGeneration(None, ())
+            sealed(state, 'empty')
+            assert state.activate_collection('empty', None)
+            following = output('next')
+            sealed(state, 'next', following)
+
+            empty = state.output_generation('sample')
+            assert not state.activate_collection('next', None)
+            assert state.activate_collection('next', empty.id)
+
+            assert empty == OutputGeneration('empty', ())
+            assert state.collection_generation('empty') == empty
+            assert state.output_generation('sample') == OutputGeneration(
+                'next', (following,)
+            )
+
+    class TestCollectionGeneration:
+        @pytest.mark.parametrize('status', ['missing', 'unsealed'])
+        def test_refuses_a_generation_that_is_not_complete(
+            self, state: State, status: str
+        ) -> None:
+            if status == 'unsealed':
+                original = output('first')
+                state.begin_collection(collection('next', [original]))
+                state.stage_output('next', 0, original)
+
+            with pytest.raises(InputError, match='not sealed'):
+                state.collection_generation('next')
 
     class TestResetBaseline:
         def test_only_clears_the_pointer_and_keeps_canary_and_spend_history(
