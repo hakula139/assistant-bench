@@ -192,6 +192,7 @@ Everything a run produces stays out of Git in the [data directory](../convention
 
 ```text
 assistant-bench/
+├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
