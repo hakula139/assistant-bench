@@ -1,0 +1,436 @@
+{
+  "family": "writing-en",
+  "round": "2026-11-07",
+  "closed_at": "2026-11-07T16:47:49.782119Z",
+  "systems": {
+    "deepseek-v4.1-flash-1017-high": {
+      "display_name": "DeepSeek V4.1 Flash 1017 · High",
+      "fingerprint": "62ab16924320ebd4"
+    },
+    "gemini-3.8-flash-high": {
+      "display_name": "Gemini 3.8 Flash · High",
+      "fingerprint": "8d4e5604c2a7a4c2"
+    },
+    "gemini-4-argon-high": {
+      "display_name": "Gemini 4 Argon · High",
+      "fingerprint": "9a6784bf6a1ccb75"
+    },
+    "gpt-6-astra-high": {
+      "display_name": "GPT-6 Astra · High",
+      "fingerprint": "b2b9822608744d3b"
+    },
+    "gpt-6.1-sol-high": {
+      "display_name": "GPT-6.1 Sol · High",
+      "fingerprint": "bf2ee9387f68aadf"
+    },
+    "kimi-k3-high": {
+      "display_name": "Kimi K3 · High",
+      "fingerprint": "042854f15c5f0a3f"
+    },
+    "opus-5.5-high": {
+      "display_name": "Claude Opus 5.5 · High",
+      "fingerprint": "12689b65138772c2"
+    }
+  },
+  "results": {
+    "scorer": "votes",
+    "method": {
+      "l2_penalty": 0.01,
+      "points_per_logit": 173.71779276130073,
+      "anchor_score": 1000.0,
+      "actor_cap": 100,
+      "interval_level": 0.95
+    },
+    "rules": {
+      "preliminary_half_width": 50.0
+    },
+    "cutoffs": {
+      "production": {
+        "id": 3,
+        "votes": 3
+      },
+      "local": {
+        "id": 0,
+        "votes": 0
+      }
+    },
+    "reference": "gemini-3.8-flash-high",
+    "anchor": "gemini-3.8-flash-high",
+    "cases": 3,
+    "votes": 3,
+    "effective_votes": 3.0,
+    "dropped_votes": 0,
+    "voters": 1,
+    "standings": [
+      {
+        "system": "gemini-4-argon-high",
+        "score": 1000.0462741553823,
+        "interval": null,
+        "rank": 1,
+        "votes": 2,
+        "decisive_votes": 2,
+        "both_bad_rate": 0.0,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": 0.026788457627118643,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 1177.7,
+          "p50": 1752.5,
+          "p90": 4781.5
+        },
+        "latency_sec": {
+          "p10": 19.3795,
+          "p50": 30.6725,
+          "p90": 84.4461
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "deepseek-v4.1-flash-1017-high",
+        "score": 1000.0138519326043,
+        "interval": null,
+        "rank": 2,
+        "votes": 0,
+        "decisive_votes": 0,
+        "both_bad_rate": null,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": null,
+        "cost_gap": "unpriced",
+        "output_tokens": {
+          "p10": 442.1,
+          "p50": 972.0,
+          "p90": 6003.599999999999
+        },
+        "latency_sec": {
+          "p10": 2.4182,
+          "p50": 4.801,
+          "p90": 22.509
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "gpt-6.1-sol-high",
+        "score": 1000.0138519326043,
+        "interval": null,
+        "rank": 2,
+        "votes": 0,
+        "decisive_votes": 0,
+        "both_bad_rate": null,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": 0.008125101694915255,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 182.0,
+          "p50": 508.5,
+          "p90": 1771.4
+        },
+        "latency_sec": {
+          "p10": 4.4192,
+          "p50": 10.128,
+          "p90": 52.4028
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "kimi-k3-high",
+        "score": 1000.0056562100343,
+        "interval": null,
+        "rank": 4,
+        "votes": 1,
+        "decisive_votes": 1,
+        "both_bad_rate": 0.0,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": null,
+        "cost_gap": "unpriced",
+        "output_tokens": {
+          "p10": 236.5,
+          "p50": 483.5,
+          "p90": 1800.3999999999996
+        },
+        "latency_sec": {
+          "p10": 2.1553,
+          "p50": 3.7279999999999998,
+          "p90": 14.090099999999998
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "gemini-3.8-flash-high",
+        "score": 1000.0,
+        "interval": null,
+        "rank": 5,
+        "votes": 1,
+        "decisive_votes": 1,
+        "both_bad_rate": 0.0,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": 0.011117771186440679,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 1012.1,
+          "p50": 1724.0,
+          "p90": 5822.799999999999
+        },
+        "latency_sec": {
+          "p10": 9.3284,
+          "p50": 14.756,
+          "p90": 48.44529999999999
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "gpt-6-astra-high",
+        "score": 999.9367716022608,
+        "interval": null,
+        "rank": 6,
+        "votes": 2,
+        "decisive_votes": 2,
+        "both_bad_rate": 0.0,
+        "gate_failure_rate": 0.0,
+        "pass_rate": null,
+        "mean_cost_usd": 0.045345811965811965,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 185.4000000000001,
+          "p50": 544.0,
+          "p90": 2019.6000000000001
+        },
+        "latency_sec": {
+          "p10": 6.281600000000003,
+          "p50": 13.363,
+          "p90": 76.7118
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      },
+      {
+        "system": "opus-5.5-high",
+        "score": 140.9035808321063,
+        "interval": null,
+        "rank": 7,
+        "votes": 0,
+        "decisive_votes": 0,
+        "both_bad_rate": null,
+        "gate_failure_rate": 0.01694915254237288,
+        "pass_rate": null,
+        "mean_cost_usd": null,
+        "cost_gap": "unreported",
+        "output_tokens": null,
+        "latency_sec": {
+          "p10": 6.9485,
+          "p50": 12.163499999999999,
+          "p90": 36.061899999999994
+        },
+        "defects": {
+          "scope": 0,
+          "facts": 0,
+          "clarity": 0,
+          "tone": 0,
+          "mechanics": 0,
+          "formulaic": 0,
+          "length": 0
+        }
+      }
+    ],
+    "unranked": [],
+    "decision": null,
+    "head_to_head": [
+      {
+        "system": "gemini-3.8-flash-high",
+        "opponent": "gemini-4-argon-high",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "gemini-4-argon-high",
+        "opponent": "gemini-3.8-flash-high",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "gemini-4-argon-high",
+        "opponent": "gpt-6-astra-high",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      },
+      {
+        "system": "gpt-6-astra-high",
+        "opponent": "gemini-4-argon-high",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "gpt-6-astra-high",
+        "opponent": "kimi-k3-high",
+        "votes": 1,
+        "wins": 1,
+        "losses": 0,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 1.0
+      },
+      {
+        "system": "kimi-k3-high",
+        "opponent": "gpt-6-astra-high",
+        "votes": 1,
+        "wins": 0,
+        "losses": 1,
+        "ties": 0,
+        "both_bad": 0,
+        "win_rate": 0.0
+      }
+    ],
+    "categories": [
+      {
+        "category": "docs",
+        "votes": 0,
+        "effective_votes": 0.0,
+        "standings": [
+          {
+            "system": "deepseek-v4.1-flash-1017-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "gemini-3.8-flash-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "gemini-4-argon-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "gpt-6-astra-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "gpt-6.1-sol-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "kimi-k3-high",
+            "score": 1000.0,
+            "votes": 0
+          },
+          {
+            "system": "opus-5.5-high",
+            "score": 140.87752783014196,
+            "votes": 0
+          }
+        ],
+        "unranked": []
+      },
+      {
+        "category": "message",
+        "votes": 3,
+        "effective_votes": 3.0,
+        "standings": [
+          {
+            "system": "gemini-3.8-flash-high",
+            "score": 1000.0,
+            "votes": 1
+          },
+          {
+            "system": "gemini-4-argon-high",
+            "score": 1000.1995370410142,
+            "votes": 2
+          },
+          {
+            "system": "gpt-6-astra-high",
+            "score": 1000.0795746624843,
+            "votes": 2
+          },
+          {
+            "system": "kimi-k3-high",
+            "score": 1000.2791310605305,
+            "votes": 1
+          }
+        ],
+        "unranked": [
+          "deepseek-v4.1-flash-1017-high",
+          "gpt-6.1-sol-high",
+          "opus-5.5-high"
+        ]
+      }
+    ],
+    "length": null,
+    "split_half_tau": null,
+    "public_held_out": {
+      "public_cases": 3,
+      "held_out_cases": 0,
+      "unavailable": "no_common_field",
+      "scores": []
+    }
+  }
+}
