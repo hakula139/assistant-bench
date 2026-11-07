@@ -580,7 +580,7 @@ async def executed_trial(
         plan = await JobPlan.from_config(
             job.config.model_copy(deep=True), job_id=job.id
         )
-        (trial,) = plan.trial_configs
+        (trial,) = job._remaining_trial_configs  # pyright: ignore[reportPrivateUsage]
         (lock,) = plan.trial_locks
         assert trial.task.path is not None
         paths = TrialPaths(trial_dir=job.job_dir / trial.trial_name)
