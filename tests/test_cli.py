@@ -278,7 +278,11 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
     configs: list[JobConfig] = []
 
     def run_job(
-        job: JobConfig, *, log: Path | None = None, plugin_context: Path | None = None
+        job: JobConfig,
+        *,
+        log: Path | None = None,
+        plugin_context: Path | None = None,
+        source_root: Path | None = None,
     ) -> Path:
         configs.append(job)
         return jobs.job_path(job)
@@ -778,6 +782,7 @@ class TestCheck:
             *,
             log: Path | None = None,
             plugin_context: Path | None = None,
+            source_root: Path | None = None,
         ) -> Path:
             failed.append(job)
             if started:
@@ -1007,6 +1012,7 @@ class TestRun:
             *,
             log: Path | None = None,
             plugin_context: Path | None = None,
+            source_root: Path | None = None,
         ) -> Path:
             events.append(config.jobs_dir.name)
             return jobs.job_path(config)
@@ -1324,6 +1330,7 @@ class TestRun:
             *,
             log: Path | None = None,
             plugin_context: Path | None = None,
+            source_root: Path | None = None,
         ) -> Path:
             submitted.append(job)
             raise subprocess.CalledProcessError(3, 'harbor')
@@ -1358,8 +1365,14 @@ class TestRun:
             *,
             log: Path | None = None,
             plugin_context: Path | None = None,
+            source_root: Path | None = None,
         ) -> Path:
-            run_host_job(job, log=log, plugin_context=plugin_context)
+            run_host_job(
+                job,
+                log=log,
+                plugin_context=plugin_context,
+                source_root=source_root,
+            )
             raise subprocess.CalledProcessError(3, 'harbor')
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
@@ -1677,8 +1690,7 @@ class TestRun:
             'Task `echo` changed since a trial ran it at version `1.0.0`.\n'
             "Bump each task's `[task] version`: the patch for a change no trial\n"
             'depends on, such as its solution, the minor for a change to `tests/`\n'
-            'alone, which regrades its trials, or the major for anything the agent\n'
-            'sees, which reruns them.\n',
+            'and the major for a change to inputs the agent sees.\n',
         )
         assert submitted == []
 
@@ -1705,16 +1717,14 @@ class TestRun:
 
         result = invoke('run', 'smoke-text')
 
-        assert (result.exit_code, result.stdout, result.stderr) == (
-            1,
-            '',
-            'Family `smoke-text` has cases whose rendered task changed under a '
-            'version a trial recorded: `en-greeting`, `zh-greeting`. A Harbor '
-            'upgrade that changes a `task.toml` default does this, and Harbor '
-            "aborts the job until the family's earlier job directories are "
-            'removed, as `docs/research/harbor.md#quirks-of-the-pinned-release` '
-            'describes.\n',
-        )
+        assert (result.exit_code, result.stdout) == (1, '')
+        assert result.stderr.startswith('Family `smoke-text` has tasks to bump:\n')
+        for case in ('en-greeting', 'zh-greeting'):
+            assert (
+                f'Task `{case}` changed since a trial ran it at version `1.0.0+'
+                in result.stderr
+            )
+        assert "Bump each task's `[task] version`" in result.stderr
         assert submitted == []
 
     def test_ignores_unregistered_trial_directories(
