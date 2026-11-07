@@ -1,7 +1,11 @@
 import asyncio
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from threading import Barrier
+from typing import cast
 
 import pytest
 
@@ -9,7 +13,7 @@ from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.spend import Entry, PendingAttempt, read_ledger
-from assistant_bench.state import State
+from assistant_bench.state import AttemptStart, RequestAdmission, State
 from support import START, accounted_trial, private_database
 
 
@@ -85,3 +89,58 @@ class TestAccountingSnapshot:
                     )
                 ]
                 assert after == [entry]
+
+
+class TestBoundedAdmission:
+    def test_two_clients_compete_for_the_last_request_across_two_claims(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'state.sqlite'
+        with private_database(path) as database:
+            state = State(database)
+            with accounted_trial(state, max_requests=2) as recorder:
+                recorder.begin(START)
+                first = asyncio.run(recorder.admit('openai-responses'))
+                asyncio.run(
+                    recorder.confirm(
+                        first,
+                        RequestReceipt(
+                            api='openai-responses',
+                            outcome='http_error',
+                            http_status=503,
+                            usage=None,
+                        ),
+                    )
+                )
+                owner = state.get_claim(recorder.claim_id)
+                second = replace(
+                    owner, id='second-claim', slot_key='second-slot', trial='second'
+                )
+                assert state.claim_attempt(second)
+                assert state.begin_attempt(
+                    AttemptStart('second-attempt', second.id, START.isoformat())
+                )
+                (initial,) = state.requests('sample')
+                attempts = [cast(str, initial['attempt_id']), 'second-attempt']
+                barrier = Barrier(2)
+
+                def compete(index: int) -> bool:
+                    with private_database(path) as client:
+                        barrier.wait(timeout=5)
+                        return State(client).admit_request(
+                            RequestAdmission(
+                                f'contender-{index}', attempts[index], START.isoformat()
+                            )
+                        )
+
+                with ThreadPoolExecutor(max_workers=2) as clients:
+                    granted = list(clients.map(compete, range(2)))
+
+                assert sorted(granted) == [False, True]
+                admitted = {
+                    cast(str, row['request_id']) for row in state.requests('sample')
+                }
+                assert admitted == {first, f'contender-{granted.index(True)}'}
+                assert not state.admit_request(
+                    RequestAdmission('later-request', attempts[0], START.isoformat())
+                )
