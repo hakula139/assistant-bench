@@ -1,5 +1,3 @@
-import asyncio
-import hashlib
 import os
 import shutil
 import subprocess
@@ -7,21 +5,20 @@ import sys
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
-from harbor.job import Job
-from harbor.models.job.config import JobConfig
+from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.trial.config import UserAgentConfig
-from pydantic import ValidationError
 
-from assistant_bench import canaries, jobs
+from assistant_bench import canaries, execution, jobs
 from assistant_bench.catalog import Api, Price, System, SystemIdentity
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprint
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
-from assistant_bench.paths import DATA_DIR_VAR
-from assistant_bench.spend import CanaryAccounting, Entry, write_canary_accounting
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Entry, read_ledger
+from assistant_bench.state import Run
 from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
@@ -34,40 +31,56 @@ from support import (
     message,
     message_stream,
     response,
+    run_host_job,
     voted_tasks,
-    write_trial,
 )
 
 
 pytestmark = pytest.mark.usefixtures('export')
 
 
-def benchmark(system: System) -> JobConfig:
+def benchmark(
+    system: System, root: Path, *, previous: JobConfig | None = None
+) -> JobConfig:
     family = load_family('smoke-text')
-    return jobs.job(family, [system], render_tasks(family, load_cases(family)[:1]))
+    sources = []
+    if previous is not None:
+        path = jobs.job_path(previous)
+        sources.append((SourceJobConfig(action='diff', type='local', path=path), path))
+    return jobs.job(
+        family,
+        [system],
+        render_tasks(family, load_cases(family)[:1], root=root),
+        root=root,
+        sources=sources,
+    )
 
 
-def prepare_probe(system: System) -> canaries.Probe:
-    (probe,) = canaries.prepare([benchmark(system)], {system.name: system})
+def prepare_probe(system: System, root: Path) -> canaries.Probe:
+    (probe,) = canaries.prepare(
+        [benchmark(system, root)], {system.name: system}, root=root
+    )
     return probe
 
 
 @pytest.fixture
 def host_jobs(
-    endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
+    endpoint: StubEndpoint, run_context: RunContext, monkeypatch: pytest.MonkeyPatch
 ) -> list[JobConfig]:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
     configs: list[JobConfig] = []
 
-    async def execute(config: JobConfig) -> None:
-        await (await Job.create(config)).run()
-
-    def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
+    def run_job(
+        config: JobConfig,
+        *,
+        log: Path | None = None,
+        plugin_context: Path | None = None,
+    ) -> Path:
         assert log == config.jobs_dir / f'{config.job_name}.log'
+        assert plugin_context is not None
         configs.append(config)
-        asyncio.run(execute(config))
-        return jobs.job_path(config)
+        return run_host_job(config, log=log, plugin_context=plugin_context)
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
@@ -86,12 +99,12 @@ class TestProbe:
             ids=['write-rate', 'input-rate', 'unknown-write-rate', 'unpriced'],
         )
         def test_uses_the_actual_probe_allowance_and_dearest_input_rate(
-            self, price: Price | None, expected: float | None
+            self, price: Price | None, expected: float | None, tmp_path: Path
         ) -> None:
             system = make_system(
                 price=price, context_window=100_000, max_output_tokens=10_000
             )
-            probe = prepare_probe(system)
+            probe = prepare_probe(system, tmp_path)
 
             ceiling = probe.ceiling_usd
 
@@ -102,19 +115,33 @@ class TestProbe:
 
 
 class TestPrepare:
-    def test_probes_pending_systems_once_across_families(self) -> None:
+    def test_probes_pending_systems_once_across_families(self, tmp_path: Path) -> None:
         family = load_family('smoke-text')
         other = family.model_copy(update={'name': 'other'})
         cases = load_cases(family)[:1]
         large = make_system()
         small = make_system(name='acme-small', route='acme/small')
         configs = [
-            jobs.job(family, [large], render_tasks(family, cases)),
-            jobs.job(other, [large, small], render_tasks(other, cases)),
+            jobs.job(
+                family,
+                [large],
+                render_tasks(family, cases, root=tmp_path),
+                root=tmp_path,
+                sources=[],
+            ),
+            jobs.job(
+                other,
+                [large, small],
+                render_tasks(other, cases, root=tmp_path),
+                root=tmp_path,
+                sources=[],
+            ),
         ]
         frozen = [config.model_dump_json() for config in configs]
 
-        probes = canaries.prepare(iter(configs), {s.name: s for s in (large, small)})
+        probes = canaries.prepare(
+            iter(configs), {s.name: s for s in (large, small)}, root=tmp_path
+        )
 
         assert [probe.original.name for probe in probes] == ['acme-large', 'acme-small']
         assert all(probe.config.n_attempts == 1 for probe in probes)
@@ -123,32 +150,40 @@ class TestPrepare:
         assert all(probe.config.agents[0].n_concurrent == 1 for probe in probes)
         assert [config.model_dump_json() for config in configs] == frozen
 
-    def test_sends_no_probe_for_reused_trials(self, data_dir: Path) -> None:
+    def test_sends_no_probe_for_reused_trials(self, tmp_path: Path) -> None:
         system = make_system()
-        config = benchmark(system)
+        config = benchmark(system, tmp_path)
         finish_job(config)
-        current = benchmark(system)
+        current = benchmark(system, tmp_path, previous=config)
 
-        probes = canaries.prepare([current], {system.name: system})
+        probes = canaries.prepare([current], {system.name: system}, root=tmp_path)
 
         assert probes == []
-        assert not (data_dir / 'canaries').exists()
+        assert not (tmp_path / 'canaries').exists()
 
     def test_sends_no_probe_for_trials_that_only_need_regrading(
-        self, families_dir: Path, data_dir: Path
+        self, families_dir: Path, tmp_path: Path
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
         selected = jobs.family_systems(family, [system])
         task = families_dir / 'f' / 'tasks' / 'echo'
-        finish_job(jobs.job(family, selected, [task]))
+        initial = jobs.job(family, selected, [task], root=tmp_path, sources=[])
+        finish_job(initial)
         break_setting(task, ('task', 'version'), '1.1.0')
-        current = jobs.job(family, selected, [task])
+        path = jobs.job_path(initial)
+        current = jobs.job(
+            family,
+            selected,
+            [task],
+            root=tmp_path,
+            sources=[(SourceJobConfig(action='diff', type='local', path=path), path)],
+        )
 
-        probes = canaries.prepare([current], {system.name: system})
+        probes = canaries.prepare([current], {system.name: system}, root=tmp_path)
 
         assert probes == []
-        assert not (data_dir / 'canaries').exists()
+        assert not (tmp_path / 'canaries').exists()
 
     @pytest.mark.parametrize(
         ('harness', 'api', 'version', 'allowance'),
@@ -161,7 +196,12 @@ class TestPrepare:
         ids=['generate', 'terminal', 'responses-cli', 'messages-cli'],
     )
     def test_keeps_original_and_generate_identities_separate(
-        self, harness: str, api: Api, version: str | None, allowance: int
+        self,
+        harness: str,
+        api: Api,
+        version: str | None,
+        allowance: int,
+        tmp_path: Path,
     ) -> None:
         original = make_system(
             harness=harness,
@@ -174,7 +214,7 @@ class TestPrepare:
         )
         frozen = original.model_dump()
 
-        probe = prepare_probe(original)
+        probe = prepare_probe(original, tmp_path)
 
         source = original.model_copy(update={'harness': 'generate', 'version': None})
         actual = source.model_copy(update={'max_output_tokens': min(2048, allowance)})
@@ -192,10 +232,9 @@ class TestPrepare:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         system = make_system(max_output_tokens=4096)
-        first = prepare_probe(system)
-        monkeypatch.setenv(DATA_DIR_VAR, str(tmp_path / 'elsewhere'))
+        first = prepare_probe(system, tmp_path / 'first')
 
-        second = prepare_probe(system)
+        second = prepare_probe(system, tmp_path / 'elsewhere')
 
         assert jobs.job_path(first.config) != jobs.job_path(second.config)
         assert first.config.tasks[0].path != second.config.tasks[0].path
@@ -206,7 +245,7 @@ class TestPrepare:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
     ) -> None:
         system = make_system()
-        first = prepare_probe(system)
+        first = prepare_probe(system, tmp_path)
         if field == 'job_name':
             relocated = first.config.model_copy(update={'job_name': 'relocated-job'})
         elif field == 'jobs_dir':
@@ -225,7 +264,7 @@ class TestPrepare:
 
         monkeypatch.setattr(jobs, 'probe_job', probe_job)
 
-        second = prepare_probe(system)
+        second = prepare_probe(system, tmp_path)
 
         assert first.protocol_digest == second.protocol_digest
 
@@ -256,10 +295,10 @@ class TestPrepare:
         ],
     )
     def test_protocol_tracks_the_resolved_stable_job_configuration(
-        self, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+        self, monkeypatch: pytest.MonkeyPatch, field: str, value: object, tmp_path: Path
     ) -> None:
         system = make_system()
-        first = prepare_probe(system)
+        first = prepare_probe(system, tmp_path)
         changed = first.config.model_copy(update={field: value})
 
         def probe_job(system: System, task: Path, root: Path) -> JobConfig:
@@ -267,7 +306,7 @@ class TestPrepare:
 
         monkeypatch.setattr(jobs, 'probe_job', probe_job)
 
-        second = prepare_probe(system)
+        second = prepare_probe(system, tmp_path)
 
         assert first.protocol_digest != second.protocol_digest
 
@@ -275,7 +314,7 @@ class TestPrepare:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         system = make_system()
-        first = prepare_probe(system)
+        first = prepare_probe(system, tmp_path)
         instruction = files('assistant_bench').joinpath('canary.md').read_text()
         (tmp_path / 'canary.md').write_text(instruction + '\nAdditional inert text.\n')
 
@@ -284,14 +323,16 @@ class TestPrepare:
 
         monkeypatch.setattr(canaries, 'files', resources)
 
-        second = prepare_probe(system)
+        second = prepare_probe(system, tmp_path)
 
         assert first.source_generate == second.source_generate
         assert first.protocol_digest != second.protocol_digest
 
-    def test_protocol_is_stable_across_independent_process_hash_seeds(self) -> None:
+    def test_protocol_is_stable_across_independent_process_hash_seeds(
+        self, tmp_path: Path
+    ) -> None:
         system = make_system()
-        config = benchmark(system)
+        config = benchmark(system, tmp_path)
 
         digests: list[str] = []
         for seed in ('1', '2', '3'):
@@ -312,7 +353,7 @@ class TestPrepare:
         assert digests[0] == digests[1] == digests[2]
 
     def test_protocol_preserves_the_order_of_extra_instructions(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         system = make_system()
         original = jobs.probe_job
@@ -324,130 +365,88 @@ class TestPrepare:
             )
 
         monkeypatch.setattr(jobs, 'probe_job', probe_job)
-        first = prepare_probe(system)
+        first = prepare_probe(system, tmp_path)
         instructions.reverse()
 
-        second = prepare_probe(system)
+        second = prepare_probe(system, tmp_path)
 
         assert first.protocol_digest != second.protocol_digest
 
 
 class TestRun:
-    @pytest.mark.parametrize('catalog', ['changed', 'removed'])
-    def test_recovers_interrupted_spend_from_frozen_accounting_before_any_new_job(
+    def test_refuses_before_paid_execution_when_the_run_cannot_be_recorded(
+        self, tmp_path: Path, run_context: RunContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        probe = prepare_probe(make_system(), tmp_path)
+        launch = Mock(
+            side_effect=AssertionError('An unrecorded run started paid work.')
+        )
+        monkeypatch.setattr(jobs, 'run_job', launch)
+        monkeypatch.setattr(
+            run_context.state,
+            'create_run',
+            Mock(side_effect=InputError('The run could not be recorded.')),
+        )
+
+        with pytest.raises(InputError):
+            canaries.run([probe], run_context)
+
+        launch.assert_not_called()
+        assert canaries.read_records(probe.original.name, run_context.state) == []
+        assert read_ledger('canaries', run_context.state) == []
+
+    @pytest.mark.parametrize('failure', ['interrupt', 'harbor-error'])
+    def test_keeps_a_failed_outcome_on_its_run_when_another_run_arrives(
         self,
-        data_dir: Path,
-        host_jobs: list[JobConfig],
+        tmp_path: Path,
+        run_context: RunContext,
         monkeypatch: pytest.MonkeyPatch,
-        catalog: str,
+        failure: str,
     ) -> None:
-        system = make_system(context_window=100_000, max_output_tokens=10_000)
-        interrupted = prepare_probe(system)
-        directory = interrupted.config.jobs_dir / 'orphaned-job'
-        write_canary_accounting(directory, interrupted.actual, interrupted.ceiling_usd)
-        attempt = Attempt(
-            trial='interrupted__1',
-            system=system.name,
-            fingerprint=fingerprint(interrupted.actual),
-            started_at=START,
-            finished_at=START,
-            responses=[MeasuredUsage(100, 0, 0, 40, None), None],
+        probe = prepare_probe(make_system(), tmp_path)
+        recorded: list[str] = []
+
+        def fail(
+            context: RunContext,
+            config: JobConfig,
+            accounting: dict[str, object],
+            *,
+            scope: str,
+            run_id: str,
+            expected_source_revision: int,
+            log: Path | None = None,
+        ) -> Run:
+            parent = Run(
+                run_id,
+                scope,
+                config.job_name,
+                context.code_revision,
+                context.case_revision,
+                START.isoformat(),
+            )
+            context.state.create_run(parent)
+            recorded.append(run_id)
+            context.state.create_run(
+                replace(parent, id='unrelated', job='concurrent-job')
+            )
+            if failure == 'interrupt':
+                raise KeyboardInterrupt
+            raise subprocess.CalledProcessError(3, 'example-command')
+
+        monkeypatch.setattr(execution, 'execute', fail)
+
+        with pytest.raises(KeyboardInterrupt if failure == 'interrupt' else InputError):
+            canaries.run([probe], run_context)
+
+        (outcome,) = canaries.read_records(probe.original.name, run_context.state)
+        assert outcome.job == probe.config.job_name
+        assert outcome.error == (
+            'InterruptedProbe' if failure == 'interrupt' else 'CalledProcessError'
         )
-        directory.mkdir()
-        (directory / ATTEMPTS_FILE).write_text((attempt.model_dump_json() + '\n') * 2)
-        ledger = data_dir / 'spend' / 'canaries.jsonl'
-        assert not ledger.exists()
-        run_job = jobs.run_job
-
-        def checked_run(config: JobConfig, *, log: Path | None = None) -> Path:
-            (recovered,) = [
-                Entry.model_validate_json(line)
-                for line in ledger.read_text().splitlines()
-            ]
-            assert recovered.job == 'orphaned-job'
-            assert recovered.price == system.price
-            assert recovered.ceiling_usd == pytest.approx(0.27048)
-            return run_job(config, log=log)
-
-        monkeypatch.setattr(jobs, 'run_job', checked_run)
-        changed = system.model_copy(
-            update={
-                'price': Price(input=10, output=20, cache_read=1, cache_write=12),
-                'max_output_tokens': 1024,
-            }
-        )
-        probes = [prepare_probe(changed)] if catalog == 'changed' else []
-
-        canaries.run(probes)
-        frozen = ledger.read_bytes()
-        assert canaries.run([]) == []
-
-        entries = [
-            Entry.model_validate_json(line) for line in ledger.read_text().splitlines()
-        ]
-        recovered = next(entry for entry in entries if entry.job == 'orphaned-job')
-        assert recovered.responses == attempt.responses
-        assert recovered.fingerprint == fingerprint(interrupted.actual)
-        assert recovered.price == system.price
-        assert recovered.ceiling_usd == pytest.approx(0.27048)
-        assert ledger.read_bytes() == frozen
-        if catalog == 'changed':
-            current = next(entry for entry in entries if entry.job != 'orphaned-job')
-            assert current.price == changed.price
-            assert current.ceiling_usd == pytest.approx(1.22048)
-            assert host_jobs == [probes[0].config]
-        else:
-            assert entries == [recovered]
-            assert host_jobs == []
-
-    @pytest.mark.parametrize('failure', ['outcomes', 'append'])
-    def test_reconciles_spend_even_when_an_outcome_cannot_be_saved(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch, failure: str
-    ) -> None:
-        system = make_system()
-        probe = prepare_probe(system)
-        attempt = Attempt(
-            trial='canary__1',
-            system=system.name,
-            fingerprint=fingerprint(probe.actual),
-            started_at=START,
-            finished_at=START,
-            responses=[MeasuredUsage(100, 0, 0, 40, None)],
-        )
-
-        def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
-            directory = jobs.job_path(config)
-            snapshot = Path(f'{directory}.accounting.json')
-            accounting = CanaryAccounting.model_validate_json(snapshot.read_text())
-            assert accounting.system == system.name
-            assert accounting.price == system.price
-            assert accounting.ceiling_usd == probe.ceiling_usd
-            assert not directory.exists()
-            directory.mkdir()
-            (directory / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
-            if failure == 'outcomes':
-                trial = directory / 'canary__1'
-                trial.mkdir()
-                (trial / 'result.json').write_text('{malformed')
-            else:
-                key = hashlib.sha256(system.name.encode()).hexdigest()
-                (data_dir / 'canaries' / f'{key}.jsonl').mkdir()
-            return directory
-
-        monkeypatch.setattr(jobs, 'run_job', run_job)
-
-        with pytest.raises(
-            ValidationError if failure == 'outcomes' else IsADirectoryError
-        ):
-            canaries.run([probe])
-
-        (entry,) = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
-        assert entry.responses == attempt.responses
-        assert entry.price == system.price
-        assert entry.ceiling_usd == probe.ceiling_usd
+        assert not outcome.success
+        assert run_context.state.run(recorded[0]).job == outcome.job
+        assert outcome.job != 'concurrent-job'
+        assert read_ledger('canaries', run_context.state) == []
 
     @pytest.mark.parametrize(
         'names',
@@ -460,32 +459,33 @@ class TestRun:
         host_jobs: list[JobConfig],
         data_dir: Path,
         names: tuple[str, str],
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         first, second = [make_system(name=name) for name in names]
         endpoint.response = completion('READY') | {'model': 'first-2026'}
-        canaries.run([prepare_probe(first)])
+        canaries.run([prepare_probe(first, tmp_path)], run_context)
         endpoint.response = completion('READY') | {'model': 'second-2026'}
-        canaries.run([prepare_probe(second)])
+        canaries.run([prepare_probe(second, tmp_path)], run_context)
         endpoint.response = completion('READY') | {'model': 'first-2026'}
 
-        canaries.run([prepare_probe(first)])
+        canaries.run([prepare_probe(first, tmp_path)], run_context)
 
         assert [
-            record.response_models for record in canaries.read_records(first.name)
+            record.response_models
+            for record in canaries.read_records(first.name, run_context.state)
         ] == [
             ['first-2026'],
             ['first-2026'],
         ]
-        (other,) = canaries.read_records(second.name)
+        (other,) = canaries.read_records(second.name, run_context.state)
         assert other.system == second.name
         assert other.response_models == ['second-2026']
         assert all(
-            record.system == first.name for record in canaries.read_records(first.name)
+            record.system == first.name
+            for record in canaries.read_records(first.name, run_context.state)
         )
-        entries = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
+        entries = read_ledger('canaries', run_context.state)
         assert [entry.system for entry in entries].count(first.name) == 2
         assert [entry.system for entry in entries].count(second.name) == 1
         assert all(entry.responses[0] is not None for entry in entries)
@@ -501,6 +501,8 @@ class TestRun:
         host_jobs: list[JobConfig],
         data_dir: Path,
         api: Api,
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         if api == 'openai-responses':
             endpoint.response = response('READY')
@@ -513,9 +515,9 @@ class TestRun:
             max_output_tokens=4096,
             thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
         )
-        probe = prepare_probe(original)
+        probe = prepare_probe(original, tmp_path)
 
-        (record,) = canaries.run([probe])
+        (record,) = canaries.run([probe], run_context)
 
         (sent,) = endpoint.requests
         limit_key = {
@@ -539,14 +541,12 @@ class TestRun:
         assert record.usage.reasoning_tokens == (
             None if api == 'anthropic-messages' else 25
         )
-        assert canaries.read_records(original.name) == [record]
-        (entry,) = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
+        assert canaries.read_records(original.name, run_context.state) == [record]
+        (entry,) = read_ledger('canaries', run_context.state)
+        assert isinstance(entry, Entry)
         assert entry.responses == [record.usage]
         assert entry.ceiling_usd == pytest.approx(0.04096)
-        assert not (data_dir / 'spend' / 'smoke-text.jsonl').exists()
+        assert read_ledger('smoke-text', run_context.state) == []
 
     @pytest.mark.parametrize(
         ('api', 'failure'),
@@ -580,6 +580,8 @@ class TestRun:
         data_dir: Path,
         api: Api,
         failure: str,
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         system = make_system(
             api=api,
@@ -609,21 +611,19 @@ class TestRun:
                 endpoint.status = 503
             elif failure == 'private-finish':
                 endpoint.response['choices'][0]['finish_reason'] = 'backend-private-47'
-        probe = prepare_probe(system)
+        probe = prepare_probe(system, tmp_path)
 
         with pytest.raises(InputError, match='canary probe failed') as error:
-            canaries.run([probe])
+            canaries.run([probe], run_context)
 
         assert 'differs from its baseline' not in str(error.value)
         assert 'backend-private-47' not in str(error.value)
-        (failed,) = canaries.read_records(system.name)
+        (failed,) = canaries.read_records(system.name, run_context.state)
         assert not failed.success
         if failure == 'private-finish':
             assert failed.finish_reason == 'backend-private-47'
-        (entry,) = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
+        (entry,) = read_ledger('canaries', run_context.state)
+        assert isinstance(entry, Entry)
         assert entry.fingerprint == fingerprint(probe.actual)
         assert len(endpoint.requests) == len(host_jobs) == 1
 
@@ -634,10 +634,13 @@ class TestRun:
         endpoint.response = (
             response('READY') if api == 'openai-responses' else completion('READY')
         )
-        (succeeded,) = canaries.run([prepare_probe(system)])
+        (succeeded,) = canaries.run([prepare_probe(system, tmp_path)], run_context)
 
         assert succeeded.success
-        assert [record.success for record in canaries.read_records(system.name)] == [
+        assert [
+            record.success
+            for record in canaries.read_records(system.name, run_context.state)
+        ] == [
             False,
             True,
         ]
@@ -668,6 +671,8 @@ class TestRun:
         tokens: int,
         model: str,
         refused: bool,
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         system = make_system()
         baseline = completion('READY')
@@ -675,53 +680,94 @@ class TestRun:
         baseline['usage']['total_tokens'] = baseline_tokens + 40
         baseline['usage']['prompt_tokens_details'] = {'cached_tokens': 0}
         endpoint.response = baseline
-        canaries.run([prepare_probe(system)])
+        canaries.run([prepare_probe(system, tmp_path)], run_context)
         payload = completion('READY')
         payload['usage']['prompt_tokens'] = tokens
         payload['usage']['total_tokens'] = tokens + 40
         payload['usage']['prompt_tokens_details'] = {'cached_tokens': 0}
         payload['model'] = model
         endpoint.response = payload
-        current = prepare_probe(system)
+        current = prepare_probe(system, tmp_path)
 
         if refused:
             with pytest.raises(InputError, match='differs from its baseline') as error:
-                canaries.run([current])
+                canaries.run([current], run_context)
             assert model not in str(error.value)
             assert 'large-2026' not in str(error.value)
         else:
-            canaries.run([current])
+            canaries.run([current], run_context)
 
         assert len(endpoint.requests) == len(host_jobs) == 2
         assert [
-            r.usage.input_tokens for r in canaries.read_records(system.name) if r.usage
+            r.usage.input_tokens
+            for r in canaries.read_records(system.name, run_context.state)
+            if r.usage
         ] == [baseline_tokens, tokens]
-        assert canaries.read_records(system.name)[-1].response_models == [model]
+        assert canaries.read_records(system.name, run_context.state)[
+            -1
+        ].response_models == [model]
 
     @pytest.mark.parametrize('changed', ['source', 'protocol'])
     def test_starts_a_new_baseline_when_source_or_protocol_changes(
-        self, endpoint: StubEndpoint, host_jobs: list[JobConfig], changed: str
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        changed: str,
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         system = make_system()
-        (first,) = canaries.run([prepare_probe(system)])
+        original = system
+        first_probe = prepare_probe(system, tmp_path)
+        (first,) = canaries.run([first_probe], run_context)
         endpoint.response = completion('READY') | {'model': 'other-2026'}
         if changed == 'source':
             system = system.model_copy(update={'prompt': 'Answer briefly.'})
-            probe = prepare_probe(system)
+            probe = prepare_probe(system, tmp_path)
         else:
-            probe = replace(prepare_probe(system), protocol_digest='different-protocol')
+            probe = replace(
+                prepare_probe(system, tmp_path), protocol_digest='different-protocol'
+            )
 
-        (current,) = canaries.run([probe])
+        (current,) = canaries.run([probe], run_context)
 
         assert current.success
-        assert len(endpoint.requests) == len(host_jobs) == 2
         assert (
             current.source_generate_fingerprint != first.source_generate_fingerprint
             or current.probe_protocol_digest != first.probe_protocol_digest
         )
+        endpoint.response = completion('READY') | {'model': 'drifted-2026'}
+        changed_probe = replace(
+            prepare_probe(system, tmp_path), protocol_digest=probe.protocol_digest
+        )
+
+        with pytest.raises(InputError, match='differs from its baseline'):
+            canaries.run([changed_probe], run_context)
+        endpoint.response = completion('READY') | {'model': 'other-2026'}
+        with pytest.raises(InputError, match='differs from its baseline'):
+            canaries.run([prepare_probe(original, tmp_path)], run_context)
+
+        state = run_context.state
+        assert state.baseline(system.name, canaries.context_key(first_probe)) == (
+            first.model_dump_json()
+        )
+        assert state.baseline(system.name, canaries.context_key(probe)) == (
+            current.model_dump_json()
+        )
+        records = canaries.read_records(system.name, state)
+        state.reset_baseline(system.name)
+
+        assert state.baseline(system.name, canaries.context_key(first_probe)) is None
+        assert state.baseline(system.name, canaries.context_key(probe)) is None
+        assert canaries.read_records(system.name, state) == records
+        assert len(endpoint.requests) == len(host_jobs) == 4
 
     def test_keeps_the_first_baseline_after_an_accepted_small_change(
-        self, endpoint: StubEndpoint, host_jobs: list[JobConfig]
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         system = make_system()
         for tokens in (50, 52):
@@ -730,98 +776,50 @@ class TestRun:
             payload['usage']['total_tokens'] = tokens + 40
             payload['usage']['prompt_tokens_details'] = {'cached_tokens': 0}
             endpoint.response = payload
-            canaries.run([prepare_probe(system)])
+            canaries.run([prepare_probe(system, tmp_path)], run_context)
         payload['usage']['prompt_tokens'] = 54
         payload['usage']['total_tokens'] = 94
         endpoint.response = payload
 
         with pytest.raises(InputError, match='Input tokens: `50` → `54`'):
-            canaries.run([prepare_probe(system)])
+            canaries.run([prepare_probe(system, tmp_path)], run_context)
 
         assert len(endpoint.requests) == len(host_jobs) == 3
-        assert all(record.success for record in canaries.read_records(system.name))
+        assert all(
+            record.success
+            for record in canaries.read_records(system.name, run_context.state)
+        )
 
     def test_records_every_selected_probe_before_refusing_the_run(
         self,
         endpoint: StubEndpoint,
         host_jobs: list[JobConfig],
         data_dir: Path,
+        tmp_path: Path,
+        run_context: RunContext,
     ) -> None:
         systems = [make_system(name=name) for name in ('large', 'small')]
-        probes = [prepare_probe(system) for system in systems]
+        probes = [prepare_probe(system, tmp_path) for system in systems]
         endpoint.statuses = [503]
 
         with pytest.raises(InputError, match='canary probe failed'):
-            canaries.run(probes)
+            canaries.run(probes, run_context)
 
-        assert [canaries.read_records(s.name)[0].success for s in systems] == [
+        assert [
+            canaries.read_records(s.name, run_context.state)[0].success for s in systems
+        ] == [
             False,
             True,
         ]
-        assert len(endpoint.requests) == len(host_jobs) == 2
-        entries = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
-        assert {entry.system for entry in entries} == {'large', 'small'}
-
-    @pytest.mark.parametrize('failure', ['interrupt', 'harbor-error', 'trial-error'])
-    def test_keeps_an_unfinished_attempt_and_its_spend_before_refusing(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch, failure: str
-    ) -> None:
-        system = make_system()
-        probe = prepare_probe(system)
-        attempt = Attempt(
-            trial='canary__1',
-            system=system.name,
-            fingerprint=fingerprint(probe.actual),
-            started_at=START,
-            finished_at=START,
-            responses=[None],
-        )
-
-        def fail(config: JobConfig, *, log: Path | None = None) -> Path:
-            directory = jobs.job_path(config)
-            directory.mkdir(parents=True)
-            (directory / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
-            if failure == 'interrupt':
-                raise KeyboardInterrupt
-            if failure == 'trial-error':
-                write_trial(
-                    directory,
-                    'canary__1',
-                    config.agents[0],
-                    task='canaries/fixed',
-                    instruction=None,
-                    version='1.0.0',
-                    error='backend-private-47',
-                )
-                return directory
-            raise subprocess.CalledProcessError(3, 'backend-private-47')
-
-        monkeypatch.setattr(jobs, 'run_job', fail)
-
-        if failure == 'interrupt':
-            with pytest.raises(KeyboardInterrupt):
-                canaries.run([probe])
-        else:
-            with pytest.raises(InputError, match='canary probe failed') as error:
-                canaries.run([probe])
-            assert 'backend-private-47' not in str(error.value)
-
-        (record,) = canaries.read_records(system.name)
         assert (
-            record.error
-            == {
-                'interrupt': 'InterruptedProbe',
-                'harbor-error': 'CalledProcessError',
-                'trial-error': 'backend-private-47',
-            }[failure]
+            run_context.state.baseline(systems[0].name, canaries.context_key(probes[0]))
+            is None
         )
-        assert not record.success
-        (entry,) = [
-            Entry.model_validate_json(line)
-            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
-        ]
-        assert entry.responses == [None]
-        assert entry.fingerprint == fingerprint(probe.actual)
+        successful = canaries.read_records(systems[1].name, run_context.state)[0]
+        assert (
+            run_context.state.baseline(systems[1].name, canaries.context_key(probes[1]))
+            == successful.model_dump_json()
+        )
+        assert len(endpoint.requests) == len(host_jobs) == 2
+        entries = read_ledger('canaries', run_context.state)
+        assert {entry.system for entry in entries} == {'large', 'small'}
