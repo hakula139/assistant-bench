@@ -53,7 +53,8 @@ src/assistant_bench/
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
 ├── paths.py                                # Repo and data directory locations, and atomic file writes
-└── diffs.py                                # Git-style diffs of a task's workspace against its repository
+├── diffs.py                                # Git-style diffs of a task's workspace against its repository
+└── html.py                                 # Unchanged complete HTML extraction and preview eligibility
 ```
 
 ## Import Layers
@@ -69,7 +70,7 @@ Imports point downward through these layers, so a module never imports one above
 7. `report`
 8. `outputs`, `harnesses`, and `scoring`
 9. `families`, `catalog`, and `state`
-10. `database`, `generation`, `messages`, `paths`, and `diffs`
+10. `database`, `generation`, `messages`, `paths`, `diffs`, and `html`
 
 `families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 

@@ -22,6 +22,7 @@ from assistant_bench.families import (
     Gate,
     VotesSettings,
 )
+from assistant_bench.html import extract_html
 from assistant_bench.messages import InputError, code, error_lines
 from assistant_bench.outputs import (
     Output,
@@ -82,13 +83,13 @@ class OutputFacts(_Model):
     fingerprint: str
     verdict: Verdict
     errored: bool
-    length: int
+    length: int | None
     content_digest: str
 
 
 class PublishedOutput(OutputFacts):
     content: str | None
-    """The rendered text or diff, present exactly when the output passed."""
+    """The text, diff, or HTML document, present exactly when the output passed."""
 
     @model_validator(mode='after')
     def _content_when_passing(self) -> Self:
@@ -119,7 +120,7 @@ class Publication(_Model):
     family: FamilyName
     display_name: str
     aspect: str | None
-    render: Literal['text', 'diff']
+    render: Literal['text', 'diff', 'html']
     defects: tuple[Defect, ...]
     reference: str
     """The system that anchors the round, frozen so closing uses what voters saw."""
@@ -129,6 +130,21 @@ class Publication(_Model):
 
     cases: tuple[PublishedCase, ...]
     outputs: tuple[PublishedOutput, ...]
+
+    @model_validator(mode='after')
+    def _html_documents(self) -> Self:
+        if self.render == 'html':
+            for output in self.outputs:
+                if output.length is not None:
+                    raise ValueError('HTML outputs have no text length')
+                if (
+                    output.content is not None
+                    and extract_html(output.content) != output.content
+                ):
+                    raise ValueError(
+                        'a passing HTML output must be an eligible document'
+                    )
+        return self
 
     def identity(self) -> str:
         """Return the digest of everything but the recorded ID."""
@@ -212,7 +228,10 @@ def prepare(
     fingerprints = system_fingerprints(kept)
     refuse_pool_conflicts(family, kept)
     published = sorted(
-        (_published_output(family.name, keys[o.case], o) for o in kept),
+        (
+            _published_output(family.name, keys[o.case], o, settings.render)
+            for o in kept
+        ),
         key=lambda output: output.key,
     )
     if not _pairable(published):
@@ -273,10 +292,19 @@ def _refuse_repeated_cases(keys: Mapping[str, str]) -> None:
         )
 
 
-def _published_output(family: str, case: str, output: Output) -> PublishedOutput:
+def _published_output(
+    family: str, case: str, output: Output, render: Literal['text', 'diff', 'html']
+) -> PublishedOutput:
     assert output.fingerprint is not None
     verdict = _verdict(output.gate_failures)
     text = output.text or ''
+    if render == 'html' and verdict == 'pass':
+        document = extract_html(text)
+        if document is None or document != text:
+            raise InputError(
+                f'Family `{family}` has a passing HTML output that is not a '
+                'collected eligible document. Collect its trials again.'
+            )
     return PublishedOutput(
         key=output_key(family, output),
         case_key=case,
@@ -284,7 +312,7 @@ def _published_output(family: str, case: str, output: Output) -> PublishedOutput
         fingerprint=output.fingerprint,
         verdict=verdict,
         errored=output.error is not None,
-        length=text_length(text),
+        length=None if render == 'html' else text_length(text),
         content_digest=_digest(text),
         content=output.text if verdict == 'pass' else None,
     )

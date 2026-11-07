@@ -854,8 +854,8 @@ class HumanEvidence:
     choice: Choice
     defects_a: tuple[Defect, ...]
     defects_b: tuple[Defect, ...]
-    length_a: int
-    length_b: int
+    length_a: int | None
+    length_b: int | None
     comparison: ranking.Comparison
     """Weight assigned once over the complete eligible family evaluation."""
 
@@ -921,15 +921,20 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
     ratings = board.ratings
     ranked = set(ratings.systems)
     connected = [row for row in votes if set(row.systems) <= ranked]
+    measured = [
+        (row, row.length_a, row.length_b)
+        for row in connected
+        if row.length_a is not None and row.length_b is not None
+    ]
     feature = ranking.length_feature(
-        [(row.length_a, row.length_b) for row in connected],
-        [row.comparison.weight for row in connected],
+        [(a, b) for _, a, b in measured],
+        [row.comparison.weight for row, _, _ in measured],
     )
     length = (
         None
         if feature is None
         else ranking.fit(
-            ranking.Matchups.build([row.comparison for row in connected]),
+            ranking.Matchups.build([row.comparison for row, _, _ in measured]),
             feature,
         ).covariate
     )

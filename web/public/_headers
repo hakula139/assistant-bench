@@ -3,10 +3,10 @@
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
 
-# Turnstile runs its challenge in a frame. `!` drops the policy the rule above attached.
+# Voting previews and Turnstile use frames. `!` drops the policy the rule above attached.
 /vote/*
   ! Content-Security-Policy
-  Content-Security-Policy: frame-src https://challenges.cloudflare.com; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+  Content-Security-Policy: frame-src 'self' https://challenges.cloudflare.com; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
 
 # Astro hashes each asset's name, so a cached copy never goes stale.
 /_astro/*

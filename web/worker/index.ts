@@ -8,6 +8,7 @@ import {
   admissionRequest,
   familyQuery,
   freshnessQuery,
+  previewRequest,
   skipRequest,
   undoRequest,
   voteRequest,
@@ -26,6 +27,7 @@ import {
 import { ApiError, type Api, type Bindings } from './api';
 import { BODY_LIMIT_BYTES } from './limits';
 import { pairState, skip } from './pairs';
+import { preview, previewHeaders, previewUnavailable } from './previews';
 import { retain } from './retention';
 import { cachedFreshness, freshness, record, undo } from './votes';
 
@@ -47,6 +49,12 @@ function address(request: Request): string {
 
 export const app = new Hono<Api>()
   .basePath('/api')
+  .use('/previews/*', async (c, next) => {
+    await next();
+    for (const [name, value] of Object.entries(previewHeaders)) {
+      c.header(name, value);
+    }
+  })
   .use(async (c, next) => {
     await next();
     c.header('Cache-Control', 'no-store');
@@ -97,6 +105,11 @@ export const app = new Hono<Api>()
       await pairState(c.env.DB, c.env.ACTOR_KEY, actor, c.req.valid('query').family, now),
     );
   })
+  .get('/previews/:pair/:side', sValidator('param', previewRequest, rejectInvalid), async (c) => {
+    const actor = await requireActor(c, Date.now());
+    const { pair, side } = c.req.valid('param');
+    return c.html(await preview(c.env.DB, actor, pair, side));
+  })
   .post('/pair/skip', sValidator('json', skipRequest, rejectInvalid), async (c) => {
     const now = Date.now();
     const actor = await requireActor(c, now);
@@ -120,12 +133,19 @@ export const app = new Hono<Api>()
     );
     return c.json({ status });
   })
-  .notFound((c) => c.json({ error: 'not_found' } satisfies ErrorView, 404))
+  .notFound((c) =>
+    c.req.path.startsWith('/api/previews/')
+      ? c.text(previewUnavailable, 404)
+      : c.json({ error: 'not_found' } satisfies ErrorView, 404),
+  )
   .onError((error, c) => {
     if (error instanceof HTTPException) {
       error = new ApiError(400, 'invalid_request');
     }
     if (error instanceof ApiError) {
+      if (c.req.path.startsWith('/api/previews/')) {
+        return c.text(previewUnavailable, error.status);
+      }
       const body: ErrorView =
         error.code === 'admission_required'
           ? { error: error.code, sitekey: c.env.TURNSTILE_SITEKEY }
@@ -138,7 +158,9 @@ export const app = new Hono<Api>()
       message: error.message,
       stack: error.stack,
     });
-    return c.json({ error: 'unavailable' } satisfies ErrorView, 500);
+    return c.req.path.startsWith('/api/previews/')
+      ? c.text(previewUnavailable, 500)
+      : c.json({ error: 'unavailable' } satisfies ErrorView, 500);
   });
 
 export default {
