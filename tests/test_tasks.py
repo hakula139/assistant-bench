@@ -298,7 +298,7 @@ class TestCheckTasks:
         (task / 'task.toml').write_text(tomli_w.dumps(config))
 
         with pytest.raises(ValueError) as error:
-            check_tasks(load_family('smoke'), [task])
+            check_tasks(load_family('smoke'), [task], private_root=data_dir / 'cases')
 
         assert '`cases/smoke/echo/task.toml`: set `[environment] cpus`.' in str(
             error.value

@@ -74,7 +74,9 @@ def _render_task(family: Family, case: Case, task_dir: Path) -> Path:
 # ── Checks ──
 
 
-def check_tasks(family: Family, tasks: list[Path]) -> None:
+def check_tasks(
+    family: Family, tasks: list[Path], *, private_root: Path | None = None
+) -> None:
     """Check that every task sets what a run needs.
 
     Raises
@@ -85,7 +87,9 @@ def check_tasks(family: Family, tasks: list[Path]) -> None:
     """
     problems: list[str] = []
     for task in tasks:
-        location = f'`{task_location(family, task)}/task.toml`'
+        location = (
+            f'`{task_location(family, task, private_root=private_root)}/task.toml`'
+        )
         try:
             config = _task_config(task)
         except ValidationError as error:
@@ -171,14 +175,20 @@ class TaskAuthor(BaseModel):
 
 
 def author_vendors(
-    family: Family, tasks: list[Path], export: NixosConfigExport
+    family: Family,
+    tasks: list[Path],
+    export: NixosConfigExport,
+    *,
+    private_root: Path | None = None,
 ) -> dict[str, str]:
     """Validate author provenance independently of runnable systems."""
     known = {model.vendor for model in export.catalog.models.values()}
     authors: dict[str, str] = {}
     problems: list[str] = []
     for task in tasks:
-        location = f'`{task_location(family, task)}/task.toml`'
+        location = (
+            f'`{task_location(family, task, private_root=private_root)}/task.toml`'
+        )
         try:
             author = TaskAuthor.model_validate(_task_config(task).metadata)
         except ValidationError as error:
@@ -236,13 +246,18 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
     return sorted(changed)
 
 
-def current_versions(family: Family, cases: dict[str, Case]) -> dict[str, str | None]:
+def current_versions(
+    family: Family, cases: dict[str, Case], *, private_root: Path | None = None
+) -> dict[str, str | None]:
     """Return expected current task versions without changing rendered tasks."""
     match family.source:
         case 'cases':
             return {case.id: _rendered_version(family, case) for case in cases.values()}
         case 'tasks':
-            return {case: _task_version(case_task(family, case)) for case in cases}
+            return {
+                case: _task_version(case_task(family, case, private_root=private_root))
+                for case in cases
+            }
         case _:
             assert_never(family.source)
 
