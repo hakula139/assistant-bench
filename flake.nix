@@ -14,7 +14,7 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     devkit = {
-      url = "github:hakula139/devkit/88f619538cc3a79bf223e538504251264e02b4e9";
+      url = "github:hakula139/devkit/b3c36cb40179dcc4c226b0fee6e474577accecfb";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -88,19 +88,6 @@
         # ------------------------------------------------------------------------------------------
         hooks = {
           dprint.enable = false;
-          # The patch adds `concurrency.queue`, unreleased as of v1.7.12. Drop it once Nixpkgs ships
-          # a newer actionlint.
-          actionlint = {
-            enable = true;
-            package = pkgs.actionlint.overrideAttrs (old: {
-              patches = (old.patches or [ ]) ++ [
-                (pkgs.fetchpatch {
-                  url = "https://github.com/rhysd/actionlint/commit/644076a59742c2d1540ebd4686eab3c308f0e562.patch";
-                  hash = "sha256-Lpd7CTkLbzgvAZV2H8G4GTUoPNDCK7PiW3A40+cquUk=";
-                })
-              ];
-            });
-          };
 
           lychee = {
             enable = true;
