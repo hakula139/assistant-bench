@@ -37,6 +37,7 @@ CREATE TABLE attempt_claims (
 
 CREATE UNIQUE INDEX attempt_claims_active_slot ON attempt_claims (scope, slot_key)
     WHERE state IN ('claimed', 'uncertain');
+CREATE INDEX attempt_claims_scope ON attempt_claims (scope);
 CREATE INDEX attempt_claims_run ON attempt_claims (run_id, state);
 
 CREATE TRIGGER claims_start_run AFTER INSERT ON attempt_claims
