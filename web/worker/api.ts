@@ -2,8 +2,9 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { ErrorCode } from '@/lib/arena';
 
-/** The bindings of every environment that runs the Worker, which the preview Worker lacks. */
 export type PublicBindings = Cloudflare.ProductionEnv | Cloudflare.StagingEnv | Cloudflare.LocalEnv;
+
+/** The bindings of every environment that runs the Worker, which the preview Worker lacks. */
 export type Bindings = PublicBindings | Cloudflare.PrivateEnv;
 
 /** The Hono environment of every route. */
