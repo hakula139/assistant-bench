@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import re
 import shlex
 from collections import ChainMap
 from collections.abc import Mapping
@@ -22,11 +23,11 @@ from harbor.agents.installed.codex import (
 )
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from assistant_bench.catalog import load_export
 from assistant_bench.harnesses import cache, proxy
-from assistant_bench.harnesses.accounting import current_trial
+from assistant_bench.harnesses.accounting import TrialAccounting, current_trial
 from assistant_bench.harnesses.docker import check_local_context
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
@@ -50,6 +51,15 @@ class ClaudeCodeOptions(PinnedVersion, HarborClaudeCodeOptions, Labels):
 
 class CodexOptions(PinnedVersion, HarborCodexOptions, Labels):
     pass
+
+
+class _SessionKey(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    peer_token: str = Field(alias='peerToken', pattern=r'^[0-9a-f]{32}$')
+    proc_start: str = Field(default='', alias='procStart')
+    proc_start_ft: str = Field(default='', alias='procStartFt')
+    pid_domain: str = Field(default='', alias='pidDomain')
 
 
 async def _install(
@@ -215,6 +225,8 @@ async def _finish(
         await environment.download_dir(
             agent.environment_logs_dir.as_posix(), agent.logs_dir
         )
+        if isinstance(agent, ClaudeCode):
+            _discard_session_keys(agent.logs_dir, current_trial())
         agent.populate_context_post_run(context)
     except Exception:
         if not failed:
@@ -224,6 +236,29 @@ async def _finish(
         )
     finally:
         _record(agent, context, calls)
+
+
+def _discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
+    """Remove Claude's validated messaging credentials from downloaded logs."""
+    sessions = logs / 'sessions'
+    directory = sessions / 'sessions'
+    for parent in (logs, sessions, directory):
+        if parent.is_symlink() or not parent.is_dir():
+            return
+    for path in directory.iterdir():
+        if (
+            re.fullmatch(r'[0-9]+\.[0-9a-f]{64}\.key(?:\.tmp\.[0-9a-f]+)?', path.name)
+            is None
+            or path.is_symlink()
+            or not path.is_file()
+        ):
+            continue
+        try:
+            key = _SessionKey.model_validate_json(path.read_bytes())
+        except ValidationError:
+            continue
+        recorder.remember_secret(key.peer_token)
+        path.unlink()
 
 
 def _record(
