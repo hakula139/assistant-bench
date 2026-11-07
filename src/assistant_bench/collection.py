@@ -116,6 +116,7 @@ def collect(
         task is invalid, or the harness is one `check_harness` refuses.
     """
     previous = context.state.output_generation(family.name)
+    sources = context.sources(family)
     entries = read_ledger(family.name, context.state)
     by_trial: defaultdict[tuple[str, str], list[Entry]] = defaultdict(list)
     for entry in entries:
@@ -130,7 +131,7 @@ def collect(
         candidate
         for candidate in _read_trials(
             family,
-            context.sources(family),
+            sources,
             current_versions(family, cases, private_root=context.private_root),
         )
         if (
