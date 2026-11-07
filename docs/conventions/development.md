@@ -6,7 +6,7 @@ Both Nix shells provide uv, Node.js, and pnpm and export `BENCH_NIXOS_CONFIG`, d
 
 The root Python project contains the `assistant_bench` CLI, and `uv sync` installs its dependencies with the `dev` group. The voting Worker is TypeScript in `web/worker/`, which `web/wrangler.toml` configures and the `web` package's Wrangler deploys.
 
-Beside the production and staging [vote stores](../design/arena.md#vote-store), the `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
+Beside the production, staging and private [vote stores](../design/arena.md#vote-store), the disposable `local` environment serves the Worker under `wrangler dev` with Cloudflare's always-passing Turnstile test keys.
 
 The project supports Python 3.14, selected by `.python-version` and bounded by the root and typing package requirements. Ruff infers its target from the root requirement, while mypy and basedpyright use the selected interpreter. The host and authored task code share one strict typing policy in the root `pyproject.toml`, which permits missing library typing metadata while missing imports and unknown or incompatible API types remain errors. Each coding task's hidden tests and reference resolve imports against its reference package, while its starter resolves only its own modules. Editors use the root `.venv`, where `uv sync` installs the checkers CI runs.
 
@@ -43,7 +43,7 @@ Commands stay minimal, and settings live in config files:
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings             | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
 | Codecov's project and patch status targets, per flag                             | `codecov.yml`                                                                                                         |
 
-Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, the D1 [credential source](../guide/running.md#voting), and `BENCH_DATA_REPOSITORY` naming the private `owner/repository` source from `.env`, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, an optional `BENCH_DATA_DIR` that moves the [data directory](data.md#the-data-directory), and GitLab's `CI_PAGES_URL` and `CI_PROJECT_URL` for [Pages builds](ci.md#deploy). The voting Worker's origins and D1 bindings belong to its environments in `web/wrangler.toml`, and its keys are Worker secrets, which [Running](../guide/running.md#setting-up-a-vote-store) sets.
+Environment variables carry secrets and per-environment values: the `BENCH_API_*` endpoint settings, native `BENCH_ANTHROPIC_BASE_URL`, the D1 [credential source](../guide/running.md#voting), `BENCH_DATA_REPOSITORY` naming the private `owner/repository` source, the Nix store path `BENCH_NIXOS_CONFIG` from the dev shell, an optional `BENCH_DATA_DIR` that moves the [vendor CLI cache](data.md#the-data-directory), and GitLab's `CI_PAGES_URL` and `CI_PROJECT_URL` for [Pages builds](ci.md#deploy). The voting Worker's origins and D1 bindings belong to its environments in `web/wrangler.toml`, and its keys are Worker secrets, which [Running](../guide/running.md#setting-up-a-vote-store) sets.
 
 Job configs are generated per run and never committed. Harbor copies each one into its job directory as `config.json`.
 

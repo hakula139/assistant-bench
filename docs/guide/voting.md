@@ -6,7 +6,7 @@ Open the website link in the repository's About section to vote on blind pairs f
 
 Follow the site's Vote link and pick a family under its aspect. The first visit verifies your browser, showing a challenge only when interaction is needed, and your first pair opens after it. The page remembers your browser in a cookie, so voting needs cookies allowed for the site.
 
-For private cases, run [`bench serve`](running.md#voting-locally) and open its local vote page. It uses the same voting flow and keeps the cases and votes on the machine.
+For private cases, open the Access-protected private vote page and sign in with an allowed identity. It uses the same voting flow and stores votes in private D1, as [Running](running.md#private-voting) describes.
 
 Each pair compares two systems' different, passing outputs on one case, and you vote at most once on each comparison. A family ends with No pairs left once you have voted on every comparison it offers. Tap the vote count in the Prompt bar to see how many pairs remain.
 

@@ -59,9 +59,9 @@ Write a one-sentence greeting for a new contributor to an open-source project.
 checklist = ["One sentence"]
 ```
 
-- `id` is a slug of the scenario alone, unique across the family's committed and local cases and using lowercase letters, digits, and hyphens. It omits the language and category, so a case can move between categories without a new ID, which would give Harbor a new task name and rerun the case on every listed system. Editing the instruction keeps the ID and [reruns](../design/architecture.md#reruns) the case.
+- `id` is a slug of the scenario alone, unique across the family's public and private cases and using lowercase letters, digits, and hyphens. It omits the language and category, so a case can move between categories without a new ID, which would give Harbor a new task name and rerun the case on every listed system. Editing the instruction keeps the ID and [reruns](../design/architecture.md#reruns) the case.
 - `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. The site shows its label from the glossary. A family's page under [`design/families/`](../design/families/) describes its categories.
-- `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](../conventions/data.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
+- `source` is `synthetic` or `public` in this repository. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` in the private repository, which runtime commands read at a pinned revision beside the public cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes. The instruction follows the repository's Markdown rules like any other Markdown file, with chat logs, transcripts, and other material whose lines Markdown would join or garble in a fenced code block.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 - `[cases.checks]` is required for `checkers` and absent for other scorers. It fixes `language = "en"` or `"zh"`, `kind = "prose"` (default) or `"directory-tree"`, and a nonempty unique `rules` list. Rule IDs are `ellipsis`, `han-punctuation` (Chinese), `curly-quotes` (English), `paragraph-lines`, `list-spacing`, `tree-comments` (directory trees) and `forbidden-marker`. Optional `targets` names a unique subset for coverage, without changing applicability. `quoted_input` lists exact instruction substrings exempt from authored-prose checks. The marker rule requires `forbidden_marker` to name its planted instruction substring, and other rules omit that field. Checker metadata is separate from the instruction, so changing it recollects verdicts without generating responses again.
@@ -72,7 +72,7 @@ Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing ca
 
 Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[task] name = "<family>/<task>"` and a `version`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, and `tests/test.sh`, which writes the reward to `/logs/verifier/reward.txt`. The image must include bash, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) explains. [`families/smoke/tasks/echo/`](../../families/smoke/tasks/echo/) is the smallest example.
 
-A task's directory name is its ID, unique across the family's committed and local tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog. Authorship remains fixed when that system retires from the runnable configuration.
+A task's directory name is its ID, unique across the family's public and private tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog. Authorship remains fixed when that system retires from the runnable configuration.
 
 `bench check` checks each task's `task.toml` for what a run needs:
 
@@ -97,7 +97,7 @@ Once a task has run, every edit to it needs a bump of `[task] version`, since Ha
 
 Deleting a task's directory retires it, after which collection leaves its trials out.
 
-A local task is a directory under the data directory's `cases/<family>/`, which `bench check` reads beside the committed tasks. It carries `source = "held-out"` or `"transcript"`, as [Data](../conventions/data.md#data-classes) describes.
+A private task is a directory under the private repository's `cases/<family>/`, which `bench check --private` reads beside the committed tasks. It carries `source = "held-out"` or `"transcript"`, as [Data](../conventions/data.md#data-classes) describes.
 
 ## Systems
 
@@ -141,4 +141,3 @@ When a change moves fingerprints:
 3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
 4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
 5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.
-6. Before the next paid run, delete the stale trials of each changed system that no closed report names under `jobs/<family>/` in the data directory, so it reruns under its name.
