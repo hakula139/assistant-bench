@@ -700,7 +700,9 @@ def _run_targets(
 
 def _refuse_drift(family: Family, systems: list[System], context: RunContext) -> None:
     drifted = jobs.drifted_systems(family, systems, context.sources(family))
-    frozen = report.reported_fingerprints(family.name)
+    frozen = report.reported_fingerprints(
+        family.name, root=context.public_root / 'reports'
+    )
     moved = _moved(frozen, systems)
     if not drifted and not moved:
         return
