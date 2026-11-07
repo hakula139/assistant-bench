@@ -43,7 +43,7 @@ def benchmark(
     system: System, root: Path, *, previous: JobConfig | None = None
 ) -> JobConfig:
     family = load_family('smoke-text')
-    sources = []
+    sources: list[tuple[SourceJobConfig, Path]] = []
     if previous is not None:
         path = jobs.job_path(previous)
         sources.append((SourceJobConfig(action='diff', type='local', path=path), path))
@@ -69,6 +69,9 @@ def host_jobs(
 ) -> list[JobConfig]:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv(
+        'BENCH_API_HEADERS', '{"x-trace": "synthetic-canary-trace-unique-value"}'
+    )
     configs: list[JobConfig] = []
 
     def run_job(
