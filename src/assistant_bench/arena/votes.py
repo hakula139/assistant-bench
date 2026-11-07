@@ -1,11 +1,11 @@
 """A store's vote cuts and moderation, production's cut snapshots, and rounds."""
 
+import hashlib
 import json
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from itertools import combinations, product
-from pathlib import Path
 from statistics import median
 from typing import Literal, Protocol, get_args
 
@@ -25,10 +25,9 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.database import Database, Param, Row
-from assistant_bench.families import Choice, Defect, Family, FamilyName
+from assistant_bench.families import Category, Choice, Defect, FamilyName
 from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output
-from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.report import (
     AnalysisInput,
     Cutoff,
@@ -84,14 +83,19 @@ class Cut(_Model):
     excluded: int
     """Excluded votes with IDs up to the cutoff."""
 
+    output_generation: str | None = None
+    """The immutable collection prepared for this publication, when known."""
+
 
 class Snapshot(_Model):
-    """The cut one `bench close` took, saved under `votes/<family>/`."""
+    """The self-contained cuts and closing policy of one voted round."""
 
     family: FamilyName
     taken_at: AwareDatetime
+    category_order: tuple[Category, ...]
+    closing_revision: str | None
     production: Cut | None
-    local: Cut | None
+    private: Cut | None
 
     @model_validator(mode='after')
     def validate_cuts(self) -> Snapshot:
@@ -146,103 +150,102 @@ class Snapshot(_Model):
             outputs.update(output_keys)
         return self
 
-    def cuts(self) -> tuple[tuple[Literal['production', 'local'], Cut], ...]:
-        cuts: list[tuple[Literal['production', 'local'], Cut]] = []
+    def cuts(self) -> tuple[tuple[Literal['production', 'private'], Cut], ...]:
+        cuts: list[tuple[Literal['production', 'private'], Cut]] = []
         if self.production is not None:
             cuts.append(('production', self.production))
-        if self.local is not None:
-            cuts.append(('local', self.local))
+        if self.private is not None:
+            cuts.append(('private', self.private))
         return tuple(cuts)
 
 
 # ── Reading a Store ──
 
 
-class _ActiveRow(BaseModel):
+class _CutHeader(BaseModel):
     id: str
+    family: FamilyName
     reference: str
-    systems: Json[dict[str, str]]
-    defects: Json[tuple[Defect, ...]]
-
-
-class _VoteRow(BaseModel):
-    id: int
-    actor_id: str
-    case_key: str
-    a_output: str
-    b_output: str
-    a_system: str
-    b_system: str
-    choice: Choice
-    defects: Json[TaggedDefects]
-    elapsed_ms: int
+    systems: dict[str, str]
+    defects: tuple[Defect, ...]
+    cutoff: int
+    excluded: int
 
 
 def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
-    """Read the family's active publication and the votes no undo can change.
+    """Read one SQL snapshot, or None when the family has no active publication.
 
-    Returns None when the store has no active publication for the family.
+    The undo cutoff, exclusions and inventory share the statement's read view.
+    Each result value holds one fact, keeping it below D1's value size limit.
+    A result exceeding the REST response limit fails through the database API.
     """
-    active = database.execute(
-        'SELECT publications.id, publications.reference, publications.systems, '
-        'publications.defects FROM active JOIN publications '
-        'ON publications.id = active.publication_id WHERE active.family = ?',
-        [family],
+    rows = database.execute(
+        """WITH active_publication AS (
+            SELECT p.* FROM active AS a JOIN publications AS p
+            ON p.id = a.publication_id WHERE a.family = ?
+        ), bounds AS (
+            SELECT coalesce(max(id), 0) AS cutoff FROM votes
+            WHERE family = ? AND recorded_at <= ?
+        ), selected_votes AS (
+            SELECT v.* FROM votes AS v JOIN active_publication AS p
+            ON v.family = p.family CROSS JOIN bounds AS b WHERE v.id <= b.cutoff
+        )
+        SELECT 'header' AS record_kind, 0 AS sort_rank, '' AS sort_key,
+            0 AS sort_id, json_object(
+                'id', p.id, 'family', p.family, 'reference', p.reference,
+                'systems', json(p.systems), 'defects', json(p.defects),
+                'cutoff', b.cutoff, 'excluded',
+                (SELECT count(*) FROM selected_votes WHERE exclusion IS NOT NULL)
+            ) AS payload_json FROM active_publication AS p CROSS JOIN bounds AS b
+        UNION ALL
+        SELECT 'case', 1, c.case_key, 0, json_object(
+            'key', c.case_key, 'category', c.category, 'split', c.split
+        ) FROM cases AS c JOIN active_publication AS p ON p.id = c.publication_id
+        UNION ALL
+        SELECT 'output', 2, o.output_key, 0, json_object(
+            'key', o.output_key, 'case_key', o.case_key, 'system', o.system,
+            'fingerprint', o.fingerprint, 'verdict', o.verdict,
+            'errored', json(CASE WHEN o.errored THEN 'true' ELSE 'false' END),
+            'length', o.length, 'content_digest', o.content_digest
+        ) FROM outputs AS o JOIN active_publication AS p ON p.id = o.publication_id
+        UNION ALL
+        SELECT 'vote', 3, '', id, json_object(
+            'id', id, 'actor', actor_id, 'case_key', case_key,
+            'a_output', a_output, 'b_output', b_output,
+            'a_system', a_system, 'b_system', b_system, 'choice', choice,
+            'defects', json(defects), 'elapsed_ms', elapsed_ms
+        ) FROM selected_votes WHERE exclusion IS NULL
+        ORDER BY sort_rank, sort_key, sort_id""",
+        [family, family, int(now.timestamp() * 1000) - UNDO_WINDOW_MS],
     ).rows
-    if not active:
+    if not rows:
         return None
-
-    publication = _ActiveRow.model_validate(active[0])
-    cases = database.execute(
-        'SELECT case_key AS key, category, split FROM cases '
-        'WHERE publication_id = ? ORDER BY case_key',
-        [publication.id],
-    ).rows
-    outputs = database.execute(
-        'SELECT output_key AS key, case_key, system, fingerprint, verdict, errored, '
-        'length, content_digest FROM outputs WHERE publication_id = ? '
-        'ORDER BY output_key',
-        [publication.id],
-    ).rows
-    inventory = Inventory(
-        id=publication.id,
-        family=family,
-        reference=publication.reference,
-        systems=publication.systems,
-        defects=publication.defects,
-        cases=tuple(CaseFacts.model_validate(row) for row in cases),
-        outputs=tuple(OutputFacts.model_validate(row) for row in outputs),
-    )
-
-    window_start = int(now.timestamp() * 1000) - UNDO_WINDOW_MS
-    cutoff = database.execute(
-        'SELECT coalesce(max(id), 0) AS cutoff FROM votes '
-        'WHERE family = ? AND recorded_at <= ?',
-        [family, window_start],
-    ).rows[0]['cutoff']
-    assert isinstance(cutoff, int)
-    if cutoff == 0:
-        return Cut(cutoff=0, inventory=inventory, votes=(), excluded=0)
-
-    rows = _paged(
-        database,
-        _VoteRow.model_validate,
-        'id, actor_id, case_key, a_output, b_output, a_system, b_system, choice, '
-        'defects, elapsed_ms',
-        'family = ? AND exclusion IS NULL AND id <= ?',
-        [family, cutoff],
-    )
-    votes = [
-        Vote(actor=row.actor_id, **row.model_dump(exclude={'actor_id'})) for row in rows
-    ]
-    excluded = database.execute(
-        'SELECT count(*) AS excluded FROM votes WHERE family = ? '
-        'AND exclusion IS NOT NULL AND id <= ?',
-        [family, cutoff],
-    ).rows[0]['excluded']
-    assert isinstance(excluded, int)
+    header = _CutHeader.model_validate_json(str(rows[0]['payload_json']))
     return Cut(
-        cutoff=cutoff, inventory=inventory, votes=tuple(votes), excluded=excluded
+        cutoff=header.cutoff,
+        excluded=header.excluded,
+        inventory=Inventory(
+            id=header.id,
+            family=header.family,
+            reference=header.reference,
+            systems=header.systems,
+            defects=header.defects,
+            cases=tuple(
+                CaseFacts.model_validate_json(str(row['payload_json']))
+                for row in rows
+                if row['record_kind'] == 'case'
+            ),
+            outputs=tuple(
+                OutputFacts.model_validate_json(str(row['payload_json']))
+                for row in rows
+                if row['record_kind'] == 'output'
+            ),
+        ),
+        votes=tuple(
+            Vote.model_validate_json(str(row['payload_json']))
+            for row in rows
+            if row['record_kind'] == 'vote'
+        ),
     )
 
 
@@ -460,54 +463,246 @@ def restore(database: Database, family: str, selector: Selector) -> int:
 # ── Snapshots ──
 
 
-def write_snapshot(snapshot: Snapshot) -> Path:
-    path = (
-        data_dir()
-        / 'votes'
-        / snapshot.family
-        / f'{snapshot.taken_at:%Y-%m-%dT%H-%M-%SZ}.json'
+class _SnapshotHeader(_Model):
+    id: str
+    family: FamilyName
+    taken_at: AwareDatetime
+    category_order_json: Json[tuple[Category, ...]]
+    closing_revision: str | None
+    expected_store_count: int
+    expected_case_count: int
+    expected_output_count: int
+    expected_vote_count: int
+    manifest_digest: str
+    sealed: bool
+
+
+class _SnapshotStore(_Model):
+    target: Literal['production', 'private']
+    publication_id: str
+    reference: str
+    systems_json: Json[dict[str, str]]
+    defects_json: Json[tuple[Defect, ...]]
+    cutoff: int
+    excluded: int
+    output_generation_id: str | None
+
+
+def _snapshot_digest(snapshot: Snapshot) -> str:
+    canonical = json.dumps(
+        snapshot.model_dump(mode='json'),
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False,
     )
-    write_atomically(path, snapshot.model_dump_json(indent=2) + '\n')
-    return path
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def read_snapshot(path: Path) -> Snapshot:
-    """Read a snapshot that `write_snapshot` saved.
+def save_snapshot(database: Database, snapshot: Snapshot) -> str:
+    """Stage immutable fact rows, verify their digest and counts, then seal them.
 
-    Raises
-    ------
-    InputError
-        The file does not validate as a snapshot.
+    Interrupted staging can resume with the same content. A sealed snapshot is
+    readable by its content ID, and no row can be added or changed after sealing.
     """
+    identity = _snapshot_digest(snapshot)
+    existing = database.execute(
+        'SELECT sealed FROM vote_snapshots WHERE id = ?', [identity]
+    ).rows
+    if existing and existing[0]['sealed']:
+        if read_snapshot(database, identity) != snapshot:
+            raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
+        return identity
+    cuts = snapshot.cuts()
+    counts = (
+        len(cuts),
+        sum(len(cut.inventory.cases) for _, cut in cuts),
+        sum(len(cut.inventory.outputs) for _, cut in cuts),
+        sum(len(cut.votes) for _, cut in cuts),
+    )
+    database.execute(
+        'INSERT INTO vote_snapshots '
+        '(id, family, taken_at, category_order_json, closing_revision, '
+        'expected_store_count, expected_case_count, expected_output_count, '
+        'expected_vote_count, manifest_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+        'ON CONFLICT (id) DO NOTHING',
+        [
+            identity,
+            snapshot.family,
+            snapshot.taken_at.isoformat(),
+            json.dumps(snapshot.category_order),
+            snapshot.closing_revision,
+            *counts,
+            identity,
+        ],
+    )
+    for target, cut in cuts:
+        inventory = cut.inventory
+        database.execute(
+            'INSERT INTO vote_snapshot_stores '
+            '(snapshot_id, target, publication_id, reference, systems_json, '
+            'defects_json, cutoff, excluded, output_generation_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            'ON CONFLICT (snapshot_id, target) DO NOTHING',
+            [
+                identity,
+                target,
+                inventory.id,
+                inventory.reference,
+                json.dumps(inventory.systems),
+                json.dumps(inventory.defects),
+                cut.cutoff,
+                cut.excluded,
+                cut.output_generation,
+            ],
+        )
+        for case in inventory.cases:
+            database.execute(
+                'INSERT INTO vote_snapshot_cases '
+                '(snapshot_id, target, case_key, facts_json) VALUES (?, ?, ?, ?) '
+                'ON CONFLICT (snapshot_id, target, case_key) DO NOTHING',
+                [identity, target, case.key, case.model_dump_json()],
+            )
+        for output in inventory.outputs:
+            database.execute(
+                'INSERT INTO vote_snapshot_outputs '
+                '(snapshot_id, target, output_key, facts_json) VALUES (?, ?, ?, ?) '
+                'ON CONFLICT (snapshot_id, target, output_key) DO NOTHING',
+                [identity, target, output.key, output.model_dump_json()],
+            )
+        for vote in cut.votes:
+            database.execute(
+                'INSERT INTO vote_snapshot_votes '
+                '(snapshot_id, target, vote_id, vote_json) VALUES (?, ?, ?, ?) '
+                'ON CONFLICT (snapshot_id, target, vote_id) DO NOTHING',
+                [identity, target, vote.id, vote.model_dump_json()],
+            )
+    if _read_snapshot(database, identity, sealed=False) != snapshot:
+        raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
+    database.execute(
+        'UPDATE vote_snapshots SET sealed = 1 WHERE id = ? AND sealed = 0 '
+        'AND expected_store_count = '
+        '(SELECT count(*) FROM vote_snapshot_stores WHERE snapshot_id = ?) '
+        'AND expected_case_count = '
+        '(SELECT count(*) FROM vote_snapshot_cases WHERE snapshot_id = ?) '
+        'AND expected_output_count = '
+        '(SELECT count(*) FROM vote_snapshot_outputs WHERE snapshot_id = ?) '
+        'AND expected_vote_count = '
+        '(SELECT count(*) FROM vote_snapshot_votes WHERE snapshot_id = ?)',
+        [identity] * 5,
+    )
+    read_snapshot(database, identity)
+    return identity
+
+
+def read_snapshot(database: Database, identity: str) -> Snapshot:
+    """Read only a sealed snapshot and verify its canonical digest and row counts."""
+    return _read_snapshot(database, identity, sealed=True)
+
+
+def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapshot:
+    headers = database.execute(
+        'SELECT * FROM vote_snapshots WHERE id = ?', [identity]
+    ).rows
+    if not headers or (sealed and not headers[0]['sealed']):
+        raise InputError(f'Snapshot `{identity}` is not sealed in the private store.')
     try:
-        return Snapshot.model_validate_json(path.read_bytes())
+        header = _SnapshotHeader.model_validate(headers[0])
+        stores = [
+            _SnapshotStore.model_validate(row)
+            for row in database.execute(
+                'SELECT target, publication_id, reference, systems_json, '
+                'defects_json, cutoff, excluded, output_generation_id '
+                'FROM vote_snapshot_stores WHERE snapshot_id = ? ORDER BY target',
+                [identity],
+            ).rows
+        ]
+        cuts: dict[Literal['production', 'private'], Cut] = {}
+        for store in stores:
+            parameters = [identity, store.target]
+            cases = tuple(
+                CaseFacts.model_validate_json(str(row['facts_json']))
+                for row in database.execute(
+                    'SELECT facts_json FROM vote_snapshot_cases '
+                    'WHERE snapshot_id = ? AND target = ? ORDER BY case_key',
+                    parameters,
+                ).rows
+            )
+            outputs = tuple(
+                OutputFacts.model_validate_json(str(row['facts_json']))
+                for row in database.execute(
+                    'SELECT facts_json FROM vote_snapshot_outputs '
+                    'WHERE snapshot_id = ? AND target = ? ORDER BY output_key',
+                    parameters,
+                ).rows
+            )
+            votes = tuple(
+                Vote.model_validate_json(str(row['vote_json']))
+                for row in database.execute(
+                    'SELECT vote_json FROM vote_snapshot_votes '
+                    'WHERE snapshot_id = ? AND target = ? ORDER BY vote_id',
+                    parameters,
+                ).rows
+            )
+            cuts[store.target] = Cut(
+                inventory=Inventory(
+                    id=store.publication_id,
+                    family=header.family,
+                    reference=store.reference,
+                    systems=store.systems_json,
+                    defects=store.defects_json,
+                    cases=cases,
+                    outputs=outputs,
+                ),
+                cutoff=store.cutoff,
+                excluded=store.excluded,
+                votes=votes,
+                output_generation=store.output_generation_id,
+            )
+        snapshot = Snapshot(
+            family=header.family,
+            taken_at=header.taken_at,
+            category_order=header.category_order_json,
+            closing_revision=header.closing_revision,
+            production=cuts.get('production'),
+            private=cuts.get('private'),
+        )
     except ValidationError as error:
-        raise InputError(error_lines(error, f'Snapshot `{path}`')) from error
+        raise InputError(error_lines(error, f'Snapshot `{identity}`')) from error
+    expected = (
+        header.expected_store_count,
+        header.expected_case_count,
+        header.expected_output_count,
+        header.expected_vote_count,
+    )
+    actual = (
+        len(cuts),
+        sum(len(c.inventory.cases) for c in cuts.values()),
+        sum(len(c.inventory.outputs) for c in cuts.values()),
+        sum(len(c.votes) for c in cuts.values()),
+    )
+    if (
+        expected != actual
+        or _snapshot_digest(snapshot) != identity
+        or header.manifest_digest != identity
+    ):
+        raise InputError(f'Snapshot `{identity}` has incomplete or conflicting facts.')
+    return snapshot
 
 
 # ── Closing ──
 
 
 def voting_input(
-    snapshot: Snapshot, family: Family, outputs: Sequence[Output]
+    snapshot: Snapshot,
+    outputs_by_cut: Mapping[Literal['production', 'private'], Sequence[Output]],
 ) -> AnalysisInput:
-    """Build the round's input from the snapshot's cut and the local outputs.
+    """Build the round's input from frozen cuts and their pinned output metrics.
 
     A vote counts when both its outputs passed in the cut's publication, on the
     vote's case, with different content. Latency, tokens and cost come from
-    `outputs`, matched by output key, and an output missing from them measures as
-    null.
-
-    Raises
-    ------
-    InputError
-        The snapshot belongs to another family.
+    `outputs_by_cut`, matched by output key. Missing collection pins or outputs
+    measure as null.
     """
-    if snapshot.family != family.name:
-        raise InputError(
-            f'The snapshot belongs to family `{snapshot.family}`, not `{family.name}`.'
-        )
-
     cuts = snapshot.cuts()
     inventory = cuts[0][1].inventory.model_copy(
         update={
@@ -547,9 +742,21 @@ def voting_input(
         for vote, weight in zip(counted, actor_weights(actors), strict=True)
     )
 
-    measured = {output_key(family.name, output): output for output in outputs}
+    measured: dict[str, Output] = {}
+    for target, cut in cuts:
+        if cut.output_generation is None:
+            continue
+        available = {
+            output_key(snapshot.family, output): output
+            for output in outputs_by_cut.get(target, ())
+        }
+        measured.update(
+            (row.key, available[row.key])
+            for row in cut.inventory.outputs
+            if row.key in available
+        )
     return AnalysisInput(
-        family=family.name,
+        family=snapshot.family,
         reference=inventory.reference,
         systems=tuple(inventory.systems),
         defects=inventory.defects,
@@ -559,11 +766,11 @@ def voting_input(
             else Cutoff(
                 id=snapshot.production.cutoff, votes=len(snapshot.production.votes)
             ),
-            local=None
-            if snapshot.local is None
-            else Cutoff(id=snapshot.local.cutoff, votes=len(snapshot.local.votes)),
+            private=None
+            if snapshot.private is None
+            else Cutoff(id=snapshot.private.cutoff, votes=len(snapshot.private.votes)),
         ),
-        declared_categories=tuple(family.settings.categories),
+        declared_categories=snapshot.category_order,
         categories=tuple((case.key, case.category) for case in inventory.cases),
         ordinary=ordinary,
         settlements=_settlements(inventory.outputs),

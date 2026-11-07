@@ -6,10 +6,16 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    ValidationError,
+    model_validator,
+)
 
 from assistant_bench.database import Database, Param
 from assistant_bench.families import (
@@ -30,12 +36,11 @@ from assistant_bench.outputs import (
     refuse_pool_conflicts,
     system_fingerprints,
 )
-from assistant_bench.paths import data_dir, write_atomically
 from assistant_bench.scoring.length import text_length
 
 
 PUBLIC_SOURCES: tuple[CaseSource, ...] = ('public', 'synthetic')
-type VotingTarget = Literal['production', 'local']
+type VotingTarget = Literal['production', 'private']
 type CaseSplit = Literal['public', 'held-out', 'private']
 
 CASE_SPLITS: dict[CaseSource, CaseSplit] = {
@@ -151,6 +156,14 @@ class Publication(_Model):
         return _digest(self.model_dump(mode='json', exclude={'id'}))
 
 
+class Preparation(_Model):
+    publication_id: str
+    target: VotingTarget
+    collection_id: str
+    case_revision: str | None
+    prepared_at: AwareDatetime
+
+
 # ── Preparation ──
 
 
@@ -163,7 +176,7 @@ def voting_target(family: Family, case: Case) -> VotingTarget:
     assert isinstance(family.settings, VotesSettings)
     if family.settings.public_voting and case.source in PUBLIC_SOURCES:
         return 'production'
-    return 'local'
+    return 'private'
 
 
 def case_key(case: Case) -> str:
@@ -339,40 +352,16 @@ def _pairable(outputs: Iterable[OutputFacts]) -> bool:
     )
 
 
-# ── Files ──
+# ── Review ──
 
 
-def write(publication: Publication, outputs: Sequence[Output]) -> Path:
-    """Write the publication and its Markdown listing to the data directory.
-
-    `outputs` supplies the gates that failing outputs failed. The listing sits
-    beside the returned JSON path with the suffix `.md`.
-    """
-    path = data_dir() / 'publications' / publication.family / f'{publication.id}.json'
-    write_atomically(path, publication.model_dump_json(indent=2) + '\n')
+def listing(publication: Publication, outputs: Sequence[Output]) -> str:
+    """Render the prepared snapshot and its generation's gate failures."""
     gates = {
         output_key(publication.family, output): output.gate_failures or []
         for output in outputs
     }
-    write_atomically(path.with_suffix('.md'), _listing(publication, gates))
-    return path
-
-
-def read(path: Path) -> Publication:
-    """Read a publication, refusing a file edited since it was prepared."""
-    try:
-        publication = Publication.model_validate_json(path.read_bytes())
-    except ValidationError as error:
-        raise InputError(error_lines(error, f'Publication `{path}`')) from error
-
-    derived = publication.identity()
-    if derived != publication.id:
-        raise InputError(
-            f'Publication `{path}` was edited: its content derives ID `{derived}`, '
-            f'but it records `{publication.id}`. Prepare it again with '
-            f'`uv run bench arena prepare {publication.family}`.'
-        )
-    return publication
+    return _listing(publication, gates)
 
 
 def _listing(publication: Publication, gates: Mapping[str, Sequence[Gate]]) -> str:
@@ -414,49 +403,27 @@ def _fenced(text: str, language: str) -> str:
 # ── Publishing ──
 
 
-def publish(
+def stage(
     database: Database,
     publication: Publication,
     now: datetime,
-    *,
-    target: Literal['staging', 'production', 'local'],
-) -> bool:
-    """Stage the publication and activate it for its family.
-
-    Each step is idempotent, so rerunning an interrupted publish completes it.
-    Returns False when the publication was already active and nothing changed.
-
-    Raises
-    ------
-    InputError
-        A case's source is neither public nor synthetic, or the staged rows do
-        not match the publication.
-    """
-    expected = 'local' if target == 'local' else 'production'
-    if publication.target != expected:
-        raise InputError(
-            f'Publication `{publication.id}` targets `{publication.target}`, '
-            f'so it cannot be published to `{target}`.'
-        )
-    if target != 'local' and (
+) -> None:
+    """Insert and verify an immutable publication without activating it."""
+    if publication.identity() != publication.id:
+        raise InputError(f'Publication `{publication.id}` has an invalid identity.')
+    if publication.target == 'production' and (
         private := [c for c in publication.cases if c.source not in PUBLIC_SOURCES]
     ):
         raise InputError(
             f'Publication `{publication.id}` holds {len(private)} cases whose source '
-            'is neither `public` nor `synthetic`, so it cannot leave this machine.'
+            'is neither `public` nor `synthetic`, so it cannot enter production.'
         )
-
-    active = database.execute(
-        'SELECT publication_id FROM active WHERE family = ?', [publication.family]
-    )
-    if active.rows and active.rows[0]['publication_id'] == publication.id:
-        return False
 
     milliseconds = int(now.timestamp() * 1000)
     database.execute(
         'INSERT INTO publications (id, family, display_name, aspect, render, '
-        'defects, reference, systems, case_count, output_count, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
+        'defects, reference, systems, case_count, output_count, created_at, target) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
         [
             publication.id,
             publication.family,
@@ -469,12 +436,21 @@ def publish(
             len(publication.cases),
             len(publication.outputs),
             milliseconds,
+            publication.target,
         ],
     )
     _insert(
         database,
         'cases',
-        ('publication_id', 'case_key', 'category', 'split', 'instruction', 'checklist'),
+        (
+            'publication_id',
+            'case_key',
+            'category',
+            'split',
+            'instruction',
+            'checklist',
+            'source',
+        ),
         [
             (
                 publication.id,
@@ -483,6 +459,7 @@ def publish(
                 case.split,
                 case.instruction,
                 json.dumps(case.checklist, ensure_ascii=False),
+                case.source,
             )
             for case in publication.cases
         ],
@@ -528,6 +505,113 @@ def publish(
         'DO UPDATE SET case_keys = excluded.case_keys',
         [publication.id, publication.id],
     )
+    if read(database, publication.id) != publication:
+        raise InputError(
+            f'Publication `{publication.id}` conflicts with its staged content.'
+        )
+
+
+def read(database: Database, publication_id: str) -> Publication:
+    """Reconstruct the normalized snapshot and verify its content identity."""
+    rows = database.execute(
+        'SELECT id, target, family, display_name, aspect, render, defects, reference, '
+        'systems, case_count, output_count FROM publications WHERE id = ?',
+        [publication_id],
+    ).rows
+    if not rows:
+        raise InputError(f'Publication `{publication_id}` does not exist.')
+    row = rows[0]
+    cases = database.execute(
+        'SELECT case_key AS key, category, split, source, instruction, checklist '
+        'FROM cases WHERE publication_id = ? ORDER BY case_key',
+        [publication_id],
+    ).rows
+    outputs = database.execute(
+        'SELECT output_key AS key, case_key, system, fingerprint, verdict, errored, '
+        'length, content_digest, content FROM outputs WHERE publication_id = ? '
+        'ORDER BY output_key',
+        [publication_id],
+    ).rows
+    try:
+        publication = Publication.model_validate(
+            {
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if key not in ('case_count', 'output_count')
+                },
+                'defects': json.loads(str(row['defects'])),
+                'systems': json.loads(str(row['systems'])),
+                'cases': [
+                    {**case, 'checklist': json.loads(str(case['checklist']))}
+                    for case in cases
+                ],
+                'outputs': outputs,
+            }
+        )
+    except ValidationError as error:
+        raise InputError(
+            error_lines(error, f'Publication `{publication_id}`')
+        ) from error
+    if (len(cases), len(outputs)) != (
+        row['case_count'],
+        row['output_count'],
+    ) or publication.identity() != publication_id:
+        raise InputError(
+            f'Publication `{publication_id}` does not match its immutable snapshot.'
+        )
+    return publication
+
+
+def record_preparation(database: Database, metadata: Preparation) -> None:
+    """Mark a verified staged snapshot ready for review and publication."""
+    publication = read(database, metadata.publication_id)
+    if publication.target != metadata.target:
+        raise InputError('A preparation must match its publication target.')
+    database.execute(
+        'INSERT INTO publication_preparations '
+        '(publication_id, target, collection_id, case_revision, prepared_at) '
+        'VALUES (?, ?, ?, ?, ?) ON CONFLICT (publication_id) DO NOTHING',
+        [
+            metadata.publication_id,
+            metadata.target,
+            metadata.collection_id,
+            metadata.case_revision,
+            metadata.prepared_at.isoformat(),
+        ],
+    )
+    if preparation(database, metadata.publication_id) != metadata:
+        raise InputError(
+            f'Publication `{metadata.publication_id}` has conflicting '
+            'preparation metadata.'
+        )
+
+
+def preparation(database: Database, publication_id: str) -> Preparation | None:
+    """Return its preparation, absent for an unmapped historical publication."""
+    rows = database.execute(
+        'SELECT publication_id, target, collection_id, case_revision, prepared_at '
+        'FROM publication_preparations WHERE publication_id = ?',
+        [publication_id],
+    ).rows
+    return Preparation.model_validate(rows[0]) if rows else None
+
+
+def read_prepared(database: Database, publication_id: str) -> Publication:
+    if preparation(database, publication_id) is None:
+        raise InputError(f'Publication `{publication_id}` has no verified preparation.')
+    return read(database, publication_id)
+
+
+def activate(database: Database, publication_id: str, now: datetime) -> bool:
+    """Atomically activate a complete verified publication for its family."""
+    publication = read(database, publication_id)
+    active = database.execute(
+        'SELECT publication_id FROM active WHERE family = ?', [publication.family]
+    ).rows
+    if active and active[0]['publication_id'] == publication_id:
+        return False
+    milliseconds = int(now.timestamp() * 1000)
     activated = database.execute(
         f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('
         'SELECT low_system, high_system, value AS case_key '
@@ -557,7 +641,7 @@ def publish(
     if activated.changes != 1:
         raise InputError(
             f'Publication `{publication.id}` is not completely staged, so it was '
-            'not activated. Publish the same file again.'
+            'not activated. Publish the same ID again.'
         )
     return True
 
