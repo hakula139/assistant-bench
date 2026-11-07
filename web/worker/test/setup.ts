@@ -11,9 +11,16 @@ const publication = env.TEST_PUBLICATION.split(/;\n(?=INSERT|$)/).filter(
 
 beforeEach(async () => {
   await env.DB.batch([
-    ...['votes', 'pairs', 'actors', 'active', 'outputs', 'cases', 'publications'].map((table) =>
-      env.DB.prepare(`DELETE FROM ${table}`),
-    ),
+    ...[
+      'votes',
+      'pair_vote_counts',
+      'pairs',
+      'actors',
+      'active',
+      'outputs',
+      'cases',
+      'publications',
+    ].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
     ...publication.map((statement) => env.DB.prepare(statement)),
   ]);
 });

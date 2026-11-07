@@ -54,6 +54,8 @@ Production D1 holds every real vote. Staging has a separate D1 database for vali
 
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/` defines, and the voting Worker in `web/worker/` serves each target's vote API from it.
 
+`pair_vote_counts` holds counted votes per family and unordered system pair. SQL triggers maintain these counts atomically when votes are inserted, withdrawn, excluded or restored, so coverage and freshness reads scale with the number of system pairs.
+
 ## Moderation
 
 Each vote row keeps its browser's actor ID, a keyed tag of its network and `elapsed_ms`, the time the voting Worker measured from issuing the pair to recording the vote. A tag is a digest of the network address under a key only the Worker holds, so `bench arena votes` lists tags as opaque handles and the owner selects one by copying it. The listing reads a family's votes in keyset pages and aggregates them in the `bench` process, which keeps the medians out of SQL.

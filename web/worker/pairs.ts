@@ -76,8 +76,8 @@ const PASSING = `
   SELECT output_key, case_key, system, content_digest FROM outputs
   WHERE publication_id = (SELECT publication_id FROM active WHERE family = ?) AND verdict = 'pass'`;
 const COVERAGE = `
-  SELECT min(a_system, b_system) AS low, max(a_system, b_system) AS high, count(*) AS votes
-  FROM votes WHERE family = ? AND exclusion IS NULL GROUP BY low, high`;
+  SELECT low_system AS low, high_system AS high, votes
+  FROM pair_vote_counts WHERE family = ?`;
 /** Keeps a pair that another request issued on the same publication meanwhile. */
 const ISSUE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)

@@ -1,5 +1,7 @@
 import math
 import re
+import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from assistant_bench.scoring.ranking import Comparison
 from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
+    MIGRATIONS_DIR,
     SQLiteDatabase,
     make_case,
     make_trial,
@@ -33,6 +36,20 @@ from support import (
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 FAMILY = make_votes_family()
+
+
+def check_pair_counts(database: SQLiteDatabase) -> None:
+    rows = database.execute(
+        'SELECT family, low_system, high_system, votes FROM pair_vote_counts '
+        'WHERE votes > 0 ORDER BY family, low_system, high_system'
+    ).rows
+    expected = database.execute(
+        'SELECT family, min(a_system, b_system) AS low_system, '
+        'max(a_system, b_system) AS high_system, count(*) AS votes '
+        'FROM votes WHERE exclusion IS NULL GROUP BY family, low_system, high_system '
+        'ORDER BY family, low_system, high_system'
+    ).rows
+    assert rows == expected
 
 
 @pytest.fixture
@@ -239,6 +256,47 @@ class TestReadCut:
         self, arena_store: SQLiteDatabase
     ) -> None:
         assert votes.read_cut(arena_store, FAMILY.name, NOW) is None
+
+
+class TestPairVoteCounts:
+    def test_initializes_existing_votes_and_tracks_subsequent_changes(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
+    ) -> None:
+        _, published = published_store
+        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
+            connection.executescript((MIGRATIONS_DIR / '0001_init.sql').read_text())
+            database = SQLiteDatabase(connection)
+            publication.publish(database, published, NOW)
+            first = record_vote(
+                database, published, NOW, actor='first', age=timedelta(hours=1)
+            )
+            second = record_vote(
+                database,
+                published,
+                NOW,
+                actor='second',
+                age=timedelta(hours=1),
+                exclusion='spam',
+            )
+
+            connection.executescript(
+                (MIGRATIONS_DIR / '0002_pair_vote_counts.sql').read_text()
+            )
+
+            check_pair_counts(database)
+            for sql, identifier in [
+                ('UPDATE votes SET exclusion = NULL WHERE id = ?', second),
+                ("UPDATE votes SET exclusion = 'spam' WHERE id = ?", first),
+                ('DELETE FROM votes WHERE id = ?', second),
+                ('DELETE FROM votes WHERE id = ?', first),
+            ]:
+                database.execute(sql, [identifier])
+
+                check_pair_counts(database)
+
+            record_vote(database, published, NOW, actor='third', age=timedelta(hours=1))
+
+            check_pair_counts(database)
 
 
 class TestStatus:
@@ -546,6 +604,9 @@ class TestExclude:
             else None
             for name in ids
         }
+        check_pair_counts(database)
+        assert votes.exclude(database, FAMILY.name, selector, 'bot') == 0
+        check_pair_counts(database)
 
     def test_leaves_votes_of_another_family_alone(
         self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]
@@ -618,6 +679,9 @@ class TestRestore:
             if row.exclusion is not None
         ]
         assert excluded == ([] if changed else [3])
+        check_pair_counts(database)
+        assert votes.restore(database, FAMILY.name, selector) == 0
+        check_pair_counts(database)
 
     def test_leaves_votes_of_another_family_alone(
         self, moderated_store: tuple[SQLiteDatabase, dict[str, int]]

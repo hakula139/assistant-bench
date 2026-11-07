@@ -27,6 +27,20 @@ async function storedVotes() {
   return results;
 }
 
+async function coverage() {
+  const { results } = await env.DB.prepare(
+    `SELECT family, low_system, high_system, votes FROM pair_vote_counts
+     WHERE votes > 0 ORDER BY family, low_system, high_system`,
+  ).all();
+  const expected = await env.DB.prepare(
+    `SELECT family, min(a_system, b_system) AS low_system, max(a_system, b_system) AS high_system,
+       count(*) AS votes FROM votes WHERE exclusion IS NULL
+     GROUP BY family, low_system, high_system ORDER BY family, low_system, high_system`,
+  ).all();
+  expect(results).toEqual(expected.results);
+  return results;
+}
+
 /** Fills the IP tag's daily cap with votes of another actor. */
 async function fillCap(options: { exclusion?: string } = {}) {
   const tag = await ipTag(env.IP_TAG_KEY, TAG_IP);
@@ -72,6 +86,7 @@ describe('POST /api/votes', () => {
     expect(stored.elapsed_ms).toBeGreaterThanOrEqual(5000);
     expect(stored.elapsed_ms).toBeLessThan(60_000);
     expect(await pendingRow(id)).toBeNull();
+    expect(await coverage()).toMatchObject([{ family: WRITING, votes: 1 }]);
   });
 
   test('answers a repeated identical vote with 204 and records it once', async () => {
@@ -84,6 +99,7 @@ describe('POST /api/votes', () => {
 
     expect(response.status).toBe(204);
     expect(await storedVotes()).toHaveLength(1);
+    expect(await coverage()).toMatchObject([{ family: WRITING, votes: 1 }]);
   });
 
   test('answers two identical votes sent at once with 204 each and records one', async () => {
@@ -116,6 +132,7 @@ describe('POST /api/votes', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'stale_pair' });
+    await coverage();
   });
 
   test.each([
@@ -151,6 +168,7 @@ describe('POST /api/votes', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'stale_pair' });
+    await coverage();
   });
 
   test.each([
@@ -180,6 +198,7 @@ describe('POST /api/votes', () => {
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({ error: 'daily_limit' });
     expect(await pendingRow(pair?.id ?? '')).not.toBeNull();
+    await coverage();
   });
 
   test('counts only votes inside the window and those not undone toward the cap', async () => {
@@ -218,6 +237,14 @@ describe('POST /api/votes/undo', () => {
       remaining: 3,
       undo: false,
     });
+    expect(await coverage()).toEqual([]);
+
+    const repeated = await call(from, 'POST', '/votes/undo', { family: WRITING });
+    const recorded = await vote(from, pair?.id ?? '');
+
+    expect(repeated.status).toBe(409);
+    expect(recorded.status).toBe(204);
+    expect(await coverage()).toMatchObject([{ family: WRITING, votes: 1 }]);
   });
 
   test("walks back through the actor's votes inside the window", async () => {
@@ -363,6 +390,72 @@ describe('freshness', () => {
     );
 
     expect(await response.json()).toEqual({ status: 'current' });
+  });
+
+  test('turns stale when a newer counted vote replaces one at the cutoff', async () => {
+    await seedVote(WRITING, caseKey, systems);
+    const { ids } = await read();
+    const query = { family: WRITING, production: String(ids[0]), production_votes: '1' };
+    await env.DB.prepare("UPDATE votes SET exclusion = 'trash' WHERE id = ?").bind(ids[0]).run();
+    await seedVote(WRITING, caseKey, systems);
+
+    const status = await freshness(env.DB, 'production', query);
+
+    expect(status).toBe('stale');
+    expect(await coverage()).toEqual([
+      { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 1 },
+    ]);
+  });
+
+  test('counts reversed systems together and isolates families through moderation and deletion', async () => {
+    await seedVote(WRITING, caseKey, systems);
+    await seedVote(WRITING, caseKey, [systems[1], systems[0]]);
+    await publish('other-writing', { other: { 'acme-large': ['a'], 'acme-small': ['b'] } });
+    await seedVote('other-writing', 'other', systems, { exclusion: 'trash' });
+    await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
+    const { ids } = await read();
+    expect(await coverage()).toEqual([
+      { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 2 },
+    ]);
+    await env.DB.prepare("UPDATE votes SET exclusion = NULL WHERE family = 'other-writing'").run();
+    expect(await coverage()).toEqual([
+      { family: 'other-writing', low_system: 'acme-large', high_system: 'acme-small', votes: 1 },
+      { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 2 },
+    ]);
+
+    for (const [sql, count] of [
+      ["UPDATE votes SET exclusion = 'trash' WHERE family = ?", 0],
+      ["UPDATE votes SET exclusion = 'another reason' WHERE family = ?", 0],
+      ['UPDATE votes SET exclusion = NULL WHERE family = ?', 3],
+      ['UPDATE votes SET exclusion = NULL WHERE family = ?', 3],
+      ['UPDATE votes SET ip_tag = NULL WHERE family = ?', 3],
+      ['DELETE FROM votes WHERE family = ?', 0],
+    ] as const) {
+      await env.DB.prepare(sql).bind(WRITING).run();
+
+      const rows = await coverage();
+
+      expect(rows).toEqual([
+        { family: 'other-writing', low_system: 'acme-large', high_system: 'acme-small', votes: 1 },
+        ...(count === 0
+          ? []
+          : [
+              {
+                family: WRITING,
+                low_system: 'acme-large',
+                high_system: 'acme-small',
+                votes: count,
+              },
+            ]),
+      ]);
+    }
+    expect(
+      await freshness(env.DB, 'production', {
+        family: WRITING,
+        production: String(ids.at(-1)),
+        production_votes: '0',
+      }),
+    ).toBe('current');
   });
 
   test('reuses an answer for the same parameters, in any order, for a minute', async () => {

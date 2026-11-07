@@ -920,10 +920,11 @@ class SQLiteDatabase:
         self.connection = connection
 
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+        before = self.connection.total_changes
         cursor = self.connection.execute(sql, list(params))
         columns = [column[0] for column in cursor.description or ()]
         rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
-        return Result(rows=rows, changes=max(cursor.rowcount, 0))
+        return Result(rows=rows, changes=self.connection.total_changes - before)
 
 
 def record_vote(

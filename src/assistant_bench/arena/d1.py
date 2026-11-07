@@ -38,7 +38,7 @@ class D1Error(Exception):
 class Result:
     rows: list[Row]
     changes: int
-    """Rows the statement inserted, updated, or deleted."""
+    """Rows the statement and its triggers inserted, updated, or deleted."""
 
 
 class Database(Protocol):
