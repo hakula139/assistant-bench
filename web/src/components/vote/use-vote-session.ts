@@ -46,7 +46,7 @@ export function useVoteSession() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sitekey, setSitekey] = useState<string | null>(null);
   const [failedVote, setFailedVote] = useState<VoteRequest | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; reload: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -86,12 +86,12 @@ export function useVoteSession() {
 
   const failed = (reason: unknown) => {
     if (isCode(reason, 'admission_required') && admitted.current) {
-      setError(COOKIES);
+      setError({ message: COOKIES, reload: false });
     } else if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
       setSitekey(reason.sitekey);
       setError(null);
     } else {
-      setError(errorMessage(reason));
+      setError({ message: errorMessage(reason), reload: isCode(reason, 'reload_required') });
     }
   };
 
@@ -106,7 +106,7 @@ export function useVoteSession() {
     setState(null);
     setDraft(null);
     setNotice(null);
-    setError(errorMessage(reason));
+    setError({ message: errorMessage(reason), reload: false });
   };
 
   const load = async (name: string, options: { restore?: boolean; notice?: string } = {}) => {
@@ -162,7 +162,10 @@ export function useVoteSession() {
         setFamilies(families);
       },
       (reason: unknown) => {
-        setError(`Could not list families: ${errorMessage(reason)}`);
+        setError({
+          message: `Could not list families: ${errorMessage(reason)}`,
+          reload: isCode(reason, 'reload_required'),
+        });
       },
     );
     if (family !== undefined) {
@@ -298,7 +301,8 @@ export function useVoteSession() {
     draft,
     sitekey,
     voteFailed: failedVote !== null,
-    error,
+    error: error?.message ?? null,
+    reloadRequired: error?.reload ?? false,
     notice,
     saved,
     busy,
