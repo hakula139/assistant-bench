@@ -259,31 +259,36 @@ describe('built pages', () => {
         await page.waitForFunction(() => document.querySelector('astro-island[ssr]') === null);
         if (path === vote) {
           await page
-            .getByRole('button', { name: 'Issues' })
-            .first()
-            .click({ timeout: 10_000 })
+            .getByRole('region', { name: 'Output A', exact: true })
+            .waitFor({ timeout: 10_000 })
             .catch(async (error: unknown) => {
               const shown = await page.locator('main').innerText();
               throw new Error(`The vote page shows no pair: ${shown}\n${errors.join('\n')}`, {
                 cause: error,
               });
             });
-          await page.getByRole('dialog', { name: 'Issues in output A' }).waitFor();
         }
         await page.waitForLoadState('networkidle');
 
         expect(await page.evaluate(() => document.documentElement.dataset.theme), path).toBe(theme);
-        const results = await new AxeBuilder({ page })
-          .options({ rules: { 'target-size': { enabled: true } } })
-          .analyze();
-        const found = [
-          ...errors,
-          ...results.violations.flatMap(({ id, nodes }) =>
-            nodes.map(({ target }) => `${id}: ${target.join(' ')}`),
-          ),
-        ];
-        if (found.length > 0) {
-          problems[path] = found;
+        for (const state of path === vote ? ['reading', 'issues'] : ['page']) {
+          if (state === 'issues') {
+            await page.getByRole('button', { name: 'Issues' }).first().click();
+            await page.getByRole('dialog', { name: 'Issues in output A' }).waitFor();
+          }
+
+          const results = await new AxeBuilder({ page })
+            .options({ rules: { 'target-size': { enabled: true } } })
+            .analyze();
+          const found = [
+            ...errors,
+            ...results.violations.flatMap(({ id, nodes }) =>
+              nodes.map(({ target }) => `${state}: ${id}: ${target.join(' ')}`),
+            ),
+          ];
+          if (found.length > 0) {
+            problems[path] = [...(problems[path] ?? []), ...found];
+          }
         }
         await page.close();
       }

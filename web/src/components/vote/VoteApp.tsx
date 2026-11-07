@@ -642,6 +642,7 @@ export function VoteApp() {
       aria-label={`Pair ${state.votes + 1}`}
       className={cn(wideContainer, 'flex flex-col gap-3 py-3 outline-none md:min-h-0 md:flex-1')}
     >
+      <h1 className="sr-only">Compare outputs</h1>
       <div
         className={cn(
           'grid gap-3 md:min-h-0 md:flex-1 md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)]',
