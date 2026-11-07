@@ -122,6 +122,44 @@ class TestBuild:
 
 
 class TestServe:
+    @pytest.mark.parametrize('number', [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
+    def test_defers_a_repeated_stop_until_group_cleanup_finishes(
+        self, number: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        probes: list[int] = []
+        completed = False
+
+        class Process:
+            pid = 123
+
+            def __init__(self, *args: Any, **kwargs: Any):
+                pass
+
+            def wait(self, timeout: float | None = None) -> int:
+                nonlocal completed
+                if timeout is not None:
+                    signal.raise_signal(number)
+                    completed = True
+                return 0
+
+        def kill(pid: int, number: int) -> None:
+            if number == 0:
+                probes.append(pid)
+                raise ProcessLookupError
+
+        previous = signal.getsignal(number)
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())
+        monkeypatch.setattr(subprocess, 'Popen', Process)
+        monkeypatch.setattr(os, 'killpg', kill)
+
+        with local.interrupts(), local.lock():
+            local.serve({})
+
+        assert completed
+        assert probes == [123]
+        assert signal.getsignal(number) == previous
+        assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == mask
+
     @pytest.mark.parametrize('number', [signal.SIGTERM, signal.SIGHUP])
     def test_stop_signals_interrupt_and_restore_handlers(self, number: int) -> None:
         previous = signal.getsignal(number)

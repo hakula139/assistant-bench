@@ -187,6 +187,14 @@ def _process(
     try:
         yield process
     finally:
+        _stop(process)
+
+
+def _stop(process: subprocess.Popen[bytes]) -> None:
+    previous = signal.pthread_sigmask(
+        signal.SIG_BLOCK, (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    )
+    try:
         deadline = time.monotonic() + 10
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
@@ -205,6 +213,8 @@ def _process(
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
             time.sleep(0.01)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
 
 
 def _run(command: Sequence[str]) -> None:

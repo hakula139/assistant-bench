@@ -84,6 +84,7 @@ Orchidarium
 pinv
 pkgs
 Priya
+pthread
 pvalue
 pwrite
 pwritev
