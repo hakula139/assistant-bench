@@ -25,7 +25,11 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Run flake check
         run: nix flake check --print-build-logs
@@ -44,7 +48,11 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -86,7 +94,11 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -119,7 +131,11 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -162,7 +178,11 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -254,7 +274,11 @@ jobs:
 
       - name: Set up Nix
         if: steps.pr.outputs.open
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.pr.outputs.open
@@ -361,7 +385,11 @@ jobs:
 
       - name: Set up Nix
         if: steps.head.outputs.current
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/actions/setup-nix@88f619538cc3a79bf223e538504251264e02b4e9
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.head.outputs.current

@@ -13,8 +13,8 @@
 
     flake-utils.url = "github:numtide/flake-utils";
 
-    git-hooks-nix = {
-      url = "github:cachix/git-hooks.nix";
+    devkit = {
+      url = "github:hakula139/devkit/88f619538cc3a79bf223e538504251264e02b4e9";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -32,7 +32,7 @@
     {
       nixpkgs,
       flake-utils,
-      git-hooks-nix,
+      devkit,
       nixos-config,
       ...
     }:
@@ -48,6 +48,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        dk = devkit.lib.mkLib pkgs;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -86,11 +87,7 @@
         # Pre-commit Hooks
         # ------------------------------------------------------------------------------------------
         hooks = {
-          end-of-file-fixer.enable = true;
-          trim-trailing-whitespace.enable = true;
-          check-added-large-files.enable = true;
-          check-yaml.enable = true;
-          taplo.enable = true;
+          dprint.enable = false;
           # The patch adds `concurrency.queue`, unreleased as of v1.7.12. Drop it once Nixpkgs ships
           # a newer actionlint.
           actionlint = {
@@ -105,80 +102,17 @@
             });
           };
 
-          lychee.enable = true;
-
-          sort-file-contents = {
+          lychee = {
             enable = true;
-            files = "^\\.cspell/words\\.txt$";
-            settings.ignore-case = true;
-          };
-
-          nixfmt.enable = true;
-          deadnix.enable = true;
-          statix.enable = true;
-
-          # shfmt reads `.editorconfig` only without formatting flags, and indents shell files that
-          # `.editorconfig`'s `[*.sh]` section misses with tabs.
-          shfmt = {
-            enable = true;
-            settings = {
-              language-dialect = null;
-              simplify = false;
-              indent = null;
-              binary-next-line = false;
-              case-indent = false;
-            };
+            extraPackages = [ pkgs.cacert ];
           };
         };
-
-        # CI runs Node and Ruff with local dependencies absent from the check's store source.
-        nodeHook =
-          name: cmd:
-          pkgs.lib.getExe (
-            pkgs.writeShellApplication {
-              inherit name;
-              runtimeInputs = nodeTools;
-
-              text = ''
-                if [ ! -d node_modules ]; then
-                  echo "node_modules is missing. Run pnpm install, then commit again." >&2
-                  exit 1
-                fi
-                pnpm exec ${cmd} "$@"
-              '';
-            }
-          );
-
-        nodeHooks = {
-          prettier = {
-            enable = true;
-            package = null;
-            entry = nodeHook "prettier" "prettier --write --ignore-unknown";
-          };
-
-          cspell = {
-            enable = true;
-            package = null;
-            entry = nodeHook "cspell" "cspell --no-must-find-files --no-progress";
-            types = [ "text" ];
-          };
-
-          markdownlint = {
-            enable = true;
-            name = "markdownlint-cli2";
-            package = null;
-            entry = nodeHook "markdownlint" "markdownlint-cli2 --fix";
-            files = "\\.md$";
-          };
-        };
-
-        uvExe = pkgs.lib.getExe pkgs.uv;
 
         uvHooks = {
           ruff = {
             enable = true;
             package = null;
-            entry = "${uvExe} run --locked ruff check --fix";
+            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} check --fix";
             types = [ "file" ];
             types_or = [
               "python"
@@ -189,7 +123,7 @@
           ruff-format = {
             enable = true;
             package = null;
-            entry = "${uvExe} run --locked ruff format";
+            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} format";
             types = [ "file" ];
             types_or = [
               "python"
@@ -198,21 +132,18 @@
           };
         };
 
-        preCommit = git-hooks-nix.lib.${system}.run {
+        preCommit = dk.preCommit {
           src = ./.;
-          hooks = hooks // nodeHooks // uvHooks;
+          inherit hooks;
+          devHooks = uvHooks // {
+            prettier = {
+              enable = true;
+              package = null;
+              entry = "${pkgs.lib.getExe (dk.nodeTool "prettier")} --write --ignore-unknown";
+              files = "\\.(astro|css|js|json|jsonc|md|mdx|ts|tsx|ya?ml)$";
+            };
+          };
         };
-
-        # Linux lychee needs CA roots in builds, even offline.
-        preCommitCheck = git-hooks-nix.lib.${system}.run {
-          src = ./.;
-          imports = [ { inherit hooks; } ];
-          hooks.lychee.extraPackages = [ pkgs.cacert ];
-        };
-
-        cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
-        flock = pkgs.lib.getExe pkgs.flock;
-        git = pkgs.lib.getExe pkgs.git;
 
         # ------------------------------------------------------------------------------------------
         # GitLab Pages Toolchain
@@ -240,24 +171,8 @@
           name = "assistant-bench-dev";
           inherit (pythonEnvironment) env;
 
-          packages = pythonEnvironment.packages ++ preCommit.enabledPackages ++ [ preCommit.config.package ];
-
-          # Match flake.nix to keep hooks in this project, since Nix evaluates a store copy.
-          # Concurrent hook installs race on hooksPath.
-          # Relative hooksPath values break linked worktrees (cachix/git-hooks.nix#688).
-          # Hook packages set PYTHONPATH, which would shadow the project's virtualenv.
-          shellHook = ''
-            unset PYTHONPATH
-            if toplevel=$(${git} rev-parse --show-toplevel 2>/dev/null) \
-              && ${cmp} -s ${./flake.nix} "$toplevel/flake.nix"; then
-              common=$(${git} rev-parse --path-format=absolute --git-common-dir)
-              (
-                ${flock} 9
-                ${preCommit.config.installationScript}
-                ${git} config --local --unset-all core.hooksPath || true
-              ) 9>"$common/git-hooks.lock"
-            fi
-          '';
+          inherit (pythonEnvironment) packages;
+          inputsFrom = [ preCommit.shell ];
         };
 
         # ------------------------------------------------------------------------------------------
@@ -269,7 +184,7 @@
         # Checks
         # ------------------------------------------------------------------------------------------
         checks = {
-          pre-commit = preCommitCheck;
+          pre-commit = preCommit.check;
           pages-pnpm =
             pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
               "pnpm ${pnpm.version}";
