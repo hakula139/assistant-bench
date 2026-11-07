@@ -66,7 +66,9 @@ class TestAccountingSnapshot:
                 assert attempt is not None
                 owner = state.get_claim(recorder.claim_id)
                 run = state.run(owner.run_id)
-                entry = Entry.of(attempt, run.job, None)
+                entry = Entry(
+                    **attempt.model_dump(), job=run.job, price=None, ceiling_usd=None
+                )
                 database = FinalizeAfterRead(reader, state, recorder.claim_id, entry)
 
                 during = read_ledger('sample', State(database))
