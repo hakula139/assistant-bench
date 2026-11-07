@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import textwrap
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
@@ -25,6 +24,7 @@ from assistant_bench.paths import DATA_DIR_VAR
 from assistant_bench.spend import CanaryAccounting, Entry, write_canary_accounting
 from assistant_bench.tasks import render_tasks
 from support import (
+    FIXTURES,
     START,
     StubEndpoint,
     break_setting,
@@ -292,26 +292,13 @@ class TestPrepare:
     def test_protocol_is_stable_across_independent_process_hash_seeds(self) -> None:
         system = make_system()
         config = benchmark(system)
-        program = textwrap.dedent(
-            """\
-            import sys
-            from harbor.models.job.config import JobConfig
-            from assistant_bench import canaries
-            from assistant_bench.catalog import System
 
-            system = System.model_validate_json(sys.argv[1])
-            config = JobConfig.model_validate_json(sys.argv[2])
-            print(canaries.prepare([config], {system.name: system})[0].protocol_digest)
-            """
-        )
-
-        digests = []
+        digests: list[str] = []
         for seed in ('1', '2', '3'):
             result = subprocess.run(
                 [
                     sys.executable,
-                    '-c',
-                    program,
+                    str(FIXTURES / 'canary-protocol.py'),
                     system.model_dump_json(),
                     config.model_dump_json(),
                 ],
