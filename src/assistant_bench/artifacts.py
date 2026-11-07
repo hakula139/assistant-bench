@@ -268,6 +268,15 @@ class ArtifactRepository:
                     _git(clone, ['switch', '--detach', parent])
                 else:
                     _git(clone, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
+                ancestor = clone
+                for component in manifest.path.split('/')[:-1]:
+                    ancestor /= component
+                    if ancestor.is_symlink() or (
+                        ancestor.exists() and not ancestor.is_dir()
+                    ):
+                        raise InputError(
+                            'The trial path cannot traverse a tracked file or symlink.'
+                        )
                 trial_files: dict[str, tuple[GitMode, bytes]] = {
                     entry.path: (entry.mode, value) for entry, value in selected
                 }
@@ -562,6 +571,9 @@ def _clone(repository: _Repository, root: Path) -> Path:
             str(clone),
         ],
     )
+    (clone / '.git' / 'info' / 'attributes').write_text(
+        '* -text -filter -ident -working-tree-encoding\n'
+    )
     return clone
 
 
@@ -625,9 +637,33 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
     ) as temporary:
         staged = Path(temporary) / 'contents'
         staged.mkdir(mode=0o700)
+        directories = {staged}
         for relative, (mode, content) in sorted(files.items()):
-            path = staged / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
+            parts = _path_parts(relative)
+            directory = staged
+            for component in parts[:-1]:
+                child = directory / component
+                if child not in directories:
+                    if child.is_symlink():
+                        raise InputError(
+                            'An artifact directory cannot traverse a symlink.'
+                        )
+                    if child.exists():
+                        if not child.is_dir() or component not in {
+                            entry.name for entry in directory.iterdir()
+                        }:
+                            raise InputError(
+                                'Artifact paths collide on the destination filesystem.'
+                            )
+                    else:
+                        child.mkdir()
+                    directories.add(child)
+                directory = child
+            path = directory / parts[-1]
+            if path.is_symlink() or path.exists():
+                raise InputError(
+                    'Artifact paths collide on the destination filesystem.'
+                )
             if mode == '120000':
                 path.symlink_to(os.fsdecode(content))
             else:
