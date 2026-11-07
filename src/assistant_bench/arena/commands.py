@@ -1,5 +1,6 @@
 """Publication, inspection and moderation of the arena's vote stores."""
 
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,10 +113,9 @@ def publish(
 
 def serve() -> None:
     """Publish local cases and serve their vote page until interrupted."""
-    with local.lock():
+    with local.interrupts(), local.lock():
         systems = load_systems(load_export())
         prepared: list[publication.Publication] = []
-        empty: list[str] = []
         for name in family_names():
             family = load_family(name)
             if not isinstance(family.settings, VotesSettings):
@@ -138,15 +138,18 @@ def serve() -> None:
                     )
                 )
             except publication.NoPairsError:
-                empty.append(name)
+                continue
 
         local.build()
         local.migrate()
         with local.database() as database:
             for item in prepared:
                 publication.publish(database, item, datetime.now(UTC), target='local')
-            for name in empty:
-                database.execute('DELETE FROM active WHERE family = ?', [name])
+            database.execute(
+                'DELETE FROM active '
+                'WHERE family NOT IN (SELECT value FROM json_each(?))',
+                [json.dumps([item.family for item in prepared])],
+            )
         if not prepared:
             raise InputError(
                 f'No local case has two different passing outputs. Add cases under '

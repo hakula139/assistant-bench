@@ -101,17 +101,36 @@ class TestBuild:
     def test_reports_a_failed_preparation_command(
         self, operation: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def run(*args: Any, **kwargs: Any) -> None:
-            assert kwargs['stdin'] == subprocess.DEVNULL
-            raise subprocess.CalledProcessError(7, args[0])
+        class Process:
+            pid = 123
 
-        monkeypatch.setattr(subprocess, 'run', run)
+            def __init__(self, *args: Any, **kwargs: Any):
+                assert kwargs['stdin'] == subprocess.DEVNULL
+                assert kwargs['start_new_session']
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 7
+
+        def kill(pid: int, number: int) -> None:
+            raise ProcessLookupError
+
+        monkeypatch.setattr(subprocess, 'Popen', Process)
+        monkeypatch.setattr(os, 'killpg', kill)
 
         with pytest.raises(InputError, match='exited with code 7'):
             operation()
 
 
 class TestServe:
+    @pytest.mark.parametrize('number', [signal.SIGTERM, signal.SIGHUP])
+    def test_stop_signals_interrupt_and_restore_handlers(self, number: int) -> None:
+        previous = signal.getsignal(number)
+
+        with pytest.raises(KeyboardInterrupt), local.interrupts():
+            signal.raise_signal(number)
+
+        assert signal.getsignal(number) == previous
+
     @pytest.mark.parametrize(
         'exit', ['normal', 'interrupt', 'failure', 'stalled', 'descendant']
     )

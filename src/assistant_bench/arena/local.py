@@ -10,6 +10,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import closing, contextmanager, suppress
 from pathlib import Path
+from types import FrameType
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -106,7 +107,7 @@ def keys() -> dict[str, str]:
 
 def build() -> None:
     """Build the site served alongside the local vote API."""
-    _run(['pnpm', '--filter', 'web', 'build'], cwd=REPO_ROOT)
+    _run(['pnpm', '--filter', 'web', 'build'])
 
 
 def migrate() -> None:
@@ -128,35 +129,63 @@ def migrate() -> None:
             '--persist-to',
             str(directory().resolve()),
         ],
-        cwd=REPO_ROOT,
     )
+
+
+@contextmanager
+def interrupts() -> Generator[None]:
+    """Translate service stop signals into cleanup and restore prior handlers."""
+
+    def interrupt(number: int, frame: FrameType | None) -> None:
+        raise KeyboardInterrupt
+
+    previous = {
+        number: signal.signal(number, interrupt)
+        for number in (signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 def serve(signing_keys: Mapping[str, str]) -> None:
     """Run the local Worker and stop its process group before returning."""
+    command = [
+        'pnpm',
+        '--filter',
+        'web',
+        'exec',
+        'wrangler',
+        'dev',
+        '--env',
+        'local',
+        '--persist-to',
+        str(directory().resolve()),
+    ]
+    try:
+        with _process(command, env=os.environ | dict(signing_keys)) as process:
+            result = process.wait()
+            if result:
+                raise InputError(f'The local vote server exited with code {result}.')
+    except KeyboardInterrupt:
+        pass
+
+
+@contextmanager
+def _process(
+    command: Sequence[str], *, env: Mapping[str, str] | None = None
+) -> Generator[subprocess.Popen[bytes]]:
     process = subprocess.Popen(
-        [
-            'pnpm',
-            '--filter',
-            'web',
-            'exec',
-            'wrangler',
-            'dev',
-            '--env',
-            'local',
-            '--persist-to',
-            str(directory().resolve()),
-        ],
+        command,
         cwd=REPO_ROOT,
-        env=os.environ | dict(signing_keys),
+        env=env,
+        stdin=subprocess.DEVNULL,
         start_new_session=True,
     )
     try:
-        result = process.wait()
-        if result:
-            raise InputError(f'The local vote server exited with code {result}.')
-    except KeyboardInterrupt:
-        pass
+        yield process
     finally:
         deadline = time.monotonic() + 10
         with suppress(ProcessLookupError):
@@ -178,10 +207,8 @@ def serve(signing_keys: Mapping[str, str]) -> None:
             time.sleep(0.01)
 
 
-def _run(command: Sequence[str], *, cwd: Path) -> None:
-    try:
-        subprocess.run(command, cwd=cwd, stdin=subprocess.DEVNULL, check=True)
-    except subprocess.CalledProcessError as error:
-        raise InputError(
-            f'Local voting preparation exited with code {error.returncode}.'
-        ) from error
+def _run(command: Sequence[str]) -> None:
+    with _process(command) as process:
+        result = process.wait()
+        if result:
+            raise InputError(f'Local voting preparation exited with code {result}.')

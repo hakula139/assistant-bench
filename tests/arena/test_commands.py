@@ -11,7 +11,14 @@ from assistant_bench.arena import commands, local, publication
 from assistant_bench.arena.d1 import D1Error, SQLiteDatabase
 from assistant_bench.catalog import System
 from assistant_bench.collection import Collection
-from assistant_bench.families import Family, VotesSettings, load_cases, load_family
+from assistant_bench.families import (
+    Case,
+    Family,
+    TaskTestsSettings,
+    VotesSettings,
+    load_cases,
+    load_family,
+)
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from support import (
@@ -258,6 +265,84 @@ class TestPublish:
 
 
 class TestServe:
+    @pytest.mark.parametrize('change', ['removed', 'tests', 'no-pairs'])
+    @pytest.mark.usefixtures('collections')
+    def test_synchronizes_active_families_while_another_remains_pairable(
+        self,
+        change: str,
+        family: Family,
+        arena_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        assert isinstance(family.settings, VotesSettings)
+        selected = family.model_copy(
+            update={
+                'settings': family.settings.model_copy(update={'public_voting': False})
+            }
+        )
+        changed = False
+
+        def names() -> list[str]:
+            return ['kept'] if changed and change == 'removed' else ['kept', 'old']
+
+        def load(name: str) -> Family:
+            settings = selected.settings
+            if changed and name == 'old' and change == 'tests':
+                settings = TaskTestsSettings.model_validate(
+                    family.settings.model_dump(
+                        exclude={
+                            'public_voting',
+                            'reference',
+                            'render',
+                            'language',
+                            'gates',
+                            'defects',
+                        }
+                    )
+                    | {'scorer': 'tests'}
+                )
+            return selected.model_copy(update={'name': name, 'settings': settings})
+
+        def has_jobs(item: Family) -> bool:
+            return not (changed and item.name == 'old' and change == 'no-pairs')
+
+        cases = load_cases(family)
+
+        def load_selected_cases(item: Family) -> list[Case]:
+            return cases
+
+        def keys() -> dict[str, str]:
+            return {}
+
+        def serve(signing: dict[str, str]) -> None:
+            pass
+
+        monkeypatch.setattr(commands, 'family_names', names)
+        monkeypatch.setattr(commands, 'load_family', load)
+        monkeypatch.setattr(commands, 'load_cases', load_selected_cases)
+        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
+        monkeypatch.setattr(local, 'build', lambda: None)
+        monkeypatch.setattr(local, 'migrate', lambda: None)
+        monkeypatch.setattr(local, 'database', lambda: nullcontext(arena_store))
+        monkeypatch.setattr(local, 'keys', keys)
+        monkeypatch.setattr(local, 'serve', serve)
+
+        first = runner.invoke(cli.app, ['serve'])
+        assert first.exit_code == 0, first.output
+        assert arena_store.execute(
+            'SELECT family FROM active ORDER BY family'
+        ).rows == [
+            {'family': 'kept'},
+            {'family': 'old'},
+        ]
+        changed = True
+        second = runner.invoke(cli.app, ['serve'])
+
+        assert second.exit_code == 0, second.output
+        assert arena_store.execute('SELECT family FROM active').rows == [
+            {'family': 'kept'},
+        ]
+
     @pytest.mark.usefixtures('collections')
     def test_serves_local_content_and_deactivates_a_family_that_loses_its_pairs(
         self,
