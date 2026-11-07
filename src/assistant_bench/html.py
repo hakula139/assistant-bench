@@ -53,10 +53,8 @@ def extract_html(text: str) -> str | None:
 
 def _document(text: str) -> str | None:
     tokens = _MARKDOWN.parse(text)
-    if not any(token.type == 'fence' for token in tokens):
+    if len(tokens) != 1 or tokens[0].type != 'fence':
         return text
-    if len(tokens) != 1:
-        return None
     token = tokens[0]
     if (
         token.type != 'fence'
