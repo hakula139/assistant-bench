@@ -15,7 +15,7 @@ from assistant_bench.families import CheckContext, CheckRule
 REVISION = 'format-1'
 _MARKDOWN = MarkdownIt('commonmark', {'html': False})
 _PROSE_FENCES = {'md', 'markdown', 'text', 'txt'}
-_TREE_COMMENT = re.compile(r'\S([ \t]+)(#\s.*)$')
+_TREE_COMMENT = re.compile(r'\S([ \t]+)(#.*)$')
 
 
 class Checks(BaseModel):

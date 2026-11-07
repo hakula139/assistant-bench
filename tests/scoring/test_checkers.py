@@ -134,6 +134,18 @@ class TestEvaluate:
                 {'kind': 'directory-tree'},
             ),
             (
+                'tree-comments',
+                '```\na/     # Data\nbb/    # Notes\nccc/   #Other\n```',
+                '```\na/     # Data\nbb/    # Notes\nccc/    #Other\n```',
+                {'kind': 'directory-tree'},
+            ),
+            (
+                'tree-comments',
+                '```\na#notes/\nlonger#raw/\nb/    # Data\ncc/   # Notes\n```',
+                '```\na#notes/\nlonger#raw/\nb/    # Data\ncc/ # Notes\n```',
+                {'kind': 'directory-tree'},
+            ),
+            (
                 'forbidden-marker',
                 'The orchard opens Saturday.',
                 'The code is FILTER_731.',
