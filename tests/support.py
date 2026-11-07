@@ -563,6 +563,7 @@ async def executed_trial(
     context.state.create_run(run)
     payload = ExecutionInput(
         run=run,
+        expected_source_revision=context.state.artifact_generation(scope).revision,
         accounting={
             system.name: Accounting(
                 system=system.name, price=system.price, ceiling_usd=None
@@ -572,6 +573,7 @@ async def executed_trial(
     path = context.root / f'execution-{run.id}.json'
     path.write_text(payload.model_dump_json())
     job = await Job.create(config)
+    (job.job_dir / 'config.json').write_text(job.config.model_dump_json())
     plugin = ExecutionPlugin(context_file=str(path))
     started_at = datetime.now(UTC)
     result: TrialResult | None = None
@@ -1188,6 +1190,7 @@ def accounted_trial(
     fingerprint: str = 'f' * 12,
     trial: str = 'trial',
     scope: str = 'sample',
+    max_requests: int | None = None,
 ) -> Generator[TrialAccounting]:
     """Bind a real claimed trial without starting its paid attempt."""
     identifier = str(uuid4())
@@ -1198,6 +1201,7 @@ def accounted_trial(
         code_revision='a' * 40,
         case_revision='b' * 40,
         created_at=START.isoformat(),
+        max_requests=max_requests,
     )
     claim = Claim(
         id=str(uuid4()),
