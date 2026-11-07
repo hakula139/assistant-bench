@@ -6,6 +6,8 @@ Open the website link in the repository's About section to vote on blind pairs f
 
 Follow the site's Vote link and pick a family under its aspect. The first visit verifies your browser, showing a challenge only when interaction is needed, and your first pair opens after it. The page remembers your browser in a cookie, so voting needs cookies allowed for the site.
 
+For private cases, run [`bench serve`](running.md#voting-locally) and open its local vote page. It uses the same voting flow and keeps the cases and votes on the machine.
+
 Each pair compares two systems' different, passing outputs on one case, and you vote at most once on each comparison. A family ends with No pairs left once you have voted on every comparison it offers. Tap the vote count in the Prompt bar to see how many pairs remain.
 
 The server holds your current pair, so a reload or a second tab shows the same one. A reload also keeps your unsent choice, issues, Markdown toggle, collapsed prompt and scroll position, and never sends a vote. If the pair changed meanwhile, the page shows the new one and says so when it cleared an unsent choice.

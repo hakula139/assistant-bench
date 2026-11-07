@@ -13,9 +13,9 @@ uv run bench arena status production writing-zh
 uv run bench close writing-zh
 ```
 
-Production votes on the public and synthetic cases of a family that sets `public_voting`, and no other case is published. `bench close` reads only production, so only production's votes rank. `prepare` requires `public_voting`, collects the family's current outputs, keeps the listed systems' outputs on the production cases, and writes `publications/<family>/<id>.json` in the data directory with a Markdown listing beside it. The listing shows each case's instruction and checklist, each passing output's text or diff under its system name, and each failing or ungraded output's system and gates. Reviewing the listing and publishing that exact file approves it.
+Production votes on the public and synthetic cases of a family that sets `public_voting`. Every other case is voted locally through `bench serve`. `bench close` reads only production, so only production's votes rank. `prepare` requires `public_voting`, collects the family's current outputs, keeps the listed systems' outputs on the production cases, and writes `publications/<family>/<id>.json` in the data directory with a Markdown listing beside it. The listing shows each case's instruction and checklist, each passing output's text or diff under its system name, and each failing or ungraded output's system and gates. Reviewing the listing and publishing that exact file approves it.
 
-- **Identities.** The publication ID digests the file's content without the ID, so `publish` refuses an edited file. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them.
+- **Identities.** The publication ID digests the file's content, including its target, without the ID, so `publish` refuses an edited file. Staging accepts production publications, and a local publication can only enter the local store. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them. Duplicate cases are refused before partitioning them between stores.
 - **Task verdicts.** A task output's tests set its verdict even after its agent errored, so an errored solution whose tests passed can join voted pairs, one whose tests failed loses its settled comparisons, and one whose tests never ran is ungraded and sits out of every comparison. The system's pass rate counts them by the [test pass rate](ranking.md#test-pass-rates) rule.
 - **Content.** Only passing outputs carry content, since only they can form a voted pair. Every output carries its verdict, length and content digest, which settle the comparisons no one votes on.
 - **Publishing** refuses a private case before anything leaves the machine. It inserts the cases and outputs idempotently, then activates the publication for its family only once every row is staged, so an interrupted run completes on a rerun and an identical file changes nothing.
@@ -50,11 +50,17 @@ A publication freezes these output facts, and only a later publication changes t
 
 ## Vote Store
 
-Production D1 holds every real vote. Staging has a separate D1 database for validating publications and runtime changes.
+Production D1 holds public votes. Staging has a separate D1 database for validating publications and runtime changes. The local store holds the cases that production cannot publish.
 
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/` defines, and the voting Worker in `web/worker/` serves each target's vote API from it.
 
 `pair_vote_counts` holds counted votes per family and unordered system pair. SQL triggers maintain these counts atomically when votes are inserted, withdrawn, excluded or restored, so coverage and freshness reads scale with the number of system pairs.
+
+## Local Voting
+
+`bench serve` collects current outputs, partitions the cases, builds the site, applies the Worker's migrations and activates each pairable local publication. The same Worker serves the site and vote API through Wrangler with persistence under the data directory's `arena/`. A family whose local cases no longer form a pair is deactivated. Cases retain only the coarse split `public`, `held-out` or `private` in the store.
+
+The process holds an exclusive nonblocking lock on `arena/serve.lock` from preparation until Wrangler and its workerd process group stop. Another server or local arena command refuses while that lock is held. Local commands open the single SQLite database Wrangler initialized. The local signing keys are created once in `arena/keys.json` with mode 0600 and reach Wrangler through its process environment, so restarting preserves browser cookies and votes.
 
 ## Moderation
 

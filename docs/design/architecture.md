@@ -12,7 +12,9 @@ src/assistant_bench/
 ├── arena/
 │   ├── commands.py                         # Publication, status and moderation commands
 │   ├── d1.py                               # The D1 REST client and each target's database
+│   ├── local.py                            # The local SQLite store, lock, signing keys and Worker lifecycle
 │   ├── publication.py                      # Publications of current outputs and their idempotent activation
+│   ├── stores.py                           # Connections to hosted and local vote stores
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
 ├── arguments.py                            # The family arguments, system option, and name refusals the commands share
@@ -89,7 +91,7 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, projects its cost from the family's spend ledger against `budget_usd`, and runs it through the Harbor CLI. Each agent attempt appends its token counts to the job's `attempts.jsonl`, which collection adds to the ledger.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
 3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench arena prepare <family>` writes a publication of the current outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes on it.
+4. `bench arena prepare <family>` writes a publication of the current public outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes on it. `bench serve` collects the other cases into a local publication and serves the same Worker against its local SQLite store.
 5. `bench close <family>` saves a cut of the counted votes, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes from its collected trial rewards instead.
 
 `bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that collection never reads them.

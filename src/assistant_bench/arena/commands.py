@@ -1,5 +1,6 @@
 """Publication, inspection and moderation of the arena's vote stores."""
 
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,12 +9,20 @@ from typing import Annotated
 import typer
 
 from assistant_bench import collection, jobs
-from assistant_bench.arena import publication, votes
-from assistant_bench.arena.d1 import Database, TargetName, connect
+from assistant_bench.arena import local, publication, votes
+from assistant_bench.arena.d1 import Database
+from assistant_bench.arena.stores import TargetName, connect
 from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
 from assistant_bench.catalog import load_export, load_systems
-from assistant_bench.families import Choice, load_cases, load_family
+from assistant_bench.families import (
+    Choice,
+    VotesSettings,
+    family_names,
+    load_cases,
+    load_family,
+)
 from assistant_bench.messages import InputError, code, count_of
+from assistant_bench.paths import data_dir
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -28,7 +37,7 @@ CLEARED = '(cleared)'
 """Stands for the network tag of a vote older than the tags' retention."""
 
 Target = Annotated[
-    TargetName, typer.Argument(help='The vote store: staging or production.')
+    TargetName, typer.Argument(help='The vote store: staging, production or local.')
 ]
 IpTag = Annotated[
     str | None, typer.Option(help='A network tag, as `bench arena votes` lists it.')
@@ -59,6 +68,7 @@ def prepare(family: FamilyArgument) -> None:
         load_cases(selected),
         outputs,
         {system.name: system.display_name for system in listed},
+        target='production',
     )
     path = publication.write(prepared, outputs)
     typer.echo(
@@ -83,7 +93,9 @@ def publish(
     """Stage a reviewed publication in the vote store and activate it."""
     prepared = publication.read(file)
     with connect(target) as database:
-        changed = publication.publish(database, prepared, datetime.now(UTC))
+        changed = publication.publish(
+            database, prepared, datetime.now(UTC), target=target
+        )
 
     if not changed:
         typer.echo(
@@ -97,6 +109,53 @@ def publish(
         f'with {count_of(len(prepared.cases), "case")} and '
         f'{count_of(len(prepared.outputs), "output")}.'
     )
+
+
+def serve() -> None:
+    """Publish local cases and serve their vote page until interrupted."""
+    with local.interrupts(), local.lock():
+        systems = load_systems(load_export())
+        prepared: list[publication.Publication] = []
+        for name in family_names():
+            family = load_family(name)
+            if not isinstance(family.settings, VotesSettings):
+                continue
+            cases = load_cases(family)
+            listed = jobs.listed_systems(family, systems)
+            outputs = (
+                collection.collect(family, systems).outputs
+                if jobs.has_jobs(family)
+                else []
+            )
+            try:
+                prepared.append(
+                    publication.prepare(
+                        family,
+                        cases,
+                        outputs,
+                        {system.name: system.display_name for system in listed},
+                        target='local',
+                    )
+                )
+            except publication.NoPairsError:
+                continue
+
+        local.build()
+        local.migrate()
+        with local.database() as database:
+            for item in prepared:
+                publication.publish(database, item, datetime.now(UTC), target='local')
+            database.execute(
+                'DELETE FROM active '
+                'WHERE family NOT IN (SELECT value FROM json_each(?))',
+                [json.dumps([item.family for item in prepared])],
+            )
+        if not prepared:
+            raise InputError(
+                f'No local case has two different passing outputs. Add cases under '
+                f'`{data_dir() / "cases"}`, then run `uv run bench run`.'
+            )
+        local.serve(local.keys())
 
 
 @app.command()

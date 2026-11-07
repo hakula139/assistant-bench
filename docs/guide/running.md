@@ -137,6 +137,16 @@ uv run bench arena status production writing-zh
 
 A family ends for a voter once no comparison is left, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
+### Voting Locally
+
+```bash
+uv run bench serve
+```
+
+Open [localhost:8790/vote/](http://localhost:8790/vote/) to vote on held-out and transcript-derived cases, and on every case of a family without `public_voting`. The command collects current trials, builds the site and publishes only to the local SQLite store. It makes no model requests. Run `bench run` first when those cases lack generated outputs.
+
+Ctrl-C stops the server. Stop it before inspecting or moderating the local store with `bench arena status local`, `bench arena votes local <family>` or the other arena commands. The local store and its browser signing keys persist under `arena/` in the data directory, so a restart preserves votes and cookies.
+
 ### Setting Up a Vote Store
 
 `web/wrangler.toml` names each target's database, and `web/migrations/` holds its schema. Create a missing database, record the `database_id` it prints under the target's `[[env.<target>.d1_databases]]` entry, then apply the migrations:
@@ -194,7 +204,8 @@ Everything a run produces stays out of Git in the [data directory](../convention
 
 ```text
 assistant-bench/
-├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
+├── agents/<harness>/<version>/<platform>/   # Verified vendor CLI executables for installed agents
+├── arena/                                 # Local vote database, signing keys and serve lock
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`

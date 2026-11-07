@@ -16,7 +16,7 @@ from harbor.models.job.config import JobConfig
 from typer.core import TyperGroup
 
 from assistant_bench import collection, jobs, report
-from assistant_bench.arena import votes
+from assistant_bench.arena import commands, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import D1Error, connect
 from assistant_bench.arguments import (
@@ -226,6 +226,12 @@ def collect(families: FamilyArguments = None) -> None:
     for name in names:
         selected = load_family(name)
         _echo_conflicts(selected, _collect(selected, systems, export))
+
+
+@app.command()
+def serve() -> None:
+    """Vote locally on cases that production does not publish."""
+    commands.serve()
 
 
 @app.command()

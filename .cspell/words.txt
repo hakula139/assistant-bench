@@ -36,6 +36,7 @@ evals
 exog
 expit
 fallocate
+fcntl
 fdatasync
 fileno
 fsize
@@ -83,6 +84,7 @@ Orchidarium
 pinv
 pkgs
 Priya
+pthread
 pvalue
 pwrite
 pwritev

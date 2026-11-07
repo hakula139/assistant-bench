@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from assistant_bench.arena import publication, votes
+from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.arena.publication import CaseFacts, Inventory, OutputFacts
 from assistant_bench.arena.votes import (
     Cut,
@@ -26,7 +27,6 @@ from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
     MIGRATIONS_DIR,
-    SQLiteDatabase,
     make_case,
     make_trial,
     make_votes_family,
@@ -62,8 +62,11 @@ def published_store(
         cases,
         [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
         ARENA_NAMES,
+        target='production',
     )
-    publication.publish(arena_store, published, NOW - timedelta(days=1))
+    publication.publish(
+        arena_store, published, NOW - timedelta(days=1), target='production'
+    )
     return arena_store, published
 
 
@@ -129,7 +132,7 @@ def snapshot(
                 systems=ARENA_NAMES,
                 defects=('facts',),
                 cases=tuple(
-                    CaseFacts(key=key, category='docs')
+                    CaseFacts(key=key, category='docs', split='public')
                     for key in dict.fromkeys(row.case_key for row in outputs)
                 ),
                 outputs=outputs,
@@ -229,7 +232,7 @@ class TestReadCut:
             systems=published.systems,
             defects=published.defects,
             cases=tuple(
-                CaseFacts(key=case.key, category=case.category)
+                CaseFacts(key=case.key, category=case.category, split=case.split)
                 for case in published.cases
             ),
             outputs=tuple(
@@ -265,8 +268,11 @@ class TestPairVoteCounts:
         _, published = published_store
         with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
             connection.executescript((MIGRATIONS_DIR / '0001_init.sql').read_text())
+            connection.executescript(
+                (MIGRATIONS_DIR / '0003_case_splits.sql').read_text()
+            )
             database = SQLiteDatabase(connection)
-            publication.publish(database, published, NOW)
+            publication.publish(database, published, NOW, target='production')
             first = record_vote(
                 database, published, NOW, actor='first', age=timedelta(hours=1)
             )

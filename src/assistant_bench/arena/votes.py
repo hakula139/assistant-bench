@@ -125,7 +125,7 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
 
     publication = _ActiveRow.model_validate(active[0])
     cases = database.execute(
-        'SELECT case_key AS key, category FROM cases '
+        'SELECT case_key AS key, category, split FROM cases '
         'WHERE publication_id = ? ORDER BY case_key',
         [publication.id],
     ).rows
