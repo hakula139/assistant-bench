@@ -6,6 +6,7 @@ import secrets
 import signal
 import sqlite3
 import subprocess
+import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import closing, contextmanager, suppress
 from pathlib import Path
@@ -157,6 +158,7 @@ def serve(signing_keys: Mapping[str, str]) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        deadline = time.monotonic() + 10
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -165,6 +167,15 @@ def serve(signing_keys: Mapping[str, str]) -> None:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait()
+        while True:
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() >= deadline:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+            time.sleep(0.01)
 
 
 def _run(command: Sequence[str], *, cwd: Path) -> None:

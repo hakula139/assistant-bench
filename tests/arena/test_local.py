@@ -112,15 +112,18 @@ class TestBuild:
 
 
 class TestServe:
-    @pytest.mark.parametrize('exit', ['normal', 'interrupt', 'failure', 'stalled'])
+    @pytest.mark.parametrize(
+        'exit', ['normal', 'interrupt', 'failure', 'stalled', 'descendant']
+    )
     def test_passes_keys_only_in_environment_and_waits_for_group_cleanup(
         self,
-        exit: Literal['normal', 'interrupt', 'failure', 'stalled'],
+        exit: Literal['normal', 'interrupt', 'failure', 'stalled', 'descendant'],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         launched: list[tuple[list[str], dict[str, Any]]] = []
         signals: list[tuple[int, int]] = []
         waits: list[float | None] = []
+        probes: list[int] = []
         signing = {'ACTOR_KEY': 'synthetic-actor-key', 'IP_TAG_KEY': 'synthetic-ip-key'}
 
         class Process:
@@ -143,6 +146,11 @@ class TestServe:
         monkeypatch.setattr(subprocess, 'Popen', Process)
 
         def kill(pid: int, number: int) -> None:
+            if number == 0:
+                probes.append(pid)
+                if exit == 'descendant' and len(probes) == 1:
+                    return
+                raise ProcessLookupError
             signals.append((pid, number))
 
         monkeypatch.setattr(os, 'killpg', kill)
@@ -163,6 +171,7 @@ class TestServe:
             expected.append((123, signal.SIGKILL))
         assert signals == expected
         assert waits == ([None, 10, None] if exit == 'stalled' else [None, 10])
+        assert probes == ([123, 123] if exit == 'descendant' else [123])
 
 
 class TestConnect:
