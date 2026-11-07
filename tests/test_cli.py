@@ -257,7 +257,7 @@ def collected_outputs(
     return Collection(outputs, [], generation)
 
 
-def write_closed_report(family: str, frozen: str | None) -> None:
+def write_closed_report(family: str, frozen: str | None) -> Path:
     """Close a round of the family that froze `opus-5.5-high` under a fingerprint."""
     closed = report.Report.model_validate_json(
         REPORT_FIXTURE.read_text().replace('acme-large', 'opus-5.5-high')
@@ -267,7 +267,7 @@ def write_closed_report(family: str, frozen: str | None) -> None:
             update={'fingerprint': frozen}
         )
     }
-    report.write_report(
+    return report.write_report(
         closed.model_copy(update={'family': family, 'systems': systems})
     )
 
@@ -1444,9 +1444,12 @@ class TestRun:
         write_votes_family(families_dir, ['opus-5.5-high'], {'c1': 'message'}, name='f')
         current = fingerprint(load_systems(load_export())['opus-5.5-high'])
         if reported:
-            write_closed_report(
+            path = write_closed_report(
                 'f', None if frozen is None else frozen.format(current=current)
             )
+            destination = cloud.public_root / 'reports' / 'f' / path.name
+            destination.parent.mkdir(parents=True)
+            shutil.copyfile(path, destination)
         if trial:
             archive_stale_job(
                 cloud,
