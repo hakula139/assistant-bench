@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -18,6 +19,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
+from assistant_bench.state import Collection, State
 from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
@@ -96,6 +98,17 @@ class RecordingDatabase:
         return self.database.execute(sql, params)
 
 
+def publish(
+    database: SQLiteDatabase | RecordingDatabase,
+    published: Publication,
+    now: datetime,
+    *,
+    target: str,
+) -> bool:
+    publication.stage(database, published, now)
+    return publication.activate(database, published.id, now)
+
+
 class TestPrepare:
     def test_preserves_html_content_and_unknown_lengths_through_the_vote_snapshot(
         self, arena_store: SQLiteDatabase
@@ -115,7 +128,7 @@ class TestPrepare:
         )
 
         published = prepare(family, [case], outputs)
-        publication.publish(arena_store, published, NOW, target='production')
+        publish(arena_store, published, NOW, target='production')
         passing = published.model_copy(
             update={
                 'outputs': tuple(
@@ -142,10 +155,15 @@ class TestPrepare:
         )
         analysis = votes.voting_input(
             votes.Snapshot(
-                family=family.name, taken_at=NOW, production=cut, local=None
+                family=family.name,
+                taken_at=NOW,
+                closed_at=NOW,
+                category_order=('docs',),
+                closing_revision=None,
+                production=cut,
+                private=None,
             ),
-            family,
-            outputs,
+            {'production': outputs},
         )
         assert [(row.length_a, row.length_b) for row in analysis.ordinary] == [
             (None, None)
@@ -181,7 +199,9 @@ class TestPrepare:
         ]
         names = {publication.case_key(case): case.id for case in cases}
 
-        local = publication.prepare(family, cases, outputs, ARENA_NAMES, target='local')
+        local = publication.prepare(
+            family, cases, outputs, ARENA_NAMES, target='private'
+        )
 
         expected = {'private': 'private', 'secret': 'held-out'}
         if not public_voting:
@@ -190,7 +210,7 @@ class TestPrepare:
         assert {row.case_key for row in local.outputs} == {
             case.key for case in local.cases
         }
-        assert local.target == 'local'
+        assert local.target == 'private'
         assert (
             local.identity()
             != local.model_copy(update={'target': 'production'}).identity()
@@ -434,119 +454,126 @@ class TestPrepare:
             prepare(make_votes_family(), [make_case('first'), twin], [])
 
 
-class TestWrite:
-    def test_writes_the_file_and_a_listing_for_review(self, data_dir: Path) -> None:
+class TestListing:
+    def test_renders_pinned_outputs_and_gates_for_review(self) -> None:
         published = text_publication()
         outputs = [make_trial('second', 'acme-pro', [Gate.LENGTH])]
 
-        path = publication.write(published, outputs)
+        listing = publication.listing(published, outputs)
 
-        assert path == (
-            data_dir / 'publications' / 'writing-fixture' / f'{published.id}.json'
-        )
-        assert publication.read(path) == published
-        listing = path.with_suffix('.md').read_text()
         assert 'Write about first.' in listing
         assert '- Mentions first' in listing
-        assert (
-            '### Acme Large (`acme-large`): pass\n\n```text\nacme-large on first\n```'
-            in listing
-        )
+        assert 'acme-large on first' in listing
         assert '### Acme Pro (`acme-pro`): fail\n\nFailed `length`.' in listing
 
 
-class TestRead:
-    @pytest.mark.parametrize('invalid', ['length', 'ineligible', 'fenced'])
-    def test_refuses_self_consistent_html_files_that_break_the_document_contract(
-        self, tmp_path: Path, invalid: str
+class TestPreparation:
+    def test_stages_without_activation_and_records_verified_metadata_once(
+        self, private_store: SQLiteDatabase
     ) -> None:
-        source = (FIXTURES / 'html' / 'community-event.html').read_text()
-        published = prepare(
-            with_settings(make_votes_family(), render='html'),
-            [make_case('page')],
-            [
-                make_trial(
-                    'page', system, text=source.replace('<title>', f'<title>{index} ')
-                )
-                for index, system in enumerate(ARENA_SYSTEMS)
-            ],
-        )
-        first = published.outputs[0]
-        assert first.content is not None
-        if invalid == 'length':
-            changed = first.model_copy(update={'length': 10})
-            message = 'HTML outputs have no text length'
-        else:
-            content = (
-                f'```html\n{first.content}```\n'
-                if invalid == 'fenced'
-                else first.content.replace('</body>', '')
-            )
-            changed = first.model_copy(update={'content': content})
-            message = 'a passing HTML output must be an eligible document'
-        draft = published.model_copy(
-            update={'outputs': (changed, *published.outputs[1:])}
-        )
-        invalid_file = draft.model_copy(update={'id': draft.identity()})
-        path = tmp_path / 'publication.json'
-        path.write_text(invalid_file.model_dump_json())
-
-        with pytest.raises(ValueError, match=message):
-            publication.read(path)
-
-    def test_refuses_an_edited_file_naming_both_ids(self, tmp_path: Path) -> None:
         published = text_publication()
-        payload = json.loads(published.model_dump_json())
-        payload['outputs'][0]['content'] = 'An edited reply.'
-        path = tmp_path / 'edited.json'
-        path.write_text(json.dumps(payload))
-        derived = Publication.model_validate(payload).identity()
+        state = State(private_store)
+        state.begin_collection(
+            Collection(
+                id='generation',
+                family=published.family,
+                expected_count=0,
+                manifest_digest=hashlib.sha256(b'').hexdigest(),
+                created_at=NOW.isoformat(),
+                code_revision=None,
+                case_revision=None,
+                system_names_json=None,
+            )
+        )
+        state.seal_collection('generation')
+        metadata = publication.Preparation(
+            publication_id=published.id,
+            target='production',
+            collection_id='generation',
+            case_revision=None,
+            prepared_at=NOW,
+        )
 
-        with pytest.raises(ValueError) as raised:
-            publication.read(path)
+        publication.stage(private_store, published, NOW)
 
-        assert f'derives ID `{derived}`' in str(raised.value)
-        assert f'records `{published.id}`' in str(raised.value)
+        assert publication.read(private_store, published.id) == published
+        assert private_store.execute('SELECT * FROM active').rows == []
+        with pytest.raises(InputError, match='no verified preparation'):
+            publication.read_prepared(private_store, published.id)
+
+        publication.record_preparation(private_store, metadata)
+        publication.record_preparation(private_store, metadata)
+
+        assert publication.read_prepared(private_store, published.id) == published
+        assert publication.preparation(private_store, published.id) == metadata
+        with pytest.raises(InputError, match='conflicting preparation metadata'):
+            publication.record_preparation(
+                private_store,
+                metadata.model_copy(update={'prepared_at': NOW + timedelta(seconds=1)}),
+            )
+        assert publication.preparation(private_store, published.id) == metadata
+
+    @pytest.mark.parametrize('change', ['content', 'source', 'count'])
+    def test_corrupted_stage_cannot_activate_or_become_ready(
+        self,
+        private_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+        change: str,
+    ) -> None:
+        published = text_publication()
+        execute = private_store.execute
+        corrupted = False
+
+        def corrupt(sql: str, params: Sequence[Param] = ()) -> Result:
+            nonlocal corrupted
+            result = execute(sql, params)
+            if sql.startswith('INSERT INTO outputs') and not corrupted:
+                corrupted = True
+                statements: dict[str, tuple[str, list[Param]]] = {
+                    'content': (
+                        "UPDATE outputs SET content = 'Changed' WHERE verdict = 'pass'",
+                        [],
+                    ),
+                    'source': ('UPDATE cases SET source = ?', ['public']),
+                    'count': (
+                        'UPDATE publications SET output_count = output_count + 1',
+                        [],
+                    ),
+                }
+                statement, arguments = statements[change]
+                execute(statement, arguments)
+            return result
+
+        monkeypatch.setattr(private_store, 'execute', corrupt)
+
+        with pytest.raises(InputError, match='immutable snapshot'):
+            publication.stage(private_store, published, NOW)
+        with pytest.raises(InputError, match='immutable snapshot'):
+            publication.activate(private_store, published.id, NOW)
+        with pytest.raises(InputError, match='immutable snapshot'):
+            publication.record_preparation(
+                private_store,
+                publication.Preparation(
+                    publication_id=published.id,
+                    target='production',
+                    collection_id='missing',
+                    case_revision=None,
+                    prepared_at=NOW,
+                ),
+            )
+
+        assert private_store.execute('SELECT * FROM active').rows == []
+        assert publication.preparation(private_store, published.id) is None
 
 
 class TestPublish:
-    def test_local_private_content_never_reaches_a_remote_store(
-        self, arena_store: SQLiteDatabase
-    ) -> None:
-        family = make_votes_family()
-        cases = [make_case('private', 'transcript'), make_case('hidden', 'held-out')]
-        prepared = publication.prepare(
-            family,
-            cases,
-            [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
-            ARENA_NAMES,
-            target='local',
-        )
-        remote = RecordingDatabase(arena_store)
-
-        for target in ('staging', 'production'):
-            with pytest.raises(InputError, match='cannot be published'):
-                publication.publish(remote, prepared, NOW, target=target)
-        assert remote.statements == []
-        changed = publication.publish(arena_store, prepared, NOW, target='local')
-
-        assert changed
-        assert rows(arena_store, 'SELECT split FROM cases ORDER BY split') == [
-            ('held-out',),
-            ('private',),
-        ]
-        assert rows(arena_store, 'SELECT content FROM outputs ORDER BY content') == [
-            (row.content,)
-            for row in sorted(prepared.outputs, key=lambda row: row.content or '')
-        ]
-
     def test_stages_and_activates_the_publication(
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
         published = text_publication()
 
-        changed = publication.publish(database, published, NOW, target='production')
+        changed = publish(database, published, NOW, target='production')
 
         assert changed
         assert rows(database, 'SELECT family, publication_id FROM active') == [
@@ -594,7 +621,7 @@ class TestPublish:
         )
         keys = {case.id: publication.case_key(case) for case in cases}
 
-        publication.publish(arena_store, published, NOW, target='production')
+        publish(arena_store, published, NOW, target='production')
 
         facts = rows(
             arena_store,
@@ -620,7 +647,7 @@ class TestPublish:
         )
         recording = RecordingDatabase(arena_store)
 
-        publication.publish(recording, published, NOW, target='production')
+        publish(recording, published, NOW, target='production')
 
         inserts = [sql.split()[2] for sql in recording.statements if 'VALUES' in sql]
         assert inserts.count('cases') == 2
@@ -632,14 +659,13 @@ class TestPublish:
     ) -> None:
         database = arena_store
         published = text_publication()
-        publication.publish(database, published, NOW, target='production')
+        publish(database, published, NOW, target='production')
         recording = RecordingDatabase(database)
 
-        changed = publication.publish(recording, published, NOW, target='production')
+        changed = publication.activate(recording, published.id, NOW)
 
         assert not changed
-        assert len(recording.statements) == 1
-        assert recording.statements[0].startswith('SELECT')
+        assert all(statement.startswith('SELECT') for statement in recording.statements)
 
     @pytest.mark.parametrize(
         'statement',
@@ -657,9 +683,9 @@ class TestPublish:
         published = text_publication()
         interrupted = RecordingDatabase(database, lambda sql: statement in sql)
         with pytest.raises(Interrupted):
-            publication.publish(interrupted, published, NOW, target='production')
+            publish(interrupted, published, NOW, target='production')
 
-        changed = publication.publish(database, published, NOW, target='production')
+        changed = publish(database, published, NOW, target='production')
 
         assert changed
         assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
@@ -685,7 +711,7 @@ class TestPublish:
         monkeypatch.setattr(arena_store, 'execute', changed)
 
         with pytest.raises(InputError, match='not completely staged'):
-            publication.publish(arena_store, published, NOW, target='production')
+            publish(arena_store, published, NOW, target='production')
 
         assert rows(arena_store, 'SELECT * FROM active') == []
 
@@ -694,12 +720,14 @@ class TestPublish:
     ) -> None:
         database = arena_store
         published = text_publication()
-        incomplete = published.model_copy(
-            update={'outputs': (*published.outputs, published.outputs[0])}
+        publication.stage(database, published, NOW)
+        database.execute(
+            'DELETE FROM outputs WHERE publication_id = ? AND output_key = ?',
+            [published.id, published.outputs[0].key],
         )
 
-        with pytest.raises(ValueError, match='not completely staged'):
-            publication.publish(database, incomplete, NOW, target='production')
+        with pytest.raises(InputError, match='does not match its immutable snapshot'):
+            publication.activate(database, published.id, NOW)
 
         assert rows(database, 'SELECT * FROM active') == []
 
@@ -708,14 +736,14 @@ class TestPublish:
     ) -> None:
         database = arena_store
         first = text_publication()
-        publication.publish(database, first, NOW, target='production')
+        publish(database, first, NOW, target='production')
         second = prepare(
             make_votes_family(),
             [make_case('first')],
             [make_trial('first', system) for system in ARENA_SYSTEMS],
         )
 
-        publication.publish(database, second, NOW, target='production')
+        publish(database, second, NOW, target='production')
 
         assert rows(database, 'SELECT publication_id FROM active') == [(second.id,)]
         assert rows(database, 'SELECT count(*) FROM publications') == [(2,)]
@@ -731,8 +759,8 @@ class TestPublish:
         draft = published.model_copy(update={'cases': cases})
         private = draft.model_copy(update={'id': draft.identity()})
 
-        with pytest.raises(ValueError, match='cannot leave this machine'):
-            publication.publish(database, private, NOW, target='production')
+        with pytest.raises(ValueError, match='cannot enter production'):
+            publish(database, private, NOW, target='production')
 
         assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
 
@@ -744,7 +772,7 @@ class TestPublish:
         database = arena_store
 
         for published in (text_publication(), diff_publication()):
-            publication.publish(database, published, NOW, target='production')
+            publish(database, published, NOW, target='production')
 
         dumped = dump(database.connection)
         if (
@@ -754,7 +782,7 @@ class TestPublish:
             stale_fixture(PUBLICATION_FIXTURE, dumped)
 
 
-def dump(connection: sqlite3.Connection) -> str:
+def dump(connection: sqlite3.Connection, *, original_schema: bool = False) -> str:
     """Return the rows `publish` writes as SQL that `wrangler d1 execute` loads."""
     lines: list[str] = []
     for table, order in (
@@ -765,9 +793,16 @@ def dump(connection: sqlite3.Connection) -> str:
         ('active', 'family'),
     ):
         cursor = connection.execute(f'SELECT * FROM {table} ORDER BY {order}')
-        columns = ', '.join(column[0] for column in cursor.description)
+        names = [column[0] for column in cursor.description]
+        selected = [
+            index
+            for index, name in enumerate(names)
+            if not original_schema or name not in ('target', 'source')
+        ]
+        columns = ', '.join(names[index] for index in selected)
         lines.extend(
-            f'INSERT INTO {table} ({columns}) VALUES ({", ".join(map(literal, row))});'
+            f'INSERT INTO {table} ({columns}) VALUES '
+            f'({", ".join(literal(row[index]) for index in selected)});'
             for row in cursor
         )
     return '\n'.join(lines) + '\n'
@@ -778,11 +813,13 @@ class TestPublicationPairCases:
         self, arena_store: SQLiteDatabase
     ) -> None:
         for published in (text_publication(), diff_publication()):
-            publication.publish(arena_store, published, NOW, target='production')
+            publish(arena_store, published, NOW, target='production')
         existing = (
             '\n'.join(
                 line
-                for line in dump(arena_store.connection).splitlines()
+                for line in dump(
+                    arena_store.connection, original_schema=True
+                ).splitlines()
                 if not line.startswith('INSERT INTO publication_pair_cases')
             )
             + '\n'
@@ -820,7 +857,13 @@ class TestPublicationPairCases:
                 current = arena_store.connection.execute(
                     f'SELECT * FROM {table} ORDER BY {order}'
                 )
-                columns = ', '.join(column[0] for column in current.description)
+                names = [column[0] for column in current.description]
+                columns = ', '.join(
+                    name for name in names if name not in ('target', 'source')
+                )
+                current = arena_store.connection.execute(
+                    f'SELECT {columns} FROM {table} ORDER BY {order}'
+                )
                 preserved = connection.execute(
                     f'SELECT {columns} FROM {table} ORDER BY {order}'
                 )
@@ -835,10 +878,10 @@ class TestPublicationPairCases:
             cases,
             [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
         )
-        publication.publish(arena_store, published, NOW, target='production')
+        publish(arena_store, published, NOW, target='production')
         staged = '\n'.join(
             line
-            for line in dump(arena_store.connection).splitlines()
+            for line in dump(arena_store.connection, original_schema=True).splitlines()
             if not line.startswith(
                 ('INSERT INTO publication_pair_cases', 'INSERT INTO active')
             )
@@ -857,9 +900,18 @@ class TestPublicationPairCases:
             connection.executescript(
                 (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
             )
+            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                if path.name[:4] > '0004':
+                    connection.executescript(path.read_text())
+            connection.execute('UPDATE publications SET target = ?', ['production'])
+            for case in published.cases:
+                connection.execute(
+                    'UPDATE cases SET source = ? WHERE case_key = ?',
+                    [case.source, case.key],
+                )
             database = SQLiteDatabase(connection)
 
-            changed = publication.publish(database, published, NOW, target='production')
+            changed = publish(database, published, NOW, target='production')
 
             assert changed
             assert rows(database, 'SELECT publication_id FROM active') == [
@@ -877,6 +929,40 @@ class TestPublicationPairCases:
                 ('acme-large', 'acme-small', keys),
                 ('acme-pro', 'acme-small', keys),
             ]
+
+
+class TestPublicationSources:
+    def test_adds_source_columns_without_guessing_or_changing_existing_votes(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        published = text_publication()
+        publication.stage(arena_store, published, NOW)
+        publication.activate(arena_store, published.id, NOW)
+        retained = dump(arena_store.connection, original_schema=True)
+        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
+            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                if path.name[:4] < '0006':
+                    connection.executescript(path.read_text())
+            connection.executescript(retained)
+            database = SQLiteDatabase(connection)
+            identifier = record_vote(
+                database, published, NOW, actor='reader', age=timedelta(hours=1)
+            )
+            before = database.execute('SELECT * FROM votes').rows
+
+            connection.executescript(
+                (MIGRATIONS_DIR / '0006_publication_sources.sql').read_text()
+            )
+
+            assert database.execute('SELECT * FROM votes').rows == before
+            assert database.execute('SELECT source FROM cases').rows == [
+                {'source': None},
+                {'source': None},
+            ]
+            cut = votes.read_cut(database, published.family, NOW)
+            assert cut is not None and [vote.id for vote in cut.votes] == [identifier]
+            with pytest.raises(InputError, match='source'):
+                publication.read(database, published.id)
 
 
 def literal(value: object) -> str:
