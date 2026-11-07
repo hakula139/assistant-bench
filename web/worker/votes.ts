@@ -28,7 +28,7 @@ const RECORD = `
   JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
   WHERE pairs.id = ?5 AND pairs.actor_id = ?6
     AND (SELECT count(*) FROM votes WHERE ip_tag = ?4 AND recorded_at > ?7) < ?8
-  ON CONFLICT DO NOTHING`;
+  ON CONFLICT DO NOTHING RETURNING id`;
 const RELEASE = `
   DELETE FROM pairs WHERE id = ?1 AND EXISTS (SELECT 1 FROM votes WHERE pair_id = ?1)`;
 const RESTORE = `
@@ -44,10 +44,11 @@ const RESTORE = `
 const WITHDRAW = `
   DELETE FROM votes
   WHERE actor_id = ?1 AND family = ?2
-    AND pair_id = (SELECT id FROM pairs WHERE actor_id = ?1 AND family = ?2)`;
+    AND pair_id = (SELECT id FROM pairs WHERE actor_id = ?1 AND family = ?2)
+  RETURNING id`;
 const FRESHNESS = `
   SELECT EXISTS (SELECT 1 FROM votes WHERE family = ?1 AND exclusion IS NULL AND id > ?2)
-    OR (SELECT count(*) FROM votes WHERE family = ?1 AND exclusion IS NULL AND id <= ?2) <> ?3
+    OR (SELECT coalesce(sum(votes), 0) FROM pair_vote_counts WHERE family = ?1) <> ?3
     AS stale`;
 
 interface Prior {
@@ -154,7 +155,7 @@ export async function record(
       ),
     db.prepare(RELEASE).bind(request.pair),
   ]);
-  if (inserted.meta.changes === 1) {
+  if (inserted.results.length === 1) {
     return;
   }
 
@@ -175,7 +176,7 @@ export async function undo(db: D1Database, actor: string, family: string, now: n
     db.prepare(RESTORE).bind(actor, family, since),
     db.prepare(WITHDRAW).bind(actor, family),
   ]);
-  if (withdrawn.meta.changes === 0) {
+  if (withdrawn.results.length === 0) {
     throw new ApiError(409, 'nothing_to_undo');
   }
 }

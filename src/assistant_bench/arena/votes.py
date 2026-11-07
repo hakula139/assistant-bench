@@ -369,21 +369,23 @@ def exclude(database: Database, family: str, selector: Selector, reason: str) ->
     """
     check_reason(reason)
     condition, param = selector.condition()
-    return database.execute(
+    result = database.execute(
         'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '
-        f'AND {condition}',
+        f'AND {condition} RETURNING id',
         [reason, family, param],
-    ).changes
+    )
+    return len(result.rows)
 
 
 def restore(database: Database, family: str, selector: Selector) -> int:
     """Count the selected excluded votes again, returning how many changed."""
     condition, param = selector.condition()
-    return database.execute(
+    result = database.execute(
         'UPDATE votes SET exclusion = NULL WHERE family = ? AND exclusion IS NOT NULL '
-        f'AND {condition}',
+        f'AND {condition} RETURNING id',
         [family, param],
-    ).changes
+    )
+    return len(result.rows)
 
 
 # ── Snapshots ──
