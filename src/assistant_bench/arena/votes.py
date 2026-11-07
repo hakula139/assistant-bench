@@ -92,6 +92,7 @@ class Snapshot(_Model):
 
     family: FamilyName
     taken_at: AwareDatetime
+    closed_at: AwareDatetime
     category_order: tuple[Category, ...]
     closing_revision: str | None
     production: Cut | None
@@ -467,6 +468,7 @@ class _SnapshotHeader(_Model):
     id: str
     family: FamilyName
     taken_at: AwareDatetime
+    closed_at: AwareDatetime
     category_order_json: Json[tuple[Category, ...]]
     closing_revision: str | None
     expected_store_count: int
@@ -521,14 +523,16 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
     )
     database.execute(
         'INSERT INTO vote_snapshots '
-        '(id, family, taken_at, category_order_json, closing_revision, '
+        '(id, family, taken_at, closed_at, category_order_json, closing_revision, '
         'expected_store_count, expected_case_count, expected_output_count, '
-        'expected_vote_count, manifest_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+        'expected_vote_count, manifest_digest) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
         'ON CONFLICT (id) DO NOTHING',
         [
             identity,
             snapshot.family,
             snapshot.taken_at.isoformat(),
+            snapshot.closed_at.isoformat(),
             json.dumps(snapshot.category_order),
             snapshot.closing_revision,
             *counts,
@@ -661,6 +665,7 @@ def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapsh
         snapshot = Snapshot(
             family=header.family,
             taken_at=header.taken_at,
+            closed_at=header.closed_at,
             category_order=header.category_order_json,
             closing_revision=header.closing_revision,
             production=cuts.get('production'),

@@ -30,6 +30,7 @@ CREATE TABLE vote_snapshots (
     id TEXT PRIMARY KEY,
     family TEXT NOT NULL,
     taken_at TEXT NOT NULL,
+    closed_at TEXT NOT NULL,
     category_order_json TEXT NOT NULL CHECK (json_valid(category_order_json)),
     closing_revision TEXT,
     expected_store_count INTEGER NOT NULL CHECK (expected_store_count >= 1),
@@ -83,6 +84,7 @@ CREATE TABLE vote_snapshot_votes (
 CREATE TRIGGER snapshots_keep_identity BEFORE UPDATE ON vote_snapshots
 WHEN OLD.id IS NOT NEW.id OR OLD.family IS NOT NEW.family
     OR OLD.taken_at IS NOT NEW.taken_at
+    OR OLD.closed_at IS NOT NEW.closed_at
     OR OLD.category_order_json IS NOT NEW.category_order_json
     OR OLD.closing_revision IS NOT NEW.closing_revision
     OR OLD.expected_store_count IS NOT NEW.expected_store_count
