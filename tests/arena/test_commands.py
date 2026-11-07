@@ -160,6 +160,7 @@ def context(
     )
     result = RunContext(
         root=root,
+        public_root=public,
         private_root=private / 'cases',
         case_revision=private_repository.revision,
         code_revision=code_revision,
@@ -167,6 +168,7 @@ def context(
         artifacts=private_repository.client,
     )
     monkeypatch.setattr(runtime, 'REPO_ROOT', public)
+    monkeypatch.setattr(runtime, 'PUBLIC_REPOSITORY', str(public))
     monkeypatch.setattr(commands, 'open_context', lambda: nullcontext(result))
     return result
 
