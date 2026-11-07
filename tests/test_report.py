@@ -12,8 +12,9 @@ from pydantic import JsonValue, ValidationError
 
 from assistant_bench import report
 from assistant_bench.arena import votes
-from assistant_bench.families import Category, Choice, load_family
-from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.families import Category, CheckRule, Choice, load_family
+from assistant_bench.messages import InputError
+from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.report import (
     AnalysisInput,
     HumanEvidence,
@@ -21,19 +22,22 @@ from assistant_bench.report import (
     Report,
     write_report,
 )
-from assistant_bench.scoring import ranking
+from assistant_bench.scoring import checkers, ranking
 from assistant_bench.scoring.pass_rates import clopper_pearson
 from assistant_bench.scoring.weighting import actor_weights
 from support import (
     AT,
     EARLY_REPORT_FIXTURE,
+    FIXTURES,
     PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
     ROUND_FAMILY,
+    START,
     TESTS_REPORT_FIXTURE,
     make_output,
     make_round,
+    write_checkers_family,
     write_task_family,
 )
 
@@ -60,6 +64,9 @@ TESTS_USAGE = {
     'acme-mini': (0.05, 12.0),
     'acme-small': (0.01, 8.0),
 }
+
+CHECKER_RULES: tuple[CheckRule, ...] = ('ellipsis', 'curly-quotes')
+
 
 USAGELESS = {'input_tokens': None, 'output_tokens': None, 'cost_usd': None}
 """The measurements of an output whose usage went unreported."""
@@ -229,6 +236,43 @@ def close_tests_round(families_dir: Path) -> Report:
     )
 
 
+def close_checkers_round(
+    families_dir: Path, *, omit: str | None = None
+) -> report.Report:
+    write_checkers_family(families_dir)
+    outputs = [
+        make_output(
+            case=f'case-{index}',
+            system=system,
+            fingerprint=f'{system}-hash',
+            text='Hello.',
+            finish_reason='stop',
+            cost_usd=0.01,
+            latency_sec=2.0,
+            checks=checkers.Checks(
+                revision=checkers.REVISION,
+                rules={
+                    rule: rule != 'ellipsis'
+                    or (index != 0 if system == 'acme' else index != 3)
+                    for rule in (CHECKER_RULES if index == 0 else CHECKER_RULES[:1])
+                },
+            ),
+        )
+        for system in ['acme', 'acme-prompted']
+        if system != omit
+        for index in range(4)
+    ]
+    write_outputs('instructions-format', outputs)
+    return report.close_checkers(
+        load_family('instructions-format'),
+        START,
+        system_names={
+            'acme': 'Acme',
+            'acme-prompted': 'Acme · Instructions',
+        },
+    )
+
+
 def close_smoke(closed_at: datetime = AT) -> Report:
     return report.close_tests(
         load_family('smoke'), closed_at, system_names={'large': 'Public large'}
@@ -249,6 +293,24 @@ def approx(value: JsonValue) -> object:
     if isinstance(value, list):
         return [approx(item) for item in value]
     return value
+
+
+class TestCheckersResults:
+    @pytest.mark.parametrize(
+        'violation', ['category-system', 'category-repeat', 'cost-gap']
+    )
+    def test_rejects_inconsistent_aggregates(self, violation: str) -> None:
+        payload = json.loads((FIXTURES / 'report-checkers.json').read_text())
+        results = payload['results']
+        if violation == 'category-system':
+            results['categories'][0]['standings'][0]['system'] = 'unlisted-system'
+        elif violation == 'category-repeat':
+            results['categories'].append(results['categories'][0])
+        else:
+            results['standings'][0]['cost_gap'] = 'unreported'
+
+        with pytest.raises(ValidationError):
+            Report.model_validate(payload)
 
 
 class TestReport:
@@ -780,6 +842,95 @@ class TestCloseTests:
                 AT,
                 system_names={'large': 'Public large', 'small': 'Public small'},
             )
+
+
+class TestCloseCheckers:
+    def test_close_binary_cases_diagnostics_and_paired_effect(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        closed = close_checkers_round(families_dir)
+        assert isinstance(closed.results, report.CheckersResults)
+        results = closed.results
+
+        assert [(row.system, row.pass_rate.rate) for row in results.standings] == [
+            ('acme', 0.75),
+            ('acme-prompted', 0.75),
+        ]
+        assert results.decision.tied == ['acme-prompted']
+        assert results.rules[0].applicable_cases == 1
+        assert results.rules[0].applicable_responses == 1
+        assert results.rules[0].passed_responses == 1
+        effect = results.prompt_effects[0]
+        assert effect.delta == 0
+        assert (
+            effect.interval is not None
+            and effect.interval.lower < 0 < effect.interval.upper
+        )
+        payload = closed.model_dump_json()
+        assert all(
+            value not in payload
+            for value in ['case-0', 'Hello.', 'Write note', 'input_tokens']
+        )
+
+    def test_close_refuses_a_wholly_missing_system(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        with pytest.raises(InputError, match='Every configured system'):
+            close_checkers_round(families_dir, omit='acme-prompted')
+
+    def test_shared_fixture(
+        self, families_dir: Path, data_dir: Path, stale_fixture: object
+    ) -> None:
+        closed = close_checkers_round(families_dir)
+        path = FIXTURES / 'report-checkers.json'
+        written = closed.model_dump_json(indent=2) + '\n'
+        if not path.exists() or json.loads(path.read_text()) != json.loads(written):
+            assert callable(stale_fixture)
+            stale_fixture(path, written)
+
+    @pytest.mark.parametrize(
+        'gap', ['missing-case', 'duplicate', 'missing-checks', 'old-checker']
+    )
+    def test_closing_refuses_incomplete_or_stale_verdicts(
+        self, families_dir: Path, data_dir: Path, gap: str
+    ) -> None:
+        close_checkers_round(families_dir)
+        outputs = read_outputs('instructions-format')
+        if gap == 'missing-case':
+            outputs.pop()
+        elif gap == 'duplicate':
+            outputs.append(outputs[0])
+        else:
+            checks = outputs[0].checks
+            assert checks is not None
+            outputs[0] = outputs[0].model_copy(
+                update={
+                    'checks': None
+                    if gap == 'missing-checks'
+                    else checks.model_copy(update={'revision': 'old'}),
+                }
+            )
+        write_outputs('instructions-format', outputs)
+
+        with pytest.raises(InputError):
+            report.close_checkers(
+                load_family('instructions-format'),
+                START,
+                system_names={
+                    'acme': 'Acme',
+                    'acme-prompted': 'Acme Instructions',
+                },
+            )
+
+
+class TestPromptEffect:
+    def test_degenerate_paired_effect_has_no_interval(self) -> None:
+        effect = report.prompt_effect('a', 'b', {'a': {'c': 0.0}, 'b': {'c': 1.0}})
+        assert effect.delta == 1 and effect.interval is None
+        constant = report.prompt_effect(
+            'a', 'b', {'a': {'c': 0.0, 'd': 0.0}, 'b': {'c': 1.0, 'd': 1.0}}
+        )
+        assert constant.delta == 1 and constant.interval is None
 
 
 class TestWriteReport:

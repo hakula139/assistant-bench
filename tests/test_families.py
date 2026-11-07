@@ -8,6 +8,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from assistant_bench import families
 from assistant_bench.families import (
+    CheckContext,
+    CheckersSettings,
     Family,
     TaskTestsSettings,
     VotesSettings,
@@ -17,7 +19,13 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.paths import FAMILIES_DIR
-from support import CODE_DEFECTS, PROSE_DEFECTS, write_task_family, write_votes_family
+from support import (
+    CODE_DEFECTS,
+    PROSE_DEFECTS,
+    write_checkers_family,
+    write_task_family,
+    write_votes_family,
+)
 
 
 class TaskOptions(TypedDict, total=False):
@@ -126,6 +134,33 @@ class TestFamilyName:
         accepted = accepts(TypeAdapter(families.FamilyName), name)
 
         assert accepted == valid
+
+
+class TestCheckersSettings:
+    def test_requires_one_sample(self, families_dir: Path) -> None:
+        write_checkers_family(families_dir)
+        settings = load_family('instructions-format').settings
+
+        with pytest.raises(ValidationError):
+            CheckersSettings.model_validate(settings.model_dump() | {'samples': 3})
+
+
+class TestCheckContext:
+    @pytest.mark.parametrize(
+        'context',
+        [
+            {'language': 'en', 'rules': ['han-punctuation']},
+            {'language': 'zh', 'rules': ['curly-quotes']},
+            {'language': 'en', 'rules': ['tree-comments']},
+            {'language': 'en', 'rules': ['forbidden-marker']},
+            {'language': 'en', 'rules': ['ellipsis'], 'targets': ['list-spacing']},
+        ],
+    )
+    def test_context_rejects_inapplicable_rules(
+        self, context: dict[str, object]
+    ) -> None:
+        with pytest.raises(ValidationError):
+            CheckContext.model_validate(context)
 
 
 class TestLoadFamily:

@@ -1,9 +1,7 @@
+scorer = "checkers"
 aspect = "instructions"
 display_name = "Format"
-scorer = "checkers"
-samples = 1
 public = false
-categories = ["docs", "message"]
 systems = [
   "opus-5.5-high",
   "opus-5.5-high-nixos",
@@ -29,3 +27,5 @@ pairs = [
   { bare = "deepseek-v4.1-flash-1017-high", prompted = "deepseek-v4.1-flash-1017-high-nixos" },
   { bare = "kimi-k3-high", prompted = "kimi-k3-high-nixos" },
 ]
+samples = 1
+categories = ["docs", "message"]

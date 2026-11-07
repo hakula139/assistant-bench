@@ -366,6 +366,15 @@ class CheckersStanding(_Model):
     cost_gap: CostGap | None
     latency_sec: Distribution | None
 
+    @model_validator(mode='after')
+    def validate_cost_gap(self) -> CheckersStanding:
+        finished = self.responses - self.errored
+        if (self.cost_gap is None) != (self.mean_cost_usd is not None or finished == 0):
+            raise ValueError(
+                'A cost gap is present exactly when finished trials lack a mean cost.'
+            )
+        return self
+
 
 class CheckersCategoryStanding(_Model):
     system: str
@@ -413,6 +422,12 @@ class CheckersResults(_Model):
     def validate_members(self) -> CheckersResults:
         _validate_decision(self.decision, self.standings)
         systems = {row.system for row in self.standings}
+        names = [board.category for board in self.categories]
+        if len(set(names)) != len(names) or any(
+            not {row.system for row in board.standings} <= systems
+            for board in self.categories
+        ):
+            raise ValueError('Categories must be unique and list standing systems.')
         if any(row.system not in systems for row in self.rules) or any(
             pair.bare not in systems or pair.prompted not in systems
             for pair in self.prompt_effects

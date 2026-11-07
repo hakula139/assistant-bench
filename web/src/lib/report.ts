@@ -289,7 +289,24 @@ export const reportSchema = z
     }
 
     if (results.scorer === 'checkers') {
+      if (
+        results.standings.some(
+          (row) =>
+            (row.cost_gap === null) !==
+            (row.mean_cost_usd !== null || row.responses === row.errored),
+        )
+      ) {
+        reject('A cost gap is present exactly when finished trials lack a mean cost');
+      }
+
       validateDecision(results.decision);
+      const categories = results.categories.map(({ category }) => category);
+      if (
+        new Set(categories).size !== categories.length ||
+        results.categories.some((board) => board.standings.some((row) => !standing.has(row.system)))
+      ) {
+        reject('Categories must be unique and list standing systems');
+      }
       if (
         results.rules.some((row) => !standing.has(row.system)) ||
         results.prompt_effects.some(

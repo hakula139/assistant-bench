@@ -5,6 +5,7 @@ import unicodedata
 from collections.abc import Sequence
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline.state_inline import StateInline
 from markdown_it.token import Token
 from pydantic import BaseModel, ConfigDict
 
@@ -36,7 +37,12 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
     for quote in context.quoted_input:
         source = source.replace(quote, re.sub(r'[^\n]', ' ', quote))
     documents = _documents(source)
-    prose = '\n'.join(_prose(tokens) for _, tokens in documents)
+    prose_documents = (
+        _documents(text or '', _quoted_markdown(context.quoted_input))
+        if context.quoted_input
+        else documents
+    )
+    prose = [span for _, tokens in prose_documents for span in _prose(tokens)]
     tree_lines = [
         line
         for _, tokens in documents
@@ -44,7 +50,7 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
         if token.type in {'fence', 'code_block'}
         for line in token.content.splitlines()
     ]
-    has_content = bool(prose.strip()) or (
+    has_content = any(span.strip() for span in prose) or (
         context.kind == 'directory-tree' and any(line.strip() for line in tree_lines)
     )
     valid = completed and has_content
@@ -52,16 +58,13 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
     for rule in context.rules:
         match rule:
             case 'ellipsis':
-                passed = '…' not in prose
+                passed = all('…' not in span for span in prose)
             case 'han-punctuation':
-                passed = not any(
-                    punctuation in ',.:' and _han(before) and _han(after)
-                    for before, punctuation, after in zip(
-                        prose, prose[1:], prose[2:], strict=False
-                    )
-                )
+                passed = all(_han_punctuation(span) for span in prose)
             case 'curly-quotes':
-                passed = not any(character in prose for character in '‘’“”')
+                passed = all(
+                    not any(character in span for character in '‘’“”') for span in prose
+                )
             case 'paragraph-lines':
                 passed = all(
                     token.map is None or token.map[1] - token.map[0] == 1
@@ -92,24 +95,62 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
     return Checks(revision=REVISION, rules=verdicts)
 
 
-def _documents(source: str) -> list[tuple[str, list[Token]]]:
-    tokens = _MARKDOWN.parse(source)
+def _quoted_markdown(quotes: Sequence[str]) -> MarkdownIt:
+    markdown = MarkdownIt('commonmark', {'html': False})
+
+    def quoted_input(state: StateInline, silent: bool) -> bool:
+        for quote in quotes:
+            if state.pos + len(quote) <= state.posMax and state.src.startswith(
+                quote, state.pos
+            ):
+                if not silent:
+                    state.push('quoted_input', '', 0)
+                state.pos += len(quote)
+                return True
+        return False
+
+    markdown.inline.ruler.before('text', 'quoted_input', quoted_input)
+    for quote in quotes:
+        markdown.inline.add_terminator_char(quote[0])
+    return markdown
+
+
+def _documents(
+    source: str, markdown: MarkdownIt = _MARKDOWN
+) -> list[tuple[str, list[Token]]]:
+    tokens = markdown.parse(source)
     documents = [(source, tokens)]
     for token in tokens:
         if token.type == 'fence' and token.info.strip().lower() in _PROSE_FENCES:
-            documents.extend(_documents(token.content))
+            documents.extend(_documents(token.content, markdown))
     return documents
 
 
-def _prose(tokens: Sequence[Token]) -> str:
-    return '\n'.join(
-        ''.join(
-            child.content if child.type == 'text' else '\n'
-            for child in token.children or []
-            if child.type in {'text', 'softbreak', 'hardbreak'}
+def _prose(tokens: Sequence[Token]) -> list[str]:
+    spans: list[str] = []
+    for token in tokens:
+        if token.type != 'inline':
+            continue
+        parts: list[str] = []
+        for child in token.children or []:
+            if child.type == 'text':
+                parts.append(child.content)
+            elif child.type in {'softbreak', 'hardbreak'}:
+                parts.append('\n')
+            elif child.type in {'code_inline', 'image', 'quoted_input'}:
+                spans.append(''.join(parts))
+                parts = []
+        spans.append(''.join(parts))
+    return spans
+
+
+def _han_punctuation(span: str) -> bool:
+    compact = ''.join(span.split())
+    return not any(
+        punctuation in ',.:' and _han(before) and _han(after)
+        for before, punctuation, after in zip(
+            compact, compact[1:], compact[2:], strict=False
         )
-        for token in tokens
-        if token.type == 'inline'
     )
 
 

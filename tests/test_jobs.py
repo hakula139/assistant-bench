@@ -29,6 +29,7 @@ from assistant_bench.families import (
 from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
+from assistant_bench.messages import InputError
 from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
@@ -40,6 +41,7 @@ from support import (
     response,
     voted_tasks,
     with_settings,
+    write_checkers_family,
     write_task_family,
     write_trial,
     write_votes_family,
@@ -116,6 +118,25 @@ class TestCheckSystems:
         family = family or voted_tasks(families_dir)
 
         jobs.check_systems(family, [system])
+
+    def test_pair_generation_and_scoring_identity(self, families_dir: Path) -> None:
+        write_checkers_family(families_dir)
+        family = load_family('instructions-format')
+        bare = make_system(name='acme')
+        instructed = bare.model_copy(
+            update={
+                'name': 'acme-prompted',
+                'display_name': 'Acme Instructions',
+                'prompt': 'Follow rules.',
+            }
+        )
+        jobs.check_systems(family, [bare, instructed])
+
+        changed = instructed.model_copy(
+            update={'context_window': instructed.context_window + 1}
+        )
+        with pytest.raises(InputError, match='differ only'):
+            jobs.check_systems(family, [bare, changed])
 
 
 class TestFamilySystems:

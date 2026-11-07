@@ -179,6 +179,45 @@ def write_votes_family(
     return path
 
 
+def write_checkers_family(families_dir: Path) -> None:
+    """Write four checker cases and a controlled system pair."""
+    directory = families_dir / 'instructions-format'
+    directory.mkdir(parents=True)
+    (directory / 'family.toml').write_text(
+        tomli_w.dumps(
+            {
+                'display_name': 'Format',
+                'scorer': 'checkers',
+                'samples': 1,
+                'systems': ['acme', 'acme-prompted'],
+                'categories': ['docs', 'message'],
+                'pairs': [{'bare': 'acme', 'prompted': 'acme-prompted'}],
+            }
+        )
+    )
+    (directory / 'cases.toml').write_text(
+        tomli_w.dumps(
+            {
+                'cases': [
+                    {
+                        'id': f'case-{index}',
+                        'category': 'docs' if index < 2 else 'message',
+                        'source': 'synthetic',
+                        'instruction': f'Write note {index}.',
+                        'checks': {
+                            'language': 'en',
+                            'rules': ['ellipsis', 'curly-quotes']
+                            if index == 0
+                            else ['ellipsis'],
+                        },
+                    }
+                    for index in range(4)
+                ]
+            }
+        )
+    )
+
+
 def install_task(task: str, instruction: str) -> None:
     """Install the task `render_tasks` writes for an instruction under its name."""
     task_dir = data_dir() / 'tasks' / task
