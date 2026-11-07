@@ -32,7 +32,7 @@ export async function preview(
     .bind(side, pair, actor)
     .first<{ content: string }>();
   if (row === null) {
-    throw new ApiError(409, 'stale_pair');
+    throw new ApiError(404, 'not_found');
   }
   return row.content;
 }
