@@ -43,6 +43,8 @@ class Claim:
 
 @dataclass(frozen=True)
 class AttemptStart:
+    """Use the owning Entry's canonical JSON timestamp for started_at."""
+
     id: str
     claim_id: str
     started_at: str
