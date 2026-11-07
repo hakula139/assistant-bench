@@ -40,11 +40,15 @@ export interface PassingOutput {
   content_digest: string;
 }
 
-/** A case and two systems the actor can still compare, with each system's outputs on the case. */
+export interface PairCases {
+  low_system: string;
+  high_system: string;
+  case_keys: string;
+}
+
 export interface Comparison {
   caseKey: string;
   systems: readonly [string, string];
-  outputs: readonly [readonly PassingOutput[], readonly PassingOutput[]];
 }
 
 /** A case and the outputs shown as A and B. */
@@ -72,9 +76,12 @@ const PENDING = `
 const ACTOR_VOTES = `
   SELECT case_key, a_system, b_system, exclusion IS NULL AS counted, recorded_at
   FROM votes WHERE actor_id = ? AND family = ?`;
-const PASSING = `
+const PAIR_CASES = `
+  SELECT low_system, high_system, case_keys FROM publication_pair_cases
+  WHERE publication_id = (SELECT publication_id FROM active WHERE family = ?)`;
+const SAMPLES = `
   SELECT output_key, case_key, system, content_digest FROM outputs
-  WHERE publication_id = (SELECT publication_id FROM active WHERE family = ?) AND verdict = 'pass'`;
+  WHERE publication_id = ? AND case_key = ? AND system IN (?, ?) AND verdict = 'pass'`;
 const COVERAGE = `
   SELECT low_system AS low, high_system AS high, votes
   FROM pair_vote_counts WHERE family = ?`;
@@ -105,29 +112,18 @@ export function ranker(actorKey: string, actor: string, family: string): Rank {
 
 /** Every comparison whose two systems pass on the case with some differing pair of samples. */
 export function candidates(
-  outputs: readonly PassingOutput[],
+  facts: readonly PairCases[],
   voted: readonly Pick<VoteRow, 'case_key' | 'a_system' | 'b_system'>[],
 ): Comparison[] {
   const done = new Set(
     voted.map((vote) => key(vote.case_key, ...sorted(vote.a_system, vote.b_system))),
   );
 
-  return [...Map.groupBy(outputs, (output) => output.case_key)].flatMap(([caseKey, outputs]) => {
-    const systems = Map.groupBy(outputs, (output) => output.system);
-    const names = [...systems.keys()].sort();
-
-    return names.flatMap((low, index) =>
-      names.slice(index + 1).flatMap((high) => {
-        const sides = [systems.get(low) ?? [], systems.get(high) ?? []] as const;
-        const differ = sides[0].some((a) =>
-          sides[1].some((b) => a.content_digest !== b.content_digest),
-        );
-        return differ && !done.has(key(caseKey, low, high))
-          ? [{ caseKey, systems: [low, high] as const, outputs: sides }]
-          : [];
-      }),
-    );
-  });
+  return facts.flatMap(({ low_system: low, high_system: high, case_keys }) =>
+    (JSON.parse(case_keys) as string[]).flatMap((caseKey) =>
+      done.has(key(caseKey, low, high)) ? [] : [{ caseKey, systems: [low, high] as const }],
+    ),
+  );
 }
 
 async function ordered<T>(items: readonly T[], rank: (item: T) => Promise<string>) {
@@ -146,7 +142,18 @@ async function caseOrder(rank: Rank, comparisons: readonly Comparison[]) {
 }
 
 /** The lowest-ranked differing sample pair, with its rank's lowest bit choosing the sides. */
-async function place(rank: Rank, { caseKey, outputs: [lows, highs] }: Comparison): Promise<Drawn> {
+async function place(
+  db: D1Database,
+  publication: string,
+  rank: Rank,
+  { caseKey, systems: [lowSystem, highSystem] }: Comparison,
+): Promise<Drawn> {
+  const outputs = await db
+    .prepare(SAMPLES)
+    .bind(publication, caseKey, lowSystem, highSystem)
+    .all<PassingOutput>();
+  const lows = outputs.results.filter(({ system }) => system === lowSystem);
+  const highs = outputs.results.filter(({ system }) => system === highSystem);
   const samples = lows.flatMap((a) =>
     highs.filter((b) => a.content_digest !== b.content_digest).map((b) => [a, b] as const),
   );
@@ -168,7 +175,7 @@ export async function draw(
   rank: Rank,
   comparisons: readonly Comparison[],
   coverage: ReadonlyMap<string, number>,
-): Promise<Drawn> {
+): Promise<Comparison> {
   const pairs = [...new Map(comparisons.map(({ systems }) => [key(...systems), systems])).values()];
   const votes = (systems: readonly string[]) => coverage.get(key(...systems)) ?? 0;
   const fewest = Math.min(...pairs.map(votes));
@@ -180,7 +187,7 @@ export async function draw(
     rank,
     comparisons.filter(({ systems }) => key(...systems) === key(...chosen.item)),
   );
-  return place(rank, first);
+  return first;
 }
 
 /** The case after `current` in the voter's order for one system pair, wrapping around. */
@@ -188,12 +195,12 @@ export async function next(
   rank: Rank,
   comparisons: readonly Comparison[],
   current: string,
-): Promise<Drawn | null> {
+): Promise<Comparison | null> {
   const order = await caseOrder(rank, comparisons);
   const following = order.at(
     (order.findIndex(({ caseKey }) => caseKey === current) + 1) % order.length,
   );
-  return following === undefined || following.caseKey === current ? null : place(rank, following);
+  return following === undefined || following.caseKey === current ? null : following;
 }
 
 /** An actor's standing in a family, as one batch reads it. */
@@ -207,11 +214,11 @@ interface Standing {
 
 /** Reads the family's active publication, or 404 `no_round`, with the actor's standing in it. */
 async function read(db: D1Database, actor: string, family: string): Promise<Standing> {
-  const [activeRows, pendingRows, voteRows, passingRows] = await db.batch([
+  const [activeRows, pendingRows, voteRows, pairRows] = await db.batch([
     db.prepare(ACTIVE).bind(family),
     db.prepare(PENDING).bind(actor, family),
     db.prepare(ACTOR_VOTES).bind(actor, family),
-    db.prepare(PASSING).bind(family),
+    db.prepare(PAIR_CASES).bind(family),
   ]);
   const active = (activeRows.results as ActiveRow[]).at(0);
   if (active === undefined) {
@@ -224,7 +231,7 @@ async function read(db: D1Database, actor: string, family: string): Promise<Stan
     active,
     pending: pending?.publication_id === active.id ? pending : undefined,
     voted,
-    comparisons: candidates(passingRows.results as PassingOutput[], voted),
+    comparisons: candidates(pairRows.results as PairCases[], voted),
   };
 }
 
@@ -285,11 +292,13 @@ async function issue(
     .prepare(COVERAGE)
     .bind(family)
     .all<{ low: string; high: string; votes: number }>();
-  const drawn = await draw(
-    ranker(actorKey, actor, family),
+  const rank = ranker(actorKey, actor, family);
+  const comparison = await draw(
+    rank,
     comparisons,
     new Map(coverage.results.map(({ low, high, votes }) => [key(low, high), votes])),
   );
+  const drawn = await place(db, publication, rank, comparison);
   const [, pending] = await db.batch([
     db
       .prepare(ISSUE)
@@ -323,15 +332,17 @@ export async function skip(
   }
 
   const systems = key(...sorted(pending.a_system, pending.b_system));
-  const drawn = await next(
-    ranker(actorKey, actor, family),
+  const rank = ranker(actorKey, actor, family);
+  const comparison = await next(
+    rank,
     standing.comparisons.filter((comparison) => key(...comparison.systems) === systems),
     pending.case_key,
   );
-  if (drawn === null) {
+  if (comparison === null) {
     return view(standing, pending, now);
   }
 
+  const drawn = await place(db, standing.active.id, rank, comparison);
   const [replaced, current] = await db.batch([
     db
       .prepare(REPLACE)

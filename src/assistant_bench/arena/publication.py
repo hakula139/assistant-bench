@@ -47,6 +47,14 @@ CASE_SPLITS: dict[CaseSource, CaseSplit] = {
 MAX_PARAMS = 100
 """D1's limit on the parameters one statement binds."""
 
+_ELIGIBLE_CASES = (
+    'SELECT DISTINCT a.system AS low_system, b.system AS high_system, a.case_key '
+    'FROM outputs AS a JOIN outputs AS b '
+    'ON b.publication_id = a.publication_id AND b.case_key = a.case_key '
+    "WHERE a.publication_id = ? AND a.verdict = 'pass' AND b.verdict = 'pass' "
+    'AND a.system < b.system AND a.content_digest <> b.content_digest'
+)
+
 
 # ── Models ──
 
@@ -482,15 +490,33 @@ def publish(
             for output in publication.outputs
         ],
     )
+    database.execute(
+        'INSERT INTO publication_pair_cases '
+        '(publication_id, low_system, high_system, case_keys) '
+        'SELECT ?, low_system, high_system, json_group_array(case_key) '
+        f'FROM ({_ELIGIBLE_CASES} ORDER BY low_system, high_system, a.case_key) '
+        'GROUP BY low_system, high_system '
+        'ON CONFLICT (publication_id, low_system, high_system) '
+        'DO UPDATE SET case_keys = excluded.case_keys',
+        [publication.id, publication.id],
+    )
     activated = database.execute(
+        f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('
+        'SELECT low_system, high_system, value AS case_key '
+        'FROM publication_pair_cases, json_each(case_keys) '
+        'WHERE publication_id = ?) '
         'INSERT INTO active (family, publication_id, activated_at) '
         'SELECT ?, ?, ? '
         'WHERE (SELECT count(*) FROM cases WHERE publication_id = ?) = ? '
         'AND (SELECT count(*) FROM outputs WHERE publication_id = ?) = ? '
+        'AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM stored) '
+        'AND NOT EXISTS (SELECT * FROM stored EXCEPT SELECT * FROM expected) '
         'ON CONFLICT (family) DO UPDATE SET '
         'publication_id = excluded.publication_id, '
         'activated_at = excluded.activated_at',
         [
+            publication.id,
+            publication.id,
             publication.family,
             publication.id,
             milliseconds,

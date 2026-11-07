@@ -18,5 +18,9 @@ INSERT INTO outputs (publication_id, output_key, case_key, system, fingerprint, 
 +++ b/x
 +fixed
 ');
+INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys) VALUES ('945a2b68624f8c972237892ca3a5636c4b2f07d31cb291181e501a4046882022', 'acme-large', 'acme-pro', '["32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22"]');
+INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys) VALUES ('945a2b68624f8c972237892ca3a5636c4b2f07d31cb291181e501a4046882022', 'acme-large', 'acme-small', '["32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22"]');
+INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys) VALUES ('945a2b68624f8c972237892ca3a5636c4b2f07d31cb291181e501a4046882022', 'acme-pro', 'acme-small', '["32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22"]');
+INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys) VALUES ('9cc90e4b27aed182936d98dc6ad9370fcfb08f63821b301a8dfe7f1ce66b5562', 'acme-large', 'acme-small', '["3020477475229dfb5b4d83103218f2d9a03dd59137a90562e6cd93edf030e9a0"]');
 INSERT INTO active (family, publication_id, activated_at) VALUES ('coding-fixture', '9cc90e4b27aed182936d98dc6ad9370fcfb08f63821b301a8dfe7f1ce66b5562', 1793275200000);
 INSERT INTO active (family, publication_id, activated_at) VALUES ('writing-fixture', '945a2b68624f8c972237892ca3a5636c4b2f07d31cb291181e501a4046882022', 1793275200000);

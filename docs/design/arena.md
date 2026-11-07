@@ -18,7 +18,7 @@ Production votes on the public and synthetic cases of a family that sets `public
 - **Identities.** The publication ID digests the file's content, including its target, without the ID, so `publish` refuses an edited file. Staging accepts production publications, and a local publication can only enter the local store. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them. Duplicate cases are refused before partitioning them between stores.
 - **Task verdicts.** A task output's tests set its verdict even after its agent errored, so an errored solution whose tests passed can join voted pairs, one whose tests failed loses its settled comparisons, and one whose tests never ran is ungraded and sits out of every comparison. The system's pass rate counts them by the [test pass rate](ranking.md#test-pass-rates) rule.
 - **Content.** Only passing outputs carry content, since only they can form a voted pair. Every output carries its verdict, length and content digest, which settle the comparisons no one votes on.
-- **Publishing** refuses a private case before anything leaves the machine. It inserts the cases and outputs idempotently, then activates the publication for its family only once every row is staged, so an interrupted run completes on a rerun and an identical file changes nothing.
+- **Publishing** refuses a private case before anything leaves the machine. It inserts the cases and outputs idempotently and derives each system pair's eligible cases before activation. It activates the publication only once every row and eligible comparison is staged, so an interrupted run completes on a rerun and an identical file changes nothing.
 
 `bench close` for a votes family takes production and local cuts at the same timestamp, saves them as `votes/<family>/<taken-at>.json` in the data directory, and closes the round from that file. Either cut may be null, and at least one must be present. Families without `public_voting` read only local votes. Stop `bench serve` before closing. `--snapshot <path>` recloses a saved file without the stores.
 
@@ -57,6 +57,8 @@ Production D1 holds public votes. Staging has a separate D1 database for validat
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/` defines, and the voting Worker in `web/worker/` serves each target's vote API from it.
 
 `pair_vote_counts` holds counted votes per family and unordered system pair. SQL triggers maintain these counts atomically when votes are inserted, withdrawn, excluded or restored, so coverage and freshness reads scale with the number of system pairs.
+
+`publication_pair_cases` holds the immutable eligible case keys per publication and unordered system pair. Pair requests read these facts to filter the browser's completed comparisons and count what remains, then read passing sample metadata only for the chosen case and systems. A pending-pair reload reads no sample metadata.
 
 ## Local Voting
 

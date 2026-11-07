@@ -17,6 +17,7 @@ beforeEach(async () => {
       'pairs',
       'actors',
       'active',
+      'publication_pair_cases',
       'outputs',
       'cases',
       'publications',

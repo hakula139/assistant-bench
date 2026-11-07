@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from support import (
     ARENA_SYSTEMS,
     CODE_DEFECTS,
     FIXTURES,
+    MIGRATIONS_DIR,
     make_case,
     make_trial,
     make_votes_family,
@@ -448,6 +450,51 @@ class TestPublish:
             database, "SELECT count(*) FROM outputs WHERE verdict != 'pass'"
         ) == rows(database, 'SELECT count(*) FROM outputs WHERE content IS NULL')
 
+    def test_stages_only_comparable_cases_once_for_each_system_pair(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        cases = [make_case(name) for name in ('first', 'second', 'same', 'alone')]
+        published = prepare(
+            make_votes_family(),
+            cases,
+            [
+                make_trial('first', 'acme-large', text='Shared.'),
+                make_trial(
+                    'first', 'acme-large', text='Distinct.', trial='first__large__2'
+                ),
+                make_trial('first', 'acme-small', text='Shared.'),
+                make_trial('first', 'acme-pro', [Gate.EMPTY], text=''),
+                *(make_trial('second', system) for system in ARENA_SYSTEMS),
+                make_trial('same', 'acme-large', text='Same.'),
+                make_trial('same', 'acme-small', text='Same.'),
+                make_trial('alone', 'acme-large'),
+                make_trial(
+                    'alone',
+                    'acme-small',
+                    gate_failures=None,
+                    error='RuntimeError',
+                    reward=None,
+                    text=None,
+                ),
+            ],
+        )
+        keys = {case.id: publication.case_key(case) for case in cases}
+
+        publication.publish(arena_store, published, NOW, target='production')
+
+        facts = rows(
+            arena_store,
+            'SELECT low_system, high_system, case_keys '
+            'FROM publication_pair_cases ORDER BY low_system, high_system',
+        )
+        assert [
+            (low, high, json.loads(keys_json)) for low, high, keys_json in facts
+        ] == [
+            ('acme-large', 'acme-pro', [keys['second']]),
+            ('acme-large', 'acme-small', sorted([keys['first'], keys['second']])),
+            ('acme-pro', 'acme-small', [keys['second']]),
+        ]
+
     def test_splits_inserts_within_the_parameter_limit(
         self, arena_store: SQLiteDatabase
     ) -> None:
@@ -480,14 +527,21 @@ class TestPublish:
         assert len(recording.statements) == 1
         assert recording.statements[0].startswith('SELECT')
 
+    @pytest.mark.parametrize(
+        'statement',
+        [
+            'INSERT INTO outputs',
+            'INSERT INTO publication_pair_cases',
+            'INSERT INTO active',
+        ],
+        ids=['outputs', 'pair-facts', 'activation'],
+    )
     def test_completes_an_interrupted_publish_when_rerun(
-        self, arena_store: SQLiteDatabase
+        self, arena_store: SQLiteDatabase, statement: str
     ) -> None:
         database = arena_store
         published = text_publication()
-        interrupted = RecordingDatabase(
-            database, lambda sql: sql.startswith('INSERT INTO outputs')
-        )
+        interrupted = RecordingDatabase(database, lambda sql: statement in sql)
         with pytest.raises(Interrupted):
             publication.publish(interrupted, published, NOW, target='production')
 
@@ -495,6 +549,31 @@ class TestPublish:
 
         assert changed
         assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
+
+    @pytest.mark.parametrize('change', ['missing', 'extra'])
+    def test_refuses_incomplete_or_extra_pair_facts_before_activation(
+        self, arena_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch, change: str
+    ) -> None:
+        published = text_publication()
+        execute = arena_store.execute
+        first = publication.case_key(make_case('first'))
+        same = publication.case_key(make_case('second', category='reply'))
+
+        def changed(sql: str, params: Sequence[Param] = ()) -> Result:
+            if 'INSERT INTO active' in sql:
+                arena_store.connection.execute(
+                    'UPDATE publication_pair_cases SET case_keys = ? '
+                    "WHERE low_system = 'acme-large' AND high_system = 'acme-small'",
+                    [json.dumps([] if change == 'missing' else [first, same])],
+                )
+            return execute(sql, params)
+
+        monkeypatch.setattr(arena_store, 'execute', changed)
+
+        with pytest.raises(InputError, match='not completely staged'):
+            publication.publish(arena_store, published, NOW, target='production')
+
+        assert rows(arena_store, 'SELECT * FROM active') == []
 
     def test_refuses_to_activate_incomplete_staging(
         self, arena_store: SQLiteDatabase
@@ -568,6 +647,7 @@ def dump(connection: sqlite3.Connection) -> str:
         ('publications', 'id'),
         ('cases', 'publication_id, case_key'),
         ('outputs', 'publication_id, output_key'),
+        ('publication_pair_cases', 'publication_id, low_system, high_system'),
         ('active', 'family'),
     ):
         cursor = connection.execute(f'SELECT * FROM {table} ORDER BY {order}')
@@ -577,6 +657,107 @@ def dump(connection: sqlite3.Connection) -> str:
             for row in cursor
         )
     return '\n'.join(lines) + '\n'
+
+
+class TestPublicationPairCases:
+    def test_backfills_existing_publications_without_changing_their_rows(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        for published in (text_publication(), diff_publication()):
+            publication.publish(arena_store, published, NOW, target='production')
+        existing = (
+            '\n'.join(
+                line
+                for line in dump(arena_store.connection).splitlines()
+                if not line.startswith('INSERT INTO publication_pair_cases')
+            )
+            + '\n'
+        )
+        expected = rows(
+            arena_store,
+            'SELECT * FROM publication_pair_cases '
+            'ORDER BY publication_id, low_system, high_system',
+        )
+
+        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
+            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                if path.name < '0004_':
+                    connection.executescript(path.read_text())
+            connection.executescript(existing)
+
+            connection.executescript(
+                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
+            )
+
+            assert (
+                rows(
+                    SQLiteDatabase(connection),
+                    'SELECT * FROM publication_pair_cases '
+                    'ORDER BY publication_id, low_system, high_system',
+                )
+                == expected
+            )
+            assert (
+                '\n'.join(
+                    line
+                    for line in dump(connection).splitlines()
+                    if not line.startswith('INSERT INTO publication_pair_cases')
+                )
+                + '\n'
+                == existing
+            )
+
+    def test_completes_staging_after_backfilling_a_partial_inactive_publication(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        cases = [make_case('first'), make_case('second')]
+        published = prepare(
+            make_votes_family(),
+            cases,
+            [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
+        )
+        publication.publish(arena_store, published, NOW, target='production')
+        staged = '\n'.join(
+            line
+            for line in dump(arena_store.connection).splitlines()
+            if not line.startswith(
+                ('INSERT INTO publication_pair_cases', 'INSERT INTO active')
+            )
+        )
+        keys = sorted(publication.case_key(case) for case in cases)
+
+        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
+            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                if path.name < '0004_':
+                    connection.executescript(path.read_text())
+            connection.executescript(staged)
+            connection.execute(
+                'DELETE FROM outputs WHERE case_key = ?',
+                [publication.case_key(cases[1])],
+            )
+            connection.executescript(
+                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
+            )
+            database = SQLiteDatabase(connection)
+
+            changed = publication.publish(database, published, NOW, target='production')
+
+            assert changed
+            assert rows(database, 'SELECT publication_id FROM active') == [
+                (published.id,)
+            ]
+            assert [
+                (low, high, json.loads(case_keys))
+                for low, high, case_keys in rows(
+                    database,
+                    'SELECT low_system, high_system, case_keys '
+                    'FROM publication_pair_cases ORDER BY low_system, high_system',
+                )
+            ] == [
+                ('acme-large', 'acme-pro', keys),
+                ('acme-large', 'acme-small', keys),
+                ('acme-pro', 'acme-small', keys),
+            ]
 
 
 def literal(value: object) -> str:
