@@ -78,6 +78,11 @@ const head = (html: string) => html.slice(html.indexOf('<thead'), html.indexOf('
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
 
+const comparison = (html: string) =>
+  [...parse(html).querySelectorAll('details')].find(
+    (element) => element.querySelector('summary')?.textContent === 'Public and held-out comparison',
+  );
+
 /** Each drawn row's score track, keyed by the system name it links. */
 const tracks = (html: string): Record<string, TrackDrawing> =>
   Object.fromEntries(
@@ -239,6 +244,47 @@ describe('VotesBoard', () => {
 
     expect(stats(html).map(([label]) => label)).not.toContain('Length bias');
     expect(stats(html)[0]).toEqual(['Votes', '315 from 7 voters on 30 cases']);
+  });
+
+  test('shows the centered split difference with the public system name and interval', async () => {
+    const round = await load();
+    round.results.public_held_out = {
+      public_cases: 30,
+      held_out_cases: 35,
+      unavailable: null,
+      scores: [{ system: 'acme-large', difference: -12, interval: { lower: -30, upper: 6 } }],
+    };
+
+    const html = render(round);
+    const table = comparison(html)?.querySelector('table');
+
+    expect(table?.querySelector('caption')?.textContent).toBe(
+      'Public minus held-out score points.',
+    );
+    expect(table?.querySelector('tbody tr')?.textContent).toBe('Acme Large−12−30 to 6');
+    expect(text(html)).toContain('30 public cases, 35 held-out cases.');
+    expect(text(html)).toContain('Private cases are excluded.');
+    expect(text(html)).toContain('This diagnostic cannot establish training contamination.');
+    expect(text(html)).toContain('Intervals use independent case clusters');
+  });
+
+  test.each([
+    ['insufficient_cases', 'At least 30 independent cases per split are required.'],
+    ['no_common_field', 'Comparable estimates are unavailable'],
+  ] as const)('explains an unavailable split comparison: %s', async (unavailable, reason) => {
+    const round = await load();
+    round.results.public_held_out = {
+      public_cases: 30,
+      held_out_cases: 17,
+      unavailable,
+      scores: [],
+    };
+
+    const html = render(round);
+
+    expect(text(html)).toContain('30 public cases, 17 held-out cases.');
+    expect(text(html)).toContain(reason);
+    expect(comparison(html)?.querySelector('table')).toBeNull();
   });
 
   test('shows a dash for a system with no both-bad rate', async () => {
