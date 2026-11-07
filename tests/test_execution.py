@@ -299,9 +299,9 @@ class TestExecutionPlugin:
         first = planned(run_context, family, system).model_copy(
             update={'job_name': 'initial'}
         )
-        for task in first.tasks:
-            assert task.path is not None
-            break_setting(task.path, ('verifier', 'environment_mode'), 'separate')
+        for configured in first.tasks:
+            assert configured.path is not None
+            break_setting(configured.path, ('verifier', 'environment_mode'), 'separate')
         execution.execute(
             run_context,
             first,
