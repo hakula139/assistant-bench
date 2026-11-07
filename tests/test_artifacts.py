@@ -788,6 +788,44 @@ class TestArtifactRepository:
             )
 
     class TestMaterialize:
+        def test_refuses_a_manifest_that_omits_a_retained_directory_parent(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            outside = tmp_path / 'outside.txt'
+            outside.write_bytes(b'Leave this external file unchanged.\n')
+            workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
+            (workspace / 'external').symlink_to(outside)
+            manifest = snapshot(trial)
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
+            )
+            payload = manifest.model_dump(mode='json')
+            payload['directories'].remove(
+                f'job/{trial.result.trial_name}/artifacts/app'
+            )
+            content = f'{json.dumps(payload, indent=2)}\n'.encode()
+
+            with pytest.raises(ValidationError):
+                TrialManifest.model_validate_json(content)
+
+            git(repository.seed, 'pull', '--quiet', '--ff-only', 'origin', 'main')
+            (repository.seed / reference.path / 'manifest.json').write_bytes(content)
+            git(repository.seed, 'add', '.')
+            git(repository.seed, 'commit', '--quiet', '-m', 'Omit a directory parent')
+            git(repository.seed, 'push', '--quiet', 'origin', 'main')
+            changed = reference.model_copy(
+                update={
+                    'commit_sha': git(repository.seed, 'rev-parse', 'HEAD'),
+                    'manifest_digest': hashlib.sha256(content).hexdigest(),
+                }
+            )
+
+            with pytest.raises(InputError):
+                repository.client.materialize(changed, tmp_path / 'restored')
+
+            assert outside.read_bytes() == b'Leave this external file unchanged.\n'
+            assert not (tmp_path / 'restored').exists()
+
         def test_preserves_frozen_empty_directories_after_the_original_client_is_gone(
             self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
