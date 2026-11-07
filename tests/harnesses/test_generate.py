@@ -25,6 +25,7 @@ from assistant_bench.harnesses.messages import MessageStreamError
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.outputs import Output
+from assistant_bench.runtime import RunContext
 from assistant_bench.scoring.gates import failed_gates
 from assistant_bench.state import State
 from assistant_bench.tasks import render_tasks
@@ -32,11 +33,11 @@ from support import (
     StubEndpoint,
     accounted_trial,
     completion,
+    executed_trial,
     make_system,
     message,
     message_stream,
     response,
-    write_trial,
 )
 
 
@@ -84,10 +85,8 @@ def run_agent(
 
 
 def collect_reply(
-    private_state: State,
+    run_context: RunContext,
     endpoint: StubEndpoint,
-    logs_dir: Path,
-    data_dir: Path,
     system: System,
 ) -> tuple[AgentContext, Output]:
     """Run `system` on the first `smoke-text` case and collect its one output."""
@@ -95,27 +94,51 @@ def collect_reply(
     family = family.model_copy(
         update={
             'settings': family.settings.model_copy(
-                update={'systems': [system.name], 'reference': system.name}
+                update={
+                    'systems': [system.name],
+                    'reference': system.name,
+                    'samples': 1,
+                }
             )
         }
     )
-    (task,) = render_tasks(family, load_cases(family)[:1])
-    config = jobs.job(family, jobs.family_systems(family, [system]), [task])
-    context, output = run_agent(
-        private_state, endpoint, logs_dir, **agent_kwargs(system)
+    (task,) = render_tasks(
+        family,
+        load_cases(family, private_root=run_context.private_root)[:1],
+        root=run_context.root,
     )
-    write_trial(
-        data_dir / 'jobs' / family.name / 'job-1',
-        'en-greeting__1',
-        config.agents[0],
-        task=f'{family.name}/en-greeting',
-        output=output.read_text(),
-        context=context,
-        instruction=None,
-        environment=config.environment,
-        verifier_disabled=config.verifier.disable,
+    config = jobs.job(
+        family,
+        jobs.family_systems(family, [system]),
+        [task],
+        root=run_context.root,
+        sources=[],
     )
-    (collected,) = collection.collect(family, {system.name: system}).outputs
+
+    async def execute() -> AgentContext:
+        async with executed_trial(
+            run_context, config, system, scope=family.name
+        ) as trial:
+            context = trial.result.agent_result
+            assert context is not None
+            agent = Generate(
+                logs_dir=trial.paths.agent_dir,
+                model_name=system.route,
+                extra_env=endpoint.env,
+                **agent_kwargs(system),
+            )
+            await agent.run(
+                (task / 'instruction.md').read_text(),
+                MagicMock(spec=BaseEnvironment),
+                context,
+            )
+            return context
+
+    context = asyncio.run(execute())
+    run_context.refresh_sources(family)
+    (collected,) = collection.collect(
+        family, {system.name: system}, run_context
+    ).outputs
     return context, collected
 
 
@@ -155,10 +178,8 @@ class TestGenerate:
         )
         def test_openai_cache_writes_survive_sdk_accounting_and_collection(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
-            logs_dir: Path,
-            data_dir: Path,
             api: Api,
             writes: int,
             tokens: tuple[int | None, ...],
@@ -178,9 +199,7 @@ class TestGenerate:
                 price=Price(input=2.0, output=10.0, cache_read=0.2),
             )
 
-            context, collected = collect_reply(
-                private_state, endpoint, logs_dir, data_dir, system
-            )
+            context, collected = collect_reply(run_context, endpoint, system)
 
             assert collected.text == 'Hello there.'
             assert (
@@ -389,10 +408,8 @@ class TestGenerate:
         )
         def test_collects_the_native_refusal_detail_into_the_output_record(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
-            logs_dir: Path,
-            data_dir: Path,
             stop: str,
             details: dict[str, Any] | None,
             finish: str,
@@ -405,9 +422,7 @@ class TestGenerate:
                 api='anthropic-messages', thinking_mode='anthropic-adaptive'
             )
 
-            _, collected = collect_reply(
-                private_state, endpoint, logs_dir, data_dir, system
-            )
+            _, collected = collect_reply(run_context, endpoint, system)
 
             assert collected.model_dump(include={'finish_reason', 'stop_details'}) == {
                 'finish_reason': finish,

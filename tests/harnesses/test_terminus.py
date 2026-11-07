@@ -35,7 +35,7 @@ from openai.types.responses import Response
 
 from assistant_bench import collection, jobs
 from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, System
-from assistant_bench.families import load_family
+from assistant_bench.families import case_task, load_family
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import HARNESSES, agent_kwargs
 from assistant_bench.harnesses.accounting import TrialAccounting
@@ -58,11 +58,13 @@ from assistant_bench.harnesses.terminus import (
     TerminusOptions,
 )
 from assistant_bench.outputs import Output, StopDetails
+from assistant_bench.runtime import RunContext
 from assistant_bench.state import State
 from support import (
     StubEndpoint,
     accounted_trial,
     completion,
+    executed_trial,
     make_system,
     message,
     message_stream,
@@ -70,7 +72,6 @@ from support import (
     response,
     terminus_completion,
     write_task_family,
-    write_trial,
 )
 
 
@@ -115,7 +116,6 @@ class NativeProbe(Terminus):
     async def execute(
         self, private_state: State, session: TmuxSession, context: AgentContext
     ) -> None:
-        self._session = session
         assert isinstance(self.options, TerminusOptions)
         with accounted_trial(
             private_state,
@@ -123,7 +123,11 @@ class NativeProbe(Terminus):
             fingerprint=self.options.fingerprint,
             trial=self.logs_dir.parent.name,
         ):
-            await self.run('Greet me.', session.environment, context)
+            await self.execute_trial(session, context)
+
+    async def execute_trial(self, session: TmuxSession, context: AgentContext) -> None:
+        self._session = session
+        await self.run('Greet me.', session.environment, context)
 
     def closure_check(self) -> Callable[[], bool]:
         return self._endpoint_client.is_closed
@@ -206,49 +210,52 @@ def messages_agent(
 
 
 def run_and_collect(
-    private_state: State,
+    run_context: RunContext,
     system: System,
     endpoint: StubEndpoint,
     terminal_session: TmuxSession,
-    logs_dir: Path,
     families_dir: Path,
-    data_dir: Path,
     error: type[Exception] | None = None,
-) -> tuple[AgentContext, Output]:
+) -> tuple[AgentContext, Output, Path]:
     """Run Terminus on a one-task family, then record and collect its trial.
 
     A run expected to fail with `error` records its type as Harbor does.
     """
     write_task_family(families_dir, 'echo', systems=(system.name,))
     family = load_family('f')
-    config = jobs.job(family, [system], [])
-    agent = NativeProbe(
-        logs_dir=logs_dir,
-        model_name=system.route,
-        extra_env=endpoint.env,
-        **agent_kwargs(system),
-    )
-    context = AgentContext()
+    task = case_task(family, 'echo', private_root=run_context.private_root)
+    config = jobs.job(family, [system], [task], root=run_context.root, sources=[])
+    config.n_attempts = 1
+    context: AgentContext | None = None
+    logs_dir: Path | None = None
+
+    async def execute() -> None:
+        nonlocal context, logs_dir
+        async with executed_trial(
+            run_context, config, system, scope=family.name
+        ) as trial:
+            context = trial.result.agent_result
+            assert context is not None
+            logs_dir = trial.paths.agent_dir
+            agent = NativeProbe(
+                logs_dir=logs_dir,
+                model_name=system.route,
+                extra_env=endpoint.env,
+                **agent_kwargs(system),
+            )
+            await agent.execute_trial(terminal_session, context)
 
     if error is None:
-        asyncio.run(agent.execute(private_state, terminal_session, context))
+        asyncio.run(execute())
     else:
         with pytest.raises(error):
-            asyncio.run(agent.execute(private_state, terminal_session, context))
-    write_trial(
-        data_dir / 'jobs' / family.name / 'job-1',
-        'echo__1',
-        config.agents[0],
-        task=f'{family.name}/echo',
-        version='1.0.0',
-        instruction=None,
-        context=context,
-        error=error.__name__ if error else None,
-        environment=config.environment,
-        verifier_disabled=config.verifier.disable,
-    )
-    (collected,) = collection.collect(family, {system.name: system}).outputs
-    return context, collected
+            asyncio.run(execute())
+    assert context is not None and logs_dir is not None
+    run_context.refresh_sources(family)
+    (collected,) = collection.collect(
+        family, {system.name: system}, run_context
+    ).outputs
+    return context, collected, logs_dir
 
 
 class TestTerminus:
@@ -581,12 +588,10 @@ class TestTerminus:
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_openai_cache_writes_survive_terminal_aggregation_and_collection(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            logs_dir: Path,
             families_dir: Path,
-            data_dir: Path,
             api: Api,
         ) -> None:
             payload = terminus_completion()
@@ -607,14 +612,12 @@ class TestTerminus:
                 price=Price(input=2.0, output=10.0, cache_read=0.2),
             )
 
-            context, collected = run_and_collect(
-                private_state,
+            context, collected, _ = run_and_collect(
+                run_context,
                 system,
                 endpoint,
                 terminal_session,
-                logs_dir,
                 families_dir,
-                data_dir,
             )
 
             assert (
@@ -638,12 +641,10 @@ class TestTerminus:
         )
         def test_sums_reasoning_tokens_only_when_every_response_reports_them(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            logs_dir: Path,
             families_dir: Path,
-            data_dir: Path,
             reported: tuple[int | None, ...],
             total: int | None,
         ) -> None:
@@ -661,14 +662,12 @@ class TestTerminus:
                 harness='terminus-2', max_output_tokens=32768, context_window=131072
             )
 
-            _, collected = run_and_collect(
-                private_state,
+            _, collected, _ = run_and_collect(
+                run_context,
                 system,
                 endpoint,
                 terminal_session,
-                logs_dir,
                 families_dir,
-                data_dir,
             )
 
             assert len(endpoint.requests) == 2
@@ -837,12 +836,10 @@ class TestTerminus:
         )
         def test_native_completion_failure_names_its_cause_without_quality_retries(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            logs_dir: Path,
             families_dir: Path,
-            data_dir: Path,
             stop: str,
             details: dict[str, Any] | None,
             tool: bool,
@@ -867,14 +864,12 @@ class TestTerminus:
                 context_window=131072,
             )
 
-            context, collected = run_and_collect(
-                private_state,
+            context, collected, _ = run_and_collect(
+                run_context,
                 system,
                 endpoint,
                 terminal_session,
-                logs_dir,
                 families_dir,
-                data_dir,
                 NativeCompletionError,
             )
 
@@ -1648,12 +1643,10 @@ class TestTerminus:
         )
         def test_rejects_unusable_native_responses_without_retrying(
             self,
-            private_state: State,
+            run_context: RunContext,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
-            logs_dir: Path,
             families_dir: Path,
-            data_dir: Path,
             status: str,
             reason: str | None,
             refusal: str | None,
@@ -1689,14 +1682,12 @@ class TestTerminus:
                 context_window=131072,
             )
 
-            context, collected = run_and_collect(
-                private_state,
+            context, collected, logs_dir = run_and_collect(
+                run_context,
                 system,
                 endpoint,
                 terminal_session,
-                logs_dir,
                 families_dir,
-                data_dir,
                 NativeCompletionError,
             )
 
