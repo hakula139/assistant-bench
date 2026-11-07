@@ -170,9 +170,13 @@ class _Client(httpx2.AsyncClient):
         if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
             return
         recorder = self._accounting()
-        recorder.remember_secret(self._endpoint.api_key())
-        for value in (self._endpoint.headers or {}).values():
-            recorder.remember_secret(value)
+        if authorization := request.headers.get('Authorization'):
+            recorder.remember_secret(authorization.removeprefix('Bearer '))
+        if key := request.headers.get('x-api-key'):
+            recorder.remember_secret(key)
+        for name in self._endpoint.headers or {}:
+            if value := request.headers.get(name):
+                recorder.remember_secret(value)
         request.extensions[REQUEST_ID] = await recorder.admit(self._api)
 
     async def _confirm(self, response: httpx2.Response) -> None:
