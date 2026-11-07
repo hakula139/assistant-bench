@@ -182,3 +182,37 @@ class TestExtractHtml:
         )
 
         assert extract_html(source) == source
+
+    def test_preserves_literal_markdown_fences_inside_a_bare_html_body(self) -> None:
+        source = DOCUMENT.replace('<h1>Welcome</h1>', '\n\n```text\nExample\n```\n\n')
+
+        assert extract_html(source) == source
+
+    @pytest.mark.parametrize(
+        'element', ['animate', 'set', 'animateMotion', 'animateTransform']
+    )
+    @pytest.mark.parametrize('uppercase', [False, True], ids=['canonical', 'uppercase'])
+    def test_refuses_svg_declarative_mutations_of_validated_fragment_links(
+        self, element: str, uppercase: bool
+    ) -> None:
+        name = element.upper() if uppercase else element
+        markup = (
+            '<svg><a href="#local">'
+            f'<{name} attributeName="href" to="https://example.com/escape" '
+            'dur="1ms" fill="freeze"/>'
+            '<text>Go</text></a></svg><p id="local">Local</p>'
+        )
+        source = DOCUMENT.replace('<h1>Welcome</h1>', markup)
+
+        assert extract_html(source) is None
+
+    def test_accepts_static_svg_css_animation_and_inert_html_names(self) -> None:
+        source = DOCUMENT.replace(
+            '<h1>Welcome</h1>',
+            '<style>@keyframes pulse { to { opacity: .5; } } '
+            'circle { animation: pulse 1s infinite; }</style>'
+            '<svg><circle cx="20" cy="20" r="10"/></svg>'
+            '<set>Inert HTML element</set>',
+        )
+
+        assert extract_html(source) == source

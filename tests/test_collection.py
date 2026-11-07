@@ -40,6 +40,7 @@ from assistant_bench.tasks import (
     render_tasks,
 )
 from support import (
+    FIXTURES,
     START,
     VOTES,
     break_setting,
@@ -288,6 +289,34 @@ class TestCollect:
         outputs = collection.collect(family, {'acme-large': make_system()}).outputs
 
         assert outputs == []
+
+    @pytest.mark.parametrize('newline', ['\n', '\r\n', '\r'])
+    @pytest.mark.parametrize('eligible', [True, False], ids=['eligible', 'ineligible'])
+    def test_extracts_html_without_losing_raw_failed_evidence(
+        self, data_dir: Path, newline: str, eligible: bool
+    ) -> None:
+        family = votes_family(render='html', language=None, gates=Gates())
+        document = (FIXTURES / 'html' / 'community-event.html').read_text()
+        document = document.replace('\n', newline)
+        source = document if eligible else document.replace('</body>', '')
+        reply = f'```html{newline}{source}```{newline}'
+        case = Case(id='page', category='reply', source='synthetic', instruction='Hi.')
+        render_cases(family, [case])
+        record_trial(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            'page__1',
+            current_agent(family),
+            task='f/page',
+            output=reply,
+            instruction=None,
+            context=AgentContext(metadata={'finish_reason': 'stop'}),
+            family=family,
+        )
+
+        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+
+        assert output.text == (document if eligible else reply)
+        assert output.gate_failures == ([] if eligible else [Gate.HTML])
 
     @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
     def test_collects_generations_and_errors(self, data_dir: Path, api: str) -> None:
