@@ -286,8 +286,11 @@ def run_context(
     private_repository: PrivateRepository,
 ) -> RunContext:
     @contextmanager
-    def connect(target: str) -> Generator[SQLiteDatabase]:
+    def connect(
+        target: str, *, credential: str | None = None
+    ) -> Generator[SQLiteDatabase]:
         assert target == 'private'
+        assert credential == 'synthetic-database-credential'
         yield private_store
 
     monkeypatch.setattr(execution, 'connect', connect)
