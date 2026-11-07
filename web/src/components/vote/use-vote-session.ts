@@ -97,7 +97,7 @@ export function useVoteSession() {
 
   /** Returns to the family list with the reason a pair did not load, unless admission can help. */
   const loadFailed = (reason: unknown) => {
-    if (isCode(reason, 'admission_required')) {
+    if (isCode(reason, 'admission_required') || isCode(reason, 'reload_required')) {
       failed(reason);
       return;
     }

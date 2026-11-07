@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { getSignedCookie, setSignedCookie } from 'hono/cookie';
 import * as z from 'zod/mini';
 
-import { ApiError, type Api, type Bindings } from './api';
+import { ApiError, type Api, type PublicBindings } from './api';
 import { hex, signer } from './hmac';
 import { ACTOR_MAX_AGE_MS, ACTORS_PER_TAG, WINDOW_MS } from './limits';
 
@@ -41,7 +41,7 @@ export async function ipTag(key: string, address: string): Promise<string> {
 
 /** Checks a Turnstile token with Cloudflare, for the hostname this deployment's widget runs on. */
 export async function verifyChallenge(
-  env: Bindings,
+  env: PublicBindings,
   token: string,
   address: string,
 ): Promise<void> {
@@ -70,6 +70,14 @@ export async function admit(db: D1Database, tag: string, now: number): Promise<s
     throw new ApiError(429, 'daily_limit');
   }
   return id;
+}
+
+/** Preserves the private owner's identity and original creation time across browsers. */
+export async function admitOwner(db: D1Database, actor: string, now: number): Promise<void> {
+  await db
+    .prepare('INSERT INTO actors (id, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING')
+    .bind(actor, now)
+    .run();
 }
 
 /** The actor ID the cookie carries under a valid signature, before any lookup. */
@@ -103,6 +111,15 @@ export async function knownActor(db: D1Database, actor: string | null, now: numb
 /** The request's actor, or 401 `admission_required`. */
 export async function requireActor(c: Context<Api>, now: number): Promise<string> {
   const actor = c.get('claimed');
+  if (c.env.STORE === 'private') {
+    if (
+      actor !== c.env.PRIVATE_ACTOR_ID ||
+      (await c.env.DB.prepare('SELECT 1 FROM actors WHERE id = ?').bind(actor).first()) === null
+    ) {
+      throw new ApiError(401, 'reload_required');
+    }
+    return actor;
+  }
   if (actor === null || !(await knownActor(c.env.DB, actor, now))) {
     throw new ApiError(401, 'admission_required');
   }
