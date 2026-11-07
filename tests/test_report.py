@@ -1267,7 +1267,7 @@ class TestVotesResults:
     def test_scales_length_with_inherited_weights_in_the_ranked_component(self) -> None:
         analysis = make_capped_analysis()
         connected = tuple(row for row in analysis.ordinary if row.systems == ('a', 'b'))
-        raw_differences = []
+        raw_differences: list[float] = []
         for row in connected:
             assert row.length_a is not None and row.length_b is not None
             raw_differences.append(
