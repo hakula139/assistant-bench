@@ -48,6 +48,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        dk = devkit.lib.mkLib pkgs;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -106,13 +107,11 @@
           };
         };
 
-        uvExe = pkgs.lib.getExe pkgs.uv;
-
         uvHooks = {
           ruff = {
             enable = true;
             package = null;
-            entry = "${uvExe} run --locked ruff check --fix";
+            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} check --fix";
             types = [ "file" ];
             types_or = [
               "python"
@@ -123,7 +122,7 @@
           ruff-format = {
             enable = true;
             package = null;
-            entry = "${uvExe} run --locked ruff format";
+            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} format";
             types = [ "file" ];
             types_or = [
               "python"
@@ -132,14 +131,14 @@
           };
         };
 
-        preCommit = (devkit.lib.mkLib pkgs).preCommit {
+        preCommit = dk.preCommit {
           src = ./.;
           inherit hooks;
           devHooks = uvHooks // {
             prettier = {
               enable = true;
               package = null;
-              entry = "${pkgs.lib.getExe pnpm} exec prettier --write --ignore-unknown";
+              entry = "${pkgs.lib.getExe (dk.nodeTool "prettier")} --write --ignore-unknown";
               files = "\\.(astro|css|js|json|jsonc|md|mdx|ts|tsx|ya?ml)$";
             };
           };
