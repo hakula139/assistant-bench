@@ -332,6 +332,22 @@ describe('VoteApp', () => {
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toHaveLength(1);
   });
 
+  test('keeps the private family selected and asks to reload without opening Turnstile', async () => {
+    const api = stubApi();
+    override(api, '/api/pair', () =>
+      Promise.resolve(Response.json({ error: 'reload_required' }, { status: 401 })),
+    );
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+
+    render(<VoteApp />);
+    const alert = await screen.findByRole('alert');
+
+    expect(alert.textContent).toBe('Reload this page to resume private voting.');
+    expect(location.search).toBe(`?family=${FAMILY.family}`);
+    expect(screen.queryByTestId('turnstile')).toBeNull();
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toEqual([]);
+  });
+
   test('reports a challenge the Worker rejects without admitting the browser', async () => {
     const api = stubApi({ admitted: false });
     override(api, '/api/actors', () =>
