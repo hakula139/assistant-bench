@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -161,7 +162,7 @@ def trial(
     (vendor / 'module.py').write_text("LABEL = 'nested repository contents'\n")
     git(vendor, 'add', '.')
     git(vendor, 'commit', '--quiet', '-m', 'Add synthetic nested source')
-    with sqlite3.connect(workspace / 'fixture.sqlite') as database:
+    with closing(sqlite3.connect(workspace / 'fixture.sqlite')) as database, database:
         database.execute('CREATE TABLE sample (value TEXT)')
         database.execute("INSERT INTO sample VALUES ('example')")
     for excluded in ('.git', '__pycache__'):
