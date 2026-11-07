@@ -189,12 +189,12 @@ export async function freshness(
   store: Bindings['STORE'],
   query: FreshnessQuery,
 ): Promise<Freshness> {
-  if (store === 'staging' || query[store] === undefined) {
+  if (store !== 'production' || query.production === undefined) {
     return 'unknown';
   }
   const row = await db
     .prepare(FRESHNESS)
-    .bind(query.family, Number(query[store]), Number(query[`${store}_votes`]))
+    .bind(query.family, Number(query.production), Number(query.production_votes))
     .first<{ stale: number }>();
   return row?.stale ? 'stale' : 'current';
 }
