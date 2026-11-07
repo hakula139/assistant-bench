@@ -40,7 +40,7 @@ GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra='forbid', frozen=True)
+    model_config = ConfigDict(extra='forbid', frozen=True, strict=True)
 
 
 class FileEntry(_Model):
@@ -159,7 +159,7 @@ def build_manifest(
 
 
 class _Repository(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='ignore', strict=True)
 
     full_name: str
     private: bool
