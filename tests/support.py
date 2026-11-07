@@ -18,10 +18,11 @@ from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
 from pathlib import Path
 from random import Random
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import tomli_w
 from harbor.job_plan import JobPlan
@@ -69,6 +70,11 @@ from assistant_bench.families import (
 )
 from assistant_bench.generation import Generation
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.accounting import (
+    TrialAccounting,
+    bind_trial,
+    reset_trial,
+)
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -79,6 +85,8 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import runnable_systems
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.spend import CanaryAccounting
+from assistant_bench.state import Claim, Run, State
 from assistant_bench.tasks import render_task_config
 
 
@@ -1025,6 +1033,68 @@ def arena_database() -> Generator[SQLiteDatabase]:
         for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
             connection.executescript(path.read_text())
         yield SQLiteDatabase(connection)
+
+
+@contextmanager
+def private_database(path: Path | None = None) -> Generator[SQLiteDatabase]:
+    """Open private state, initializing a new database from the shipped schemas."""
+    initialize = path is None or not path.exists()
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(
+        sqlite3.connect(path if path is not None else ':memory:', autocommit=True)
+    ) as connection:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 100)
+        connection.execute('PRAGMA foreign_keys = ON')
+        if initialize:
+            for migration in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                connection.executescript(migration.read_text())
+            schema = files('assistant_bench').joinpath('sql/private/0001_state.sql')
+            connection.executescript(schema.read_text())
+        yield SQLiteDatabase(connection)
+
+
+@contextmanager
+def accounted_trial(
+    state: State,
+    *,
+    system: str = 'acme-large',
+    fingerprint: str = 'f' * 12,
+    trial: str = 'trial',
+    scope: str = 'sample',
+) -> Generator[TrialAccounting]:
+    """Bind a real claimed trial without starting its paid attempt."""
+    identifier = str(uuid4())
+    parent = Run(
+        id=identifier,
+        scope=scope,
+        job=f'job-{identifier}',
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        created_at=START.isoformat(),
+    )
+    claim = Claim(
+        id=str(uuid4()),
+        run_id=parent.id,
+        scope=scope,
+        slot_key=f'{trial}/{system}/{identifier}',
+        trial=trial,
+        system=system,
+        fingerprint=fingerprint,
+        accounting_json=CanaryAccounting(
+            system=system, price=None, ceiling_usd=None
+        ).model_dump_json(),
+        expected_source_revision=state.source_revision(scope),
+        created_at=START.isoformat(),
+    )
+    state.create_run(parent)
+    assert state.claim_attempt(claim)
+    recorder = TrialAccounting(state, claim)
+    token = bind_trial(recorder)
+    try:
+        yield recorder
+    finally:
+        reset_trial(token)
 
 
 # ── Synthetic Round ──

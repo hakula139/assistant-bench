@@ -1,8 +1,9 @@
 import os
 import ssl
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import httpx2
@@ -15,12 +16,19 @@ from assistant_bench import families, jobs, report
 from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.database import SQLiteDatabase
+from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.accounting import TrialAccounting
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
+from assistant_bench.state import State
 from support import (
     EXPORT_FILE,
+    START,
     StubEndpoint,
+    accounted_trial,
     arena_database,
+    make_system,
+    private_database,
     serve_stub,
 )
 
@@ -126,8 +134,11 @@ def endpoint_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncOpenAI]:
     clients: list[AsyncOpenAI] = []
     build = Endpoint.client
 
-    def record(endpoint: Endpoint) -> AsyncOpenAI:
-        client = build(endpoint)
+    def record(
+        endpoint: Endpoint,
+        api: Literal['openai-chat-completions', 'openai-responses'],
+    ) -> AsyncOpenAI:
+        client = build(endpoint, api)
         clients.append(client)
         return client
 
@@ -187,6 +198,35 @@ def reports_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def arena_store() -> Iterator[SQLiteDatabase]:
     with arena_database() as database:
         yield database
+
+
+@pytest.fixture
+def private_store() -> Iterator[SQLiteDatabase]:
+    with private_database() as database:
+        yield database
+
+
+@pytest.fixture
+def private_state(private_store: SQLiteDatabase) -> State:
+    return State(private_store)
+
+
+@pytest.fixture
+def bound_trial(private_state: State) -> Iterator[TrialAccounting]:
+    system = make_system()
+    with accounted_trial(
+        private_state, system=system.name, fingerprint=fingerprint(system)
+    ) as recorder:
+        yield recorder
+
+
+@pytest.fixture
+def begun_trial(bound_trial: TrialAccounting) -> Iterator[TrialAccounting]:
+    bound_trial.begin(START)
+    try:
+        yield bound_trial
+    finally:
+        bound_trial.finish(START + timedelta(seconds=1))
 
 
 @pytest.fixture
