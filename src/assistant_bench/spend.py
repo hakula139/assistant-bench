@@ -52,7 +52,27 @@ def update_ledger(family: Family, systems: Mapping[str, System]) -> list[Entry]:
     its system's current price, so a later price change or a system leaving the
     catalog leaves its cost as it was.
     """
-    path = _ledger_file(family.name)
+    return _update_ledger(
+        _ledger_file(family.name),
+        sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}')),
+        systems,
+    )
+
+
+def update_canary_ledger(
+    job_dirs: Iterable[Path], systems: Mapping[str, System]
+) -> list[Entry]:
+    """Keep probe attempts outside family budgets, priced at their actual limits."""
+    return _update_ledger(
+        _ledger_file('canaries'),
+        [path / ATTEMPTS_FILE for path in job_dirs if (path / ATTEMPTS_FILE).exists()],
+        systems,
+    )
+
+
+def _update_ledger(
+    path: Path, attempts_paths: Iterable[Path], systems: Mapping[str, System]
+) -> list[Entry]:
     entries = _unique(
         [Entry.model_validate_json(line) for line in path.read_text().splitlines()]
         if path.exists()
@@ -61,7 +81,7 @@ def update_ledger(family: Family, systems: Mapping[str, System]) -> list[Entry]:
     seen = {_key(entry) for entry in entries}
     added = [
         entry
-        for attempts in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
+        for attempts in attempts_paths
         for entry in _read_attempts(attempts, systems)
         if _key(entry) not in seen
     ]

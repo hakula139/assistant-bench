@@ -114,11 +114,15 @@ Before Harbor starts, `bench run` prints each system's pending trials, the trial
 
 A terminal agent's trajectory `final_metrics` counts only responses with valid usage.
 
+Before adding family trials, a run also sends the [route canaries](../design/systems.md#model-swaps) for systems with pending work. Its printed full-context cost ceiling includes the resolved system prompt and API framing within the context allowance, plus the probe's completion allowance including reasoning. An unknown price or cache-write rate leaves that ceiling unknown. Actual probe spend is recorded separately in `spend/canaries.jsonl` and does not consume family budgets.
+
 ### Model Swaps
 
 A fingerprint hashes a system's route, so an endpoint that starts serving another model under an unchanged route keeps the fingerprint. The summary names each system whose pool shows a swap by the signals [Systems](../design/systems.md#model-swaps) defines, with the jobs behind each signal. `bench arena prepare` and `bench close` on a `tests` family refuse such a family, since publishing would start votes on the mixed pool and closing would freeze it.
 
 When the route serves another model, delete the minority job's trials of that system under `jobs/<family>/` and rerun them, or give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
+
+A canary refusal happens before new family trials start. If the route changed models, remove that system's stale trials and `canaries/<system>.jsonl`, then rerun. For a benign template change, remove only the canary file to establish a new baseline. For a failed probe, correct the reported failure and rerun. Keep `spend/canaries.jsonl` so resetting a baseline preserves past costs.
 
 ## Voting
 
@@ -204,8 +208,11 @@ Everything a run produces stays out of Git in the [data directory](../convention
 
 ```text
 assistant-bench/
-├── agents/<harness>/<version>/<platform>/   # Verified vendor CLI executables for installed agents
+├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
 ├── arena/                                 # Local vote database, signing keys and serve lock
+├── canaries/<system>.jsonl                 # Every route probe, including its identities, protocol, usage and outcome
+├── canaries/jobs/<job>/                    # Probe Harbor jobs, separate from family collection
+├── canaries/task/                          # The fixed synthetic probe task
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
@@ -213,6 +220,7 @@ assistant-bench/
 ├── outputs/<family>.jsonl                  # Collected Harbor trial records
 ├── publications/<family>/<id>.json         # Publications from `bench arena prepare`, each with its .md listing
 ├── spend/<family>.jsonl                    # The family's ledger of agent attempts
+├── spend/canaries.jsonl                    # Probe attempts outside family budgets
 ├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
 └── votes/<family>/<taken-at>.json          # Vote cuts that `bench close` saved
 ```
