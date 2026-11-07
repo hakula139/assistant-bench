@@ -69,7 +69,8 @@ def require_loopback(request: httpx.Request | httpx2.Request) -> None:
 
 
 @pytest.fixture(autouse=True)
-def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> set[tuple[str, str]]:
+    downloads: set[tuple[str, str]] = set()
     send = httpx.AsyncClient.send
     send2 = httpx2.AsyncClient.send
     handle = httpx.HTTPTransport.handle_request
@@ -89,12 +90,18 @@ def loopback_requests_only(monkeypatch: pytest.MonkeyPatch) -> None:
     def checked_handle(
         transport: httpx.HTTPTransport, request: httpx.Request
     ) -> httpx.Response:
-        require_loopback(request)
+        if not (
+            request.method == 'GET'
+            and request.url.scheme == 'https'
+            and (request.url.host, request.url.path) in downloads
+        ):
+            require_loopback(request)
         return handle(transport, request)
 
     monkeypatch.setattr(httpx.AsyncClient, 'send', checked_send)
     monkeypatch.setattr(httpx2.AsyncClient, 'send', checked_send2)
     monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', checked_handle)
+    return downloads
 
 
 @pytest.fixture

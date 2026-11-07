@@ -34,14 +34,16 @@ A fingerprint hashes a system's route, so it cannot see an endpoint that serves 
 
 `System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route as the model name.
 
-| Harness      | Agent                                         | Environment                                      |
-| ------------ | --------------------------------------------- | ------------------------------------------------ |
-| `generate`   | `assistant_bench.harnesses.generate:Generate` | `assistant_bench.harnesses.host:HostEnvironment` |
-| `terminus-2` | `assistant_bench.harnesses.terminus:Terminus` | Harbor's Docker environment                      |
+| Harness       | Agent                                            | Environment                                      |
+| ------------- | ------------------------------------------------ | ------------------------------------------------ |
+| `generate`    | `assistant_bench.harnesses.generate:Generate`    | `assistant_bench.harnesses.host:HostEnvironment` |
+| `terminus-2`  | `assistant_bench.harnesses.terminus:Terminus`    | Harbor's Docker environment                      |
+| `claude-code` | `assistant_bench.harnesses.installed:ClaudeCode` | Harbor's Docker environment                      |
+| `codex`       | `assistant_bench.harnesses.installed:Codex`      | Harbor's Docker environment                      |
 
 Harbor gives every trial of a job the same environment. A job whose harnesses are all `single_call` runs in `HostEnvironment`, which starts no container and refuses every command and file transfer, and any other job runs in Harbor's Docker environment. `bench check`'s oracle and nop jobs run in Docker, since both act in the task's container.
 
-`systems.toml` has no `harness` key, so a case family runs every system as `generate`, the single-call agent, while a task family runs every system it lists under the family's [`harness`](../guide/authoring.md#families). A harness that cannot send a system's prompt, which `terminus-2` cannot, makes `bench check` and `bench run` refuse the family while it lists a system with one. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry.
+Systems without an explicit harness run as `generate` in case families and inherit a task family's [`harness`](../guide/authoring.md#families). An installed agent's per-system `harness` and pinned `version` override that default. Claude Code requires native Messages, and Codex requires Responses. Both require task families. Only `generate` accepts a system prompt, and `bench check` and `bench run` refuse unsupported combinations before a job starts. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry.
 
 `terminus-2` is Harbor's terminal agent: it sends its JSON protocol to the model from the host and drives the container's shell through tmux, which its task images install. Its generation version combines the bench's declared generation protocol with the locked Harbor version, since Harbor supplies its prompt and loop. `generate` uses only the bench's generation protocol. Resolved systems capture those versions, and each native agent reports the same version after checking that the installed Harbor matches the lock. A Harbor upgrade changes Terminus fingerprints while unrelated grading or tooling changes preserve the single-call protocol.
 
@@ -49,7 +51,11 @@ Terminus routes Chat Completions through LiteLLM under an `openai/` prefix, whic
 
 A single-call response that exhausts its allowance, refuses, or fails remains an incomplete attempt, while Terminus keeps Harbor's output-length handling, which salvages or re-requests a truncated turn. Neither harness retries for quality. Thinking blocks, signatures, and reasoning items stay in private artifacts and conversation state, outside model-visible user text and public outputs. Harbor owns the terminal command loop, its context management, and summarization.
 
-Both harnesses validate reported token counters through one accounting boundary, so an invalid or missing required count leaves tokens and cost unknown, while a reported zero stays zero. Terminus sums usage over completed responses only. Collection prices cache reads and writes separately from the shared catalog, and cost stays unknown when nonzero cache writes lack a declared price. The native clients add no cache breakpoints.
+Every harness validates reported token counters through one accounting boundary, so an invalid or missing required count leaves tokens and cost unknown, while a reported zero stays zero. Multi-turn agents sum usage over completed responses only. Collection prices cache reads and writes separately from the shared catalog, and cost stays unknown when nonzero cache writes lack a declared price. The native clients add no cache breakpoints.
+
+Installed agents use Harbor's native command loop, context management, session logs, and ATIF trajectory conversion. Their CLI release and generation options enter the fingerprint with the locked Harbor version. The host downloads the target architecture's Linux executable into the data directory's `agents/` cache, verifies the vendor's published SHA-256, and uploads it into the container without changing the task image or its install-time network access. Trial metadata records the executable's SHA-256.
+
+Each installed trial uses a host proxy authenticated by a temporary token. The proxy holds the real endpoint key and headers, accepts only the configured model and its API's inference paths, and observes completion events while preserving the forwarded response bytes. It records each completed response in the spend ledger, including unknown usage, and retains completed responses when a later turn fails or times out. The container receives only the temporary proxy credentials. The proxy listens on the host's network interfaces so Docker can reach it through `host.docker.internal`, which is the trial's only added allowed host. Harbor starts with an explicit host-tool and endpoint-variable allowlist, keeping assistant credentials and native settings outside the subprocess.
 
 Harbor records each trial's agent and environment import paths in the job's `config.json`, and `harbor job resume` imports them from there, so an import path must never change once a job uses it.
 

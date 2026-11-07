@@ -55,17 +55,18 @@ class TestCheckSystems:
         ('harness', 'system', 'message'),
         [
             pytest.param(
-                'claude-code',
+                'unknown',
                 make_system(),
-                'Family `f`: harness `claude-code` is not one of `generate`, '
-                '`terminus-2`.',
+                'Family `f`: harness `unknown` is not one of `generate`, '
+                '`terminus-2`, `claude-code`, `codex`.',
                 id='unknown-harness',
             ),
             pytest.param(
                 'generate',
                 make_system(),
                 'Family `f`: harness `generate` makes one request and never acts '
-                "in a task's environment, so choose among `terminus-2`.",
+                "in a task's environment, so choose among `terminus-2`, "
+                '`claude-code`, `codex`.',
                 id='single-call-harness',
             ),
             pytest.param(
@@ -481,6 +482,12 @@ class TestRunJob:
         shutil.copyfile(FIXTURES / 'recording-harbor.sh', harbor)
         harbor.chmod(0o755)
         monkeypatch.setenv('STUB_HARBOR_EXIT_CODE', str(exit_code))
+        environment = jobs.harbor_environment()
+        monkeypatch.setattr(
+            jobs,
+            'harbor_environment',
+            lambda: environment | {'STUB_HARBOR_EXIT_CODE': str(exit_code)},
+        )
         monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
         return harbor
 

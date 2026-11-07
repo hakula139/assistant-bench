@@ -43,6 +43,8 @@ Drop a test once another covers everything it checks.
 
 Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle and nop validation, the terminal agent, reuse without another request, and tests-only regrading that preserves the solution's identity and diff. Verify request settings and keep keys out of job files.
 
+Installed-agent trials download fixed official CLI releases, verify their published checksums, and exercise tool execution, native trajectories, usage, and diff collection. Only their dedicated fixture registers the exact HTTPS GET release and asset paths with the network guard. Model transports remain loopback-only.
+
 `pyproject.toml` deselects Docker tests by default, and Harbor Smoke selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
 
 ## Parallel Runs

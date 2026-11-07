@@ -1,6 +1,7 @@
 """Harbor job configs for a family's systems, and their runs."""
 
 import asyncio
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,8 @@ from assistant_bench.harnesses import (
     agent_kwargs,
     fingerprint,
 )
+from assistant_bench.harnesses.cache import InstalledHarness, artifact
+from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.messages import InputError, code
 from assistant_bench.paths import data_dir
@@ -100,28 +103,43 @@ def check_systems(family: Family, systems: list[System]) -> None:
         that it cannot send.
     """
     check_harness(family)
-    harness = family.settings.harness
-    if harness is None or HARNESSES[harness].sends_prompt:
-        return
-
-    prompted = [system.name for system in systems if system.prompt is not None]
-    if prompted:
-        raise InputError(
-            f'Family `{family.name}` lists {code(prompted)}, whose prompt the '
-            f'`{harness}` harness cannot send. Remove them from `systems`.'
-        )
+    for system in family_systems(family, systems):
+        harness = HARNESSES[system.harness]
+        if family.source != 'tasks' and not harness.single_call:
+            raise InputError(
+                f'Family `{family.name}`: system `{system.name}` uses '
+                f'`{system.harness}`, which requires a task environment.'
+            )
+        if system.api not in harness.apis:
+            raise InputError(
+                f'System `{system.name}`: harness `{system.harness}` accepts '
+                f'{code(harness.apis)} (got `{system.api}`).'
+            )
+        if system.harness in ('claude-code', 'codex') and system.version is None:
+            raise InputError(
+                f'System `{system.name}`: set its `harness` and pinned `version` '
+                'in `systems.toml`.'
+            )
+        if system.prompt is not None and not harness.sends_prompt:
+            raise InputError(
+                f'Family `{family.name}` lists {code([system.name])}, whose prompt the '
+                f'`{system.harness}` harness cannot send. Remove them from `systems`.'
+            )
 
 
 def family_systems(family: Family, systems: list[System]) -> list[System]:
     """Return the systems as the family runs them.
 
-    A task family runs every system under its `harness`, which enters the
-    system's fingerprint, while a case family runs each system as it resolves.
+    A task family's default harness applies to systems without an explicit
+    installed harness. A case family keeps each system as it resolves.
     """
     harness = family.settings.harness
     if harness is None:
         return systems
-    return [system.model_copy(update={'harness': harness}) for system in systems]
+    return [
+        system if system.version else system.model_copy(update={'harness': harness})
+        for system in systems
+    ]
 
 
 def runnable_systems(systems: Mapping[str, System]) -> dict[str, list[System]]:
@@ -172,7 +190,8 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     harness = HARNESSES[system.harness]
     return trial_config.AgentConfig(
         import_path=harness.import_path,
-        model_name=system.route,
+        model_name=f'{harness.model_prefix}{system.route}',
+        extra_allowed_hosts=['host.docker.internal'] if system.version else [],
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
         kwargs=agent_kwargs(system),
@@ -350,8 +369,8 @@ def job_path(config: JobConfig) -> Path:
 def run_job(config: JobConfig) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
-    Harbor inherits the process environment, which must hold `HARBOR_ENV` and
-    lack `ANTHROPIC_CUSTOM_HEADERS`, as `bench` arranges.
+    Harbor receives endpoint settings and the host tools' environment without
+    the assistant's authentication, model settings, or native configuration.
 
     Raises
     ------
@@ -359,11 +378,46 @@ def run_job(config: JobConfig) -> Path:
         Harbor exited with an error.
     """
     harbor = Path(sys.executable).with_name('harbor')
+    installed: set[tuple[InstalledHarness, str]] = set()
+    for agent in config.agents:
+        if agent.import_path == 'assistant_bench.harnesses.installed:ClaudeCode':
+            installed.add(('claude-code', agent.kwargs['version']))
+        elif agent.import_path == 'assistant_bench.harnesses.installed:Codex':
+            installed.add(('codex', agent.kwargs['version']))
+    if installed:
+        architecture = subprocess.check_output(
+            ['docker', 'info', '--format', '{{.Architecture}}'], text=True
+        ).strip()
+        for harness, version in installed:
+            artifact(harness, version, architecture)
     with tempfile.NamedTemporaryFile(
         'w', suffix='.json', delete_on_close=False
     ) as file:
         file.write(config.model_dump_json())
         file.close()
-        subprocess.run([harbor, 'run', '--config', file.name, '--yes'], check=True)
+        subprocess.run(
+            [harbor, 'run', '--config', file.name, '--yes'],
+            check=True,
+            env=harbor_environment(),
+        )
 
     return job_path(config)
+
+
+def harbor_environment() -> dict[str, str]:
+    """Return the host tools and file-backed endpoint settings Harbor needs."""
+    names = {
+        'PATH',
+        'HOME',
+        'USER',
+        'TMPDIR',
+        'LANG',
+        'BENCH_NIXOS_CONFIG',
+        'BENCH_DATA_DIR',
+        *ENDPOINT_VARS,
+    }
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in names or name.startswith(('DOCKER_', 'XDG_'))
+    } | HARBOR_ENV

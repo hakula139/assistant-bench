@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from assistant_bench.catalog import System, SystemIdentity
+from assistant_bench.catalog import Api, System, SystemIdentity
 from assistant_bench.harnesses import options
 
 
@@ -21,6 +21,14 @@ class Harness:
     import_path: str
     options: Callable[[SystemIdentity], dict[str, Any]]
     """Builds the agent's kwargs other than the trial labels."""
+
+    apis: tuple[Api, ...] = (
+        'openai-chat-completions',
+        'openai-responses',
+        'anthropic-messages',
+    )
+    harbor_loop: bool = False
+    model_prefix: str = ''
 
     sends_prompt: bool = False
     single_call: bool = False
@@ -43,6 +51,21 @@ HARNESSES: dict[str, Harness] = {
     'terminus-2': Harness(
         import_path='assistant_bench.harnesses.terminus:Terminus',
         options=options.terminus,
+        harbor_loop=True,
+    ),
+    'claude-code': Harness(
+        import_path='assistant_bench.harnesses.installed:ClaudeCode',
+        options=options.claude_code,
+        apis=('anthropic-messages',),
+        harbor_loop=True,
+        model_prefix='anthropic/',
+    ),
+    'codex': Harness(
+        import_path='assistant_bench.harnesses.installed:Codex',
+        options=options.codex,
+        apis=('openai-responses',),
+        harbor_loop=True,
+        model_prefix='openai/',
     ),
 }
 
@@ -60,7 +83,7 @@ def fingerprint(identity: SystemIdentity) -> str:
             'harness': identity.harness,
             'model_name': identity.route,
             'options': harness.options(identity),
-            'version': identity.generation.version(identity.harness, identity.api),
+            'version': identity.generation.version(harness.harbor_loop, identity.api),
         },
         sort_keys=True,
     )

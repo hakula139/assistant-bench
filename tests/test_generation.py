@@ -46,19 +46,19 @@ class TestGeneration:
                 Generation.model_validate({'protocol': 2, 'harbor': '0.24.0'})
 
         @pytest.mark.parametrize(
-            ('harness', 'base'), [('generate', '2'), ('terminus-2', '0.24.0+bench.2')]
+            ('harbor_loop', 'base'), [(False, '2'), (True, '0.24.0+bench.2')]
         )
         def test_includes_native_versions_only_for_the_messages_api(
-            self, harness: str, base: str
+            self, harbor_loop: bool, base: str
         ) -> None:
             versions = make_generation(protocol=2, harbor='0.24.0')
 
             assert (
-                versions.version(harness, 'anthropic-messages')
+                versions.version(harbor_loop, 'anthropic-messages')
                 == f'{base}+messages.1.2023-06-01'
             )
-            assert versions.version(harness, 'openai-responses') == base
-            assert versions.version(harness, 'openai-chat-completions') == base
+            assert versions.version(harbor_loop, 'openai-responses') == base
+            assert versions.version(harbor_loop, 'openai-chat-completions') == base
 
 
 class TestParseGeneration:

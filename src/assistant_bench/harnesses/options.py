@@ -42,3 +42,26 @@ def terminus(identity: SystemIdentity) -> dict[str, Any]:
     if identity.effort is not None:
         values['reasoning_effort'] = identity.effort
     return values
+
+
+def claude_code(identity: SystemIdentity) -> dict[str, Any]:
+    return {
+        'version': identity.version,
+        'reasoning_effort': identity.effort,
+        'disable_web_search': True,
+        'max_turns': None,
+        'max_thinking_tokens': None,
+        'max_output_tokens': identity.max_output_tokens,
+    }
+
+
+def codex(identity: SystemIdentity) -> dict[str, Any]:
+    return {
+        'version': identity.version,
+        'reasoning_effort': identity.effort,
+        'disable_web_search': True,
+        'config': {
+            'model_context_window': identity.context_window,
+            'model_max_output_tokens': identity.max_output_tokens,
+        },
+    }
