@@ -51,6 +51,27 @@ class TestLoopbackRequestsOnly:
 
 
 class TestEndpoint:
+    def test_nonbillable_token_counting_needs_no_trial_admission(
+        self, endpoint: StubEndpoint, private_state: State
+    ) -> None:
+        endpoint.response = {'input_tokens': 5}
+        configured = Endpoint.read(endpoint.env.get, 'anthropic-messages')
+
+        async def request() -> None:
+            async with configured.messages_client() as client:
+                result = await client.messages.count_tokens(
+                    model='acme/large',
+                    messages=[{'role': 'user', 'content': 'Hello.'}],
+                )
+                assert result.input_tokens == 5
+
+        asyncio.run(request())
+
+        assert [sent.path for sent in endpoint.requests] == [
+            '/anthropic/v1/messages/count_tokens'
+        ]
+        assert private_state.requests('sample') == []
+
     @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
         @pytest.mark.parametrize(
@@ -251,6 +272,43 @@ class TestEndpoint:
                 asyncio.run(request())
 
             assert endpoint.requests == []
+
+        @pytest.mark.parametrize(
+            'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+        )
+        @pytest.mark.parametrize('event_stream', [False, True], ids=['json', 'sse'])
+        def test_http_errors_have_durable_unknown_usage_even_with_stream_headers(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            private_state: State,
+            api: Api,
+            event_stream: bool,
+        ) -> None:
+            endpoint.status = 503
+            endpoint.response = {'error': {'message': 'Unavailable.'}}
+            if event_stream:
+                endpoint.stream = [b'Unavailable.']
+            configured = Endpoint.read(endpoint.env.get, api)
+
+            async def request() -> None:
+                async with configured.http_client(api) as client:
+                    reply = await client.post(f'{endpoint.url}/v1/responses', json={})
+                    assert reply.status_code == 503
+                    (stored,) = private_state.requests('sample')
+                    assert isinstance(stored['receipt_json'], str)
+                    saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+                    assert (
+                        saved.api,
+                        saved.outcome,
+                        saved.http_status,
+                        saved.usage,
+                    ) == (api, 'http_error', 503, None)
+
+            asyncio.run(request())
+
+            assert len(endpoint.requests) == 1
+            assert not begun_trial.fatal
 
         def test_a_caught_receipt_failure_still_blocks_every_followup_request(
             self,
