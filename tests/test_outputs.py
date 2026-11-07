@@ -1,13 +1,14 @@
+import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from assistant_bench.families import Family
 from assistant_bench.messages import InputError
-from assistant_bench.outputs import pool_conflicts, read_outputs
-from support import VOTES, make_output
+from assistant_bench.outputs import pool_conflicts, read_outputs, write_outputs
+from assistant_bench.state import Collection, State
+from support import START, VOTES, make_output
 
 
 TASKS = VOTES.model_copy(update={'source': 'tasks'})
@@ -127,17 +128,78 @@ class TestPoolConflicts:
 
 
 class TestReadOutputs:
-    def test_names_a_file_an_older_collection_wrote(self, data_dir: Path) -> None:
+    def test_names_an_invalid_record_from_a_stored_collection(
+        self, private_state: State
+    ) -> None:
         record = json.loads(make_output().model_dump_json())
         del record['response_models']
-        path = data_dir / 'outputs' / 'f.jsonl'
-        path.parent.mkdir(parents=True)
-        path.write_text(json.dumps(record) + '\n')
+        value = json.dumps(record)
+        private_state.begin_collection(
+            Collection(
+                id='stored',
+                family='f',
+                expected_count=1,
+                manifest_digest=hashlib.sha256(f'{value}\n'.encode()).hexdigest(),
+                created_at=START.isoformat(),
+                code_revision=None,
+                case_revision=None,
+                system_names_json=None,
+            )
+        )
+        private_state.stage_output('stored', 0, value)
+        private_state.seal_collection('stored')
+        assert private_state.activate_collection('stored', None)
 
         with pytest.raises(InputError) as raised:
-            read_outputs('f')
+            read_outputs('f', private_state)
 
         assert str(raised.value) == (
-            f'Outputs `{path}`: `response_models`: Field required.\n'
+            'Outputs of `f`: `response_models`: Field required.\n'
             'Run `uv run bench collect f` to rewrite it.'
+        )
+
+
+class TestWriteOutputs:
+    def test_preserves_pinned_outputs_and_refuses_a_stale_writer(
+        self, private_state: State
+    ) -> None:
+        first = make_output(text='Original answer.\r\n')
+        following = make_output(text='New answer.\n')
+        assert read_outputs('f', private_state) == []
+        original = write_outputs(
+            'f',
+            [first],
+            private_state,
+            previous=None,
+            code_revision='a' * 40,
+            case_revision='b' * 40,
+            system_names={'s': 'System S'},
+        )
+        pinned = private_state.output_generation('f')
+        current = write_outputs(
+            'f',
+            [following],
+            private_state,
+            previous=original,
+            code_revision='c' * 40,
+            case_revision='d' * 40,
+            system_names={'s': 'Renamed System'},
+        )
+
+        with pytest.raises(InputError, match='changed its active outputs'):
+            write_outputs(
+                'f',
+                [make_output(text='Stale answer.')],
+                private_state,
+                previous=original,
+                code_revision='a' * 40,
+                case_revision='b' * 40,
+                system_names={'s': 'System S'},
+            )
+
+        assert read_outputs('f', private_state, generation=pinned) == [first]
+        assert read_outputs('f', private_state) == [following]
+        assert private_state.output_generation('f').id == current
+        assert private_state.collection(original).system_names_json == (
+            '{"s": "System S"}'
         )
