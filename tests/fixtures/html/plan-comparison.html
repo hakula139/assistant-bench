@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Folio plans</title>
+    <style>
+      body { max-width: 70rem; margin: auto; padding: 1.5rem; font: 1rem/1.6 system-ui; color: #302544; background: #faf7ff; }
+      .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1.5rem; }
+      article { padding: 1rem; border: 1px solid #a195b6; }
+      section { margin-block: 2.5rem; }
+      a, summary { color: #5b2f8c; }
+      a:focus-visible, summary:focus-visible { outline: 3px solid #944019; outline-offset: 4px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Room for your team's knowledge</h1>
+      <p>
+        Folio plans, billed monthly in USD. No annual option. Taxes are additional where applicable.
+      </p>
+      <a href="#details">Compare plan details</a>
+    </header>
+    <main>
+      <section id="details">
+        <h2>Choose a plan</h2>
+        <div class="plans">
+          <article>
+            <h3>Starter</h3>
+            <p><strong>$0</strong></p>
+            <ul>
+              <li>Up to 3 members</li>
+              <li>1 shared workspace</li>
+              <li>1 GB storage</li>
+              <li>30-day version history</li>
+              <li>Community support</li>
+            </ul>
+            <a href="#questions">Read Starter details</a>
+          </article>
+          <article>
+            <h3>Team</h3>
+            <p><strong>$24 per workspace per month</strong></p>
+            <ul>
+              <li>Up to 15 members</li>
+              <li>5 shared workspaces</li>
+              <li>50 GB storage</li>
+              <li>180-day version history</li>
+              <li>Email support within 2 business days</li>
+            </ul>
+            <a href="#questions">Read Team details</a>
+          </article>
+          <article>
+            <h3>Studio</h3>
+            <p><strong>$64 per workspace per month</strong></p>
+            <ul>
+              <li>Up to 50 members</li>
+              <li>Unlimited shared workspaces</li>
+              <li>250 GB storage</li>
+              <li>Unlimited version history</li>
+              <li>Email support within 1 business day</li>
+            </ul>
+            <a href="#questions">Read Studio details</a>
+          </article>
+        </div>
+      </section>
+      <section>
+        <h2>Included on every plan</h2>
+        <p>Unlimited pages, full-text search, Markdown export, and read-only public sharing.</p>
+      </section>
+      <section id="questions">
+        <h2>Before you choose</h2>
+        <details>
+          <summary>Can we try a paid plan?</summary>
+          <p>Paid plans have a 14-day trial with no payment card required.</p>
+        </details>
+        <details>
+          <summary>Can we export our content?</summary>
+          <p>Every plan includes content export.</p>
+        </details>
+        <details>
+          <summary>What happens on downgrade?</summary>
+          <p>
+            Existing content remains readable. New uploads stop if the storage limit is exceeded.
+          </p>
+        </details>
+      </section>
+    </main>
+  </body>
+</html>
