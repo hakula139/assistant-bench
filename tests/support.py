@@ -578,6 +578,7 @@ async def executed_trial(
     *,
     scope: str,
     run_id: str | None = None,
+    max_requests: int | None = None,
 ) -> AsyncGenerator[RecordedTrial]:
     """Run one real planned trial's admission and publication around an agent call."""
     run = Run(
@@ -587,6 +588,7 @@ async def executed_trial(
         code_revision=context.code_revision,
         case_revision=context.case_revision,
         created_at=datetime.now(UTC).isoformat(),
+        max_requests=max_requests,
     )
     context.state.create_run(run)
     payload = ExecutionInput(
