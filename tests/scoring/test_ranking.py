@@ -26,14 +26,14 @@ STRENGTHS = {'large': 0.8, 'medium': 0.3, 'small': -0.4}
 
 def test_split_difference_uses_case_clusters_and_centered_common_scores() -> None:
     public = [
-        Comparison('a', 'b', score, f'public-{case}', sided=False)
+        Comparison(
+            'a', 'b', 0.0 if case % 3 == 0 else 1.0, f'public-{case}', sided=False
+        )
         for case in range(30)
-        for score in (1.0, 1.0, 0.0)
     ]
     held = [
-        Comparison('a', 'b', score, f'held-{case}', sided=False)
+        Comparison('a', 'b', 1.0 if case % 3 == 0 else 0.0, f'held-{case}', sided=False)
         for case in range(30)
-        for score in (0.0, 0.0, 1.0)
     ]
 
     result, reason = ranking.split_difference(public, held)
@@ -43,6 +43,11 @@ def test_split_difference_uses_case_clusters_and_centered_common_scores() -> Non
     assert result.difference[0] > 100
     assert result.difference.sum() == pytest.approx(0)
     assert result.half_width[0] == pytest.approx(result.half_width[1])
+    assert 90 < result.half_width[0] < 105
+
+    duplicated, _ = ranking.split_difference(public * 100, held * 100)
+    assert duplicated is not None
+    assert duplicated.half_width == pytest.approx(result.half_width, rel=0.01)
 
     repeated = [row._replace(case='same') for row in held]
     assert ranking.split_difference(public, repeated) == (None, 'insufficient_cases')
