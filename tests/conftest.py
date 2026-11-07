@@ -1,5 +1,7 @@
+import json
 import os
 import ssl
+import sys
 from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -14,6 +16,7 @@ from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs, report
 from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
+from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.harnesses import fingerprint
@@ -23,10 +26,13 @@ from assistant_bench.paths import DATA_DIR_VAR
 from assistant_bench.state import State
 from support import (
     EXPORT_FILE,
+    FIXTURES,
     START,
+    PrivateRepository,
     StubEndpoint,
     accounted_trial,
     arena_database,
+    git,
     make_system,
     private_database,
     serve_stub,
@@ -209,6 +215,64 @@ def private_store() -> Iterator[SQLiteDatabase]:
 @pytest.fixture
 def private_state(private_store: SQLiteDatabase) -> State:
     return State(private_store)
+
+
+@pytest.fixture
+def private_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> PrivateRepository:
+    for name in (
+        'GIT_DIR',
+        'GIT_WORK_TREE',
+        'GIT_INDEX_FILE',
+        'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+        'GIT_CONFIG_COUNT',
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    for name in ('GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME'):
+        monkeypatch.setenv(name, 'Test')
+    for name in ('GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'):
+        monkeypatch.setenv(name, 'test@example.com')
+    remote = tmp_path / 'remote.git'
+    git(tmp_path, 'init', '--quiet', '--bare', '--initial-branch=main', str(remote))
+    seed = tmp_path / 'seed'
+    seed.mkdir()
+    git(seed, 'init', '--quiet', '--initial-branch=main')
+    cases = seed / 'cases'
+    cases.mkdir()
+    (cases / 'sample.toml').write_bytes(b'cases = []\r\n')
+    (seed / 'unrelated.txt').write_text('Not a case source.\n')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '--quiet', '-m', 'Add synthetic sources')
+    git(seed, 'remote', 'add', 'origin', str(remote))
+    git(seed, 'push', '--quiet', 'origin', 'main')
+    revision = git(seed, 'rev-parse', 'HEAD')
+    slug = 'example/private-data'
+    metadata = tmp_path / 'metadata.json'
+    metadata.write_text(
+        json.dumps(
+            {
+                'full_name': slug,
+                'private': True,
+                'ssh_url': str(remote),
+                'default_branch': 'main',
+            }
+        )
+    )
+    binary = tmp_path / 'bin'
+    binary.mkdir()
+    stub = binary / 'gh'
+    stub.write_text(
+        f'#!{sys.executable}\n' + (FIXTURES / 'artifacts' / 'gh.py').read_text()
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
+    monkeypatch.setenv('TEST_GH_METADATA', str(metadata))
+    monkeypatch.delenv('TEST_GH_STATUS', raising=False)
+    return PrivateRepository(ArtifactRepository(slug), remote, seed, metadata, revision)
 
 
 @pytest.fixture
