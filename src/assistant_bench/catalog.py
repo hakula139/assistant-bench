@@ -190,9 +190,10 @@ class System(SystemIdentity):
 
 
 def load_systems(
-    export: NixosConfigExport, path: Path = REPO_ROOT / SYSTEMS_FILE
+    export: NixosConfigExport, path: Path | None = None, *, root: Path = REPO_ROOT
 ) -> dict[str, System]:
-    return parse_systems(export, path.read_text(), load_generation())
+    path = root / SYSTEMS_FILE if path is None else path
+    return parse_systems(export, path.read_text(), load_generation(root))
 
 
 def parse_systems(

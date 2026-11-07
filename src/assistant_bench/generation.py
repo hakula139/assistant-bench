@@ -3,6 +3,7 @@
 import tomllib
 from functools import cache
 from importlib import metadata
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -47,11 +48,11 @@ def parse_generation(project: str, lock: str) -> Generation:
 
 
 @cache
-def load_generation() -> Generation:
+def load_generation(root: Path = REPO_ROOT) -> Generation:
     """Resolve current versions, refusing an installed Harbor outside the lock."""
     generation = parse_generation(
-        (REPO_ROOT / 'pyproject.toml').read_text(),
-        (REPO_ROOT / 'uv.lock').read_text(),
+        (root / 'pyproject.toml').read_text(),
+        (root / 'uv.lock').read_text(),
     )
     if metadata.version('harbor') != generation.harbor:
         raise InputError('Installed Harbor differs from uv.lock. Run `uv sync`.')

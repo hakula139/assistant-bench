@@ -53,6 +53,7 @@ from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_
 from assistant_bench.runtime import (
     RunContext,
     implementation_revision,
+    materialize_implementation,
     open_context,
     open_sources,
 )
@@ -219,7 +220,7 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     `budget_usd` refuses the whole run.
     """
     with open_context() as context:
-        export, systems = _catalog()
+        export, systems = _catalog(context.public_root)
         _run_families(families, names, export, systems, context)
 
 
@@ -241,7 +242,10 @@ def _run_families(
         raise InputError('\n'.join(problems))
 
     probes = canaries.prepare(
-        (job for _, _, job in prepared), systems, root=context.root
+        (job for _, _, job in prepared),
+        systems,
+        root=context.root,
+        source_root=context.public_root,
     )
     for probe in probes:
         ceiling = probe.ceiling_usd
@@ -254,15 +258,23 @@ def _run_families(
     canaries.run(probes, context)
 
     for family, selected, job in prepared:
+        run_id = str(uuid4())
         try:
             execution.execute(
                 context,
                 job,
                 {system.name: Accounting.of(system) for system in selected},
                 scope=family.name,
-                run_id=str(uuid4()),
+                run_id=run_id,
                 expected_source_revision=context.source_revision(family),
             )
+        except subprocess.CalledProcessError as error:
+            typer.echo(
+                f'Harbor exited with code {error.returncode} for run `{run_id}`. '
+                'Inspect its cloud records and trial artifacts.',
+                err=True,
+            )
+            raise typer.Exit(error.returncode) from error
         finally:
             context.refresh_sources(family)
             _echo_conflicts(family, _collect(family, systems, export, context).outputs)
@@ -275,7 +287,7 @@ def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None
     Nothing runs, and no request reaches the endpoint.
     """
     with open_context() as context:
-        export, systems = _catalog()
+        export, systems = _catalog(context.public_root)
         for family, selected, job in _prepare(
             families, names, export, systems, context
         ):
@@ -298,9 +310,9 @@ def collect(families: FamilyArguments = None) -> None:
         if not names:
             typer.echo('No family has jobs yet. Run `uv run bench run` first.')
             return
-        export, systems = _catalog()
+        export, systems = _catalog(context.public_root)
         for name in names:
-            selected = load_family(name)
+            selected = load_family(name, root=context.public_root / 'families')
             _echo_conflicts(
                 selected, _collect(selected, systems, export, context).outputs
             )
@@ -338,8 +350,16 @@ def close(
 
 def _take_snapshot(family: Family) -> str:
     """Seal independently captured stores and their exact collection mappings."""
-    assert isinstance(family.settings, VotesSettings)
     revision = implementation_revision()
+    with tempfile.TemporaryDirectory(prefix='bench-closing-') as temporary:
+        root = Path(temporary) / 'public'
+        materialize_implementation(revision, root)
+        selected = load_family(family.name, root=root / 'families')
+        return _capture_snapshot(selected, revision)
+
+
+def _capture_snapshot(family: Family, revision: str) -> str:
+    assert isinstance(family.settings, VotesSettings)
     taken_at = datetime.now(UTC)
     with connect('private') as database:
         production = None
@@ -406,7 +426,8 @@ def _close_votes(family: str, identity: str) -> report.Report:
 
 def _close_tests(family: Family) -> report.Report:
     with open_context() as context:
-        export, systems = _catalog()
+        family = load_family(family.name, root=context.public_root / 'families')
+        export, systems = _catalog(context.public_root)
         collected = _collect(family, systems, export, context)
         sources = context.closing_sources(collected.generation)
         metadata = context.state.collection(collected.generation)
@@ -445,9 +466,11 @@ def fingerprints() -> None:
 # ── Helpers ──
 
 
-def _catalog() -> tuple[NixosConfigExport, dict[str, System]]:
+def _catalog(root: Path | None = None) -> tuple[NixosConfigExport, dict[str, System]]:
     export = load_export()
-    return export, load_systems(export)
+    return export, load_systems(
+        export, root=root
+    ) if root is not None else load_systems(export)
 
 
 def _render_tasks(
@@ -532,7 +555,7 @@ def _named_systems(
 def _families_with_jobs(context: RunContext) -> list[str]:
     return [
         name
-        for name in family_names()
+        for name in family_names(root=context.public_root / 'families')
         if context.state.artifact_generation(name).artifacts
     ]
 
@@ -546,7 +569,13 @@ def _prepare(
 ) -> list[tuple[Family, list[System], JobConfig]]:
     """Return each family to run with its systems and its job."""
     prepared: list[tuple[Family, list[System], JobConfig]] = []
-    for family, selected in _run_targets(families, names, systems):
+    check_case_entries(
+        private_root=context.private_root,
+        families_root=context.public_root / 'families',
+    )
+    for family, selected in _run_targets(
+        families, names, systems, root=context.public_root / 'families'
+    ):
         if not selected:
             raise InputError(
                 f'Family `{family.name}` lists no systems. Add them to `systems` in '
@@ -561,10 +590,20 @@ def _prepare(
         sources = context.sources(family)
         if changed := changed_tasks(family, tasks, sources):
             raise InputError(
-                f'Family `{family.name}` changed {code(changed)} '
-                'without a task version bump. '
-                'Bump the patch for reference-only changes, the minor for tests, '
-                'or the major for inputs the agent sees.'
+                '\n'.join(
+                    [
+                        f'Family `{family.name}` has tasks to bump:',
+                        *(
+                            f'Task `{task}` changed since a trial ran it '
+                            f'at version `{version}`.'
+                            for task, version in changed
+                        ),
+                        "Bump each task's `[task] version`: the patch for a change "
+                        'no trial\ndepends on, such as its solution, the minor for '
+                        'a change to `tests/`\n'
+                        'and the major for a change to inputs the agent sees.',
+                    ]
+                )
             )
         prepared.append(
             (
@@ -580,12 +619,14 @@ def _run_targets(
     families: list[str] | None,
     names: list[str] | None,
     systems: Mapping[str, System],
+    *,
+    root: Path | None = None,
 ) -> list[tuple[Family, list[System]]]:
     """Return each family to run with the systems to send it."""
     if families is not None:
         targets: list[tuple[Family, list[System]]] = []
         for name in families:
-            family = load_family(name)
+            family = load_family(name, root=root)
             listed = _family_systems(family, systems)
             targets.append(
                 (family, _named_systems(family, listed, names) if names else listed)
@@ -593,7 +634,9 @@ def _run_targets(
         return targets
 
     every = [
-        family for family in map(load_family, family_names()) if family.settings.systems
+        family
+        for name in family_names(root=root)
+        if (family := load_family(name, root=root)).settings.systems
     ]
 
     if names is None:

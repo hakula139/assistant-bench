@@ -491,7 +491,9 @@ def _hidden(path: Path) -> bool:
     return path.name.startswith('.')
 
 
-def check_case_entries(*, private_root: Path | None = None) -> None:
+def check_case_entries(
+    *, private_root: Path | None = None, families_root: Path | None = None
+) -> None:
     """Refuse a visible private source entry that no family reads.
 
     A case family reads `cases/<family>.toml` and a task family each directory
@@ -502,7 +504,11 @@ def check_case_entries(*, private_root: Path | None = None) -> None:
     InputError
         A visible entry is one no family reads.
     """
-    unread = _unread_case_entries(private_root) if private_root is not None else []
+    unread = (
+        _unread_case_entries(private_root, families_root)
+        if private_root is not None
+        else []
+    )
     if unread:
         raise InputError(
             f'No family reads {code(unread)} under the private source '
@@ -513,14 +519,15 @@ def check_case_entries(*, private_root: Path | None = None) -> None:
         )
 
 
-def _unread_case_entries(root: Path) -> list[Path]:
+def _unread_case_entries(root: Path, families_root: Path | None) -> list[Path]:
     """Return each unread entry, listing a task family's loose files one by one."""
     if not root.is_dir():
         return []
 
-    names = family_names()
+    directory = FAMILIES_DIR if families_root is None else families_root
+    names = family_names(root=directory)
     case_families = {
-        name for name in names if (FAMILIES_DIR / name / 'cases.toml').is_file()
+        name for name in names if (directory / name / 'cases.toml').is_file()
     }
     task_families = set(names) - case_families
 

@@ -23,6 +23,7 @@ from assistant_bench.state import State
 
 
 REPOSITORY_VAR = 'BENCH_DATA_REPOSITORY'
+PUBLIC_REPOSITORY = 'https://github.com/hakula139/assistant-bench.git'
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class ClosingSources:
 @dataclass(frozen=True)
 class RunContext:
     root: Path
+    public_root: Path
     private_root: Path
     case_revision: str
     code_revision: str
@@ -91,7 +93,7 @@ class RunContext:
         root = self.root / 'closing' / collection_id
         source = root / 'public'
         if not source.exists():
-            _public_source(collection.code_revision, source)
+            materialize_implementation(collection.code_revision, source)
         private = root / 'private'
         if not private.exists():
             self.artifacts.source(collection.case_revision, private)
@@ -121,20 +123,21 @@ def open_sources() -> Generator[PrivateSources]:
 def open_context() -> Generator[RunContext]:
     """Open cloud state and pinned sources for one disposable local execution."""
     revision = implementation_revision()
-    with (
-        open_sources() as sources,
-        connect('private') as database,
-        tempfile.TemporaryDirectory(prefix='bench-run-') as temporary,
-    ):
-        database.execute('SELECT 1')
-        yield RunContext(
-            root=Path(temporary),
-            private_root=sources.root,
-            case_revision=sources.revision,
-            code_revision=revision,
-            state=State(database),
-            artifacts=ArtifactRepository(os.environ[REPOSITORY_VAR]),
-        )
+    with tempfile.TemporaryDirectory(prefix='bench-run-') as temporary:
+        root = Path(temporary)
+        public = root / 'public'
+        materialize_implementation(revision, public)
+        with open_sources() as sources, connect('private') as database:
+            database.execute('SELECT 1')
+            yield RunContext(
+                root=root,
+                public_root=public,
+                private_root=sources.root,
+                case_revision=sources.revision,
+                code_revision=revision,
+                state=State(database),
+                artifacts=ArtifactRepository(os.environ[REPOSITORY_VAR]),
+            )
 
 
 def implementation_revision() -> str:
@@ -164,6 +167,31 @@ def implementation_revision() -> str:
                 'Runtime commands require committed implementation inputs. '
                 'Commit the tracked changes before running this command.'
             )
+        remote = git('ls-remote', '--exit-code', PUBLIC_REPOSITORY, 'refs/heads/main')
+        head, reference = remote.split('\t')
+        if reference != 'refs/heads/main' or not re.fullmatch(r'[0-9a-f]{40}', head):
+            raise InputError('The canonical implementation main could not be verified.')
+        git('fetch', '--no-tags', '--no-write-fetch-head', PUBLIC_REPOSITORY, head)
+        reachable = subprocess.run(
+            [
+                'git',
+                '-C',
+                str(REPO_ROOT),
+                'merge-base',
+                '--is-ancestor',
+                revision,
+                head,
+            ],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if reachable.returncode:
+            raise InputError(
+                'Runtime commands require code retained by canonical GitHub main. '
+                'Merge it before creating persistent runs or collections.'
+            )
     except (OSError, subprocess.CalledProcessError) as error:
         raise InputError(
             'Runtime commands require a Git implementation checkout.'
@@ -171,7 +199,8 @@ def implementation_revision() -> str:
     return revision
 
 
-def _public_source(revision: str, destination: Path) -> None:
+def materialize_implementation(revision: str, destination: Path) -> None:
+    """Restore public implementation inputs from the canonical Git repository."""
     if not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise InputError(
             'A collection implementation revision must be a Git commit SHA.'
@@ -183,23 +212,24 @@ def _public_source(revision: str, destination: Path) -> None:
     for name in local_variables:
         environment.pop(name, None)
     try:
-        exists = subprocess.run(
-            ['git', '-C', str(REPO_ROOT), 'cat-file', '-e', f'{revision}^{{commit}}'],
+        subprocess.run(
+            [
+                'git',
+                '-C',
+                str(REPO_ROOT),
+                'fetch',
+                '--no-tags',
+                '--no-write-fetch-head',
+                PUBLIC_REPOSITORY,
+                revision,
+            ],
             env=environment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            check=False,
+            check=True,
         )
-        if exists.returncode:
-            subprocess.run(
-                ['git', '-C', str(REPO_ROOT), 'fetch', '--no-tags', 'origin', revision],
-                env=environment,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
-            )
         archive = subprocess.check_output(
-            ['git', '-C', str(REPO_ROOT), 'archive', revision, 'families'],
+            ['git', '-C', str(REPO_ROOT), 'archive', revision],
             env=environment,
             stderr=subprocess.DEVNULL,
         )

@@ -662,7 +662,10 @@ def _command(
     except FileNotFoundError as error:
         raise InputError('Private artifacts require `git` and `gh` on PATH.') from error
     if check and result.returncode:
-        raise InputError(f'Private artifact `{arguments[0]}` command failed.')
+        raise InputError(
+            f'Private artifact `{arguments[0]}` command failed. '
+            'Check native Git access over SSH and GitHub CLI authentication.'
+        )
     return result
 
 

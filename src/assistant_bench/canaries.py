@@ -6,7 +6,6 @@ import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -22,6 +21,7 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
+from assistant_bench.paths import REPO_ROOT
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Accounting
 from assistant_bench.state import State
@@ -87,7 +87,11 @@ class Record(BaseModel):
 
 
 def prepare(
-    configs: Iterable[JobConfig], systems: Mapping[str, System], *, root: Path
+    configs: Iterable[JobConfig],
+    systems: Mapping[str, System],
+    *,
+    root: Path,
+    source_root: Path = REPO_ROOT,
 ) -> list[Probe]:
     """Prepare one probe for each selected system with at least one pending trial."""
     pending = {name for config in configs for name in jobs.pending_trials(config)}
@@ -97,7 +101,7 @@ def prepare(
     root = root / 'canaries'
     task = root / 'task'
     task.mkdir(parents=True, exist_ok=True)
-    instruction = files('assistant_bench').joinpath('canary.md').read_text()
+    instruction = (source_root / 'src' / 'assistant_bench' / 'canary.md').read_text()
     task_config = render_task_config('canaries/fixed', instruction)
     (task / 'instruction.md').write_text(instruction)
     (task / 'task.toml').write_text(task_config.model_dump_toml())
@@ -151,8 +155,6 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
     problems: list[str] = []
     for probe in probes:
         key = context_key(probe)
-        baseline = context.state.baseline(probe.original.name, key)
-        previous = [Record.model_validate_json(baseline)] if baseline else []
         run_id = str(uuid4())
         run_error: str | None = 'InterruptedProbe'
         try:
@@ -187,11 +189,20 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
         probe_problems = [
             problem
             for record in outcomes
-            if (problem := _problem(record, previous)) is not None
+            if (problem := _problem(record, [])) is not None
         ]
-        problems.extend(probe_problems)
         if not probe_problems:
             context.state.establish_baseline(probe.original.name, key, run_id)
+            winner = context.state.baseline(probe.original.name, key)
+            if winner is None:
+                raise InputError('The accepted canary baseline could not be confirmed.')
+            baseline = Record.model_validate_json(winner)
+            probe_problems.extend(
+                problem
+                for record in outcomes
+                if (problem := _problem(record, [baseline])) is not None
+            )
+        problems.extend(probe_problems)
     if problems:
         raise InputError('\n'.join(problems))
     return records
@@ -280,6 +291,6 @@ def _problem(record: Record, previous: list[Record]) -> str | None:
         f'System `{record.system}`: canary differs from its baseline on '
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
         f'{model_change}The run was refused. Inspect its canary records. '
-        'Give a changed system a new name. Review a benign template change '
-        'before resetting its cloud canary baseline.'
+        'Fix the route and give the changed system a new name. '
+        'A changed probe protocol establishes its own baseline.'
     )

@@ -81,7 +81,9 @@ def execute(
         ).model_dump_json()
     )
     try:
-        jobs.run_job(config, log=log, plugin_context=path)
+        jobs.run_job(
+            config, log=log, plugin_context=path, source_root=context.public_root
+        )
     except BaseException as error:
         _cancel_unstarted(context.state, run.id, error)
         raise
