@@ -312,15 +312,28 @@ def run_context(
     )
     if 'families_dir' not in request.fixturenames:
         shutil.copytree(source / 'families', public / 'families')
+    cases = private_repository.seed / 'cases'
+    (cases / 'sample.toml').unlink()
+    (cases / '.gitkeep').touch()
+    git(private_repository.seed, 'add', 'cases')
+    git(
+        private_repository.seed,
+        'commit',
+        '--quiet',
+        '-m',
+        'Start without private cases',
+    )
+    git(private_repository.seed, 'push', '--quiet', 'origin', 'main')
+    revision = git(private_repository.seed, 'rev-parse', 'HEAD')
     private_root = private_repository.client.source(
-        private_repository.revision, tmp_path / 'private-source'
+        revision, tmp_path / 'private-source'
     )
     return RunContext(
         root=root,
         public_root=public,
         private_root=private_root,
         code_revision='1' * 40,
-        case_revision=private_repository.revision,
+        case_revision=revision,
         state=private_state,
         artifacts=private_repository.client,
     )
