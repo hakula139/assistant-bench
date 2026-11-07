@@ -579,6 +579,108 @@ class TestArtifactRepository:
             )
 
     class TestMaterialize:
+        def test_case_aliases_never_follow_a_previously_restored_symlink(
+            self, repository: Repository, trial: Trial, tmp_path: Path
+        ) -> None:
+            outside = tmp_path / 'outside'
+            outside.mkdir()
+            (outside / 'sentinel.txt').write_bytes(
+                b'Leave this external tree unchanged.\n'
+            )
+            probe = tmp_path / 'case-probe'
+            probe.mkdir()
+            (probe / 'A').touch()
+            aliases = (probe / 'a').exists()
+            reference = publish(repository, trial)
+            prefix = f'job/{trial.result.trial_name}/artifacts/app'
+            additions = {
+                f'{prefix}/A': ('120000', os.fsencode(outside)),
+                f'{prefix}/a/file.txt': ('100644', b'Keep these artifact bytes.\n'),
+            }
+            entries = [
+                FileEntry.model_validate(
+                    {
+                        'path': path,
+                        'mode': mode,
+                        'sha256': hashlib.sha256(content).hexdigest(),
+                    }
+                )
+                for path, (mode, content) in additions.items()
+            ]
+            manifest = TrialManifest.model_validate(
+                {
+                    **trial.manifest.model_dump(),
+                    'files': tuple(
+                        sorted(
+                            [*trial.manifest.files, *entries],
+                            key=lambda item: item.path,
+                        )
+                    ),
+                }
+            )
+            additions['manifest.json'] = ('100644', manifest.content())
+            git(repository.remote, 'read-tree', reference.commit_sha)
+            for path, (mode, content) in additions.items():
+                blob = (
+                    subprocess.run(
+                        ['git', 'hash-object', '-w', '--stdin'],
+                        cwd=repository.remote,
+                        input=content,
+                        capture_output=True,
+                        check=True,
+                    )
+                    .stdout.decode()
+                    .strip()
+                )
+                git(
+                    repository.remote,
+                    'update-index',
+                    '--add',
+                    '--cacheinfo',
+                    f'{mode},{blob},{reference.path}/{path}',
+                )
+            tree = git(repository.remote, 'write-tree')
+            commit = git(
+                repository.remote,
+                'commit-tree',
+                tree,
+                '-p',
+                reference.commit_sha,
+                '-m',
+                'Add synthetic case alias paths',
+            )
+            git(
+                repository.remote,
+                'update-ref',
+                'refs/heads/main',
+                commit,
+                reference.commit_sha,
+            )
+            changed = ArtifactRef(
+                commit_sha=commit,
+                path=reference.path,
+                manifest_digest=hashlib.sha256(manifest.content()).hexdigest(),
+            )
+
+            restored = None
+            error = None
+            try:
+                restored = repository.client.materialize(changed, tmp_path / 'restored')
+            except InputError as failure:
+                error = failure
+
+            assert sorted(path.name for path in outside.iterdir()) == ['sentinel.txt']
+            assert (
+                outside / 'sentinel.txt'
+            ).read_bytes() == b'Leave this external tree unchanged.\n'
+            assert (error is not None) == aliases, error
+            if restored is not None:
+                workspace = restored / trial.result.trial_name / 'artifacts' / 'app'
+                assert (
+                    workspace / 'a' / 'file.txt'
+                ).read_bytes() == b'Keep these artifact bytes.\n'
+                assert (workspace / 'A').is_symlink()
+
         @pytest.mark.parametrize(
             'failure', ['bytes', 'mode', 'manifest', 'extra', 'missing']
         )
