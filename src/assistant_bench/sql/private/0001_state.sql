@@ -32,7 +32,7 @@ CREATE TABLE attempt_claims (
     expected_source_revision INTEGER NOT NULL CHECK (expected_source_revision >= 0),
     created_at TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'claimed'
-        CHECK (state IN ('claimed', 'uncertain', 'settled'))
+        CHECK (state IN ('claimed', 'uncertain', 'settled', 'cancelled'))
 ) STRICT;
 
 CREATE UNIQUE INDEX attempt_claims_active_slot ON attempt_claims (scope, slot_key)
@@ -55,7 +55,7 @@ WHEN OLD.id IS NOT NEW.id
     OR OLD.accounting_json IS NOT NEW.accounting_json
     OR OLD.expected_source_revision IS NOT NEW.expected_source_revision
     OR OLD.created_at IS NOT NEW.created_at
-    OR (OLD.state = 'settled' AND NEW.state != 'settled')
+    OR (OLD.state IN ('settled', 'cancelled') AND NEW.state != OLD.state)
 BEGIN
     SELECT RAISE(ABORT, 'Attempt claim identity is immutable');
 END;
@@ -71,17 +71,64 @@ BEGIN
     UPDATE runs SET status = 'uncertain' WHERE id = NEW.run_id AND status != 'complete';
 END;
 
+CREATE TABLE attempt_starts (
+    id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES attempt_claims (id),
+    started_at TEXT NOT NULL,
+    UNIQUE (claim_id, started_at)
+) STRICT;
+
+CREATE TRIGGER starts_need_live_claim BEFORE INSERT ON attempt_starts
+WHEN NOT EXISTS (
+    SELECT 1 FROM attempt_claims WHERE id = NEW.claim_id AND state = 'claimed'
+)
+BEGIN
+    SELECT RAISE(ABORT, 'An attempt start requires a claimed slot');
+END;
+
+CREATE TRIGGER starts_keep_content BEFORE UPDATE ON attempt_starts
+BEGIN
+    SELECT RAISE(ABORT, 'Attempt starts are immutable');
+END;
+
+CREATE TRIGGER starts_keep_history BEFORE DELETE ON attempt_starts
+BEGIN
+    SELECT RAISE(ABORT, 'Attempt start history is immutable');
+END;
+
+CREATE TRIGGER claims_cancel_before_start BEFORE UPDATE OF state ON attempt_claims
+WHEN NEW.state = 'cancelled'
+    AND EXISTS (SELECT 1 FROM attempt_starts WHERE claim_id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'A started claim cannot be cancelled');
+END;
+
 CREATE TABLE attempt_entries (
     scope TEXT NOT NULL,
     job TEXT NOT NULL,
     trial TEXT NOT NULL,
     started_at TEXT NOT NULL,
     claim_id TEXT NOT NULL REFERENCES attempt_claims (id),
+    attempt_id TEXT NOT NULL UNIQUE REFERENCES attempt_starts (id),
     entry_json TEXT NOT NULL CHECK (json_valid(entry_json)),
     PRIMARY KEY (scope, job, trial, started_at)
 ) STRICT;
 
 CREATE INDEX attempt_entries_claim ON attempt_entries (claim_id);
+
+CREATE TRIGGER entries_need_start BEFORE INSERT ON attempt_entries
+WHEN NOT EXISTS (
+    SELECT 1 FROM attempt_starts AS starts
+    JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+    JOIN runs ON runs.id = claims.run_id
+    WHERE starts.id = NEW.attempt_id AND starts.claim_id = NEW.claim_id
+        AND starts.started_at = NEW.started_at AND claims.scope = NEW.scope
+        AND runs.job = NEW.job AND claims.trial = NEW.trial
+        AND claims.state IN ('claimed', 'uncertain')
+)
+BEGIN
+    SELECT RAISE(ABORT, 'A ledger entry requires its live attempt start');
+END;
 
 CREATE TRIGGER entries_keep_content BEFORE UPDATE ON attempt_entries
 BEGIN
@@ -93,17 +140,93 @@ BEGIN
     SELECT RAISE(ABORT, 'Attempt ledger history is immutable');
 END;
 
-CREATE TABLE claim_artifacts (
-    claim_id TEXT PRIMARY KEY REFERENCES attempt_claims (id),
+CREATE TABLE request_admissions (
+    id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL REFERENCES attempt_starts (id),
+    created_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX request_admissions_attempt ON request_admissions (attempt_id);
+
+CREATE TRIGGER requests_need_live_attempt BEFORE INSERT ON request_admissions
+WHEN NOT EXISTS (
+    SELECT 1 FROM attempt_starts AS starts
+    JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+    WHERE starts.id = NEW.attempt_id AND claims.state = 'claimed'
+        AND NOT EXISTS (
+            SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
+        )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'A request requires a live unfinished attempt');
+END;
+
+CREATE TRIGGER requests_keep_content BEFORE UPDATE ON request_admissions
+BEGIN
+    SELECT RAISE(ABORT, 'Request admissions are immutable');
+END;
+
+CREATE TRIGGER requests_keep_history BEFORE DELETE ON request_admissions
+BEGIN
+    SELECT RAISE(ABORT, 'Request admission history is immutable');
+END;
+
+CREATE TABLE request_receipts (
+    request_id TEXT PRIMARY KEY REFERENCES request_admissions (id),
+    receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json))
+) STRICT;
+
+CREATE TRIGGER receipts_keep_content BEFORE UPDATE ON request_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'Request terminal receipts are immutable');
+END;
+
+CREATE TRIGGER receipts_keep_history BEFORE DELETE ON request_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'Request terminal receipt history is immutable');
+END;
+
+CREATE TABLE trial_artifacts (
+    run_id TEXT NOT NULL REFERENCES runs (id),
+    trial_id TEXT NOT NULL,
+    source_trial_id TEXT NOT NULL,
     commit_sha TEXT NOT NULL,
     path TEXT NOT NULL,
-    manifest_digest TEXT NOT NULL
+    manifest_digest TEXT NOT NULL,
+    PRIMARY KEY (run_id, trial_id)
+) STRICT;
+
+CREATE TRIGGER trial_artifacts_keep_content BEFORE UPDATE ON trial_artifacts
+BEGIN
+    SELECT RAISE(ABORT, 'Trial artifact references are immutable');
+END;
+
+CREATE TRIGGER trial_artifacts_keep_history BEFORE DELETE ON trial_artifacts
+BEGIN
+    SELECT RAISE(ABORT, 'Trial artifact history is immutable');
+END;
+
+CREATE TABLE claim_artifacts (
+    claim_id TEXT PRIMARY KEY REFERENCES attempt_claims (id),
+    run_id TEXT NOT NULL,
+    trial_id TEXT NOT NULL,
+    FOREIGN KEY (run_id, trial_id) REFERENCES trial_artifacts (run_id, trial_id)
 ) STRICT;
 
 CREATE TRIGGER artifacts_need_entry BEFORE INSERT ON claim_artifacts
-WHEN NOT EXISTS (SELECT 1 FROM attempt_entries WHERE claim_id = NEW.claim_id)
+WHEN NOT EXISTS (
+    SELECT 1 FROM attempt_claims
+    WHERE id = NEW.claim_id AND run_id = NEW.run_id AND trial = NEW.trial_id
+        AND state IN ('claimed', 'uncertain')
+) OR NOT EXISTS (SELECT 1 FROM attempt_entries WHERE claim_id = NEW.claim_id)
+    OR EXISTS (
+        SELECT 1 FROM request_admissions AS requests
+        JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+        LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+        WHERE starts.claim_id = NEW.claim_id AND receipts.request_id IS NULL
+    )
 BEGIN
-    SELECT RAISE(ABORT, 'Claim artifacts require a recorded attempt');
+    SELECT RAISE(ABORT, 'Claim artifacts require their live claim, Entry and receipts');
 END;
 
 CREATE TRIGGER artifacts_settle_claim AFTER INSERT ON claim_artifacts
@@ -126,9 +249,15 @@ WHEN NEW.state = 'settled'
     AND (
         NOT EXISTS (SELECT 1 FROM claim_artifacts WHERE claim_id = NEW.id)
         OR NOT EXISTS (SELECT 1 FROM attempt_entries WHERE claim_id = NEW.id)
+        OR EXISTS (
+            SELECT 1 FROM request_admissions AS requests
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            WHERE starts.claim_id = NEW.id AND receipts.request_id IS NULL
+        )
     )
 BEGIN
-    SELECT RAISE(ABORT, 'A settled claim requires its ledger and artifacts');
+    SELECT RAISE(ABORT, 'A settled claim requires its ledger, artifacts and receipts');
 END;
 
 CREATE TRIGGER claims_advance_source AFTER UPDATE OF state ON attempt_claims

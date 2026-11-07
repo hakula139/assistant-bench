@@ -11,7 +11,7 @@ from assistant_bench.database import Database, Row
 from assistant_bench.messages import InputError
 
 
-type ClaimState = Literal['claimed', 'uncertain', 'settled']
+type ClaimState = Literal['claimed', 'uncertain', 'settled', 'cancelled']
 type RunStatus = Literal['prepared', 'running', 'complete', 'uncertain']
 
 
@@ -36,6 +36,20 @@ class Claim:
     fingerprint: str
     accounting_json: str
     expected_source_revision: int
+    created_at: str
+
+
+@dataclass(frozen=True)
+class AttemptStart:
+    id: str
+    claim_id: str
+    started_at: str
+
+
+@dataclass(frozen=True)
+class RequestAdmission:
+    id: str
+    attempt_id: str
     created_at: str
 
 
@@ -154,6 +168,122 @@ class State:
             (claim_id,),
         )
 
+    def cancel_claim(self, claim_id: str) -> bool:
+        """Close a claim only when no attempt has crossed its start fence."""
+        self._claim_row(claim_id)
+        return bool(
+            self._database.execute(
+                """
+                UPDATE attempt_claims SET state = 'cancelled'
+                WHERE id = ? AND state IN ('claimed', 'uncertain')
+                    AND NOT EXISTS (
+                        SELECT 1 FROM attempt_starts
+                        WHERE claim_id = attempt_claims.id
+                    )
+                RETURNING id
+                """,
+                (claim_id,),
+            ).rows
+        )
+
+    def begin_attempt(self, attempt: AttemptStart) -> bool:
+        """Persist the mandatory start fence before any paid request.
+
+        Only a true result grants a new start. Repeated identities return false
+        and cannot authorize another attempt or another paid request.
+        """
+        self._claim_row(attempt.claim_id)
+        rows = self._database.execute(
+            """
+            INSERT INTO attempt_starts (id, claim_id, started_at)
+            SELECT ?, id, ? FROM attempt_claims WHERE id = ? AND state = 'claimed'
+            ON CONFLICT DO NOTHING RETURNING id
+            """,
+            (attempt.id, attempt.started_at, attempt.claim_id),
+        ).rows
+        if rows:
+            return True
+        previous = self._database.execute(
+            'SELECT * FROM attempt_starts WHERE id = ?', (attempt.id,)
+        ).rows
+        if previous and previous[0] != {
+            'id': attempt.id,
+            'claim_id': attempt.claim_id,
+            'started_at': attempt.started_at,
+        }:
+            raise InputError(f'Attempt `{attempt.id}` already has different metadata.')
+        return False
+
+    def admit_request(self, request: RequestAdmission) -> bool:
+        """Grant one paid request ID under a live, unfinished attempt.
+
+        False never permits I/O, including after an uncertain response to the
+        admission itself. A request ID is never reused to resend a paid request.
+        """
+        rows = self._database.execute(
+            """
+            INSERT INTO request_admissions (id, attempt_id, created_at)
+            SELECT ?, starts.id, ? FROM attempt_starts AS starts
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            WHERE starts.id = ? AND claims.state = 'claimed'
+                AND NOT EXISTS (
+                    SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
+                )
+            ON CONFLICT (id) DO NOTHING RETURNING id
+            """,
+            (request.id, request.created_at, request.attempt_id),
+        ).rows
+        if rows:
+            return True
+        previous = self._database.execute(
+            'SELECT * FROM request_admissions WHERE id = ?', (request.id,)
+        ).rows
+        if previous and previous[0] != {
+            'id': request.id,
+            'attempt_id': request.attempt_id,
+            'created_at': request.created_at,
+        }:
+            raise InputError(f'Request `{request.id}` already has different metadata.')
+        return False
+
+    def record_receipt(self, request_id: str, receipt_json: str) -> None:
+        """Append a domain-validated terminal receipt, preserving unknown usage."""
+        self._database.execute(
+            """
+            INSERT INTO request_receipts (request_id, receipt_json) VALUES (?, ?)
+            ON CONFLICT (request_id) DO NOTHING
+            """,
+            (request_id, receipt_json),
+        )
+        rows = self._database.execute(
+            'SELECT receipt_json FROM request_receipts WHERE request_id = ?',
+            (request_id,),
+        ).rows
+        if not _same_json(cast(str, rows[0]['receipt_json']), receipt_json):
+            raise InputError(f'Request `{request_id}` already has a different receipt.')
+
+    def requests(self, scope: str, *, unrecorded_only: bool = False) -> list[Row]:
+        """Read admitted requests with frozen accounting and terminal receipts.
+
+        A missing receipt is None and means unknown usage.
+        Unrecorded requests exclude every attempt covered by a final Entry.
+        """
+        return self._database.execute(
+            """
+            SELECT requests.id AS request_id, requests.attempt_id, starts.claim_id,
+                requests.created_at, claims.accounting_json, receipts.receipt_json
+            FROM request_admissions AS requests
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            WHERE claims.scope = ? AND (? = 0 OR NOT EXISTS (
+                SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
+            ))
+            ORDER BY requests.created_at, requests.id
+            """,
+            (scope, int(unrecorded_only)),
+        ).rows
+
     def record_entry(self, claim_id: str, entry_json: str) -> None:
         """Append one already-priced Entry without releasing its paid slot."""
         claim = self.get_claim(claim_id)
@@ -178,14 +308,17 @@ class State:
         self._database.execute(
             """
             INSERT INTO attempt_entries (
-                scope, job, trial, started_at, claim_id, entry_json
+                scope, job, trial, started_at, claim_id, attempt_id, entry_json
             )
-            SELECT claims.scope, runs.job, claims.trial, ?, claims.id, ?
+            SELECT claims.scope, runs.job, claims.trial, starts.started_at,
+                claims.id, starts.id, ?
             FROM attempt_claims AS claims JOIN runs ON runs.id = claims.run_id
+            JOIN attempt_starts AS starts ON starts.claim_id = claims.id
             WHERE claims.id = ? AND claims.state IN ('claimed', 'uncertain')
+                AND starts.started_at = ?
             ON CONFLICT (scope, job, trial, started_at) DO NOTHING
             """,
-            (started_at, entry_json, claim_id),
+            (entry_json, claim_id, started_at),
         )
         rows = self._database.execute(
             """
@@ -200,7 +333,7 @@ class State:
             or not _same_json(cast(str, rows[0]['entry_json']), entry_json)
         ):
             raise InputError(
-                f'Claim `{claim_id}` cannot record a different or settled attempt.'
+                f'Claim `{claim_id}` needs a matching live start or identical Entry.'
             )
 
     def entries(self, scope: str) -> list[str]:
@@ -212,61 +345,99 @@ class State:
             ).rows
         ]
 
-    def settle_claim(
-        self, claim_id: str, commit_sha: str, path: str, manifest_digest: str
-    ) -> None:
-        """Attach a remotely verified artifact reference and atomically release a slot.
+    def settle_claim(self, claim_id: str) -> None:
+        """Atomically settle recorded work with registered artifacts and receipts.
 
-        The caller confirms remote Git durability first. The SQL insertion and
-        its triggers require a ledger entry, settle the claim, and advance the
-        scope's source counter together. Repeated matching references do neither
-        another release nor another counter increment.
+        All admitted requests need confirmed terminal receipts, even when their
+        validated usage is unknown. A rejected settlement keeps its active state
+        and slot. Repeated settlement never advances the source counter twice.
         """
         self._claim_row(claim_id)
         self._database.execute(
             """
-            INSERT INTO claim_artifacts (claim_id, commit_sha, path, manifest_digest)
-            SELECT id, ?, ?, ? FROM attempt_claims
-            WHERE id = ? AND state IN ('claimed', 'uncertain')
+            INSERT INTO claim_artifacts (claim_id, run_id, trial_id)
+            SELECT claims.id, claims.run_id, claims.trial FROM attempt_claims AS claims
+            JOIN trial_artifacts AS artifacts
+                ON artifacts.run_id = claims.run_id
+                    AND artifacts.trial_id = claims.trial
+            WHERE claims.id = ? AND claims.state IN ('claimed', 'uncertain')
                 AND EXISTS (
                     SELECT 1 FROM attempt_entries
-                    WHERE claim_id = attempt_claims.id
+                    WHERE claim_id = claims.id
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM request_admissions AS requests
+                    JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+                    LEFT JOIN request_receipts AS receipts
+                        ON receipts.request_id = requests.id
+                    WHERE starts.claim_id = claims.id AND receipts.request_id IS NULL
                 )
             ON CONFLICT (claim_id) DO NOTHING
             """,
-            (commit_sha, path, manifest_digest, claim_id),
+            (claim_id,),
         )
         rows = self._database.execute(
-            'SELECT commit_sha, path, manifest_digest FROM claim_artifacts '
-            'WHERE claim_id = ?',
+            'SELECT claim_id FROM claim_artifacts WHERE claim_id = ?',
             (claim_id,),
         ).rows
         if not rows:
             raise InputError(
-                f'Claim `{claim_id}` needs a recorded attempt before settlement.'
+                f'Claim `{claim_id}` needs an Entry, artifacts and terminal receipts.'
             )
-        if rows[0] != {
+
+    def record_trial_artifact(
+        self,
+        run_id: str,
+        trial_id: str,
+        source_trial_id: str,
+        commit_sha: str,
+        path: str,
+        manifest_digest: str,
+    ) -> None:
+        """Register remotely confirmed artifacts independently of paid claims."""
+        self._database.execute(
+            """
+            INSERT INTO trial_artifacts (
+                run_id, trial_id, source_trial_id, commit_sha, path, manifest_digest
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (run_id, trial_id) DO NOTHING
+            """,
+            (run_id, trial_id, source_trial_id, commit_sha, path, manifest_digest),
+        )
+        if self.trial_artifact(run_id, trial_id) != {
+            'run_id': run_id,
+            'trial_id': trial_id,
+            'source_trial_id': source_trial_id,
             'commit_sha': commit_sha,
             'path': path,
             'manifest_digest': manifest_digest,
         }:
-            raise InputError(
-                f'Claim `{claim_id}` already has different artifact references.'
-            )
+            raise InputError(f'Trial `{trial_id}` already has different artifacts.')
+
+    def trial_artifact(self, run_id: str, trial_id: str) -> Row:
+        rows = self._database.execute(
+            'SELECT * FROM trial_artifacts WHERE run_id = ? AND trial_id = ?',
+            (run_id, trial_id),
+        ).rows
+        if not rows:
+            raise InputError(f'Trial `{trial_id}` has no registered artifacts.')
+        return rows[0]
 
     def artifacts(self, scope: str) -> list[Row]:
         return self._database.execute(
             """
-            SELECT artifacts.claim_id, claims.run_id, claims.trial,
-                artifacts.commit_sha, artifacts.path, artifacts.manifest_digest
-            FROM claim_artifacts AS artifacts
-            JOIN attempt_claims AS claims ON claims.id = artifacts.claim_id
-            WHERE claims.scope = ? ORDER BY claims.created_at, claims.id
+            SELECT artifacts.* FROM trial_artifacts AS artifacts
+            JOIN runs ON runs.id = artifacts.run_id
+            WHERE runs.scope = ? ORDER BY runs.created_at, runs.id, artifacts.trial_id
             """,
             (scope,),
         ).rows
 
     def complete_run(self, run_id: str) -> bool:
+        """Close a run whose claims settled or were cancelled before execution.
+
+        This closes claim lifecycles. Collection sealing separately establishes
+        whether a complete set of trial outputs has been published.
+        """
         self._run(run_id)
         return bool(
             self._database.execute(
@@ -276,7 +447,10 @@ class State:
                 SELECT 1 FROM attempt_claims AS claims
                 LEFT JOIN claim_artifacts AS artifacts ON artifacts.claim_id = claims.id
                 WHERE claims.run_id = runs.id
-                    AND (claims.state != 'settled' OR artifacts.claim_id IS NULL)
+                    AND (
+                        claims.state NOT IN ('settled', 'cancelled')
+                        OR (claims.state = 'settled' AND artifacts.claim_id IS NULL)
+                    )
             )
             RETURNING id
             """,
