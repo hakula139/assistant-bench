@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import assert_never
 
 import semver
+from harbor.models.job.config import SourceJobConfig
 from harbor.models.task import config as task_config
 from harbor.models.task.verifier_mode import resolve_task_verifier_mode
 from harbor.models.trial import config as trial_config
@@ -14,8 +15,8 @@ from harbor.trial.network_policy import resolve_trial_network_plan
 from pydantic import BaseModel, Field, ValidationError
 
 from assistant_bench.catalog import NixosConfigExport
-from assistant_bench.families import Case, Family, case_task, task_location, tasks_dir
-from assistant_bench.jobs import family_sources, source_trials
+from assistant_bench.families import Case, Family, case_task, task_location
+from assistant_bench.jobs import source_trials
 from assistant_bench.messages import InputError, code, error_lines
 
 
@@ -48,15 +49,15 @@ def render_task_config(name: str, instruction: str) -> task_config.TaskConfig:
     )
 
 
-def render_tasks(family: Family, cases: list[Case]) -> list[Path]:
-    """Write one Harbor task per case under the data directory and return their paths.
+def render_tasks(family: Family, cases: list[Case], *, root: Path) -> list[Path]:
+    """Write one Harbor task per case under the command root and return their paths.
 
     A task names no image, since its trial starts no container while the agent calls
     the endpoint from the host. It has no tests, which Harbor accepts while the
     verifier is disabled. A task's version follows its content. The directory is
     rebuilt, so cases the family no longer has leave no task.
     """
-    directory = tasks_dir(family)
+    directory = root / 'tasks' / family.name
     if directory.exists():
         shutil.rmtree(directory)
     directory.mkdir(parents=True)
@@ -212,7 +213,9 @@ def author_vendors(
 # ── Versions ──
 
 
-def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
+def changed_tasks(
+    family: Family, tasks: list[Path], sources: list[tuple[SourceJobConfig, Path]]
+) -> list[tuple[str, str]]:
     """Return each task whose content changed since a trial recorded its version.
 
     Harbor aborts a job whose task has an earlier trial at the same version but
@@ -232,7 +235,7 @@ def changed_tasks(family: Family, tasks: list[Path]) -> list[tuple[str, str]]:
         )
 
     changed: set[tuple[str, str]] = set()
-    for trial in source_trials(family_sources(family)):
+    for trial in source_trials(sources):
         if trial.task_name not in current:
             continue
         version, digest = current[trial.task_name]

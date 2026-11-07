@@ -86,7 +86,7 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import runnable_systems
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
-from assistant_bench.spend import CanaryAccounting
+from assistant_bench.spend import Accounting
 from assistant_bench.state import Claim, Run, State
 from assistant_bench.tasks import render_task_config
 
@@ -1091,7 +1091,7 @@ def accounted_trial(
         trial=trial,
         system=system,
         fingerprint=fingerprint,
-        accounting_json=CanaryAccounting(
+        accounting_json=Accounting(
             system=system, price=None, ceiling_usd=None
         ).model_dump_json(),
         expected_source_revision=state.source_revision(scope),

@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 from assistant_bench.messages import InputError, code, error_lines, validated_toml
-from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.paths import FAMILIES_DIR
 
 
 # ── Names and Votes ──
@@ -623,11 +623,6 @@ def task_location(
         for root, prefix in _task_roots(family, private_root)
         if task.parent == root
     )
-
-
-def tasks_dir(family: Family) -> Path:
-    """Return the directory that `tasks.render_tasks` installs the family's tasks in."""
-    return data_dir() / 'tasks' / family.name
 
 
 def case_task(
