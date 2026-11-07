@@ -63,9 +63,9 @@ class TestTrialAccounting:
             with pytest.raises(AccountingError, match='was not granted'):
                 asyncio.run(begun_trial.admit('openai-responses'))
 
-            assert begun_trial.fatal
+            assert not begun_trial.fatal
             assert private_state.requests('sample') == []
-            assert private_state.claim_state(begun_trial.claim_id) == 'uncertain'
+            assert private_state.claim_state(begun_trial.claim_id) == 'claimed'
 
     class TestConfirm:
         def test_keeps_request_order_and_unknown_usage_after_out_of_order_receipts(

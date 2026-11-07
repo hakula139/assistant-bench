@@ -1,4 +1,5 @@
 import asyncio
+import os
 import ssl
 from pathlib import Path
 
@@ -76,6 +77,8 @@ class TestEndpoint:
             asyncio.run(request())
             recorder.finish(START)
             attempt = recorder.attempt()
+            assert not recorder.fatal
+            assert private_state.claim_state(recorder.claim_id) == 'claimed'
 
         assert [sent.path for sent in endpoint.requests] == ['/v1/responses'] * 2
         records = private_state.requests('bounded')
@@ -107,6 +110,86 @@ class TestEndpoint:
 
     @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
+        @pytest.mark.parametrize('api', ['openai-responses', 'anthropic-messages'])
+        def test_remembers_sent_credentials_after_key_and_header_rotation(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            monkeypatch: pytest.MonkeyPatch,
+            api: Api,
+        ) -> None:
+            original_key = endpoint.key_file.read_text().strip()
+            rotated_key = 'rotated-endpoint-key'
+            original_header = 'original-endpoint-header'
+            rotated_header = 'rotated-endpoint-header'
+            for name, value in endpoint.env.items():
+                monkeypatch.setenv(name, value)
+            monkeypatch.setenv(
+                HEADERS_VAR, f'{{"x-session-token": "{original_header}"}}'
+            )
+            configured = Endpoint.read(os.environ.get, api)
+            first_client = (
+                configured.messages_client()
+                if api == 'anthropic-messages'
+                else configured.client(api)
+            )
+            endpoint.response = message() if api == 'anthropic-messages' else response()
+            endpoint.key_file.write_text(rotated_key)
+            monkeypatch.setenv(
+                HEADERS_VAR, f'{{"x-rotated-token": "{rotated_header}"}}'
+            )
+
+            async def send(
+                client: openai.AsyncOpenAI | anthropic.AsyncAnthropic,
+            ) -> None:
+                if isinstance(client, anthropic.AsyncAnthropic):
+                    await client.messages.create(
+                        model='acme/large',
+                        max_tokens=64,
+                        messages=[{'role': 'user', 'content': 'Hello.'}],
+                    )
+                else:
+                    await client.responses.create(model='acme/large', input='Hello.')
+
+            async def request() -> None:
+                async with first_client:
+                    await send(first_client)
+                remembered_original = all(
+                    value in begun_trial.secrets()
+                    for value in (original_key, original_header)
+                )
+                assert remembered_original
+
+                rotated = Endpoint.read(os.environ.get, api)
+                second_client = (
+                    rotated.messages_client()
+                    if api == 'anthropic-messages'
+                    else rotated.client(api)
+                )
+                async with second_client:
+                    await send(second_client)
+
+            asyncio.run(request())
+
+            first, second = endpoint.requests
+            header = 'x-api-key' if api == 'anthropic-messages' else 'authorization'
+            prefix = '' if api == 'anthropic-messages' else 'Bearer '
+            sent_original = first.headers[header] == prefix + original_key
+            sent_rotated = second.headers[header] == prefix + rotated_key
+            assert sent_original and sent_rotated
+            assert first.headers['x-session-token'] == original_header
+            assert second.headers['x-rotated-token'] == rotated_header
+            remembered_both = all(
+                value in begun_trial.secrets()
+                for value in (
+                    original_key,
+                    rotated_key,
+                    original_header,
+                    rotated_header,
+                )
+            )
+            assert remembered_both
+
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'anthropic-messages']
         )
