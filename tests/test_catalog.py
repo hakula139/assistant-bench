@@ -192,11 +192,25 @@ class TestLoadSystems:
             'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
             'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
             'kimi-k3-high': 'Kimi K3 · High',
+            'opus-5.5-high-nixos': 'Claude Opus 5.5 · High · Instructions',
+            'gpt-6-astra-high-nixos': 'GPT-6 Astra · High · Instructions',
+            'gpt-6.1-sol-high-nixos': 'GPT-6.1 Sol · High · Instructions',
+            'gemini-4-argon-high-nixos': 'Gemini 4 Argon · High · Instructions',
+            'gemini-3.8-flash-high-nixos': 'Gemini 3.8 Flash · High · Instructions',
+            'deepseek-v4.1-flash-1017-high-nixos': (
+                'DeepSeek V4.1 Flash 1017 · High · Instructions'
+            ),
+            'kimi-k3-high-nixos': 'Kimi K3 · High · Instructions',
         }
         assert {system.effort for system in systems.values()} == {'high'}
         assert {
             name for name, system in systems.items() if system.api == 'openai-responses'
-        } == {'gpt-6-astra-high', 'gpt-6.1-sol-high'}
+        } == {
+            'gpt-6-astra-high',
+            'gpt-6.1-sol-high',
+            'gpt-6-astra-high-nixos',
+            'gpt-6.1-sol-high-nixos',
+        }
         native = systems['opus-5.5-high']
         assert (
             native.api,

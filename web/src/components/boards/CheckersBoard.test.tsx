@@ -33,7 +33,7 @@ test('keeps strict ties and descriptive effects separate from applicable-rule de
   const details = screen.getByText('Acme', { selector: 'summary' }).parentElement;
   expect(details).not.toBeNull();
   await userEvent.setup().click(screen.getByText('Acme', { selector: 'summary' }));
-  expect(details?.textContent).toContain('Straight English quotes0 / 11');
+  expect(details?.textContent).toContain('Straight quotes1 / 11');
 });
 
 test('filters strict scores by category without changing the paired overall effects', async () => {

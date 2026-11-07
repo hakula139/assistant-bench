@@ -21,8 +21,12 @@ interface Props {
 function passRows({ systems, results }: TestsReport | CheckersReport) {
   const names = reportNames(systems);
   return results.standings
-    .map(({ system, pass_rate }) => ({ name: systemName(names, system), pass_rate }))
-    .toSorted(byPassRate);
+    .map(({ system, pass_rate }) => ({ system, name: systemName(names, system), pass_rate }))
+    .toSorted(
+      results.scorer === 'checkers'
+        ? (a, b) => b.pass_rate.rate - a.pass_rate.rate || a.system.localeCompare(b.system)
+        : byPassRate,
+    );
 }
 
 const { family } = Astro.props;

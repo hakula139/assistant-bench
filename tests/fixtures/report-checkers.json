@@ -114,8 +114,8 @@
         "system": "acme",
         "applicable_cases": 1,
         "applicable_responses": 1,
-        "passed_responses": 0,
-        "pass_rate": 0.0
+        "passed_responses": 1,
+        "pass_rate": 1.0
       },
       {
         "rule": "ellipsis",

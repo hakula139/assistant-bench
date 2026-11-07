@@ -15,11 +15,14 @@ from assistant_bench.families import (
 )
 from assistant_bench.jobs import check_systems
 from assistant_bench.messages import InputError
-from assistant_bench.outputs import write_outputs
+from assistant_bench.outputs import read_outputs, write_outputs
 from assistant_bench.scoring import checkers
 from assistant_bench.scoring.checkers import evaluate
 from assistant_bench.tasks import current_versions, render_tasks
 from support import FIXTURES, START, finish_generation, make_output, make_system
+
+
+PROSE_RULES: tuple[CheckRule, ...] = ('ellipsis', 'curly-quotes')
 
 
 @pytest.mark.parametrize(
@@ -27,6 +30,7 @@ from support import FIXTURES, START, finish_generation, make_output, make_system
     [
         ('ellipsis', 'Wait...', 'Wait…', {}),
         ('han-punctuation', '山间，晨雾。', '山间,晨雾。', {'language': 'zh'}),
+        ('han-punctuation', '𠀀，晨。', '𠀀,晨。', {'language': 'zh'}),
         (
             'han-punctuation',
             '山间[，](https://example.com)晨雾。',
@@ -90,6 +94,7 @@ def test_prose_fences_do_not_bypass_rules(wrapper: str) -> None:
     result = evaluate(context, wrapper.format('Wait…'), completed=True)
 
     assert not result.passed
+    assert evaluate(context, wrapper.format('Wait...'), completed=True).passed
 
 
 def test_code_links_and_exact_quoted_input_are_exempt() -> None:
@@ -182,10 +187,11 @@ def close_round(families_dir: Path, *, omit: str | None = None) -> report.Report
             latency_sec=2.0,
             checks=checkers.Checks(
                 revision=checkers.REVISION,
-                rules=dict.fromkeys(
-                    ['ellipsis', 'curly-quotes'] if index == 0 else ['ellipsis'],
-                    index != 0 if system == 'acme' else index != 3,
-                ),
+                rules={
+                    rule: rule != 'ellipsis'
+                    or (index != 0 if system == 'acme' else index != 3)
+                    for rule in (PROSE_RULES if index == 0 else PROSE_RULES[:1])
+                },
             ),
         )
         for system in ['acme', 'acme-prompted']
@@ -217,7 +223,7 @@ def test_close_binary_cases_diagnostics_and_paired_effect(
     assert results.decision.tied == ['acme-prompted']
     assert results.rules[0].applicable_cases == 1
     assert results.rules[0].applicable_responses == 1
-    assert results.rules[0].passed_responses == 0
+    assert results.rules[0].passed_responses == 1
     effect = results.prompt_effects[0]
     assert effect.delta == 0
     assert (
@@ -280,8 +286,12 @@ def test_shared_fixture(
         stale_fixture(path, written)
 
 
+@pytest.mark.parametrize('completion', ['stop', 'length', None, 'error'])
 def test_recollection_regrades_without_generation_changes(
-    families_dir: Path, data_dir: Path
+    families_dir: Path,
+    data_dir: Path,
+    completion: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     write_family(families_dir)
     family = load_family('instructions-format')
@@ -289,6 +299,19 @@ def test_recollection_regrades_without_generation_changes(
     system = make_system(name='acme')
     paths = render_tasks(family, cases)
     finish_generation(jobs.job(family, [system], paths[:1]), 'Wait…')
+    (result_file,) = (data_dir / 'jobs' / family.name).glob('*/*/result.json')
+    payload = json.loads(result_file.read_text())
+    payload['agent_result']['metadata']['finish_reason'] = (
+        'stop' if completion == 'error' else completion
+    )
+    if completion == 'error':
+        payload['exception_info'] = {
+            'exception_type': 'AgentError',
+            'exception_message': 'failed',
+            'exception_traceback': '',
+            'occurred_at': START.isoformat(),
+        }
+    result_file.write_text(json.dumps(payload))
     inputs = jobs.current_inputs(family, [system])
     versions = current_versions(family, {case.id: case for case in cases})
     first = collection.collect(family, {'acme': system}).outputs
@@ -301,10 +324,63 @@ def test_recollection_regrades_without_generation_changes(
     (families_dir / family.name / 'cases.toml').write_text(
         tomli_w.dumps({'cases': [case.model_dump(exclude_none=True) for case in cases]})
     )
+    monkeypatch.setattr(checkers, 'REVISION', 'format-2')
     second = collection.collect(family, {'acme': system}).outputs
 
-    assert second[0].checks is not None and second[0].checks.passed
+    assert second[0].checks is not None
+    assert second[0].checks.revision == 'format-2'
+    assert second[0].checks.passed == (completion == 'stop')
     assert first[0].trial == second[0].trial
     assert first[0].fingerprint == second[0].fingerprint
     assert jobs.current_inputs(family, [system]) == inputs
     assert current_versions(family, {case.id: case for case in cases}) == versions
+
+
+@pytest.mark.parametrize(
+    'gap', ['missing-case', 'duplicate', 'missing-checks', 'old-checker']
+)
+def test_closing_refuses_incomplete_or_stale_verdicts(
+    families_dir: Path, data_dir: Path, gap: str
+) -> None:
+    close_round(families_dir)
+    outputs = read_outputs('instructions-format')
+    if gap == 'missing-case':
+        outputs.pop()
+    elif gap == 'duplicate':
+        outputs.append(outputs[0])
+    else:
+        checks = outputs[0].checks
+        assert checks is not None
+        outputs[0] = outputs[0].model_copy(
+            update={
+                'checks': None
+                if gap == 'missing-checks'
+                else checks.model_copy(update={'revision': 'old'}),
+            }
+        )
+    write_outputs('instructions-format', outputs)
+
+    with pytest.raises(InputError):
+        report.close_checkers(
+            load_family('instructions-format'),
+            START,
+            system_names={
+                'acme': 'Acme',
+                'acme-prompted': 'Acme Instructions',
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    'context',
+    [
+        {'language': 'en', 'rules': ['han-punctuation']},
+        {'language': 'zh', 'rules': ['curly-quotes']},
+        {'language': 'en', 'rules': ['tree-comments']},
+        {'language': 'en', 'rules': ['forbidden-marker']},
+        {'language': 'en', 'rules': ['ellipsis'], 'targets': ['list-spacing']},
+    ],
+)
+def test_context_rejects_inapplicable_rules(context: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        CheckContext.model_validate(context)

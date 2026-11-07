@@ -17,6 +17,7 @@ import {
   roundPaths,
   systemPath,
   systemPaths,
+  type CheckersFamily,
   type Family,
   type TestsFamily,
   type VotesFamily,
@@ -137,6 +138,19 @@ async function testsFamily(): Promise<TestsFamily> {
   return { ...listing(report.family, config), scorer: 'tests', config, rounds: [report] };
 }
 
+async function checkersFamily(): Promise<CheckersFamily> {
+  const report = await readReport('report-checkers', 'checkers');
+  const config: Extract<FamilyConfig, { scorer: 'checkers' }> = {
+    scorer: 'checkers',
+    aspect: 'instructions',
+    display_name: 'Format',
+    systems: ['acme', 'acme-prompted'],
+    categories: ['docs', 'message'],
+    public: true,
+  };
+  return { ...listing(report.family, config), scorer: 'checkers', config, rounds: [report] };
+}
+
 function guide(html: string): string {
   const match = /href="\/methodology\/#([\w-]+)"/.exec(html);
   if (!match) {
@@ -246,6 +260,21 @@ describe('family page', () => {
     expect(text(html)).toContain('Acme Pro 92% 44–100% 83% 6 12 1');
   });
 
+  test('renders strict checks and their empty state through the scorer registry', async () => {
+    const loaded = await checkersFamily();
+    const [closed, empty] = await Promise.all([
+      render(FamilyPage, { family: loaded, boards: [] }),
+      render(FamilyPage, { family: { ...loaded, rounds: [] }, boards: [] }),
+    ]);
+
+    expect(text(closed)).toContain(
+      'Run same cases for all Checks all applicable rules Pass rate share of cases passed',
+    );
+    expect(text(closed)).toContain('Acme 75% 19–99% 4');
+    expect(text(empty)).toContain('No round has closed yet.');
+    expect(text(empty)).toContain('Systems: Acme, Acme · Instructions');
+  });
+
   test("draws a coding family's steps and names its gate-failure column for the tests", async () => {
     const html = await render(FamilyPage, { family: await codingFamily(), boards: [] });
 
@@ -276,6 +305,7 @@ describe('family page', () => {
   test.each([
     ['votes', family, 'votes', 'Cases', 'Ranked by blind pairwise votes'],
     ['tests', testsFamily, 'tests', 'Tasks', 'Scored by automated tests'],
+    ['checkers', checkersFamily, 'checkers', 'Cases', 'Scored by strict format checks'],
     [
       'coding',
       codingFamily,
@@ -433,6 +463,16 @@ describe('family panel', () => {
     expect(text(html)).toContain(
       'System Pass rate 95% interval Acme Alpha 92% 44–100% Acme Pro 92% 44–100% Acme Mini 83% 36–100%',
     );
+  });
+
+  test('keeps checkers ties in system ID order when display names sort differently', async () => {
+    const loaded = await checkersFamily();
+    loaded.rounds[0].systems.acme.display_name = 'Zeta';
+    loaded.rounds[0].systems['acme-prompted'].display_name = 'Alpha';
+
+    const html = await render(FamilyPanel, { family: loaded });
+
+    expect(text(html)).toContain('Zeta 75% 19–99% Alpha 75% 19–99%');
   });
 });
 

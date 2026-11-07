@@ -236,7 +236,7 @@ class CheckContext(BaseModel):
     kind: Literal['prose', 'directory-tree'] = 'prose'
     rules: Unique[CheckRule] = Field(min_length=1)
     targets: Unique[CheckRule] = []
-    quoted_input: list[str] = []
+    quoted_input: list[Annotated[str, Field(min_length=1)]] = []
     forbidden_marker: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode='after')
@@ -447,6 +447,15 @@ def load_cases(family: Family) -> list[Case]:
             raise InputError(
                 f'Family `{family.name}`: case `{case.id}` needs scoring context '
                 'exactly when its scorer is `checkers`.'
+            )
+        if case.checks is not None and any(
+            value not in case.instruction
+            for value in [*case.checks.quoted_input, case.checks.forbidden_marker]
+            if value is not None
+        ):
+            raise InputError(
+                f'Family `{family.name}`: case `{case.id}` declares a quotation or '
+                'planted marker absent from its instruction.'
             )
         if case.id in cases:
             raise InputError(

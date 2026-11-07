@@ -18,13 +18,13 @@ import { reportNames, systemName } from '@/lib/systems';
 import { useCategory } from '@/lib/use-category';
 
 const rules = {
-  'ellipsis': 'Three-period ellipsis',
-  'han-punctuation': 'Fullwidth Chinese punctuation',
-  'curly-quotes': 'Straight English quotes',
-  'paragraph-lines': 'One source line per paragraph',
+  'ellipsis': 'Ellipsis',
+  'han-punctuation': 'Han punctuation',
+  'curly-quotes': 'Straight quotes',
+  'paragraph-lines': 'Paragraph lines',
   'list-spacing': 'List spacing',
-  'tree-comments': 'Aligned tree comments',
-  'forbidden-marker': 'Forbidden marker omitted',
+  'tree-comments': 'Tree comments',
+  'forbidden-marker': 'Marker omitted',
 };
 
 export function CheckersBoard({ round: { systems, results } }: { round: CheckersReport }) {
@@ -34,7 +34,9 @@ export function CheckersBoard({ round: { systems, results } }: { round: Checkers
     category === null
       ? results.standings
       : (results.categories.find((board) => board.category === category)?.standings ?? [])
-  ).map((row) => ({ ...row, name: systemName(names, row.system) }));
+  )
+    .map((row) => ({ ...row, name: systemName(names, row.system) }))
+    .toSorted((a, b) => b.pass_rate.rate - a.pass_rate.rate || a.system.localeCompare(b.system));
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,7 +78,7 @@ export function CheckersBoard({ round: { systems, results } }: { round: Checkers
         </TableBody>
       </Table>
       {category === null && (
-        <p className={note}>
+        <p className={`${note} text-balance`}>
           {decisionNote(results.decision, rows, names, {
             figure: 'strict case pass rate',
             test: 'a paired sign test over shared cases',
@@ -88,8 +90,8 @@ export function CheckersBoard({ round: { systems, results } }: { round: Checkers
           Prompt effect
         </h2>
         <p className={note}>
-          Prompted minus bare pass rate on paired cases. These descriptive differences do not
-          establish significance. A missing interval means the paired case bootstrap could not
+          Prompted minus bare pass rate across all paired cases. These descriptive differences do
+          not establish significance. A missing interval means the paired case bootstrap could not
           estimate variation.
         </p>
         <Table>

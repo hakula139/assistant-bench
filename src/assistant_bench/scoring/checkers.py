@@ -1,6 +1,7 @@
 """Deterministic checks of authored Markdown, separate from generation identity."""
 
 import re
+import unicodedata
 from collections.abc import Sequence
 
 from markdown_it import MarkdownIt
@@ -13,9 +14,6 @@ from assistant_bench.families import CheckContext, CheckRule
 REVISION = 'format-1'
 _MARKDOWN = MarkdownIt('commonmark', {'html': False})
 _PROSE_FENCES = {'md', 'markdown', 'text', 'txt'}
-_HAN_PUNCTUATION = re.compile(
-    r'(?<=[\u3400-\u4dbf\u4e00-\u9fff])[,.:](?=[\u3400-\u4dbf\u4e00-\u9fff])'
-)
 _TREE_COMMENT = re.compile(r'\S([ \t]+)(#\s.*)$')
 
 
@@ -56,7 +54,12 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
             case 'ellipsis':
                 passed = '…' not in prose
             case 'han-punctuation':
-                passed = _HAN_PUNCTUATION.search(prose) is None
+                passed = not any(
+                    punctuation in ',.:' and _han(before) and _han(after)
+                    for before, punctuation, after in zip(
+                        prose, prose[1:], prose[2:], strict=False
+                    )
+                )
             case 'curly-quotes':
                 passed = not any(character in prose for character in '‘’“”')
             case 'paragraph-lines':
@@ -149,3 +152,9 @@ def _list_spacing(source: str, tokens: Sequence[Token]) -> bool:
 
 def _blank(line: str) -> bool:
     return re.fullmatch(r'\s*(?:>\s*)*', line) is not None
+
+
+def _han(character: str) -> bool:
+    return unicodedata.name(character, '').startswith(
+        ('CJK UNIFIED IDEOGRAPH-', 'CJK COMPATIBILITY IDEOGRAPH-')
+    )

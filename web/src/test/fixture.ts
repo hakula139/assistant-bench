@@ -5,6 +5,8 @@ import type { SystemNames } from '@/lib/systems';
 
 /** Display names for every system the fixtures name, each unlike its table name. */
 export const FIXTURE_NAMES: SystemNames = {
+  'acme': 'Acme',
+  'acme-prompted': 'Acme · Instructions',
   'acme-edge': 'Acme Edge',
   'acme-flash': 'Acme Flash',
   'acme-large': 'Acme Large',
