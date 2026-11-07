@@ -7,13 +7,13 @@ import {
   DistributionTable,
   HeadToHeadTable,
   RoundsTable,
-  VotesStat,
+  SystemStats,
 } from '@/components/boards/SystemTables';
 import { DotRangePlot, type DotRange } from '@/components/charts/DotRangePlot';
 import { ForestPlot, type ForestPlotRow } from '@/components/charts/ForestPlot';
 import { TableTwin } from '@/components/charts/TableTwin';
 import { BoardSwitcher } from '@/components/site/BoardSwitcher';
-import { note, PageHeader, Section, stack, Stat, statList } from '@/components/site/PageParts';
+import { note, PageHeader, Section, stack } from '@/components/site/PageParts';
 import { StatusMark } from '@/components/site/Term';
 import {
   Breadcrumb,
@@ -25,7 +25,6 @@ import {
 import Base from '@/layouts/Base.astro';
 import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
-import { formatScore, formatScoreRange } from '@/lib/format';
 import { categoryTerms, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
 import { isPreliminary } from '@/lib/ranking';
@@ -123,19 +122,12 @@ const latencyRows = distributionRows((item) => item.latency_sec);
       )}
     </Fragment>
     <BoardSwitcher aspect={family.aspect} boards={boards} />
-    <dl class={statList}>
-      <Stat
-        label="Score"
-        detail={standing.interval ? `(${formatScoreRange(standing.interval)})` : undefined}
-      >
-        {formatScore(standing.score)}
-      </Stat>
-      <Stat label="Rank">{standing.rank}</Stat>
-      <VotesStat client:visible votes={standing.votes} decisive={standing.decisive_votes} />
-      <Stat label="Round">
-        <a href={roundPath(family, round)}>{round}</a>
-      </Stat>
-    </dl>
+    <SystemStats
+      client:visible
+      standing={standing}
+      round={round}
+      roundHref={roundPath(family, round)}
+    />
   </PageHeader>
 
   <div class={stack}>

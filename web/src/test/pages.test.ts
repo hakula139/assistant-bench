@@ -496,7 +496,7 @@ describe('system page', () => {
       'Votes 98 (82 decisive)',
       'Round 2026-10-21',
     ]);
-    expect(islandHints(html, 'VotesStat')).toEqual(['(82 decisive)']);
+    expect(islandHints(html, 'SystemStats')).toEqual(['(82 decisive)']);
   });
 
   test('names the system, its family, and every other system by display name', async () => {
