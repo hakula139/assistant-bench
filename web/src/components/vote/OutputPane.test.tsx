@@ -7,6 +7,20 @@ import { OutputPane } from '@/components/vote/OutputPane';
 describe('OutputPane', () => {
   afterEach(cleanup);
 
+  test('opens the selected preview as an isolated document with an accessible name', () => {
+    const url = '/api/previews/00000000-0000-4000-8000-000000000001/b';
+
+    render(
+      <OutputPane side="B" render="html" previewUrl={url} asMarkdown={false} controls={null} />,
+    );
+
+    const frame = screen.getByTitle<HTMLIFrameElement>('Output B preview');
+    expect(frame.getAttribute('src')).toBe(url);
+    expect(frame.getAttribute('sandbox')).toBe('');
+    expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(frame.hasAttribute('srcdoc')).toBe(false);
+  });
+
   test('shows raw HTML and images in Markdown as text, without loading them', () => {
     const text = '<b>bold</b> ![logo](http://example.com/logo.png)';
 

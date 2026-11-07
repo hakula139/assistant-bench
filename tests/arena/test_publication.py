@@ -2,13 +2,13 @@ import json
 import sqlite3
 from collections.abc import Callable, Sequence
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from assistant_bench.arena import publication
+from assistant_bench.arena import publication, votes
 from assistant_bench.arena.publication import Publication
 from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.families import (
@@ -27,6 +27,8 @@ from support import (
     make_case,
     make_trial,
     make_votes_family,
+    record_vote,
+    with_settings,
 )
 
 
@@ -95,6 +97,74 @@ class RecordingDatabase:
 
 
 class TestPrepare:
+    def test_preserves_html_content_and_unknown_lengths_through_the_vote_snapshot(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        family = with_settings(make_votes_family(), render='html')
+        case = make_case('page')
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        outputs = [
+            make_trial('page', system, text=source.replace('Welcome', system))
+            for system in ARENA_SYSTEMS[:2]
+        ]
+        outputs[1] = outputs[1].model_copy(
+            update={'text': source.replace('Saturday', 'Sunday')}
+        )
+        outputs.append(
+            make_trial('page', ARENA_SYSTEMS[2], [Gate.HTML], text='raw failure')
+        )
+
+        published = prepare(family, [case], outputs)
+        publication.publish(arena_store, published, NOW, target='production')
+        passing = published.model_copy(
+            update={
+                'outputs': tuple(
+                    row for row in published.outputs if row.verdict == 'pass'
+                )
+            }
+        )
+        record_vote(arena_store, passing, NOW, actor='reader', age=timedelta(hours=1))
+        cut = votes.read_cut(arena_store, family.name, NOW)
+
+        assert published.render == 'html'
+        expected = {output.system: output.text for output in outputs}
+        for output in published.outputs:
+            assert output.length is None
+            assert output.content == (
+                expected[output.system] if output.verdict == 'pass' else None
+            )
+        assert cut is not None
+        assert cut.inventory.outputs == tuple(
+            publication.OutputFacts.model_validate(
+                output.model_dump(exclude={'content'})
+            )
+            for output in published.outputs
+        )
+        analysis = votes.voting_input(
+            votes.Snapshot(
+                family=family.name, taken_at=NOW, production=cut, local=None
+            ),
+            family,
+            outputs,
+        )
+        assert [(row.length_a, row.length_b) for row in analysis.ordinary] == [
+            (None, None)
+        ]
+
+    @pytest.mark.parametrize(
+        'fenced', [False, True], ids=['ineligible', 'uncollected-fence']
+    )
+    def test_refuses_passing_html_that_collection_has_not_made_eligible(
+        self, fenced: bool
+    ) -> None:
+        family = with_settings(make_votes_family(), render='html')
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        reply = f'```html\n{source}```\n' if fenced else source.replace('</body>', '')
+        outputs = [make_trial('page', system, text=reply) for system in ARENA_SYSTEMS]
+
+        with pytest.raises(InputError, match='not a collected eligible document'):
+            prepare(family, [make_case('page')], outputs)
+
     @pytest.mark.parametrize('public_voting', [True, False])
     def test_partitions_local_cases_and_records_their_split(
         self, public_voting: bool
