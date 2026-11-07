@@ -103,7 +103,8 @@ class State:
         """Claim a slot only at the source revision used to plan its generation.
 
         A repeated claim ID returns false, so it never admits another paid call.
-        Claimed and uncertain slots remain occupied until their artifacts settle.
+        Claimed and uncertain slots remain occupied until settlement or
+        cancellation before an attempt starts.
         """
         if _object(claim.accounting_json)['system'] != claim.system:
             raise InputError(f'Claim `{claim.id}` has a different accounting system.')
