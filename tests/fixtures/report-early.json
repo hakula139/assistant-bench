@@ -76,10 +76,18 @@
         "both_bad_rate": 0.2727272727272727,
         "gate_failure_rate": 0.0,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.012477,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 143.6,
+          "p50": 401.0,
+          "p90": 704.6
+        },
+        "latency_sec": {
+          "p10": 4.473181610104428,
+          "p50": 18.177959948645857,
+          "p90": 36.678192016442324
+        },
         "defects": {
           "scope": 0,
           "facts": 0,
@@ -103,10 +111,18 @@
         "both_bad_rate": 0.3333333333333333,
         "gate_failure_rate": 0.016666666666666666,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.009195333333333333,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 145.0,
+          "p50": 413.0,
+          "p90": 764.8
+        },
+        "latency_sec": {
+          "p10": 5.000667139112841,
+          "p50": 23.43129221058306,
+          "p90": 36.5976454242129
+        },
         "defects": {
           "scope": 2,
           "facts": 0,
@@ -130,10 +146,18 @@
         "both_bad_rate": 0.15384615384615385,
         "gate_failure_rate": 0.05,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.019370666666666668,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 190.20000000000002,
+          "p50": 478.0,
+          "p90": 735.2
+        },
+        "latency_sec": {
+          "p10": 3.637116019426664,
+          "p50": 19.409331074239436,
+          "p90": 34.02872258270517
+        },
         "defects": {
           "scope": 1,
           "facts": 0,
@@ -157,10 +181,18 @@
         "both_bad_rate": 0.16666666666666666,
         "gate_failure_rate": 0.05,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.004385333333333334,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 163.8,
+          "p50": 422.0,
+          "p90": 748.4
+        },
+        "latency_sec": {
+          "p10": 6.136335394830338,
+          "p50": 17.56367775849482,
+          "p90": 31.165036678283254
+        },
         "defects": {
           "scope": 0,
           "facts": 0,
@@ -184,10 +216,18 @@
         "both_bad_rate": 0.0,
         "gate_failure_rate": 0.05,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.022150000000000003,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 151.6,
+          "p50": 417.0,
+          "p90": 734.4
+        },
+        "latency_sec": {
+          "p10": 3.869392645635315,
+          "p50": 17.9591343179422,
+          "p90": 36.543774235484925
+        },
         "defects": {
           "scope": 0,
           "facts": 0,
@@ -211,10 +251,18 @@
         "both_bad_rate": null,
         "gate_failure_rate": 0.6833333333333333,
         "pass_rate": null,
-        "mean_cost_usd": null,
-        "cost_gap": "unreported",
-        "output_tokens": null,
-        "latency_sec": null,
+        "mean_cost_usd": 0.03716266666666667,
+        "cost_gap": null,
+        "output_tokens": {
+          "p10": 205.4,
+          "p50": 451.0,
+          "p90": 696.4
+        },
+        "latency_sec": {
+          "p10": 7.276175274695369,
+          "p50": 25.386516450722205,
+          "p90": 35.804151344595375
+        },
         "defects": {
           "scope": 0,
           "facts": 0,
