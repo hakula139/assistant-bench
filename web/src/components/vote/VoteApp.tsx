@@ -95,10 +95,12 @@ function Screen({ title, children }: { title: string; children: ReactNode }) {
 function StartScreen({
   families,
   error,
+  recovery,
   onStart,
 }: {
   families: FamilyView[] | null;
   error: string | null;
+  recovery: ReactNode;
   onStart: (family: string) => void;
 }) {
   const groupsId = useId();
@@ -106,6 +108,7 @@ function StartScreen({
   return (
     <Screen title="Choose a family to vote on">
       <ErrorAlert error={error} />
+      {recovery && <div className="flex flex-col items-start gap-2">{recovery}</div>}
       {families?.length === 0 && (
         <p className="text-muted-foreground">
           No voting families are available right now. Please check back later.
@@ -432,6 +435,7 @@ export function VoteApp() {
     sitekey,
     voteFailed,
     error,
+    reloadRequired,
     notice,
     saved,
     busy,
@@ -580,6 +584,15 @@ export function VoteApp() {
       <Button disabled={busy} onClick={submit}>
         Retry vote
       </Button>
+    ) : reloadRequired ? (
+      <Button
+        disabled={busy}
+        onClick={() => {
+          window.location.reload();
+        }}
+      >
+        Reload page
+      </Button>
     ) : (
       error !== null &&
       family !== undefined && (
@@ -600,7 +613,14 @@ export function VoteApp() {
       );
     }
 
-    return <StartScreen families={families} error={error} onStart={start} />;
+    return (
+      <StartScreen
+        families={families}
+        error={error}
+        recovery={reloadRequired ? recovery : null}
+        onStart={start}
+      />
+    );
   }
 
   if (pair === null || draft === null) {
@@ -718,7 +738,7 @@ export function VoteApp() {
         undoable={state.undo}
         locked={locked}
         error={error}
-        recovery={sitekey !== null || voteFailed ? recovery : null}
+        recovery={sitekey !== null || voteFailed || reloadRequired ? recovery : null}
         onChoose={(choice) => {
           update({ choice });
         }}
