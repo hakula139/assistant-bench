@@ -18,6 +18,20 @@ function replaceField(payload: object, path: (string | number)[], value: unknown
 }
 
 describe('reportSchema', () => {
+  test.each([
+    ['unknown category system', ['categories', 0, 'standings', 0, 'system'], 'unlisted-system'],
+    ['repeated category', ['categories', 1, 'category'], 'docs'],
+    ['cost gap beside a mean cost', ['standings', 0, 'cost_gap'], 'unreported'],
+  ] satisfies [string, (string | number)[], unknown][])(
+    'rejects a checker %s',
+    async (_name, path, value) => {
+      const payload = await readFixture('report-checkers');
+      replaceField(payload, ['results', ...path], value);
+
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
+
   test.each(['unknown', 'punctuation'])(
     'rejects the %s issue code in an aggregate',
     async (defect) => {
@@ -70,7 +84,7 @@ describe('reportSchema', () => {
     expect(reportSchema.safeParse({ ...payload, [field]: value }).success).toBe(false);
   });
 
-  test.each(['report', 'report-early'] as const)(
+  test.each(['report', 'report-early', 'report-checkers'] as const)(
     'parses the %s votes round the pydantic models write',
     async (name) => {
       const payload = await readFixture(name);

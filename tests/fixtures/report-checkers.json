@@ -1,0 +1,158 @@
+{
+  "family": "instructions-format",
+  "round": "2026-10-21",
+  "closed_at": "2026-10-21T00:00:00Z",
+  "systems": {
+    "acme": {
+      "display_name": "Acme",
+      "fingerprint": "acme-hash"
+    },
+    "acme-prompted": {
+      "display_name": "Acme · Instructions",
+      "fingerprint": "acme-prompted-hash"
+    }
+  },
+  "results": {
+    "scorer": "checkers",
+    "samples": 1,
+    "checker_revision": "format-1",
+    "standings": [
+      {
+        "system": "acme",
+        "cases": 4,
+        "responses": 4,
+        "errored": 0,
+        "pass_rate": {
+          "rate": 0.75,
+          "lower": 0.19412044968324346,
+          "upper": 0.9936905367902902
+        },
+        "mean_cost_usd": 0.01,
+        "cost_gap": null,
+        "latency_sec": {
+          "p10": 2.0,
+          "p50": 2.0,
+          "p90": 2.0
+        }
+      },
+      {
+        "system": "acme-prompted",
+        "cases": 4,
+        "responses": 4,
+        "errored": 0,
+        "pass_rate": {
+          "rate": 0.75,
+          "lower": 0.19412044968324346,
+          "upper": 0.9936905367902902
+        },
+        "mean_cost_usd": 0.01,
+        "cost_gap": null,
+        "latency_sec": {
+          "p10": 2.0,
+          "p50": 2.0,
+          "p90": 2.0
+        }
+      }
+    ],
+    "categories": [
+      {
+        "category": "docs",
+        "standings": [
+          {
+            "system": "acme",
+            "cases": 2,
+            "pass_rate": {
+              "rate": 0.5,
+              "lower": 0.01257911709342506,
+              "upper": 0.9874208829065749
+            }
+          },
+          {
+            "system": "acme-prompted",
+            "cases": 2,
+            "pass_rate": {
+              "rate": 1.0,
+              "lower": 0.15811388300841903,
+              "upper": 1.0
+            }
+          }
+        ]
+      },
+      {
+        "category": "message",
+        "standings": [
+          {
+            "system": "acme",
+            "cases": 2,
+            "pass_rate": {
+              "rate": 1.0,
+              "lower": 0.15811388300841903,
+              "upper": 1.0
+            }
+          },
+          {
+            "system": "acme-prompted",
+            "cases": 2,
+            "pass_rate": {
+              "rate": 0.5,
+              "lower": 0.01257911709342506,
+              "upper": 0.9874208829065749
+            }
+          }
+        ]
+      }
+    ],
+    "decision": {
+      "leader": "acme",
+      "tied": [
+        "acme-prompted"
+      ]
+    },
+    "rules": [
+      {
+        "rule": "curly-quotes",
+        "system": "acme",
+        "applicable_cases": 1,
+        "applicable_responses": 1,
+        "passed_responses": 1,
+        "pass_rate": 1.0
+      },
+      {
+        "rule": "ellipsis",
+        "system": "acme",
+        "applicable_cases": 4,
+        "applicable_responses": 4,
+        "passed_responses": 3,
+        "pass_rate": 0.75
+      },
+      {
+        "rule": "curly-quotes",
+        "system": "acme-prompted",
+        "applicable_cases": 1,
+        "applicable_responses": 1,
+        "passed_responses": 1,
+        "pass_rate": 1.0
+      },
+      {
+        "rule": "ellipsis",
+        "system": "acme-prompted",
+        "applicable_cases": 4,
+        "applicable_responses": 4,
+        "passed_responses": 3,
+        "pass_rate": 0.75
+      }
+    ],
+    "prompt_effects": [
+      {
+        "bare": "acme",
+        "prompted": "acme-prompted",
+        "cases": 4,
+        "delta": 0.0,
+        "interval": {
+          "lower": -0.75,
+          "upper": 0.75
+        }
+      }
+    ]
+  }
+}

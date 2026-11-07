@@ -23,7 +23,7 @@ from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
 from harbor.models.trial import config as trial_config
 
 from assistant_bench.catalog import SYSTEMS_FILE, System
-from assistant_bench.families import Family, family_names, load_family
+from assistant_bench.families import CheckersSettings, Family, family_names, load_family
 from assistant_bench.harnesses import (
     HARNESSES,
     HOST_ENVIRONMENT,
@@ -104,6 +104,21 @@ def check_systems(family: Family, systems: list[System]) -> None:
         that it cannot send.
     """
     check_harness(family)
+    if isinstance(family.settings, CheckersSettings):
+        by_name = {system.name: system for system in systems}
+        excluded = {'name', 'display_name', 'prompt', 'price', 'vendor'}
+        for pair in family.settings.pairs:
+            bare, instructed = by_name[pair.bare], by_name[pair.prompted]
+            if (
+                bare.prompt is not None
+                or instructed.prompt is None
+                or bare.model_dump(exclude=excluded)
+                != instructed.model_dump(exclude=excluded)
+            ):
+                raise InputError(
+                    f'Family `{family.name}`: `{pair.bare}` and `{pair.prompted}` '
+                    'must differ only by the added prompt and public labels.'
+                )
     for system in family_systems(family, systems):
         harness = HARNESSES[system.harness]
         if family.source != 'tasks' and not harness.single_call:

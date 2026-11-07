@@ -136,6 +136,62 @@ const testsResults = z.strictObject({
   decision,
 });
 
+const checkRule = z.enum([
+  'ellipsis',
+  'han-punctuation',
+  'curly-quotes',
+  'paragraph-lines',
+  'list-spacing',
+  'tree-comments',
+  'forbidden-marker',
+]);
+
+const checkersStanding = z.strictObject({
+  system: z.string(),
+  cases: z.int().min(1),
+  responses: z.int().min(1),
+  errored: z.int().nonnegative(),
+  pass_rate: passRate,
+  mean_cost_usd: z.number().nullable(),
+  cost_gap: costGap.nullable(),
+  latency_sec: distribution.nullable(),
+});
+
+const checkersResults = z.strictObject({
+  scorer: z.literal('checkers'),
+  samples: z.literal(1),
+  checker_revision: z.string(),
+  standings: z.array(checkersStanding).min(1),
+  categories: z.array(
+    z.strictObject({
+      category: z.enum(categories),
+      standings: z.array(
+        z.strictObject({ system: z.string(), cases: z.int().min(1), pass_rate: passRate }),
+      ),
+    }),
+  ),
+  decision,
+  rules: z.array(
+    z.strictObject({
+      rule: checkRule,
+      system: z.string(),
+      applicable_cases: z.int().min(1),
+      applicable_responses: z.int().min(1),
+      passed_responses: z.int().nonnegative(),
+      pass_rate: share,
+    }),
+  ),
+  prompt_effects: z.array(
+    z.strictObject({
+      bare: z.string(),
+      prompted: z.string(),
+      cases: z.int().min(1),
+      delta: z.number().min(-1).max(1),
+      interval: scoreInterval.nullable(),
+    }),
+  ),
+});
+
 // ── Report ──
 
 /** Mirrors the pydantic `Report` model, which writes `reports/<family>/<round>.json`. */
@@ -145,7 +201,7 @@ export const reportSchema = z
     round: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/),
     closed_at: z.iso.datetime({ offset: true }),
     systems: z.record(z.string().min(1), publicSystem),
-    results: z.discriminatedUnion('scorer', [votesResults, testsResults]),
+    results: z.discriminatedUnion('scorer', [votesResults, testsResults, checkersResults]),
   })
   .superRefine(({ systems, results }, context) => {
     const reject = (message: string) => {
@@ -232,6 +288,35 @@ export const reportSchema = z
       }
     }
 
+    if (results.scorer === 'checkers') {
+      if (
+        results.standings.some(
+          (row) =>
+            (row.cost_gap === null) !==
+            (row.mean_cost_usd !== null || row.responses === row.errored),
+        )
+      ) {
+        reject('A cost gap is present exactly when finished trials lack a mean cost');
+      }
+
+      validateDecision(results.decision);
+      const categories = results.categories.map(({ category }) => category);
+      if (
+        new Set(categories).size !== categories.length ||
+        results.categories.some((board) => board.standings.some((row) => !standing.has(row.system)))
+      ) {
+        reject('Categories must be unique and list standing systems');
+      }
+      if (
+        results.rules.some((row) => !standing.has(row.system)) ||
+        results.prompt_effects.some(
+          (pair) => !standing.has(pair.bare) || !standing.has(pair.prompted),
+        )
+      ) {
+        reject('Diagnostics and effects must name standing systems');
+      }
+    }
+
     const ids = Object.keys(systems);
 
     if (
@@ -268,4 +353,5 @@ export type PassRate = z.infer<typeof passRate>;
 export type CostGap = z.infer<typeof costGap>;
 export type TestsStanding = z.infer<typeof testsStanding>;
 export type TestsResults = z.infer<typeof testsResults>;
+export type CheckersResults = z.infer<typeof checkersResults>;
 export type Report = z.infer<typeof reportSchema>;

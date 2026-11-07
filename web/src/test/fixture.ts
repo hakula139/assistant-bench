@@ -5,6 +5,8 @@ import type { SystemNames } from '@/lib/systems';
 
 /** Display names for every system the fixtures name, each unlike its table name. */
 export const FIXTURE_NAMES: SystemNames = {
+  'acme': 'Acme',
+  'acme-prompted': 'Acme · Instructions',
   'acme-edge': 'Acme Edge',
   'acme-flash': 'Acme Flash',
   'acme-large': 'Acme Large',
@@ -77,20 +79,20 @@ export function shownSlugs(html: string, names: SystemNames = FIXTURE_NAMES): st
 }
 
 const fixtures = import.meta.glob<Record<string, unknown>>(
-  '../../../tests/fixtures/{report,report-early,report-tests,report.schema}.json',
+  '../../../tests/fixtures/{report,report-early,report-tests,report-checkers,report.schema}.json',
   { import: 'default' },
 );
 
 /** Each result is an independent mutable copy. */
 export async function readFixture(
-  name: 'report' | 'report-early' | 'report-tests' | 'report.schema' = 'report',
+  name: 'report' | 'report-early' | 'report-tests' | 'report-checkers' | 'report.schema' = 'report',
 ): Promise<Record<string, unknown>> {
   return structuredClone(await fixtures[`../../../tests/fixtures/${name}.json`]());
 }
 
 /** Parses a report fixture, refusing one that another scorer wrote. */
 export async function readReport<S extends Scorer>(
-  name: 'report' | 'report-early' | 'report-tests',
+  name: 'report' | 'report-early' | 'report-tests' | 'report-checkers',
   scorer: S,
 ): Promise<ScoredReport<S>> {
   const report = reportSchema.parse(await readFixture(name));

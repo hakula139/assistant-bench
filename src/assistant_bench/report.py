@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Literal, assert_never
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -20,9 +21,12 @@ from pydantic import (
     Field,
     model_validator,
 )
+from scipy.stats import bootstrap
 
 from assistant_bench.families import (
     Category,
+    CheckersSettings,
+    CheckRule,
     Choice,
     Defect,
     Family,
@@ -40,6 +44,7 @@ from assistant_bench.outputs import (
 )
 from assistant_bench.paths import REPORTS_DIR, write_atomically
 from assistant_bench.scoring import pass_rates, ranking, weighting
+from assistant_bench.scoring.checkers import REVISION
 
 
 SWAPPED: dict[Choice, Choice] = {
@@ -351,10 +356,92 @@ class TestsResults(_Model):
         return self
 
 
+class CheckersStanding(_Model):
+    system: str
+    cases: Annotated[int, Field(ge=1)]
+    responses: Annotated[int, Field(ge=1)]
+    errored: Annotated[int, Field(ge=0)]
+    pass_rate: PassRate
+    mean_cost_usd: float | None
+    cost_gap: CostGap | None
+    latency_sec: Distribution | None
+
+    @model_validator(mode='after')
+    def validate_cost_gap(self) -> CheckersStanding:
+        finished = self.responses - self.errored
+        if (self.cost_gap is None) != (self.mean_cost_usd is not None or finished == 0):
+            raise ValueError(
+                'A cost gap is present exactly when finished trials lack a mean cost.'
+            )
+        return self
+
+
+class CheckersCategoryStanding(_Model):
+    system: str
+    cases: Annotated[int, Field(ge=1)]
+    pass_rate: PassRate
+
+
+class CheckersCategory(_Model):
+    category: Category
+    standings: list[CheckersCategoryStanding]
+
+
+class RuleDiagnostic(_Model):
+    rule: CheckRule
+    system: str
+    applicable_cases: Annotated[int, Field(ge=1)]
+    applicable_responses: Annotated[int, Field(ge=1)]
+    passed_responses: Annotated[int, Field(ge=0)]
+    pass_rate: Share
+
+
+class PromptEffect(_Model):
+    """Descriptive prompted-minus-bare difference over the same cases."""
+
+    bare: str
+    prompted: str
+    cases: Annotated[int, Field(ge=1)]
+    delta: Annotated[float, Field(ge=-1, le=1)]
+    interval: ScoreInterval | None
+
+
+class CheckersResults(_Model):
+    """Strict binary case scores, applicable-rule diagnostics and paired effects."""
+
+    scorer: Literal['checkers']
+    samples: Literal[1]
+    checker_revision: str
+    standings: Annotated[list[CheckersStanding], Field(min_length=1)]
+    categories: list[CheckersCategory]
+    decision: Decision
+    rules: list[RuleDiagnostic]
+    prompt_effects: list[PromptEffect]
+
+    @model_validator(mode='after')
+    def validate_members(self) -> CheckersResults:
+        _validate_decision(self.decision, self.standings)
+        systems = {row.system for row in self.standings}
+        names = [board.category for board in self.categories]
+        if len(set(names)) != len(names) or any(
+            not {row.system for row in board.standings} <= systems
+            for board in self.categories
+        ):
+            raise ValueError('Categories must be unique and list standing systems.')
+        if any(row.system not in systems for row in self.rules) or any(
+            pair.bare not in systems or pair.prompted not in systems
+            for pair in self.prompt_effects
+        ):
+            raise ValueError('Diagnostics and effects must name standing systems.')
+        return self
+
+
 # ── Reports ──
 
 
-type Results = Annotated[VotesResults | TestsResults, Field(discriminator='scorer')]
+type Results = Annotated[
+    VotesResults | TestsResults | CheckersResults, Field(discriminator='scorer')
+]
 type RoundName = Annotated[str, Field(pattern=r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$')]
 
 
@@ -390,7 +477,7 @@ class Report(_Model):
                     )
                 if results.anchor not in {row.system for row in results.standings}:
                     raise ValueError('The anchor must have an overall standing.')
-            case TestsResults():
+            case TestsResults() | CheckersResults():
                 unranked = []
             case _:
                 assert_never(self.results)
@@ -401,7 +488,7 @@ class Report(_Model):
 
 
 def _validate_decision(
-    decision: Decision, standings: Sequence[Standing | TestsStanding]
+    decision: Decision, standings: Sequence[Standing | TestsStanding | CheckersStanding]
 ) -> None:
     systems = {row.system for row in standings}
     leader, tied = decision.leader, decision.tied
@@ -430,7 +517,7 @@ def _referenced_systems(results: Results) -> set[str]:
             for board in results.categories:
                 systems.update(row.system for row in board.standings)
                 systems.update(board.unranked)
-        case TestsResults():
+        case TestsResults() | CheckersResults():
             pass
         case _:
             assert_never(results)
@@ -462,6 +549,173 @@ def close_tests(
     return _report(
         family.name, closed_at, results, system_fingerprints(outputs), system_names
     )
+
+
+def close_checkers(
+    family: Family, closed_at: datetime, *, system_names: Mapping[str, str]
+) -> Report:
+    """Close only a complete configured system-by-case matrix at this revision."""
+    assert isinstance(family.settings, CheckersSettings)
+    cases = {case.id: case for case in load_cases(family)}
+    outputs = [
+        output
+        for output in read_outputs(family.name)
+        if output.case in cases and output.system in family.settings.systems
+    ]
+    counts = Counter((output.system, output.case) for output in outputs)
+    if not cases or any(
+        counts[system, case] != 1
+        for system in family.settings.systems
+        for case in cases
+    ):
+        raise InputError(
+            'Every configured system needs exactly one response to every current '
+            'case before closing.'
+        )
+    for output in outputs:
+        context = cases[output.case].checks
+        assert context is not None
+        if (
+            output.checks is None
+            or output.checks.revision != REVISION
+            or set(output.checks.rules) != set(context.rules)
+        ):
+            raise InputError('Recollect current checker verdicts before closing.')
+    refuse_pool_conflicts(family, outputs)
+    shares: dict[str, dict[str, float]] = {
+        system: {
+            output.case: float(output.checks.passed)
+            for output in outputs
+            if output.system == system and output.checks is not None
+        }
+        for system in family.settings.systems
+    }
+    standings: list[CheckersStanding] = []
+    for system, mine in shares.items():
+        trials = [output for output in outputs if output.system == system]
+        finished = [output for output in trials if output.error is None]
+        standings.append(
+            CheckersStanding(
+                system=system,
+                cases=len(mine),
+                responses=len(trials),
+                errored=len(trials) - len(finished),
+                pass_rate=_pass_rate(mine.values()),
+                mean_cost_usd=_mean(output.cost_usd for output in finished),
+                cost_gap=_cost_gap(finished),
+                latency_sec=_distribution(output.latency_sec for output in finished),
+            )
+        )
+    standings.sort(key=lambda row: (-row.pass_rate.rate, row.system))
+    leader = standings[0].system
+    diagnostics: list[RuleDiagnostic] = []
+    for system in family.settings.systems:
+        rules: list[CheckRule] = sorted(
+            {
+                rule
+                for case in cases.values()
+                if case.checks
+                for rule in case.checks.rules
+            }
+        )
+        for rule in rules:
+            values = [
+                output.checks.rules[rule]
+                for output in outputs
+                if output.system == system
+                and output.checks is not None
+                and rule in output.checks.rules
+            ]
+            diagnostics.append(
+                RuleDiagnostic(
+                    rule=rule,
+                    system=system,
+                    applicable_cases=len(values),
+                    applicable_responses=len(values),
+                    passed_responses=sum(values),
+                    pass_rate=statistics.fmean(values),
+                )
+            )
+    results = CheckersResults(
+        scorer='checkers',
+        samples=1,
+        checker_revision=REVISION,
+        standings=standings,
+        categories=[
+            CheckersCategory(
+                category=category,
+                standings=[
+                    CheckersCategoryStanding(
+                        system=row.system,
+                        cases=len(category_values),
+                        pass_rate=_pass_rate(category_values),
+                    )
+                    for row in standings
+                    if (
+                        category_values := [
+                            value
+                            for case, value in shares[row.system].items()
+                            if cases[case].category == category
+                        ]
+                    )
+                ],
+            )
+            for category in family.settings.categories
+            if any(case.category == category for case in cases.values())
+        ],
+        decision=Decision(
+            leader=leader,
+            tied=[
+                row.system
+                for row in standings[1:]
+                if not pass_rates.separates(shares[leader], shares[row.system])
+            ],
+        ),
+        rules=diagnostics,
+        prompt_effects=[
+            prompt_effect(pair.bare, pair.prompted, shares)
+            for pair in family.settings.pairs
+        ],
+    )
+    return _report(
+        family.name, closed_at, results, system_fingerprints(outputs), system_names
+    )
+
+
+def prompt_effect(
+    bare: str, prompted: str, shares: Mapping[str, Mapping[str, float]]
+) -> PromptEffect:
+    """Describe a controlled pair with resampling over paired binary case scores."""
+    cases = sorted(shares[bare])
+    baseline = np.array([shares[bare][case] for case in cases])
+    instructed = np.array([shares[prompted][case] for case in cases])
+    differences = instructed - baseline
+    interval = None
+    if len(cases) > 1 and np.ptp(differences) > 0:
+        result = bootstrap(
+            (baseline, instructed),
+            _paired_difference,
+            paired=True,
+            vectorized=False,
+            method='percentile',
+            confidence_level=0.95,
+            rng=np.random.default_rng(0),
+        )
+        interval = ScoreInterval(
+            lower=float(result.confidence_interval.low),
+            upper=float(result.confidence_interval.high),
+        )
+    return PromptEffect(
+        bare=bare,
+        prompted=prompted,
+        cases=len(cases),
+        delta=float(np.mean(differences)),
+        interval=interval,
+    )
+
+
+def _paired_difference(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
+    return float(np.mean(b - a))
 
 
 def close_votes(

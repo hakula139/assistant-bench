@@ -81,12 +81,15 @@ A family directory holds `family.toml` and either `cases.toml` or `tasks/`, with
 
 In `family.toml`, `scorer` discriminates the settings model, which decides how the outputs rank, and each place that depends on the scorer matches on that model and ends in `assert_never`, so mypy reports any scorer that a `match` misses:
 
-| Scorer  | Sources       | Ranks by                                                                                                      |
-| ------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
-| `votes` | Both          | Blind pairwise votes, after `gate_failures` settle each pair a gate decides: a case's gates or a task's tests |
-| `tests` | `tasks/` only | The mean of each system's rewards                                                                             |
+| Scorer     | Sources           | Ranks by                                                                                                      |
+| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `votes`    | Both              | Blind pairwise votes, after `gate_failures` settle each pair a gate decides: a case's gates or a task's tests |
+| `tests`    | `tasks/` only     | The mean of each system's rewards                                                                             |
+| `checkers` | `cases.toml` only | Binary case passes across every applicable format rule                                                        |
 
 ## Data Flow
+
+The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision do not enter rendered instructions, task versions or system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
 
 1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, projects its cost from the family's spend ledger against `budget_usd`, and runs it through the Harbor CLI. Each agent attempt appends its token counts to the job's `attempts.jsonl`, which collection adds to the ledger.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.

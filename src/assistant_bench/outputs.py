@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from assistant_bench.families import Family, Gate
 from assistant_bench.messages import InputError, count_of, error_lines, series
 from assistant_bench.paths import data_dir, write_atomically
+from assistant_bench.scoring.checkers import Checks
 
 
 type Verdict = Literal['pass', 'fail', 'ungraded']
@@ -57,6 +58,7 @@ class Output(BaseModel):
     """
 
     reward: float | None
+    checks: Checks | None
 
     input_tokens: int | None
     cached_tokens: int | None

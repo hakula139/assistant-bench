@@ -1,3 +1,4 @@
+import json
 import shutil
 from datetime import timedelta
 from pathlib import Path
@@ -29,10 +30,12 @@ from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
+from assistant_bench.scoring import checkers
 from assistant_bench.scoring.gates import failed_gates
 from assistant_bench.spend import Entry
 from assistant_bench.tasks import (
     TASK_VERSION,
+    current_versions,
     render_task_config,
     render_tasks,
 )
@@ -45,6 +48,7 @@ from support import (
     make_system,
     voted_tasks,
     with_settings,
+    write_checkers_family,
     write_trial,
     write_votes_family,
 )
@@ -333,6 +337,7 @@ class TestCollect:
             'text': 'Hi.',
             'reward': None,
             'gate_failures': [],
+            'checks': None,
             'finish_reason': 'stop',
             'stop_details': None,
             'input_tokens': 1_000,
@@ -1105,6 +1110,58 @@ class TestCollect:
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"
         )
+
+    @pytest.mark.parametrize('completion', ['stop', 'length', None, 'error'])
+    def test_recollection_regrades_without_generation_changes(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        completion: str | None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        write_checkers_family(families_dir)
+        family = load_family('instructions-format')
+        cases = load_cases(family)
+        system = make_system(name='acme')
+        paths = render_tasks(family, cases)
+        finish_generation(jobs.job(family, [system], paths[:1]), 'Wait…')
+        (result_file,) = (data_dir / 'jobs' / family.name).glob('*/*/result.json')
+        payload = json.loads(result_file.read_text())
+        payload['agent_result']['metadata']['finish_reason'] = (
+            'stop' if completion == 'error' else completion
+        )
+        if completion == 'error':
+            payload['exception_info'] = {
+                'exception_type': 'AgentError',
+                'exception_message': 'failed',
+                'exception_traceback': '',
+                'occurred_at': START.isoformat(),
+            }
+        result_file.write_text(json.dumps(payload))
+        inputs = jobs.current_inputs(family, [system])
+        versions = current_versions(family, {case.id: case for case in cases})
+        first = collection.collect(family, {'acme': system}).outputs
+        assert first[0].checks is not None and not first[0].checks.passed
+
+        assert cases[0].checks is not None
+        cases[0].checks = cases[0].checks.model_copy(
+            update={'rules': ['curly-quotes'], 'targets': ['curly-quotes']}
+        )
+        (families_dir / family.name / 'cases.toml').write_text(
+            tomli_w.dumps(
+                {'cases': [case.model_dump(exclude_none=True) for case in cases]}
+            )
+        )
+        monkeypatch.setattr(checkers, 'REVISION', 'format-2')
+        second = collection.collect(family, {'acme': system}).outputs
+
+        assert second[0].checks is not None
+        assert second[0].checks.revision == 'format-2'
+        assert second[0].checks.passed == (completion == 'stop')
+        assert first[0].trial == second[0].trial
+        assert first[0].fingerprint == second[0].fingerprint
+        assert jobs.current_inputs(family, [system]) == inputs
+        assert current_versions(family, {case.id: case for case in cases}) == versions
 
 
 class TestReadTrials:

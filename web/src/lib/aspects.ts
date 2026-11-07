@@ -2,6 +2,7 @@
 export const aspects = {
   writing: { title: 'Writing' },
   coding: { title: 'Coding' },
+  instructions: { title: 'Instructions' },
 } satisfies Record<string, { title: string }>;
 
 export type Aspect = keyof typeof aspects;

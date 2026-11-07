@@ -30,6 +30,7 @@ export interface MethodStep {
 export const scorers: Record<Scorer, { title: string; summary: string; inputs: string }> = {
   votes: { title: 'Votes', summary: 'Ranked by blind pairwise votes', inputs: 'Cases' },
   tests: { title: 'Tests', summary: 'Scored by automated tests', inputs: 'Tasks' },
+  checkers: { title: 'Checks', summary: 'Scored by strict format checks', inputs: 'Cases' },
 };
 
 const languages: Record<NonNullable<VotesConfig['language']>, string> = {
@@ -189,6 +190,12 @@ export function methodSteps(of: Scorer | FamilyConfig): MethodStep[] {
         },
       ];
     }
+    case 'checkers':
+      return [
+        { step: 'text', title: 'Run', detail: 'same cases for all' },
+        { step: 'tests', title: 'Checks', detail: 'all applicable rules' },
+        { step: 'rate', title: 'Pass rate', detail: 'share of cases passed' },
+      ];
     case 'tests': {
       const tests = config?.scorer === 'tests' ? config : undefined;
       return [

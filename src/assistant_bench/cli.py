@@ -33,6 +33,7 @@ from assistant_bench.catalog import (
     load_systems,
 )
 from assistant_bench.families import (
+    CheckersSettings,
     Family,
     TaskTestsSettings,
     VotesSettings,
@@ -259,10 +260,11 @@ def close(
                 selected,
                 _take_snapshot(selected) if snapshot is None else snapshot,
             )
-        case TaskTestsSettings():
+        case TaskTestsSettings() | CheckersSettings():
             if snapshot is not None:
                 raise InputError(
-                    f'Family `{family}` is scored by tests, so it has no votes.'
+                    f'Family `{family}` is scored by {selected.settings.scorer}, '
+                    'so it has no votes.'
                 )
             closed = _close_tests(selected)
         case _:
@@ -311,7 +313,12 @@ def _close_votes(family: Family, path: Path) -> report.Report:
 def _close_tests(family: Family) -> report.Report:
     export, systems = _catalog()
     _collect(family, systems, export)
-    return report.close_tests(
+    close_round = (
+        report.close_checkers
+        if isinstance(family.settings, CheckersSettings)
+        else report.close_tests
+    )
+    return close_round(
         family,
         datetime.now(UTC),
         system_names={name: system.display_name for name, system in systems.items()},

@@ -21,16 +21,17 @@ A `family.toml` lists its fields in this order:
 
 | Field           | Required                   | Meaning                                                                                                                                                                 |
 | --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`        | yes                        | `votes` for blind pairwise votes, or `tests` for a task family's test rewards. Case families use `votes`                                                                |
+| `scorer`        | yes                        | `votes` for blind pairwise votes, `tests` for task test rewards, or `checkers` for deterministic format checks of rendered cases                                        |
 | `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                     |
 | `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                           |
 | `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                        |
 | `public_voting` | no                         | For `votes`, publish the family for [production voting](../design/arena.md#publication-and-closing). Defaults to `false`                                                |
 | `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                     |
+| `pairs`         | `checkers`                 | Bare / prompted system pairs. Every listed system appears in exactly one pair                                                                                           |
 | `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                             |
 | `render`        | `votes` task families      | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                                      |
 | `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                  |
-| `samples`       | yes                        | Harbor attempts per task and system, at least 1. Raising it runs only the extra attempts                                                                                |
+| `samples`       | yes                        | Harbor attempts per task and system. `checkers` requires exactly 1. Other scorers allow at least 1, and raising it runs only the extra attempts                         |
 | `harness`       | task families with systems | The default agent for systems without an explicit harness, normally `terminus-2`. Changing it replaces those systems' trials. Case families use `generate` and set none |
 | `budget_usd`    | no                         | The USD that the [spend ledger](running.md#spend-and-budgets) and a run's projection may reach before `bench run` refuses priced pending trials. Defaults to none       |
 | `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                    |
@@ -38,6 +39,8 @@ A `family.toml` lists its fields in this order:
 | `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                      |
 
 A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
+
+Each `checkers` pair is `{ bare = "<system>", prompted = "<system>" }`. The bare system has no system prompt, and the prompted system has one. Their resolved generation settings must otherwise match, including model, API, effort, context, completion limit, harness and generation version. Checker families require cases and use each case's language.
 
 ## Cases
 
@@ -54,11 +57,12 @@ Write a one-sentence greeting for a new contributor to an open-source project.
 checklist = ["One sentence"]
 ```
 
-- `id` is a slug of the scenario alone, unique across the family's committed and local cases and using lowercase letters, digits, and hyphens. It omits the language, which the family fixes, and the category, so a case can move between categories without a new ID, which would give Harbor a new task name and rerun the case on every listed system. Editing the instruction keeps the ID and [reruns](../design/architecture.md#reruns) the case.
+- `id` is a slug of the scenario alone, unique across the family's committed and local cases and using lowercase letters, digits, and hyphens. It omits the language and category, so a case can move between categories without a new ID, which would give Harbor a new task name and rerun the case on every listed system. Editing the instruction keeps the ID and [reruns](../design/architecture.md#reruns) the case.
 - `category` tags the case for per-category leaderboards and is one of the family's `categories`, so a held-out case cannot publish a new category name. The site shows its label from the glossary. A family's page under [`design/families/`](../design/families/) describes its categories.
 - `source` is `synthetic` or `public` in committed files. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` under the [data directory](../conventions/data.md#the-data-directory), which the bench appends to the committed cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes. The instruction follows the repository's Markdown rules like any other Markdown file, with chat logs, transcripts, and other material whose lines Markdown would join or garble in a fenced code block.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
+- `[cases.checks]` is required for `checkers` and absent for other scorers. It fixes `language = "en"` or `"zh"`, `kind = "prose"` (default) or `"directory-tree"`, and a nonempty unique `rules` list. Rule IDs are `ellipsis`, `han-punctuation` (Chinese), `curly-quotes` (English), `paragraph-lines`, `list-spacing`, `tree-comments` (directory trees) and `forbidden-marker`. Optional `targets` names a unique subset for coverage, without changing applicability. `quoted_input` lists exact instruction substrings exempt from authored-prose checks. The marker rule requires `forbidden_marker` to name its planted instruction substring, and other rules omit that field. Checker metadata is separate from the instruction, so changing it recollects verdicts without generating responses again.
 
 Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems.
 

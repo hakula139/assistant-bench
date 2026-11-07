@@ -82,6 +82,197 @@
       "title": "CategoryStanding",
       "type": "object"
     },
+    "CheckRule": {
+      "enum": [
+        "ellipsis",
+        "han-punctuation",
+        "curly-quotes",
+        "paragraph-lines",
+        "list-spacing",
+        "tree-comments",
+        "forbidden-marker"
+      ],
+      "type": "string"
+    },
+    "CheckersCategory": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/CheckersCategoryStanding"
+          },
+          "title": "Standings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "standings"
+      ],
+      "title": "CheckersCategory",
+      "type": "object"
+    },
+    "CheckersCategoryStanding": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "cases": {
+          "minimum": 1,
+          "title": "Cases",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "$ref": "#/$defs/PassRate"
+        }
+      },
+      "required": [
+        "system",
+        "cases",
+        "pass_rate"
+      ],
+      "title": "CheckersCategoryStanding",
+      "type": "object"
+    },
+    "CheckersResults": {
+      "additionalProperties": false,
+      "description": "Strict binary case scores, applicable-rule diagnostics and paired effects.",
+      "properties": {
+        "scorer": {
+          "const": "checkers",
+          "title": "Scorer",
+          "type": "string"
+        },
+        "samples": {
+          "const": 1,
+          "title": "Samples",
+          "type": "integer"
+        },
+        "checker_revision": {
+          "title": "Checker Revision",
+          "type": "string"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/CheckersStanding"
+          },
+          "minItems": 1,
+          "title": "Standings",
+          "type": "array"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/CheckersCategory"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/RuleDiagnostic"
+          },
+          "title": "Rules",
+          "type": "array"
+        },
+        "prompt_effects": {
+          "items": {
+            "$ref": "#/$defs/PromptEffect"
+          },
+          "title": "Prompt Effects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scorer",
+        "samples",
+        "checker_revision",
+        "standings",
+        "categories",
+        "decision",
+        "rules",
+        "prompt_effects"
+      ],
+      "title": "CheckersResults",
+      "type": "object"
+    },
+    "CheckersStanding": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "cases": {
+          "minimum": 1,
+          "title": "Cases",
+          "type": "integer"
+        },
+        "responses": {
+          "minimum": 1,
+          "title": "Responses",
+          "type": "integer"
+        },
+        "errored": {
+          "minimum": 0,
+          "title": "Errored",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "$ref": "#/$defs/PassRate"
+        },
+        "mean_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mean Cost Usd"
+        },
+        "cost_gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostGap"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latency_sec": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "system",
+        "cases",
+        "responses",
+        "errored",
+        "pass_rate",
+        "mean_cost_usd",
+        "cost_gap",
+        "latency_sec"
+      ],
+      "title": "CheckersStanding",
+      "type": "object"
+    },
     "CostGap": {
       "enum": [
         "unpriced",
@@ -267,6 +458,50 @@
       "title": "PassRate",
       "type": "object"
     },
+    "PromptEffect": {
+      "additionalProperties": false,
+      "description": "Descriptive prompted-minus-bare difference over the same cases.",
+      "properties": {
+        "bare": {
+          "title": "Bare",
+          "type": "string"
+        },
+        "prompted": {
+          "title": "Prompted",
+          "type": "string"
+        },
+        "cases": {
+          "minimum": 1,
+          "title": "Cases",
+          "type": "integer"
+        },
+        "delta": {
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Delta",
+          "type": "number"
+        },
+        "interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScoreInterval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "bare",
+        "prompted",
+        "cases",
+        "delta",
+        "interval"
+      ],
+      "title": "PromptEffect",
+      "type": "object"
+    },
     "PublicSystem": {
       "additionalProperties": false,
       "properties": {
@@ -298,6 +533,7 @@
     "Results": {
       "discriminator": {
         "mapping": {
+          "checkers": "#/$defs/CheckersResults",
           "tests": "#/$defs/TestsResults",
           "votes": "#/$defs/VotesResults"
         },
@@ -309,12 +545,55 @@
         },
         {
           "$ref": "#/$defs/TestsResults"
+        },
+        {
+          "$ref": "#/$defs/CheckersResults"
         }
       ]
     },
     "RoundName": {
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
       "type": "string"
+    },
+    "RuleDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "$ref": "#/$defs/CheckRule"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "applicable_cases": {
+          "minimum": 1,
+          "title": "Applicable Cases",
+          "type": "integer"
+        },
+        "applicable_responses": {
+          "minimum": 1,
+          "title": "Applicable Responses",
+          "type": "integer"
+        },
+        "passed_responses": {
+          "minimum": 0,
+          "title": "Passed Responses",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "$ref": "#/$defs/Share"
+        }
+      },
+      "required": [
+        "rule",
+        "system",
+        "applicable_cases",
+        "applicable_responses",
+        "passed_responses",
+        "pass_rate"
+      ],
+      "title": "RuleDiagnostic",
+      "type": "object"
     },
     "ScoreInterval": {
       "additionalProperties": false,

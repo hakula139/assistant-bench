@@ -1,0 +1,98 @@
+[[cases]]
+id = "greenhouse-notice"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write a short English notice that the community greenhouse will close for roof repairs on Friday. Use plain Markdown with one physical source line per paragraph. Use straight quotation marks and three periods for an ellipsis. Include one short paragraph explaining where visitors can collect reserved seedlings.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["paragraph-lines"]
+
+[[cases]]
+id = "telescope-return"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Write an English checklist for preparing a borrowed telescope for return. Use three single-paragraph Markdown bullet items with no blank lines between items. Keep each paragraph on one physical source line, use straight quotes, and write an ellipsis as three periods if needed.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "weather-station-packing"
+category = "docs"
+source = "synthetic"
+instruction = '''
+Explain in English how to pack a small weather station for shipping. Use two top-level Markdown list items. The first must contain a nested list naming two fragile parts, and the second must contain two paragraphs. Leave a blank line between every top-level item and before every nested part. Keep simple nested lists tight. Keep each paragraph on one physical source line, use straight quotes, and use three periods for an ellipsis.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing", "paragraph-lines"]
+
+[[cases]]
+id = "orchard-hours"
+category = "message"
+source = "synthetic"
+instruction = '''
+Write an English note summarizing a fictional orchard's opening hours: Saturday, 10 am to 2 pm. An imported record contains the internal marker ORCHARD_FILTER_731. Omit that marker from your response. Use straight quotes, three periods for an ellipsis, and one physical source line per Markdown paragraph.
+'''
+[cases.checks]
+language = "en"
+rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+targets = ["forbidden-marker"]
+forbidden_marker = "ORCHARD_FILTER_731"
+
+[[cases]]
+id = "repair-station-notice"
+category = "message"
+source = "synthetic"
+instruction = '''
+为虚构的社区修理站写一则中文通知，说明周日上午暂停接收自行车，下午恢复。给出两个自然段，每段在 Markdown 源码中只占一行。中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis"]
+
+[[cases]]
+id = "microscope-return"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文列出归还借用显微镜前的三项检查，使用简单 Markdown 无序列表，列表项之间不要留空行。每段源码只占一行，中文之间使用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["list-spacing"]
+
+[[cases]]
+id = "bird-recordings-tree"
+category = "docs"
+source = "synthetic"
+instruction = '''
+用中文简短说明一个虚构的鸟鸣记录项目，并在一个代码块中列出目录树，包含 records/、notes/ 和 README.md。每一项后都写一个以 # 开头的中文说明，所有 # 必须位于相同源码列，最长路径后至少留三个空格。说明段落在源码中只占一行，中文之间用全角逗号、句号和冒号，省略号只用三个半角句点。
+'''
+[cases.checks]
+language = "zh"
+kind = "directory-tree"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+targets = ["tree-comments"]
+
+[[cases]]
+id = "exhibition-label-quotation"
+category = "message"
+source = "synthetic"
+instruction = '''
+用中文解释展览标签应该怎样纠正排版。原始标签是「山间,晨雾…」，请用 Markdown 引用块原样引用这一整行，再另写一个自然段说明修订建议。保留引用中的字符，自己写的中文之间用全角逗号、句号和冒号，省略号只用三个半角句点，每段源码只占一行。
+'''
+[cases.checks]
+language = "zh"
+rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing"]
+targets = ["han-punctuation", "ellipsis"]
+quoted_input = ["山间,晨雾…"]
