@@ -1,6 +1,6 @@
 """Validate reported token counters before they enter trial accounting."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Annotated, Any, Self, assert_never
@@ -68,6 +68,26 @@ class MeasuredUsage:
         context.n_input_tokens = self.input_tokens
         context.n_cache_tokens = self.cache_tokens
         context.n_output_tokens = self.output_tokens
+
+
+def combined_usage(responses: Sequence[MeasuredUsage | None]) -> MeasuredUsage | None:
+    """Sum measured requests only when every admitted request reports valid usage."""
+    if not responses or any(usage is None for usage in responses):
+        return None
+    measured = [usage for usage in responses if usage is not None]
+    reasoning = [usage.reasoning_tokens for usage in measured]
+    return MeasuredUsage(
+        input_tokens=sum(usage.input_tokens for usage in measured),
+        cache_tokens=sum(usage.cache_tokens for usage in measured),
+        cache_write_tokens=sum(usage.cache_write_tokens for usage in measured),
+        output_tokens=sum(usage.output_tokens for usage in measured),
+        reasoning_tokens=(
+            sum(value for value in reasoning if value is not None)
+            if all(value is not None for value in reasoning)
+            else None
+        ),
+        cache_write_unpriced=any(usage.cache_write_unpriced for usage in measured),
+    )
 
 
 def measure(api: Api, reported: object) -> dict[str, Any]:

@@ -18,8 +18,9 @@ from pydantic_core import to_jsonable_python
 from assistant_bench import execution, jobs
 from assistant_bench.catalog import System, SystemIdentity
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.generate import OUTPUT_FILE
-from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.harnesses.usage import MeasuredUsage, combined_usage
 from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.runtime import RunContext
@@ -180,7 +181,7 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
             run_error = type(error).__name__
         finally:
             context.state.run(run_id)
-            outcomes = _outcomes(probe, run_error)
+            outcomes = _outcomes(probe, run_error, context.state, run_id)
             if len(outcomes) != 1:
                 raise InputError('A canary execution produced more than one outcome.')
             context.state.append_canary(run_id, outcomes[0].model_dump_json())
@@ -219,27 +220,47 @@ def read_records(system: str, state: State) -> list[Record]:
     return [Record.model_validate_json(value) for value in state.records(system)]
 
 
-def _outcomes(probe: Probe, run_error: str | None) -> list[Record]:
+def _outcomes(
+    probe: Probe, run_error: str | None, state: State, run_id: str
+) -> list[Record]:
     directory = jobs.job_path(probe.config)
     results = [
         TrialResult.model_validate_json(path.read_text())
         for path in sorted(directory.glob('*/result.json'))
     ]
     return (
-        [_record(probe, result, run_error) for result in results]
+        [_record(probe, result, run_error, state, run_id) for result in results]
         if results
-        else [_record(probe, None, run_error or 'MissingTrialResult')]
+        else [_record(probe, None, run_error or 'MissingTrialResult', state, run_id)]
     )
 
 
-def _record(probe: Probe, result: TrialResult | None, run_error: str | None) -> Record:
+def _record(
+    probe: Probe,
+    result: TrialResult | None,
+    run_error: str | None,
+    state: State,
+    run_id: str,
+) -> Record:
     directory = jobs.job_path(probe.config)
-    context = result.agent_result if result else None
-    metadata = (context.metadata or {}) if context else {}
     trial = result.trial_name if result else None
-    output = directory / trial / 'agent' / OUTPUT_FILE if trial else None
-    exception = result.exception_info if result else None
-    model = metadata.get('response_model')
+    audited = result is not None and state.trial_registered(
+        run_id, result.trial_name, str(result.id)
+    )
+    receipts = (
+        [
+            RequestReceipt.model_validate_json(cast(str, row['receipt_json']))
+            if row['receipt_json'] is not None
+            else None
+            for row in state.trial_requests(run_id, trial)
+        ]
+        if trial is not None
+        else []
+    )
+    context = result.agent_result if result is not None and audited else None
+    metadata = (context.metadata or {}) if context else {}
+    output = directory / trial / 'agent' / OUTPUT_FILE if trial and audited else None
+    exception = result.exception_info if result is not None and audited else None
     return Record(
         system=probe.original.name,
         job=probe.config.job_name,
@@ -253,12 +274,22 @@ def _record(probe: Probe, result: TrialResult | None, run_error: str | None) -> 
         source_generate_fingerprint=fingerprint(probe.source_generate),
         actual_probe_fingerprint=fingerprint(probe.actual),
         probe_protocol_digest=probe.protocol_digest,
-        usage=MeasuredUsage.from_details(metadata),
-        response_models=[model] if isinstance(model, str) and model else [],
+        usage=combined_usage(
+            [receipt.usage if receipt else None for receipt in receipts]
+        ),
+        response_models=sorted(
+            {
+                receipt.response_model
+                for receipt in receipts
+                if receipt is not None and receipt.response_model is not None
+            }
+        ),
         output=output.read_text() if output and output.exists() else '',
         finish_reason=metadata.get('finish_reason'),
         latency_sec=metadata.get('latency_sec'),
-        error=exception.exception_type if exception else run_error,
+        error=(exception.exception_type if exception else run_error)
+        if audited
+        else 'UnauditedTrial',
     )
 
 
@@ -291,6 +322,7 @@ def _problem(record: Record, previous: list[Record]) -> str | None:
         f'System `{record.system}`: canary differs from its baseline on '
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
         f'{model_change}The run was refused. Inspect its canary records. '
-        'Fix the route and give the changed system a new name. '
-        'A changed probe protocol establishes its own baseline.'
+        'Give a changed system a new name. After verifying a benign route change, '
+        f'run `bench reset-canary {record.system}` to clear its baseline contexts '
+        'while retaining its probe and spend history.'
     )
