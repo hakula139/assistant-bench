@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Papertrail service status</title>
+    <style>
+      body { max-width: 64rem; margin: auto; padding: 1.5rem; font: 1rem/1.6 system-ui; color: #162b3d; background: #f0f4f6; }
+      section { margin-block: 2.5rem; }
+      .incident { padding: 1rem; border-left: .4rem solid #a45e06; background: #fff5d9; }
+      summary { cursor: pointer; }
+      a, summary { color: #173c5d; }
+      a:focus-visible, summary:focus-visible { outline: 3px solid #805300; outline-offset: 4px; }
+      li { margin-block: .5rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Papertrail status</h1>
+      <p>Snapshot: June 12, 14:20 UTC.</p>
+      <p class="incident">
+        <strong>Degraded performance.</strong> File uploads are delayed in the West region. Existing
+        files remain readable. No data loss has been observed.
+      </p>
+      <a href="#current">Read the current incident</a>
+    </header>
+    <main>
+      <section>
+        <h2>Components</h2>
+        <ul>
+          <li>Web app: operational.</li>
+          <li>File downloads: operational.</li>
+          <li>File uploads: degraded.</li>
+          <li>Search: operational.</li>
+          <li>Notifications: operational.</li>
+        </ul>
+      </section>
+      <section id="current">
+        <h2>West region upload delays</h2>
+        <p>Incident open. Next update by 14:45 UTC.</p>
+        <ol>
+          <li><strong>13:40 UTC, investigating:</strong> Elevated queue times detected.</li>
+          <li><strong>14:00 UTC, identified:</strong> Storage worker backlog.</li>
+          <li><strong>14:15 UTC, mitigating:</strong> Adding worker capacity.</li>
+        </ol>
+      </section>
+      <section>
+        <h2>Last 24 hours, all regions</h2>
+        <p>Availability: 99.92%. Median API response: 180 ms. Completed uploads: 18,420.</p>
+      </section>
+      <section>
+        <h2>Recent history</h2>
+        <details>
+          <summary>June 10: Search indexing lag, resolved</summary>
+          <p>Resolved at 09:30 UTC after 35 minutes.</p>
+        </details>
+        <details>
+          <summary>June 7: Notification delivery delays, resolved</summary>
+          <p>Resolved at 17:10 UTC after 50 minutes.</p>
+        </details>
+        <p>June 5: No incidents reported.</p>
+      </section>
+    </main>
+  </body>
+</html>
