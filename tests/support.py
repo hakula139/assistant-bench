@@ -1,6 +1,7 @@
 """Builders and the stub endpoint shared by the tests."""
 
 import asyncio
+import gzip
 import ipaddress
 import json
 import math
@@ -801,6 +802,7 @@ class StubEndpoint:
     responses: list[dict[str, Any]] = field(default_factory=list)
     stream: list[bytes] | None = None
     streams: list[list[bytes]] = field(default_factory=list)
+    gzip: bool = False
     stream_gate: threading.Event | None = None
     stream_gate_after: int = 0
     stream_waiting: threading.Event = field(default_factory=threading.Event)
@@ -856,6 +858,8 @@ def serve_stub(
             payload = (
                 b''.join(stream) if stream is not None else json.dumps(reply).encode()
             )
+            if stub.gzip:
+                payload = gzip.compress(payload)
             self.send_response(stub.statuses.pop(0) if stub.statuses else stub.status)
             self.send_header(
                 'Content-Type',
@@ -864,11 +868,14 @@ def serve_stub(
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
             self.send_header('request-id', 'req-1')
+            if stub.gzip:
+                self.send_header('Content-Encoding', 'gzip')
             for name, value in stub.response_headers.items():
                 self.send_header(name, value)
             with suppress(BrokenPipeError, ConnectionResetError):
                 self.end_headers()
-                for index, chunk in enumerate(stream or [payload]):
+                chunks = [payload] if stub.gzip else stream or [payload]
+                for index, chunk in enumerate(chunks):
                     if stub.stream_gate is not None and index == stub.stream_gate_after:
                         stub.stream_waiting.set()
                         stub.stream_gate.wait()
