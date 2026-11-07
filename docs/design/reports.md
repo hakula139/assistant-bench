@@ -4,15 +4,15 @@ A report publishes one closed round's aggregates under public system IDs. `repor
 
 ## Closing a Round
 
-`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family first saves cuts of its available production and local votes, which `--snapshot <path>` recloses later, while a test-scored family collects and aggregates its current trials. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
+`uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family seals cuts of its available production and private votes in private D1. `--snapshot <id>` replays that immutable snapshot with its original closing time. A test-scored family collects an immutable output generation and aggregates it with the exact public and private source revisions frozen by collection. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
 
-Voted closure uses the cut's active publication, the collected measurements and the current family's labels. It requires eligible human choices or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
+Voted closure uses each cut's publication facts, frozen labels and associated output generation. Missing historical generation evidence leaves measurements unknown. Replay needs no current family, case sources or catalog. Closure requires eligible human choices or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
 
 ## Frozen Identity
 
 `Report` holds `family`, `round`, `closed_at`, `systems` and `results`. `systems` maps exactly every ID referenced by the results to its public `display_name` and output `fingerprint`. An unknown fingerprint stays null. Standing rows reference this shared identity map. A historical round's labels and fingerprints never depend on today's catalog.
 
-Voted systems get labels, fingerprints and the reference from the publication the closing cut read. Test-scored systems get labels from the resolved public catalog and fingerprints from actual outputs. A known fingerprint that differs from the one an earlier report froze under the same ID fails closure, while display names may change between rounds.
+Voted systems get labels, fingerprints and the reference from the publication the closing cut read. Test-scored systems get labels from the catalog names frozen by collection and fingerprints from that generation's outputs. A known fingerprint that differs from the one an earlier report froze under the same ID fails closure, while display names may change between rounds.
 
 ## Results
 
