@@ -16,6 +16,29 @@ describe('markdown', () => {
 
   test.each([
     [
+      'text',
+      'Run the tests before you merge.',
+      'Run the tests before <span class="text-nowrap">you merge.</span>',
+    ],
+    [
+      'emphasis',
+      'Then we **merge**.',
+      'Then <span class="text-nowrap">we <strong>merge</strong>.</span>',
+    ],
+    [
+      'inline code',
+      '在 2.0 里改为 `wrap = "preserve"`。',
+      `在 2.0 里改为 <span class="text-nowrap">${code}wrap = &quot;preserve&quot;</code>。</span>`,
+    ],
+  ])('keeps a task ending in %s inside its own label', (_, text, tail) => {
+    const html = markdown.render(`- [x] ${text}`);
+
+    expect(html).toContain(`${tail}</label>`);
+    expect(html).not.toContain('<span class="text-nowrap"><label');
+  });
+
+  test.each([
+    [
       'a code span',
       '在 2.0 里改为 `wrap = "preserve"`。',
       `在 2.0 里改为 <span class="text-nowrap">${code}wrap = &quot;preserve&quot;</code>。</span>`,

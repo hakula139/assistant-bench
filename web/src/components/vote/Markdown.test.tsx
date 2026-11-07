@@ -1,11 +1,75 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { Markdown } from '@/components/vote/Markdown';
 
 describe('Markdown', () => {
   afterEach(cleanup);
+
+  test.each([
+    ['unchecked', ' ', false],
+    ['checked', 'x', true],
+    ['uppercase', 'X', true],
+  ])('renders %s tasks as named checkboxes that cannot be edited', async (_, marker, checked) => {
+    const user = userEvent.setup();
+    render(<Markdown text={`- [${marker}] Complete this task.`} />);
+    const checkbox = screen.getByRole<HTMLInputElement>('checkbox', {
+      name: 'Complete this task.',
+    });
+
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.checked).toBe(checked);
+    await user.click(checkbox);
+    await user.click(screen.getByText('Complete', { exact: false }));
+
+    expect(checkbox.checked).toBe(checked);
+    expect(checkbox.labels?.[0].textContent.trim()).toBe('Complete this task.');
+  });
+
+  test('preserves nested task labels and ordinary list items independently', () => {
+    render(
+      <Markdown
+        text={
+          '- [X] Review **the plan**.\n  - [ ] Run `make test`.\n  - Ordinary child.\n- Ordinary top.'
+        }
+      />,
+    );
+
+    const parent = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Review the plan.' });
+    const child = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Run make test.' });
+    expect(parent.checked).toBe(true);
+    expect(child.checked).toBe(false);
+    expect(child.closest('li')?.parentElement?.parentElement).toBe(parent.closest('li'));
+    expect(parent.labels?.[0].contains(child)).toBe(false);
+    for (const name of ['Ordinary child.', 'Ordinary top.']) {
+      expect(screen.getByText(name).closest('li')?.querySelector('input, label')).toBeNull();
+    }
+  });
+
+  test.each([
+    ['a fenced block', '```text\n- [x] Keep this literal.\n```', '- [x] Keep this literal.\n'],
+    ['inline code', '`- [ ] Keep this literal.`', '- [ ] Keep this literal.'],
+  ])('does not turn task markers in %s into controls', (_, text, literal) => {
+    const { container } = render(<Markdown text={text} />);
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(container.querySelector('code')?.textContent).toBe(literal);
+  });
+
+  test('keeps untrusted HTML and images inert inside a task label', () => {
+    const html = '<input type="checkbox" checked>';
+    const image = '![logo](https://example.com/logo.png)';
+
+    const { container } = render(<Markdown text={`- [ ] ${html} ${image}`} />);
+
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getByRole<HTMLInputElement>('checkbox').disabled).toBe(true);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain(html);
+    expect(container.textContent).toContain('!logo');
+  });
 
   test.each([
     ['a code span holding a backtick', 'Type `` `x` `` here.', ['`x`'], 'Type `x` here.'],
