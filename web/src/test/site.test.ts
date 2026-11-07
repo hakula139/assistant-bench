@@ -363,6 +363,7 @@ describe('Pages deployment', () => {
       ).toBe(`${repository}/-/tree/main/families/writing-en`);
 
       await navigation.getByRole('link', { name: 'Methodology' }).click();
+      await page.waitForLoadState('domcontentloaded');
       expect(new URL(page.url()).pathname).toBe(`${base}methodology/`);
       expect(
         await page.locator(`a[href^="${repository}/-/blob/main/docs/design/"]`).count(),
