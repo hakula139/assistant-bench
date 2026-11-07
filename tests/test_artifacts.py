@@ -575,6 +575,29 @@ class TestArtifactRepository:
 
             assert git(repository.remote, 'rev-parse', 'main') == before
 
+        def test_a_successful_push_acknowledgment_requires_remote_confirmation(
+            self, repository: PrivateRepository, trial: Trial
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            hook = repository.remote / 'hooks' / 'post-receive'
+            hook.write_text(
+                '#!/bin/bash\n'
+                'set -euo pipefail\n'
+                'read -r old new ref\n'
+                'git update-ref "$ref" "$old" "$new"\n'
+            )
+            hook.chmod(0o755)
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(trial.job, second),
+                    ]
+                )
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
         @pytest.mark.parametrize('change', ['content', 'outside'])
         def test_commit_hooks_cannot_publish_changes_beyond_the_audited_tree(
             self,
