@@ -24,7 +24,12 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant_bench import jobs
 from assistant_bench.arena.d1 import connect, token as d1_token
-from assistant_bench.artifacts import ArtifactRepository, build_manifest, snapshot_trial
+from assistant_bench.artifacts import (
+    ArtifactRepository,
+    MaterializedTrial,
+    build_manifest,
+    snapshot_trial,
+)
 from assistant_bench.harnesses.accounting import (
     TrialAccounting,
     bind_trial,
@@ -270,8 +275,8 @@ class ExecutionPlugin(BaseJobPlugin):
                 code_revision=run.code_revision,
                 case_revision=run.case_revision,
             )
-            reference = repository.publish_trial(
-                run.id, artifact_id, destination, manifest
+            (reference,) = repository.publish_trials(
+                (MaterializedTrial(job=destination, manifest=manifest),)
             )
             return reference.commit_sha, reference.path, reference.manifest_digest
 
