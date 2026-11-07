@@ -131,7 +131,8 @@ def make_analysis(
         cutoffs=report.Cutoffs(
             production=report.Cutoff(
                 id=len(ordinary) + dropped, votes=len(ordinary) + dropped
-            )
+            ),
+            local=None,
         ),
         declared_categories=tuple(dict.fromkeys(category for _, category in resolved)),
         categories=resolved,
@@ -139,6 +140,7 @@ def make_analysis(
         settlements=settlements,
         outputs=outputs,
         dropped=dropped,
+        splits=tuple((case, 'public') for case, _ in resolved),
     )
 
 
@@ -335,7 +337,7 @@ class TestReport:
             votes.voting_input(snapshot, ROUND_FAMILY, outputs),
             closed_at,
             fingerprints=votes.fingerprints(snapshot),
-            system_names=snapshot.production.inventory.systems,
+            system_names=votes.system_names(snapshot),
         )
 
         written = closed.model_dump_json(indent=2) + '\n'
@@ -410,6 +412,21 @@ class TestReport:
         [
             (('reference',), 'unknown-reference'),
             (('anchor',), 'unknown-anchor'),
+            (
+                ('public_held_out',),
+                {
+                    'public_cases': 30,
+                    'held_out_cases': 30,
+                    'unavailable': None,
+                    'scores': [
+                        {
+                            'system': 'unlisted-system',
+                            'difference': 0,
+                            'interval': {'lower': -1, 'upper': 1},
+                        }
+                    ],
+                },
+            ),
             (('anchor',), 'acme-edge'),
             (('unranked',), ['acme-large']),
             (('categories', 0, 'unranked'), ['acme-large']),
@@ -426,6 +443,7 @@ class TestReport:
         ids=[
             'reference',
             'anchor',
+            'diagnostic-system',
             'unranked-anchor',
             'duplicate-membership',
             'category-duplicate-membership',
@@ -1005,6 +1023,29 @@ class TestReportedFingerprints:
 
 
 class TestVotesResults:
+    def test_split_diagnostic_excludes_private_cases_and_requires_independent_cases(
+        self,
+    ) -> None:
+        analysis = make_analysis(
+            tuple(make_evidence(index, choice='tie') for index in range(80))
+        )
+        analysis = replace(
+            analysis,
+            splits=tuple(
+                (
+                    f'case-{index}',
+                    'public' if index < 30 else 'held-out' if index < 47 else 'private',
+                )
+                for index in range(80)
+            ),
+        )
+
+        diagnostic = report.votes_results(analysis).public_held_out
+
+        assert (diagnostic.public_cases, diagnostic.held_out_cases) == (30, 17)
+        assert diagnostic.unavailable == 'insufficient_cases'
+        assert diagnostic.scores == []
+
     def test_counts_defects_on_the_output_side_and_ignores_errored_measurements(
         self,
     ) -> None:

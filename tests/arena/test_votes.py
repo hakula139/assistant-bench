@@ -123,6 +123,7 @@ def snapshot(
     return Snapshot(
         family=FAMILY.name,
         taken_at=NOW,
+        local=None,
         production=Cut(
             cutoff=max((row.id for row in production), default=0),
             inventory=Inventory(
@@ -717,6 +718,134 @@ class TestSnapshotFiles:
 
 
 class TestVotingInput:
+    def test_unions_partly_overlapping_system_fields_in_store_order(self) -> None:
+        a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
+        c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-pro')
+        production = snapshot((a, b), (vote(1, a, b),)).production
+        local = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and local is not None
+        production = production.model_copy(
+            update={
+                'inventory': production.inventory.model_copy(
+                    update={
+                        'systems': {
+                            system: ARENA_NAMES[system]
+                            for system in ('acme-large', 'acme-small')
+                        }
+                    }
+                )
+            }
+        )
+        local = local.model_copy(
+            update={
+                'inventory': local.inventory.model_copy(
+                    update={
+                        'systems': {
+                            system: ARENA_NAMES[system]
+                            for system in ('acme-large', 'acme-pro')
+                        }
+                    }
+                )
+            }
+        )
+        merged = Snapshot(
+            family=FAMILY.name, taken_at=NOW, production=production, local=local
+        )
+
+        analysis = votes.voting_input(merged, FAMILY, [])
+
+        assert analysis.systems == ('acme-large', 'acme-small', 'acme-pro')
+        assert list(votes.system_names(merged)) == list(analysis.systems)
+        assert {row.comparison.right for row in analysis.ordinary} == {
+            'acme-small',
+            'acme-pro',
+        }
+
+    def test_merges_disjoint_stores_with_independent_actors_and_cut_validation(
+        self,
+    ) -> None:
+        a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
+        c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-small')
+        production = snapshot(
+            (a, b), tuple(vote(index, a, b) for index in range(1, 102))
+        )
+        local = snapshot((c, d), (vote(1, c, d), vote(2, a, b))).production
+        assert local is not None
+        local = local.model_copy(
+            update={
+                'inventory': local.inventory.model_copy(
+                    update={
+                        'cases': (
+                            CaseFacts(key='held', category='docs', split='held-out'),
+                        ),
+                    }
+                )
+            }
+        )
+        merged = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            production=production.production,
+            local=local,
+        )
+
+        analysis = votes.voting_input(merged, FAMILY, [])
+
+        assert {row.actor for row in analysis.ordinary} == {
+            'production:actor',
+            'local:actor',
+        }
+        assert sum(row.comparison.weight for row in analysis.ordinary) == pytest.approx(
+            101
+        )
+        assert analysis.dropped == 1
+        assert analysis.cutoffs == Cutoffs(
+            production=Cutoff(id=101, votes=101), local=Cutoff(id=2, votes=2)
+        )
+        assert dict(analysis.splits) == {'public': 'public', 'held': 'held-out'}
+
+    @pytest.mark.parametrize(
+        'mismatch',
+        [
+            'cases',
+            'outputs',
+            'family',
+            'reference',
+            'systems',
+            'defects',
+            'fingerprint',
+            'cutoff',
+        ],
+    )
+    def test_rejects_incompatible_store_cuts(self, mismatch: str) -> None:
+        a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
+        c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-small')
+        production = snapshot((a, b), (vote(1, a, b),)).production
+        local = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and local is not None
+        variants: dict[str, dict[str, object]] = {
+            'cases': {'cases': production.inventory.cases},
+            'outputs': {'outputs': (a, d)},
+            'family': {'family': 'other'},
+            'reference': {'reference': 'acme-small'},
+            'systems': {'systems': ARENA_NAMES | {'acme-large': 'Different label'}},
+            'defects': {'defects': ()},
+            'fingerprint': {
+                'outputs': (c.model_copy(update={'fingerprint': 'changed'}), d)
+            },
+        }
+        changes = variants.get(mismatch, {})
+        local = local.model_copy(
+            update={'cutoff': 0}
+            if mismatch == 'cutoff'
+            else {'inventory': local.inventory.model_copy(update=changes)}
+        )
+
+        with pytest.raises(ValueError):
+            Snapshot(
+                family=FAMILY.name, taken_at=NOW, production=production, local=local
+            )
+
     def test_counts_votes_both_of_whose_outputs_still_pass_distinctly(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
         failing = fact('f', 'c', 'acme-pro', 'fail')
@@ -733,9 +862,9 @@ class TestVotingInput:
             snapshot((a, b, failing, twin), rows, excluded=2), FAMILY, []
         )
 
-        assert [row.actor for row in analysis.ordinary] == ['actor']
+        assert [row.actor for row in analysis.ordinary] == ['production:actor']
         assert analysis.dropped == 5
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4))
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4), local=None)
 
     def test_drops_a_vote_on_a_case_whose_text_changed(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
@@ -750,7 +879,7 @@ class TestVotingInput:
 
         analysis = votes.voting_input(snapshot((a, b)), FAMILY, [])
 
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0))
+        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0), local=None)
 
     def test_anchors_on_the_reference_the_publication_froze(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')

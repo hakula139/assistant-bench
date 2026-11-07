@@ -196,7 +196,7 @@ uv run bench close writing-zh
 uv run bench close writing-zh --snapshot <snapshot-path>
 ```
 
-For a voted family, `bench close` saves the production votes that can no longer be undone under `votes/<family>/` in the data directory, fits them, and writes `reports/<family>/<round>.json`, dated by the UTC day. `--snapshot` recloses a saved file without reading the store. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+For a voted family, stop `bench serve` before closing. `bench close` saves the available production and local votes that can no longer be undone under `votes/<family>/` in the data directory, combines them, and writes `reports/<family>/<round>.json`, dated by the UTC day. Families without `public_voting` read only the local store. `--snapshot` recloses a saved file without reading either store. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 

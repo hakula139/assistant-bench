@@ -164,6 +164,16 @@ describe('reportSchema', () => {
     ['category preliminary flag', ['categories', 0, 'standings', 0, 'preliminary'], true],
     ['unknown reference', ['reference'], 'unknown'],
     ['unknown anchor', ['anchor'], 'unknown'],
+    [
+      'unknown diagnostic system',
+      ['public_held_out'],
+      {
+        public_cases: 30,
+        held_out_cases: 30,
+        unavailable: null,
+        scores: [{ system: 'unlisted-system', difference: 0, interval: { lower: -1, upper: 1 } }],
+      },
+    ],
     ['unranked anchor', ['anchor'], 'acme-edge'],
     ['duplicate membership', ['unranked'], ['acme-large']],
     ['category duplicate membership', ['categories', 0, 'unranked'], ['acme-large']],

@@ -345,6 +345,8 @@ describe('freshness', () => {
   test.each([
     ['current while the counted votes match', 'production', 0, true, 'current'],
     ['stale with a counted vote after the cutoff', 'production', 1, true, 'stale'],
+    ['current on local while its counted votes match', 'local', 0, true, 'current'],
+    ['stale on local after its cutoff', 'local', 1, true, 'stale'],
     ['unknown without a production cutoff', 'production', 0, false, 'unknown'],
     ['unknown on staging', 'staging', 0, true, 'unknown'],
   ] as const)('answers %s', async (_, store, later, cut, expected) => {
@@ -355,7 +357,12 @@ describe('freshness', () => {
 
     const status = await freshness(env.DB, store, {
       family: WRITING,
-      ...(cut ? { production: String(cutoff), production_votes: String(ids.length - later) } : {}),
+      ...(cut
+        ? {
+            [store === 'local' ? 'local' : 'production']: String(cutoff),
+            [store === 'local' ? 'local_votes' : 'production_votes']: String(ids.length - later),
+          }
+        : {}),
     });
 
     expect(status).toBe(expected);

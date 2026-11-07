@@ -52,7 +52,8 @@
       "production": {
         "id": 337,
         "votes": 337
-      }
+      },
+      "local": null
     },
     "reference": "acme-large",
     "anchor": "acme-large",
@@ -625,6 +626,12 @@
       }
     ],
     "length": 29.857460748704252,
-    "split_half_tau": 0.39999999999999997
+    "split_half_tau": 0.39999999999999997,
+    "public_held_out": {
+      "public_cases": 30,
+      "held_out_cases": 0,
+      "unavailable": "no_common_field",
+      "scores": []
+    }
   }
 }

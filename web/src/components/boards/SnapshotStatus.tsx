@@ -12,8 +12,8 @@ const closedTime = new Intl.DateTimeFormat('en', {
 });
 
 const messages: Record<Freshness, string> = {
-  current: 'The ranking uses every counted vote.',
-  stale: 'Votes or moderation have changed since this round closed.',
+  current: 'This voting service has no new counted votes since the round closed.',
+  stale: 'Counted votes or moderation at this voting service have changed since the round closed.',
   unknown: 'Current votes could not be checked.',
 };
 
@@ -49,6 +49,10 @@ export function SnapshotStatus({ family, closedAt, cutoffs }: SnapshotStatusProp
     <p className={note} role="status">
       Closed <time dateTime={closedAt}>{closedTime.format(new Date(closedAt))} UTC</time>.
       {status !== null && ` ${messages[status]}`}
+      {status !== null &&
+        cutoffs.production !== null &&
+        cutoffs.local !== null &&
+        ' The round also includes votes from another source, which has not been checked.'}
     </p>
   );
 }

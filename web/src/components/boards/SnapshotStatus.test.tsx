@@ -8,7 +8,7 @@ import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 const closedAt = '2026-01-02T12:00:00Z';
 const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
 const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
-const cutoffs = { production: { id: 337, votes: 330 } };
+const cutoffs = { production: { id: 337, votes: 330 }, local: null };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
@@ -33,8 +33,11 @@ describe('SnapshotStatus', () => {
   });
 
   test.each([
-    ['current', 'The ranking uses every counted vote.'],
-    ['stale', 'Votes or moderation have changed since this round closed.'],
+    ['current', 'This voting service has no new counted votes since the round closed.'],
+    [
+      'stale',
+      'Counted votes or moderation at this voting service have changed since the round closed.',
+    ],
     ['unknown', 'Current votes could not be checked.'],
   ] as const)(
     'checks the serving origin and then shows the %s verdict',
@@ -58,6 +61,23 @@ describe('SnapshotStatus', () => {
       expect(signal).toBeInstanceOf(AbortSignal);
     },
   );
+
+  test('discloses an unchecked source when a combined round is current here', async () => {
+    stubFetch(Promise.resolve(Response.json({ status: 'current' })));
+
+    render(
+      <SnapshotStatus
+        family="writing-zh"
+        closedAt={closedAt}
+        cutoffs={{ ...cutoffs, local: { id: 20, votes: 15 } }}
+      />,
+    );
+
+    expect((await screen.findByText(/another source/)).textContent).toContain(
+      'The round also includes votes from another source, which has not been checked.',
+    );
+    expect(screen.getByRole('status').textContent).not.toContain('uses every counted vote');
+  });
 
   test.each([
     ['an unsupported status', () => Promise.resolve(Response.json({ status: 'pending' }))],

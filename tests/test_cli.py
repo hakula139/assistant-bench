@@ -23,7 +23,7 @@ from rich.text import Text
 from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, collection, jobs, report
-from assistant_bench.arena import publication, votes
+from assistant_bench.arena import local, publication, votes
 from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.catalog import (
     EXPORT_VAR,
@@ -1822,6 +1822,39 @@ class TestClose:
         monkeypatch.setattr(cli, 'connect', connect)
         return store
 
+    def test_closes_local_only_without_opening_a_remote_client(
+        self,
+        store: Store,
+        families_dir: Path,
+        reports_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        configuration = families_dir / 'f' / 'family.toml'
+        configuration.write_text(
+            configuration.read_text().replace(
+                'public_voting = true', 'public_voting = false'
+            )
+        )
+        record_vote(
+            store.database,
+            store.published,
+            datetime.now(UTC),
+            actor='local',
+            age=timedelta(hours=1),
+        )
+        monkeypatch.setattr(local, 'exists', lambda: True)
+        monkeypatch.setattr(local, 'database', lambda: nullcontext(store.database))
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert store.targets == []
+        (path,) = (reports_dir / 'f').iterdir()
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.results.scorer == 'votes'
+        assert closed.results.cutoffs.production is None
+        assert closed.results.cutoffs.local == report.Cutoff(id=1, votes=1)
+
     def test_saves_the_production_cut_and_closes_from_it(
         self,
         store: Store,
@@ -1855,7 +1888,7 @@ class TestClose:
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
         assert closed.results.cutoffs == report.Cutoffs(
-            production=report.Cutoff(id=last, votes=3)
+            production=report.Cutoff(id=last, votes=3), local=None
         )
         assert (closed.results.votes, closed.results.voters) == (3, 3)
         assert closed.systems['large'] == report.PublicSystem(
@@ -1875,7 +1908,7 @@ class TestClose:
         cut = votes.read_cut(store.database, 'f', now)
         assert cut is not None
         path = votes.write_snapshot(
-            votes.Snapshot(family='f', taken_at=now, production=cut)
+            votes.Snapshot(family='f', taken_at=now, production=cut, local=None)
         )
 
         result = invoke('close', 'f', '--snapshot', str(path))
@@ -1893,9 +1926,8 @@ class TestClose:
 
         assert result.exit_code == 1
         assert result.stderr == (
-            'Family `f` has no active publication in production, so it has no votes '
-            'to close. Publish one with `uv run bench arena publish production '
-            '<file>`.\n'
+            'Family `f` has no active voting publication. '
+            'Publish production cases or run `uv run bench serve` first.\n'
         )
 
     def test_refuses_votes_of_a_family_without_public_voting(
@@ -1907,7 +1939,8 @@ class TestClose:
 
         assert result.exit_code == 1
         assert result.stderr == (
-            'Family `f` sets no `public_voting`, so no store holds its votes.\n'
+            'Family `f` has no active voting publication. '
+            'Publish production cases or run `uv run bench serve` first.\n'
         )
 
     def test_rejects_a_missing_snapshot_as_its_option(

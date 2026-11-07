@@ -306,14 +306,32 @@
     },
     "Cutoffs": {
       "additionalProperties": false,
-      "description": "Production's cutoff at closing.",
+      "description": "Each store's cutoff at closing, null when it contributed no cut.",
       "properties": {
         "production": {
-          "$ref": "#/$defs/Cutoff"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cutoff"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "local": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cutoff"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "production"
+        "production",
+        "local"
       ],
       "title": "Cutoffs",
       "type": "object"
@@ -619,6 +637,76 @@
       "maximum": 1,
       "minimum": 0,
       "type": "number"
+    },
+    "SplitDiagnostic": {
+      "additionalProperties": false,
+      "description": "Descriptive public-minus-held-out scores centered on the common field mean.",
+      "properties": {
+        "public_cases": {
+          "title": "Public Cases",
+          "type": "integer"
+        },
+        "held_out_cases": {
+          "title": "Held Out Cases",
+          "type": "integer"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "enum": [
+                "insufficient_cases",
+                "no_common_field",
+                "disconnected_field",
+                "unidentifiable_field",
+                "separated_fit"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unavailable"
+        },
+        "scores": {
+          "items": {
+            "$ref": "#/$defs/SplitScoreDifference"
+          },
+          "title": "Scores",
+          "type": "array"
+        }
+      },
+      "required": [
+        "public_cases",
+        "held_out_cases",
+        "unavailable",
+        "scores"
+      ],
+      "title": "SplitDiagnostic",
+      "type": "object"
+    },
+    "SplitScoreDifference": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "title": "System",
+          "type": "string"
+        },
+        "difference": {
+          "title": "Difference",
+          "type": "number"
+        },
+        "interval": {
+          "$ref": "#/$defs/ScoreInterval"
+        }
+      },
+      "required": [
+        "system",
+        "difference",
+        "interval"
+      ],
+      "title": "SplitScoreDifference",
+      "type": "object"
     },
     "Standing": {
       "additionalProperties": false,
@@ -1102,6 +1190,9 @@
           ],
           "description": "Order agreement between alternating eligible votes, when measurable.",
           "title": "Split Half Tau"
+        },
+        "public_held_out": {
+          "$ref": "#/$defs/SplitDiagnostic"
         }
       },
       "required": [
@@ -1122,7 +1213,8 @@
         "head_to_head",
         "categories",
         "length",
-        "split_half_tau"
+        "split_half_tau",
+        "public_held_out"
       ],
       "title": "VotesResults",
       "type": "object"

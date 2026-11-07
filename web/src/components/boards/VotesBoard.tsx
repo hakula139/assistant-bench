@@ -20,6 +20,7 @@ import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -157,6 +158,53 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
         )}
       </dl>
       <SnapshotStatus family={round.family} closedAt={round.closed_at} cutoffs={results.cutoffs} />
+      <details className={note}>
+        <summary>Public and held-out comparison</summary>
+        <p className="text-pretty">
+          Scores compare public and held-out cases after centering each split on the common system
+          field&apos;s mean. Private cases are excluded. This diagnostic cannot establish training
+          contamination.
+        </p>
+        <p className="text-pretty">
+          {results.public_held_out.unavailable === 'no_common_field'
+            ? 'Available cases: '
+            : 'Cases in the common field: '}
+          {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
+          {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
+          {results.public_held_out.unavailable === 'insufficient_cases'
+            ? ' At least 30 independent cases per split are required.'
+            : results.public_held_out.unavailable !== null
+              ? ' Comparable estimates are unavailable because the common system field lacks an identifiable connected fit with non-separated outcomes.'
+              : ' Intervals use independent case clusters at the recorded interval level.'}
+        </p>
+        {results.public_held_out.scores.length > 0 && (
+          <Table>
+            <TableCaption>Public minus held-out score points.</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">System</TableHead>
+                <TableHead scope="col" numeric>
+                  Difference
+                </TableHead>
+                <TableHead scope="col" numeric>
+                  Interval
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {results.public_held_out.scores.map((row) => (
+                <TableRow key={row.system}>
+                  <TableCell>{systemName(reportNames(round.systems), row.system)}</TableCell>
+                  <TableCell numeric>{formatScore(row.difference)}</TableCell>
+                  <TableCell numeric>
+                    {formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </details>
       <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>

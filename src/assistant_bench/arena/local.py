@@ -70,6 +70,13 @@ def database_path() -> Path:
     return paths[0]
 
 
+def exists() -> bool:
+    """Whether Wrangler has initialized a D1 database in the local store."""
+    return any(
+        path.name != 'metadata.sqlite' for path in directory().glob(DATABASE_GLOB)
+    )
+
+
 @contextmanager
 def database() -> Generator[SQLiteDatabase]:
     """Open the initialized store while its caller holds the exclusive lock."""
