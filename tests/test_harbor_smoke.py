@@ -12,10 +12,12 @@ import pytest
 from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 
-from assistant_bench import collection, jobs
+from assistant_bench import collection, execution, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.harnesses.endpoint import HEADERS_VAR
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Accounting, Entry
 from support import (
     StubEndpoint,
     make_system,
@@ -23,6 +25,7 @@ from support import (
     message_stream,
     reasoned_response,
     response,
+    run_host_job,
     terminus_completion,
     write_task_family,
 )
@@ -108,11 +111,13 @@ def serve_messages_turns(endpoint: StubEndpoint, commands: str) -> dict[str, Any
     return first
 
 
-def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task() -> None:
+def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task(
+    tmp_path: Path,
+) -> None:
     family = load_family('smoke')
     tasks = [case_task(family, case.id) for case in load_cases(family)]
 
-    job_dir = jobs.run_job(jobs.check_job(family, tasks))
+    job_dir = jobs.run_job(jobs.check_job(family, tasks, root=tmp_path))
 
     outputs = collection.read_trials(family, job_dir)
     assert Counter(
@@ -156,6 +161,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     export: NixosConfigExport,
     families_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_context: RunContext,
     api: str,
     effort: str,
     thinking_mode: str | None,
@@ -163,6 +169,8 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
 ) -> None:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv(HEADERS_VAR, '{"x-trace":"synthetic-docker-trace"}')
+    monkeypatch.setattr(jobs, 'run_job', run_host_job)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
@@ -176,12 +184,41 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     )
     systems = jobs.family_systems(family, [system])
 
-    job_dir = jobs.run_job(jobs.job(family, systems, [task]))
+    config = jobs.job(
+        family,
+        systems,
+        [task],
+        root=run_context.root,
+        sources=run_context.sources(family),
+    )
+    execution.execute(
+        run_context,
+        config,
+        {system.name: Accounting.of(system)},
+        scope=family.name,
+        run_id='first-run',
+        expected_source_revision=run_context.source_revision(family),
+    )
+    job_dir = jobs.job_path(config)
+    run_context.refresh_sources(family)
     requests = len(endpoint.requests)
-    jobs.run_job(jobs.job(family, systems, [task]))
+    execution.execute(
+        run_context,
+        jobs.job(
+            family,
+            systems,
+            [task],
+            root=run_context.root,
+            sources=run_context.sources(family),
+        ),
+        {system.name: Accounting.of(system)},
+        scope=family.name,
+        run_id='second-run',
+        expected_source_revision=run_context.source_revision(family),
+    )
 
     assert len(endpoint.requests) == requests > 0
-    (output,) = collection.collect(family, {system.name: system}).outputs
+    (output,) = collection.collect(family, {system.name: system}, run_context).outputs
     assert output.model_dump(
         include={'case', 'system', 'error', 'reward', 'gate_failures', 'text'}
     ) == {
@@ -218,7 +255,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     )
     for request in endpoint.requests:
         assert request.headers['authorization'] == 'Bearer test-key'
-        assert request.headers['x-trace'] == 'bench'
+        assert request.headers['x-trace'] == 'synthetic-docker-trace'
         if api == 'openai-responses':
             assert request.path == '/v1/responses'
             assert request.body['reasoning'] == {'effort': 'max'}
@@ -256,14 +293,28 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
 
     test = task / 'tests' / 'test.sh'
     test.write_text(test.read_text() + '# A tests-only edit.\n')
-    config = task / 'task.toml'
-    config.write_text(
-        config.read_text().replace('version = "1.0.0"', 'version = "1.1.0"')
+    manifest = task / 'task.toml'
+    manifest.write_text(
+        manifest.read_text().replace('version = "1.0.0"', 'version = "1.1.0"')
     )
-    jobs.run_job(jobs.job(family, systems, [task]))
+    execution.execute(
+        run_context,
+        jobs.job(
+            family,
+            systems,
+            [task],
+            root=run_context.root,
+            sources=run_context.sources(family),
+        ),
+        {system.name: Accounting.of(system)},
+        scope=family.name,
+        run_id='third-run',
+        expected_source_revision=run_context.source_revision(family),
+    )
+    run_context.refresh_sources(family)
 
     assert len(endpoint.requests) == requests
-    (regraded,) = collection.collect(family, {system.name: system}).outputs
+    (regraded,) = collection.collect(family, {system.name: system}, run_context).outputs
     assert regraded == output
 
 
@@ -280,6 +331,7 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     endpoint: StubEndpoint,
     families_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_context: RunContext,
     harness: str,
     version: str,
     api: str,
@@ -287,6 +339,8 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
 ) -> None:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv(HEADERS_VAR, '{"x-trace":"synthetic-docker-trace"}')
+    monkeypatch.setattr(jobs, 'run_job', run_host_job)
     write_task_family(families_dir, 'echo', systems=('acme-large',))
     family = load_family('f')
     task = case_task(family, 'echo')
@@ -349,18 +403,44 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
         context_window=131072,
     )
     selected = jobs.family_systems(family, [system])
-    config = jobs.job(family, selected, [task])
+    config = jobs.job(
+        family,
+        selected,
+        [task],
+        root=run_context.root,
+        sources=run_context.sources(family),
+    )
     if cancelled:
         endpoint.response_gate = threading.Event()
         endpoint.response_gate_after = 1
 
     try:
-        job_dir = jobs.run_job(config)
+        if cancelled:
+            with pytest.raises(ExceptionGroup):
+                execution.execute(
+                    run_context,
+                    config,
+                    {system.name: Accounting.of(system)},
+                    scope=family.name,
+                    run_id='installed-run',
+                    expected_source_revision=run_context.source_revision(family),
+                )
+        else:
+            execution.execute(
+                run_context,
+                config,
+                {system.name: Accounting.of(system)},
+                scope=family.name,
+                run_id='installed-run',
+                expected_source_revision=run_context.source_revision(family),
+            )
     finally:
         if endpoint.response_gate is not None:
             endpoint.response_gate.set()
 
-    (output,) = collection.collect(family, {system.name: system}).outputs
+    job_dir = jobs.job_path(config)
+    run_context.refresh_sources(family)
+    (output,) = collection.collect(family, {system.name: system}, run_context).outputs
     if cancelled:
         assert output.error == 'AgentTimeoutError'
         assert endpoint.response_waiting.is_set()
@@ -369,15 +449,19 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
         assert output.reward == 1.0
         assert output.text is not None and '+hello' in output.text
     turns = 1 if cancelled else 2
-    assert output.input_tokens == turns * (130 if harness == 'claude-code' else 120)
-    assert output.output_tokens == turns * 40
+    assert output.input_tokens == (
+        None if cancelled else turns * (130 if harness == 'claude-code' else 120)
+    )
+    assert output.output_tokens == (None if cancelled else turns * 40)
     assert list(job_dir.rglob('trajectory.json'))
     (attempt,) = [
-        Attempt.model_validate_json(line)
-        for line in (job_dir / ATTEMPTS_FILE).read_text().splitlines()
+        Entry.model_validate_json(value)
+        for value in run_context.state.entries(family.name)
     ]
-    assert all(usage and usage.output_tokens == 40 for usage in attempt.responses)
-    assert len(attempt.responses) == turns
+    measured = [usage for usage in attempt.responses if usage is not None]
+    assert all(usage.output_tokens == 40 for usage in measured)
+    assert len(measured) == turns
+    assert attempt.responses.count(None) == int(cancelled)
     key = endpoint.key_file.read_text().strip().encode()
     assert not [
         path
