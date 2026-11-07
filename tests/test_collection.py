@@ -2,6 +2,7 @@ import json
 import shutil
 from dataclasses import replace
 from datetime import timedelta
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -12,6 +13,7 @@ import tomli_w
 from harbor.models.agent.context import AgentContext
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import SourceJobConfig
+from harbor.models.job.lock import ExtraDockerComposeLock, TrialLock
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TimingInfo
 
@@ -496,6 +498,124 @@ class TestCollect:
         shutil.rmtree(data_dir / 'jobs' / 'f' / 'job-2')
 
         assert self.collect(family, {system.name: system}).outputs == []
+
+    @pytest.mark.parametrize(
+        ('boundary', 'change', 'accepted'),
+        [
+            ('candidate-current', 'relocated', True),
+            ('candidate-current', 'changed', False),
+            ('candidate-current', 'reordered', False),
+            ('origin-trial', 'relocated', True),
+            ('origin-trial', 'changed', False),
+            ('origin-trial', 'reordered', False),
+            ('candidate-current', 'absent', True),
+            ('candidate-current', 'empty', False),
+        ],
+    )
+    def test_uses_native_ordered_overlay_content_without_reading_historical_paths(
+        self,
+        data_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        boundary: str,
+        change: str,
+        accepted: bool,
+    ) -> None:
+        family = votes_family(samples=1)
+        system = make_system()
+        render_cases(
+            family,
+            [Case(id='a', category='reply', source='synthetic', instruction='Hi.')],
+        )
+        contents = (
+            [b'services:\n  app:\n    command: echo blue\n', b'name: sample\n']
+            if change not in {'absent', 'empty'}
+            else []
+        )
+
+        def environment(
+            root: Path, *, altered: bool = False
+        ) -> tuple[trial_config.EnvironmentConfig, list[ExtraDockerComposeLock] | None]:
+            root.mkdir(parents=True)
+            paths: list[Path] = []
+            for index, content in enumerate(contents):
+                path = root / f'{index}.yaml'
+                path.write_bytes(
+                    content + b'# Different content.\n'
+                    if altered and change == 'changed' and index == 0
+                    else content
+                )
+                paths.append(path)
+            if altered and change == 'reordered':
+                paths.reverse()
+            locks = [
+                ExtraDockerComposeLock(
+                    path=path, digest=f'sha256:{sha256(path.read_bytes()).hexdigest()}'
+                )
+                for path in paths
+            ]
+            return (
+                trial_config.EnvironmentConfig(
+                    type=EnvironmentType.DOCKER, extra_docker_compose=paths
+                ),
+                locks if locks or (altered and change == 'empty') else None,
+            )
+
+        current, current_locks = environment(tmp_path / 'current')
+
+        def configured_environment(
+            systems: list[System], source_root: Path | None = None
+        ) -> trial_config.EnvironmentConfig:
+            return current
+
+        monkeypatch.setattr(jobs, '_environment', configured_environment)
+        agent = current_agent(family, system)
+
+        def recorded(
+            name: str, *, altered: bool = False, source: UUID | None = None
+        ) -> tuple[UUID, TrialLock]:
+            config, locks = environment(tmp_path / 'historical' / name, altered=altered)
+            job = data_dir / 'jobs' / family.name / f'job-{name}'
+            trial = f'a__{name}'
+            identifier = write_trial(
+                job,
+                trial,
+                agent,
+                task='f/a',
+                output='Archived answer.',
+                environment=config,
+                verifier_disabled=True,
+                source=source,
+                context=AgentContext(metadata={'finish_reason': 'stop'}),
+            )
+            path = job / trial / 'lock.json'
+            lock = TrialLock.model_validate_json(path.read_text()).model_copy(
+                update={'extra_docker_compose': locks}
+            )
+            path.write_text(lock.model_dump_json())
+            return identifier, lock
+
+        identifier, origin = recorded('origin', altered=True)
+        comparison = (
+            recorded('regrade', source=identifier)[1]
+            if boundary == 'origin-trial'
+            else origin.model_copy(
+                update={'environment': current, 'extra_docker_compose': current_locks}
+            )
+        )
+        assert (origin == comparison) is accepted
+        locks_before = {
+            path: path.read_bytes()
+            for path in (data_dir / 'jobs' / family.name).glob('*/*/lock.json')
+        }
+        shutil.rmtree(tmp_path / 'historical')
+
+        outputs = self.collect(family, {system.name: system}).outputs
+
+        assert [(output.job, output.trial, output.text) for output in outputs] == (
+            [('job-origin', 'a__origin', 'Archived answer.')] if accepted else []
+        )
+        assert {path: path.read_bytes() for path in locks_before} == locks_before
 
     @pytest.mark.parametrize(
         ('errors', 'kept'),
