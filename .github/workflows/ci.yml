@@ -26,6 +26,10 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Run flake check
         run: nix flake check --print-build-logs
@@ -45,6 +49,10 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -87,6 +95,10 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -120,6 +132,10 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -163,6 +179,10 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -203,11 +223,10 @@ jobs:
       - harbor-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: read
     steps:
       - name: Check results
-        uses: hakula139/devkit/actions/ci-result@v1.0.0-rc.3
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
 
   preview:
     name: Deploy Preview
@@ -256,6 +275,10 @@ jobs:
       - name: Set up Nix
         if: steps.pr.outputs.open
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.pr.outputs.open
@@ -363,6 +386,10 @@ jobs:
       - name: Set up Nix
         if: steps.head.outputs.current
         uses: hakula139/devkit/actions/setup-nix@v1.0.0-rc.3
+        with:
+          extra_nix_config: |
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.head.outputs.current
