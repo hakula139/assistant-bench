@@ -38,6 +38,7 @@ from assistant_bench.catalog import EXPORT_VAR, Api, NixosConfigExport, Price, S
 from assistant_bench.families import load_family
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses import HARNESSES, agent_kwargs
+from assistant_bench.harnesses.accounting import TrialAccounting
 from assistant_bench.harnesses.endpoint import (
     CA_FILE_VAR,
     KEY_FILE_VAR,
@@ -51,11 +52,16 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
 )
 from assistant_bench.harnesses.responses import ResponsesLLM
-from assistant_bench.harnesses.terminus import ChatCompletionsLLM, Terminus
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.harnesses.terminus import (
+    ChatCompletionsLLM,
+    Terminus,
+    TerminusOptions,
+)
 from assistant_bench.outputs import Output, StopDetails
+from assistant_bench.state import State
 from support import (
     StubEndpoint,
+    accounted_trial,
     completion,
     make_system,
     message,
@@ -68,7 +74,7 @@ from support import (
 )
 
 
-pytestmark = pytest.mark.usefixtures('export')
+pytestmark = pytest.mark.usefixtures('export', 'begun_trial')
 
 OPTIONS = {'api': 'openai-chat-completions', 'system': 's', 'fingerprint': 'f'}
 
@@ -106,9 +112,18 @@ def terminal_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TmuxSes
 
 
 class NativeProbe(Terminus):
-    async def execute(self, session: TmuxSession, context: AgentContext) -> None:
+    async def execute(
+        self, private_state: State, session: TmuxSession, context: AgentContext
+    ) -> None:
         self._session = session
-        await self.run('Greet me.', session.environment, context)
+        assert isinstance(self.options, TerminusOptions)
+        with accounted_trial(
+            private_state,
+            system=self.options.system,
+            fingerprint=self.options.fingerprint,
+            trial=self.logs_dir.parent.name,
+        ):
+            await self.run('Greet me.', session.environment, context)
 
     def closure_check(self) -> Callable[[], bool]:
         return self._endpoint_client.is_closed
@@ -191,6 +206,7 @@ def messages_agent(
 
 
 def run_and_collect(
+    private_state: State,
     system: System,
     endpoint: StubEndpoint,
     terminal_session: TmuxSession,
@@ -215,10 +231,10 @@ def run_and_collect(
     context = AgentContext()
 
     if error is None:
-        asyncio.run(agent.execute(terminal_session, context))
+        asyncio.run(agent.execute(private_state, terminal_session, context))
     else:
         with pytest.raises(error):
-            asyncio.run(agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(private_state, terminal_session, context))
     write_trial(
         data_dir / 'jobs' / family.name / 'job-1',
         'echo__1',
@@ -565,6 +581,7 @@ class TestTerminus:
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_openai_cache_writes_survive_terminal_aggregation_and_collection(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -591,7 +608,13 @@ class TestTerminus:
             )
 
             context, collected = run_and_collect(
-                system, endpoint, terminal_session, logs_dir, families_dir, data_dir
+                private_state,
+                system,
+                endpoint,
+                terminal_session,
+                logs_dir,
+                families_dir,
+                data_dir,
             )
 
             assert (
@@ -615,6 +638,7 @@ class TestTerminus:
         )
         def test_sums_reasoning_tokens_only_when_every_response_reports_them(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -638,18 +662,25 @@ class TestTerminus:
             )
 
             _, collected = run_and_collect(
-                system, endpoint, terminal_session, logs_dir, families_dir, data_dir
+                private_state,
+                system,
+                endpoint,
+                terminal_session,
+                logs_dir,
+                families_dir,
+                data_dir,
             )
 
             assert len(endpoint.requests) == 2
             assert collected.output_tokens == 80
             assert collected.reasoning_tokens == total
 
-        def test_failed_native_attempts_keep_their_artifacts_when_the_caller_retries(
+        def test_uncertain_native_attempt_keeps_its_artifact_and_refuses_retry(
             self,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             logs_dir: Path,
+            begun_trial: TrialAccounting,
         ) -> None:
             partial = message('Partial.', message_id='partial')
             completed = message('Recovered.', message_id='recovered')
@@ -658,28 +689,27 @@ class TestTerminus:
                 message_stream(completed),
             ]
 
-            async def retry() -> LLMResponse:
+            async def retry() -> None:
                 with pytest.raises(MessageStreamError):
                     await messages_agent.client.call('Greet me.')
-                return await messages_agent.client.call('Greet me.')
+                with pytest.raises(anthropic.APIConnectionError):
+                    await messages_agent.client.call('Greet me.')
 
-            result = asyncio.run(retry())
+            asyncio.run(retry())
 
-            assert result.content == 'Recovered.'
+            assert begun_trial.fatal
             assert [request.body['messages'] for request in endpoint.requests] == [
                 [{'role': 'user', 'content': 'Greet me.'}]
-            ] * 2
-            assert [
-                json.loads((logs_dir / f'message-{ordinal}.json').read_text())['id']
-                for ordinal in (1, 2)
-            ] == ['partial', 'recovered']
+            ]
+            assert (
+                json.loads((logs_dir / 'message-1.json').read_text())['id'] == 'partial'
+            )
+            assert not (logs_dir / 'message-2.json').exists()
             assert isinstance(messages_agent.client, MessagesLLM)
             assert [
                 attempt['response_status'] for attempt in messages_agent.client.attempts
-            ] == ['incomplete', 'completed']
-            assert [
-                recorded['response_id'] for recorded in messages_agent.client.calls
-            ] == ['recovered']
+            ] == ['incomplete', 'incomplete']
+            assert messages_agent.client.calls == []
 
         @pytest.mark.parametrize(
             ('error_type', 'message', 'expected'),
@@ -807,6 +837,7 @@ class TestTerminus:
         )
         def test_native_completion_failure_names_its_cause_without_quality_retries(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -837,6 +868,7 @@ class TestTerminus:
             )
 
             context, collected = run_and_collect(
+                private_state,
                 system,
                 endpoint,
                 terminal_session,
@@ -870,6 +902,7 @@ class TestTerminus:
         )
         def test_native_cancellation_keeps_completed_usage_through_collection(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             messages_clients: list[AsyncAnthropic],
@@ -914,7 +947,7 @@ class TestTerminus:
                     asyncio.to_thread(endpoint.response_waiting.wait)
                 )
                 task = asyncio.create_task(
-                    messages_agent.execute(terminal_session, context)
+                    messages_agent.execute(private_state, terminal_session, context)
                 )
                 try:
                     completed, _ = await asyncio.wait(
@@ -980,8 +1013,9 @@ class TestTerminus:
             assert client.is_closed()
             assert len(endpoint.requests) == 2
 
-        def test_records_the_usage_of_a_broken_stream_in_the_attempt(
+        def test_a_broken_stream_stays_unknown_and_prevents_another_request(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             terminal_session: TmuxSession,
@@ -997,17 +1031,22 @@ class TestTerminus:
             ]
             context = AgentContext()
 
-            asyncio.run(messages_agent.execute(terminal_session, context))
+            with pytest.raises(MessageStreamError):
+                asyncio.run(
+                    messages_agent.execute(private_state, terminal_session, context)
+                )
 
             assert context.metadata is not None
-            assert len(context.metadata['calls']) == 2
-            (line,) = (logs_dir.parent.parent / ATTEMPTS_FILE).read_text().splitlines()
-            attempt = Attempt.model_validate_json(line)
-            assert (attempt.trial, len(attempt.responses)) == ('trial', 3)
-            assert None not in attempt.responses
+            assert context.metadata['calls'] == []
+            (stored,) = private_state.requests('sample')
+            assert stored['receipt_json'] is None
+            assert isinstance(stored['claim_id'], str)
+            assert private_state.claim_state(stored['claim_id']) == 'uncertain'
+            assert len(endpoint.requests) == 1
 
         def test_native_budget_continuation_keeps_signed_blocks_and_all_usage(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             terminal_session: TmuxSession,
@@ -1026,7 +1065,9 @@ class TestTerminus:
             ]
             context = AgentContext()
 
-            asyncio.run(messages_agent.execute(terminal_session, context))
+            asyncio.run(
+                messages_agent.execute(private_state, terminal_session, context)
+            )
 
             first, reissued, confirmed = endpoint.requests
             assert reissued.body['messages'][:-1] == [
@@ -1058,6 +1099,7 @@ class TestTerminus:
 
         def test_counts_native_chat_summary_subagents_once_with_main_requests(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             monkeypatch: pytest.MonkeyPatch,
             terminal_session: TmuxSession,
@@ -1102,7 +1144,7 @@ class TestTerminus:
                 Terminus2, '_check_proactive_summarization', summarize_once
             )
 
-            asyncio.run(agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(private_state, terminal_session, context))
 
             _, _, questions, answers, continued, confirmed = endpoint.requests
             assert 'Summary.' in questions.body['messages'][-1]['content']
@@ -1147,10 +1189,10 @@ class TestTerminus:
             with pytest.raises(BadRequestError):
                 asyncio.run(agent.request('Greet me.'))
 
-            assert len(endpoint.requests) == 3
+            assert len(endpoint.requests) == 1
             assert agent.client.calls == []
 
-        def test_retryable_chat_errors_keep_native_attempts_without_sdk_retries(
+        def test_retryable_chat_error_is_recorded_without_regeneration(
             self,
             endpoint: StubEndpoint,
             endpoint_clients: list[openai.AsyncOpenAI],
@@ -1171,11 +1213,11 @@ class TestTerminus:
 
             assert [request.path for request in endpoint.requests] == [
                 '/v1/chat/completions'
-            ] * 3
+            ]
             assert [
                 request.headers['x-stainless-retry-count']
                 for request in endpoint.requests
-            ] == ['0', '0', '0']
+            ] == ['0']
             (client,) = endpoint_clients
             assert client.max_retries == 0
             assert client.is_closed()
@@ -1200,6 +1242,7 @@ class TestTerminus:
         @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_cancellation_preserves_reported_native_usage_and_closes_the_request(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             endpoint_clients: list[openai.AsyncOpenAI],
             export: NixosConfigExport,
@@ -1259,7 +1302,9 @@ class TestTerminus:
             context = AgentContext()
 
             async def cancel() -> str:
-                task = asyncio.create_task(agent.execute(terminal_session, context))
+                task = asyncio.create_task(
+                    agent.execute(private_state, terminal_session, context)
+                )
                 try:
                     assert await asyncio.to_thread(endpoint.response_waiting.wait, 5)
                     task.cancel()
@@ -1343,8 +1388,9 @@ class TestTerminus:
             ] * (1 if prior_usage is None else 2)
             assert client.max_retries == 0
 
-        def test_keeps_http_failure_usage_unknown_through_native_retries(
+        def test_keeps_http_failure_usage_unknown_without_native_retries(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             responses_agent: NativeProbe,
             terminal_session: TmuxSession,
@@ -1354,9 +1400,11 @@ class TestTerminus:
             context = AgentContext()
 
             with pytest.raises(openai.InternalServerError):
-                asyncio.run(responses_agent.execute(terminal_session, context))
+                asyncio.run(
+                    responses_agent.execute(private_state, terminal_session, context)
+                )
 
-            assert len(endpoint.requests) == 3
+            assert len(endpoint.requests) == 1
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
@@ -1367,39 +1415,7 @@ class TestTerminus:
             assert context.metadata['calls'] == []
             assert [
                 call['response_status'] for call in context.metadata['attempts']
-            ] == ['request_failed'] * 3
-
-        def test_counts_usage_from_completed_requests_after_a_retry(
-            self,
-            endpoint: StubEndpoint,
-            responses_agent: NativeProbe,
-            terminal_session: TmuxSession,
-        ) -> None:
-            endpoint.statuses = [503]
-            endpoint.response = response(
-                json.dumps(
-                    {'analysis': '', 'plan': '', 'commands': [], 'task_complete': True}
-                )
-            )
-            context = AgentContext()
-
-            asyncio.run(responses_agent.execute(terminal_session, context))
-
-            assert len(endpoint.requests) == 3
-            assert (
-                context.n_input_tokens,
-                context.n_cache_tokens,
-                context.n_output_tokens,
-                context.cost_usd,
-            ) == (240, 200, 80, None)
-            assert context.metadata is not None
-            assert [call['response_status'] for call in context.metadata['calls']] == [
-                'completed',
-                'completed',
-            ]
-            assert [
-                call['response_status'] for call in context.metadata['attempts']
-            ] == ['request_failed', 'completed', 'completed']
+            ] == ['request_failed']
 
         def test_maps_the_provider_context_error_to_native_context_management(
             self, endpoint: StubEndpoint, responses_agent: NativeProbe
@@ -1449,6 +1465,7 @@ class TestTerminus:
 
         def test_native_budget_reissue_preserves_partial_items_and_all_reported_usage(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             responses_agent: NativeProbe,
             terminal_session: TmuxSession,
@@ -1465,7 +1482,9 @@ class TestTerminus:
             ]
             context = AgentContext()
 
-            asyncio.run(responses_agent.execute(terminal_session, context))
+            asyncio.run(
+                responses_agent.execute(private_state, terminal_session, context)
+            )
 
             first, reissued, confirmed = endpoint.requests
             assert reissued.body['input'][:-1] == [
@@ -1495,6 +1514,7 @@ class TestTerminus:
         )
         def test_chat_budget_reissue_preserves_partial_text_and_reported_usage(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -1516,7 +1536,7 @@ class TestTerminus:
             )
             context = AgentContext()
 
-            asyncio.run(agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(private_state, terminal_session, context))
 
             first, reissued, confirmed = endpoint.requests
             assert reissued.body['messages'][:-2] == first.body['messages']
@@ -1557,6 +1577,7 @@ class TestTerminus:
         )
         def test_keeps_usage_unknown_for_an_unrecognized_completion_envelope(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -1579,7 +1600,7 @@ class TestTerminus:
             )
             context = AgentContext()
 
-            asyncio.run(agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(private_state, terminal_session, context))
 
             assert len(endpoint.requests) == 2
             assert (
@@ -1613,6 +1634,7 @@ class TestTerminus:
         @pytest.mark.parametrize('unknown', [0, 1], ids=['first', 'last'])
         def test_keeps_aggregate_usage_unknown_if_any_native_response_lacks_valid_usage(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -1651,7 +1673,7 @@ class TestTerminus:
             )
             context = AgentContext()
 
-            asyncio.run(agent.execute(terminal_session, context))
+            asyncio.run(agent.execute(private_state, terminal_session, context))
 
             assert len(endpoint.requests) == 2
             assert (
@@ -1694,6 +1716,7 @@ class TestTerminus:
         )
         def test_rejects_unusable_native_responses_without_retrying(
             self,
+            private_state: State,
             endpoint: StubEndpoint,
             terminal_session: TmuxSession,
             logs_dir: Path,
@@ -1735,6 +1758,7 @@ class TestTerminus:
             )
 
             context, collected = run_and_collect(
+                private_state,
                 system,
                 endpoint,
                 terminal_session,
@@ -1969,6 +1993,7 @@ class TestTerminus:
         @pytest.mark.parametrize('fails', [False, True], ids=['success', 'failure'])
         def test_closes_the_transport_and_keeps_metadata_after_the_parent_finishes(
             self,
+            private_state: State,
             agent_export: tuple[dict[str, str], NixosConfigExport],
             endpoint: StubEndpoint,
             monkeypatch: pytest.MonkeyPatch,
@@ -2000,13 +2025,16 @@ class TestTerminus:
 
             monkeypatch.setattr(Terminus2, 'run', finish)
 
-            if fails:
-                with pytest.raises(RuntimeError, match='agent failed'):
+            with accounted_trial(private_state):
+                if fails:
+                    with pytest.raises(RuntimeError, match='agent failed'):
+                        asyncio.run(
+                            agent.run('Go.', MagicMock(spec=BaseEnvironment), context)
+                        )
+                else:
                     asyncio.run(
                         agent.run('Go.', MagicMock(spec=BaseEnvironment), context)
                     )
-            else:
-                asyncio.run(agent.run('Go.', MagicMock(spec=BaseEnvironment), context))
 
             assert is_closed()
             expected: dict[str, Any] = {
