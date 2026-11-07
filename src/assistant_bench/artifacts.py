@@ -68,14 +68,16 @@ class ArtifactRef(_Model):
 
 
 class TrialManifest(_Model):
+    """Preserve unknown original execution pins as null revisions."""
+
     scope: Component
     run_id: Component
     claim_id: Component
     trial_id: Component
     job_name: Component
     trial_name: Component
-    code_revision: Commit
-    case_revision: Commit
+    code_revision: Commit | None
+    case_revision: Commit | None
     files: tuple[FileEntry, ...]
 
     @property
@@ -126,8 +128,8 @@ def build_manifest(
     trial_id: str,
     job_name: str,
     trial_name: str,
-    code_revision: str,
-    case_revision: str,
+    code_revision: str | None,
+    case_revision: str | None,
 ) -> TrialManifest:
     """Describe the selected trial's raw files without replacing a secret audit.
 
@@ -651,14 +653,10 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
                             'An artifact directory cannot traverse a symlink.'
                         )
                     if child.exists():
-                        if not child.is_dir() or component not in {
-                            entry.name for entry in directory.iterdir()
-                        }:
-                            raise InputError(
-                                'Artifact paths collide on the destination filesystem.'
-                            )
-                    else:
-                        child.mkdir()
+                        raise InputError(
+                            'Artifact paths collide on the destination filesystem.'
+                        )
+                    child.mkdir()
                     directories.add(child)
                 directory = child
             path = directory / parts[-1]
