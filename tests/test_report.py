@@ -12,9 +12,15 @@ from pydantic import JsonValue, ValidationError
 
 from assistant_bench import report
 from assistant_bench.arena import votes
-from assistant_bench.families import Category, CheckRule, Choice, load_family
+from assistant_bench.families import (
+    Category,
+    CheckRule,
+    Choice,
+    load_cases,
+    load_family,
+)
 from assistant_bench.messages import InputError
-from assistant_bench.outputs import Output, read_outputs, write_outputs
+from assistant_bench.outputs import Output
 from assistant_bench.report import (
     AnalysisInput,
     HumanEvidence,
@@ -32,7 +38,6 @@ from support import (
     PROSE_DEFECTS,
     REPORT_FIXTURE,
     REPORT_SCHEMA_FIXTURE,
-    ROUND_FAMILY,
     START,
     TESTS_REPORT_FIXTURE,
     make_output,
@@ -132,7 +137,7 @@ def make_analysis(
             production=report.Cutoff(
                 id=len(ordinary) + dropped, votes=len(ordinary) + dropped
             ),
-            local=None,
+            private=None,
         ),
         declared_categories=tuple(dict.fromkeys(category for _, category in resolved)),
         categories=resolved,
@@ -217,18 +222,17 @@ def close_tests_round(families_dir: Path) -> Report:
         samples=2,
         categories=TESTS_CATEGORIES,
     )
-    write_outputs(
-        'coding-tasks',
-        [
-            trial(system, task, index, passed)
-            for system, passes in TESTS_PASSES.items()
-            for task, passed in zip(TESTS_CATEGORIES, passes, strict=True)
-            for index in range(2)
-        ],
-    )
+    outputs = [
+        trial(system, task, index, passed)
+        for system, passes in TESTS_PASSES.items()
+        for task, passed in zip(TESTS_CATEGORIES, passes, strict=True)
+        for index in range(2)
+    ]
 
     return report.close_tests(
         load_family('coding-tasks'),
+        load_cases(load_family('coding-tasks'), private_root=None),
+        outputs,
         AT,
         system_names={
             'acme-pro': 'Acme Pro',
@@ -238,11 +242,8 @@ def close_tests_round(families_dir: Path) -> Report:
     )
 
 
-def close_checkers_round(
-    families_dir: Path, *, omit: str | None = None
-) -> report.Report:
-    write_checkers_family(families_dir)
-    outputs = [
+def checker_outputs(omit: str | None = None) -> list[Output]:
+    return [
         make_output(
             case=f'case-{index}',
             system=system,
@@ -264,9 +265,18 @@ def close_checkers_round(
         if system != omit
         for index in range(4)
     ]
-    write_outputs('instructions-format', outputs)
+
+
+def close_checkers_round(
+    families_dir: Path, *, omit: str | None = None
+) -> report.Report:
+    write_checkers_family(families_dir)
+    outputs = checker_outputs(omit)
+
     return report.close_checkers(
         load_family('instructions-format'),
+        load_cases(load_family('instructions-format'), private_root=None),
+        outputs,
         START,
         system_names={
             'acme': 'Acme',
@@ -275,9 +285,13 @@ def close_checkers_round(
     )
 
 
-def close_smoke(closed_at: datetime = AT) -> Report:
+def close_smoke(outputs: list[Output], closed_at: datetime = AT) -> Report:
     return report.close_tests(
-        load_family('smoke'), closed_at, system_names={'large': 'Public large'}
+        load_family('smoke'),
+        load_cases(load_family('smoke'), private_root=None),
+        outputs,
+        closed_at,
+        system_names={'large': 'Public large'},
     )
 
 
@@ -334,7 +348,7 @@ class TestReport:
         snapshot, outputs = make_round(days, closed_at - timedelta(hours=1))
 
         closed = report.close_votes(
-            votes.voting_input(snapshot, ROUND_FAMILY, outputs),
+            votes.voting_input(snapshot, {'production': outputs}),
             closed_at,
             fingerprints=votes.fingerprints(snapshot),
             system_names=votes.system_names(snapshot),
@@ -622,24 +636,19 @@ class TestReport:
 
 def close_frozen(frozen: str | None) -> Report:
     """Close `large` under `fingerprint` after a round that froze `frozen`."""
-    write_outputs(
-        'smoke', [make_output(case='echo', system='large', fingerprint=frozen)]
-    )
-    write_report(close_smoke(AT - timedelta(days=1)))
-    write_outputs(
-        'smoke',
-        [make_output(case='echo', system='large', fingerprint='fingerprint')],
-    )
-    return close_smoke()
+    outputs = [make_output(case='echo', system='large', fingerprint=frozen)]
+    write_report(close_smoke(outputs, AT - timedelta(days=1)))
+    outputs = [make_output(case='echo', system='large', fingerprint='fingerprint')]
+    return close_smoke(outputs)
 
 
 class TestCloseTests:
     def test_normalizes_an_offset_closing_time_before_naming_the_round(self) -> None:
-        write_outputs('smoke', [make_output(case='echo', system='large')])
+        outputs = [make_output(case='echo', system='large')]
         utc = AT.replace(hour=23)
         local = utc.astimezone(timezone(timedelta(hours=9)))
 
-        closed = close_smoke(local)
+        closed = close_smoke(outputs, local)
 
         assert closed.round == '2026-10-21'
         assert closed.closed_at == utc
@@ -684,16 +693,13 @@ class TestCloseTests:
     def test_rejects_a_tests_family_it_cannot_aggregate(
         self, trials: list[dict[str, Any]], message: str
     ) -> None:
-        write_outputs(
-            'smoke',
-            [
-                make_output(**{'case': 'echo', 'system': 'large'} | trial)
-                for trial in trials
-            ],
-        )
+        outputs = [
+            make_output(**{'case': 'echo', 'system': 'large'} | trial)
+            for trial in trials
+        ]
 
         with pytest.raises(ValueError, match=message):
-            close_smoke()
+            close_smoke(outputs)
 
     def test_reports_pass_rates_for_a_tests_family(self) -> None:
         trials: list[dict[str, Any]] = [
@@ -708,17 +714,12 @@ class TestCloseTests:
             },
             {'trial': '4', 'case': 'retired', 'reward': 1.0},
         ]
-        write_outputs(
-            'smoke',
-            [
-                make_output(
-                    **{'case': 'echo', 'system': 'large', 'cost_usd': 0.01} | trial
-                )
-                for trial in trials
-            ],
-        )
+        outputs = [
+            make_output(**{'case': 'echo', 'system': 'large', 'cost_usd': 0.01} | trial)
+            for trial in trials
+        ]
 
-        closed = close_smoke()
+        closed = close_smoke(outputs)
         results = closed.results
 
         assert results.scorer == 'tests'
@@ -740,17 +741,12 @@ class TestCloseTests:
             {'trial': '2', **USAGELESS},
             {'trial': '3', 'error': 'TimeoutError', 'cost_usd': 1.0},
         ]
-        write_outputs(
-            'smoke',
-            [
-                make_output(
-                    **{'case': 'echo', 'system': 'large', 'reward': 1.0} | trial
-                )
-                for trial in trials
-            ],
-        )
+        outputs = [
+            make_output(**{'case': 'echo', 'system': 'large', 'reward': 1.0} | trial)
+            for trial in trials
+        ]
 
-        closed = close_smoke()
+        closed = close_smoke(outputs)
 
         assert closed.results.scorer == 'tests'
         (standing,) = closed.results.standings
@@ -816,13 +812,14 @@ class TestCloseTests:
         write_task_family(
             families_dir, 'a', 'b', categories={'a': 'feature', 'b': 'bug-fix'}
         )
-        write_outputs(
-            'f',
-            [make_output(case=case, system='large', reward=1.0) for case in 'ab'],
-        )
+        outputs = [make_output(case=case, system='large', reward=1.0) for case in 'ab']
 
         closed = report.close_tests(
-            load_family('f'), AT, system_names={'large': 'Public large'}
+            load_family('f'),
+            load_cases(load_family('f'), private_root=None),
+            outputs,
+            AT,
+            system_names={'large': 'Public large'},
         )
 
         assert closed.results.scorer == 'tests'
@@ -835,21 +832,18 @@ class TestCloseTests:
         self, families_dir: Path
     ) -> None:
         write_task_family(families_dir, 'a', 'b', samples=2)
-        write_outputs(
-            'f',
-            [
-                make_output(case=case, system=system, trial=trial, reward=1.0)
-                for case, system, trial in [
-                    ('a', 'large', '1'),
-                    ('a', 'large', '2'),
-                    ('b', 'large', '1'),
-                    ('a', 'small', '1'),
-                    ('a', 'small', '2'),
-                    ('b', 'small', '1'),
-                    ('b', 'small', '2'),
-                ]
-            ],
-        )
+        outputs = [
+            make_output(case=case, system=system, trial=trial, reward=1.0)
+            for case, system, trial in [
+                ('a', 'large', '1'),
+                ('a', 'large', '2'),
+                ('b', 'large', '1'),
+                ('a', 'small', '1'),
+                ('a', 'small', '2'),
+                ('b', 'small', '1'),
+                ('b', 'small', '2'),
+            ]
+        ]
 
         with pytest.raises(
             ValueError,
@@ -857,6 +851,8 @@ class TestCloseTests:
         ):
             report.close_tests(
                 load_family('f'),
+                load_cases(load_family('f'), private_root=None),
+                outputs,
                 AT,
                 system_names={'large': 'Public large', 'small': 'Public small'},
             )
@@ -912,8 +908,8 @@ class TestCloseCheckers:
     def test_closing_refuses_incomplete_or_stale_verdicts(
         self, families_dir: Path, data_dir: Path, gap: str
     ) -> None:
-        close_checkers_round(families_dir)
-        outputs = read_outputs('instructions-format')
+        write_checkers_family(families_dir)
+        outputs = checker_outputs()
         if gap == 'missing-case':
             outputs.pop()
         elif gap == 'duplicate':
@@ -928,11 +924,12 @@ class TestCloseCheckers:
                     else checks.model_copy(update={'revision': 'old'}),
                 }
             )
-        write_outputs('instructions-format', outputs)
 
         with pytest.raises(InputError):
             report.close_checkers(
                 load_family('instructions-format'),
+                load_cases(load_family('instructions-format'), private_root=None),
+                outputs,
                 START,
                 system_names={
                     'acme': 'Acme',
