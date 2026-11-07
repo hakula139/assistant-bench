@@ -13,6 +13,7 @@ from harbor.models.trial.config import UserAgentConfig
 
 from assistant_bench import canaries, execution, jobs
 from assistant_bench.catalog import Api, Price, System, SystemIdentity
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprint
 from assistant_bench.messages import InputError
@@ -405,6 +406,7 @@ class TestRun:
         run_context: RunContext,
         monkeypatch: pytest.MonkeyPatch,
         failure: str,
+        private_store: SQLiteDatabase,
     ) -> None:
         probe = prepare_probe(make_system(), tmp_path)
         recorded: list[str] = []
@@ -448,6 +450,9 @@ class TestRun:
         )
         assert not outcome.success
         assert run_context.state.run(recorded[0]).job == outcome.job
+        assert private_store.execute('SELECT run_id FROM canary_records').rows == [
+            {'run_id': recorded[0]}
+        ]
         assert outcome.job != 'concurrent-job'
         assert read_ledger('canaries', run_context.state) == []
 
