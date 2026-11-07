@@ -1,6 +1,7 @@
 """Harbor job configs for a family's systems, and their runs."""
 
 import asyncio
+import hashlib
 import os
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from harbor.job_diff import (
 from harbor.job_plan import JobPlan
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.job.config import JobConfig, RetryConfig, SourceJobConfig
+from harbor.models.job.lock import ExtraDockerComposeLock
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
 
@@ -302,9 +304,25 @@ def probe_job(system: System, task: Path, root: Path) -> JobConfig:
     return config.model_copy(update={'retry': RetryConfig(max_retries=0)})
 
 
+type EnvironmentInputs = tuple[
+    trial_config.EnvironmentConfig, tuple[ExtraDockerComposeLock, ...] | None
+]
+
+
+def environment_inputs(
+    environment: trial_config.EnvironmentConfig,
+    overlays: list[ExtraDockerComposeLock] | None,
+) -> EnvironmentInputs:
+    """Use Harbor's ordered content identity for portable Compose locations."""
+    return (
+        environment.model_copy(update={'extra_docker_compose': []}),
+        tuple(overlays) if overlays is not None else None,
+    )
+
+
 def current_inputs(
     family: Family, systems: list[System]
-) -> dict[str, tuple[trial_config.AgentConfig, trial_config.EnvironmentConfig, bool]]:
+) -> dict[str, tuple[trial_config.AgentConfig, EnvironmentInputs, bool]]:
     """Map each system the family lists to the inputs a current trial records.
 
     The inputs are the agent config, the environment config, and whether the
@@ -314,10 +332,16 @@ def current_inputs(
         family, [system for system in systems if system.name in family.settings.systems]
     )
     environment = _environment(resolved, family.source_root.parent)
+    overlays: list[ExtraDockerComposeLock] = []
+    for path in environment.extra_docker_compose:
+        with path.open('rb') as file:
+            digest = hashlib.file_digest(file, 'sha256').hexdigest()
+        overlays.append(ExtraDockerComposeLock(path=path, digest=f'sha256:{digest}'))
+    identity = environment_inputs(environment, overlays or None)
     return {
         system.name: (
             _agent_config(system),
-            environment,
+            identity,
             family.source != 'tasks',
         )
         for system in resolved
