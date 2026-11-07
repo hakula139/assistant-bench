@@ -85,8 +85,8 @@ const votesRules = z.strictObject({
 
 const cutoff = z.strictObject({ id: z.int().nonnegative(), votes: z.int().nonnegative() });
 const cutoffs = z
-  .strictObject({ production: cutoff.nullable(), local: cutoff.nullable() })
-  .refine((value) => value.production !== null || value.local !== null);
+  .strictObject({ production: cutoff.nullable(), private: cutoff.nullable() })
+  .refine((value) => value.production !== null || value.private !== null);
 
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),

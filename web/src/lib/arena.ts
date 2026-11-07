@@ -38,15 +38,15 @@ export const freshnessQuery = z
     family: familyName,
     production: z.optional(queryCount),
     production_votes: z.optional(queryCount),
-    local: z.optional(queryCount),
-    local_votes: z.optional(queryCount),
+    private: z.optional(queryCount),
+    private_votes: z.optional(queryCount),
   })
   .check(
     z.refine((value) =>
-      ['production', 'local'].every(
+      ['production', 'private'].every(
         (store) =>
-          (value[store as 'production' | 'local'] === undefined) ===
-          (value[`${store}_votes` as 'production_votes' | 'local_votes'] === undefined),
+          (value[store as 'production' | 'private'] === undefined) ===
+          (value[`${store}_votes` as 'production_votes' | 'private_votes'] === undefined),
       ),
     ),
   );
