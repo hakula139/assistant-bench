@@ -74,7 +74,11 @@ def trial(
     prepared.config.verifier.environment_mode = VerifierEnvironmentMode.SEPARATE
     (task / 'task.toml').write_text(prepared.config.model_dump_toml())
     config = jobs.job(
-        family, jobs.family_systems(family, [make_system()]), [task]
+        family,
+        jobs.family_systems(family, [make_system()]),
+        [task],
+        root=tmp_path,
+        sources=[],
     ).model_copy(update={'jobs_dir': tmp_path / 'source-jobs', 'job_name': 'job-a'})
     finish_generation(config, 'First line.\r\nSecond line.\n')
     job = config.jobs_dir / config.job_name
@@ -834,6 +838,8 @@ class TestArtifactRepository:
                 trial.family,
                 jobs.family_systems(trial.family, [make_system()]),
                 [trial.task],
+                root=tmp_path,
+                sources=[],
             )
             plan = asyncio.run(JobPlan.from_config(current))
             source = SourceJobConfig(action='diff', type='local', path=prepared)
