@@ -1066,8 +1066,10 @@ def private_database(path: Path | None = None) -> Generator[SQLiteDatabase]:
         if initialize:
             for migration in sorted(MIGRATIONS_DIR.glob('*.sql')):
                 connection.executescript(migration.read_text())
-            schema = files('assistant_bench').joinpath('sql/private/0001_state.sql')
-            connection.executescript(schema.read_text())
+            schemas = files('assistant_bench').joinpath('sql/private')
+            for schema in sorted(schemas.iterdir(), key=lambda path: path.name):
+                if schema.name.endswith('.sql'):
+                    connection.executescript(schema.read_text())
         yield SQLiteDatabase(connection)
 
 
