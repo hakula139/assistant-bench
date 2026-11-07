@@ -181,6 +181,19 @@ class ArtifactRepository:
             )
         self.repository_slug = repository_slug
 
+    def head(self) -> str:
+        """Resolve private remote `main` to an immutable source revision."""
+        repository = self._metadata()
+        output = _git(
+            Path.cwd(),
+            ['ls-remote', '--heads', '--', repository.ssh_url, 'refs/heads/main'],
+        ).stdout
+        if not output:
+            raise InputError('The private repository has no `main` source revision.')
+        revision = output.decode().split()[0]
+        _commit(revision)
+        return revision
+
     def source(self, revision: str, destination: Path) -> Path:
         """Restore only `cases/` from an immutable commit into an empty directory."""
         _commit(revision)

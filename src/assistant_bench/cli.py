@@ -5,6 +5,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
@@ -48,6 +49,7 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
+from assistant_bench.runtime import open_sources
 from assistant_bench.spend import (
     Basis,
     Projection,
@@ -118,6 +120,10 @@ def check(
             help='Check only this task in one named task family. Repeat for several.',
         ),
     ] = None,
+    private: Annotated[
+        bool,
+        typer.Option('--private', help='Also validate pinned private case sources.'),
+    ] = False,
 ) -> None:
     """Validate every family, or the named ones.
 
@@ -128,7 +134,16 @@ def check(
     if task_names and (not families or len(families) != 1):
         raise InputError('Select exactly one task family with `--task`.')
 
-    check_case_entries()
+    with open_sources() if private else nullcontext() as sources:
+        _check(families, task_names, sources.root if sources is not None else None)
+
+
+def _check(
+    families: list[str] | None,
+    task_names: list[str] | None,
+    private_root: Path | None,
+) -> None:
+    check_case_entries(private_root=private_root)
     export, systems = _catalog()
     task_families: list[tuple[Family, list[Path]]] = []
     for family in map(load_family, families or family_names()):
@@ -139,10 +154,12 @@ def check(
                     f'Family `{family.name}` has cases. Select a task family with '
                     '`--task`.'
                 )
-            cases = count_of(len(_render_tasks(family)), 'valid case')
+            cases = count_of(
+                len(_render_tasks(family, private_root=private_root)), 'valid case'
+            )
             typer.echo(f'Family `{family.name}`: {cases}.')
             continue
-        tasks = _task_dirs(family, export)
+        tasks = _task_dirs(family, export, private_root=private_root)
         if task_names:
             known_names(
                 task_names,
@@ -364,9 +381,9 @@ def _catalog() -> tuple[NixosConfigExport, dict[str, System]]:
     return export, load_systems(export)
 
 
-def _render_tasks(family: Family) -> list[Path]:
+def _render_tasks(family: Family, *, private_root: Path | None = None) -> list[Path]:
     """Render a case family's tasks, refusing any that would abort its job."""
-    tasks = render_tasks(family, load_cases(family))
+    tasks = render_tasks(family, load_cases(family, private_root=private_root))
     changed = changed_tasks(family, tasks)
     if changed:
         raise InputError(
@@ -379,12 +396,17 @@ def _render_tasks(family: Family) -> list[Path]:
     return tasks
 
 
-def _task_dirs(family: Family, export: NixosConfigExport) -> list[Path]:
+def _task_dirs(
+    family: Family, export: NixosConfigExport, *, private_root: Path | None = None
+) -> list[Path]:
     """Return a task family's task directories once each is fit to run."""
-    tasks = [case_task(family, case.id) for case in load_cases(family)]
-    check_tasks(family, tasks)
+    tasks = [
+        case_task(family, case.id, private_root=private_root)
+        for case in load_cases(family, private_root=private_root)
+    ]
+    check_tasks(family, tasks, private_root=private_root)
     if family.settings.systems:
-        author_vendors(family, tasks, export)
+        author_vendors(family, tasks, export, private_root=private_root)
 
     changed = changed_tasks(family, tasks)
     if changed:
