@@ -99,7 +99,7 @@ class TrialAccounting:
         if not admitted:
             del self._requests[request_id]
             del self._apis[request_id]
-            self._fail('The model request admission was not granted.')
+            raise AccountingError('The model request admission was not granted.')
         return request_id
 
     async def confirm(self, request_id: str, receipt: RequestReceipt) -> None:
