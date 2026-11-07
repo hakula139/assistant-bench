@@ -579,6 +579,39 @@ class TestArtifactRepository:
             )
 
     class TestMaterialize:
+        def test_unknown_historical_revisions_survive_publication_and_restoration(
+            self, repository: Repository, trial: Trial, tmp_path: Path
+        ) -> None:
+            manifest = TrialManifest.model_validate(
+                {
+                    **trial.manifest.model_dump(),
+                    'code_revision': None,
+                    'case_revision': None,
+                }
+            )
+            for field in ['code_revision', 'case_revision']:
+                with pytest.raises(ValidationError):
+                    TrialManifest.model_validate(
+                        {**manifest.model_dump(), field: 'invalid-commit'}
+                    )
+
+            reference = repository.client.publish_trial(
+                manifest.run_id, manifest.claim_id, trial.job, manifest
+            )
+            restored = repository.client.materialize(reference, tmp_path / 'restored')
+
+            archived = json.loads(
+                git(
+                    repository.remote,
+                    'show',
+                    f'{reference.commit_sha}:{reference.path}/manifest.json',
+                )
+            )
+            assert archived['code_revision'] is archived['case_revision'] is None
+            assert (restored / 'config.json').read_bytes() == (
+                trial.job / 'config.json'
+            ).read_bytes()
+
         def test_case_aliases_never_follow_a_previously_restored_symlink(
             self, repository: Repository, trial: Trial, tmp_path: Path
         ) -> None:
