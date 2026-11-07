@@ -304,6 +304,32 @@ class TestState:
             assert state.artifacts(parent.scope) == before
             assert state.source_revision(parent.scope) == 1
 
+        def test_failed_source_advance_rolls_back_the_artifact_and_claim_together(
+            self, state: State, tmp_path: Path
+        ) -> None:
+            parent, owner = claimed(state)
+            original = entry(parent, owner)
+            state.record_entry(owner.id, original.model_dump_json())
+            with closing(
+                sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
+            ) as other:
+                other.executescript(
+                    'CREATE TRIGGER refuse_source_advance '
+                    'BEFORE UPDATE ON source_heads '
+                    "BEGIN SELECT RAISE(ABORT, 'Synthetic storage failure'); END;"
+                )
+
+            with pytest.raises(
+                sqlite3.IntegrityError, match='Synthetic storage failure'
+            ):
+                state.settle_claim(owner.id, COMMIT, 'runs/run-a/claim-a', DIGEST)
+
+            assert state.claim_state(owner.id) == 'claimed'
+            assert state.artifacts(parent.scope) == []
+            assert state.source_revision(parent.scope) == 0
+            assert state.entries(parent.scope) == [original.model_dump_json()]
+            assert not state.complete_run(parent.id)
+
         def test_out_of_order_slots_advance_a_counter_and_refuse_stale_plans(
             self, state: State
         ) -> None:
