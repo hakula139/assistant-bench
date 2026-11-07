@@ -98,7 +98,11 @@ async def connect(
                 request_id = upstream.request.extensions.get(REQUEST_ID)
                 terminal = False
                 try:
-                    if 'text/event-stream' in upstream.headers.get('content-type', ''):
+                    if (
+                        upstream.is_success
+                        and 'text/event-stream'
+                        in upstream.headers.get('content-type', '')
+                    ):
                         usage: dict[str, Any] = {}
                         message: dict[str, Any] = {}
                         final_usage = False
