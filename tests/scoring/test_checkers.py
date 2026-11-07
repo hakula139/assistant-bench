@@ -6,6 +6,44 @@ from assistant_bench.scoring.checkers import evaluate
 
 class TestEvaluate:
     @pytest.mark.parametrize(
+        'quote',
+        [
+            '> 山间,晨雾…',
+            '- 山间,晨雾…',
+            '山间,晨雾…\n湖上:微风…',
+            '**山间,晨雾…**',
+            '```text\n山间,晨雾…\n```',
+        ],
+    )
+    def test_exact_raw_quotes_preserve_block_markup_and_multiple_lines(
+        self, quote: str
+    ) -> None:
+        context = CheckContext(
+            language='zh',
+            rules=['han-punctuation', 'ellipsis'],
+            quoted_input=[quote],
+        )
+        text = '说明。\n\n' + quote
+
+        passing = evaluate(context, text, completed=True)
+        failing = evaluate(context, text + '\n\n额外, 文字。', completed=True)
+
+        assert passing.passed
+        assert not failing.passed
+
+    @pytest.mark.parametrize('forged', ['\x1e', '\x1e\x1e', '\x1e\x1e\x1e'])
+    def test_response_characters_cannot_forge_a_quote_exemption(
+        self, forged: str
+    ) -> None:
+        context = CheckContext(
+            language='zh', rules=['han-punctuation'], quoted_input=['保留。']
+        )
+
+        result = evaluate(context, '山间,' + forged + '晨雾。', completed=True)
+
+        assert not result.passed
+
+    @pytest.mark.parametrize(
         'text',
         [
             '山间, 晨雾。',

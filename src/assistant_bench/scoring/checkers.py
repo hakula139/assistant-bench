@@ -34,11 +34,18 @@ class Checks(BaseModel):
 def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Checks:
     """Check one response. An incomplete or prose-free reply fails every rule."""
     source = text or ''
+    prose_source = source
+    quote_boundary = '\x1e'
+    while quote_boundary in source:
+        quote_boundary += '\x1e'
     for quote in context.quoted_input:
         source = source.replace(quote, re.sub(r'[^\n]', ' ', quote))
+        prose_source = prose_source.replace(
+            quote, re.sub(r'[^\n]', quote_boundary, quote)
+        )
     documents = _documents(source)
     prose_documents = (
-        _documents(text or '', _quoted_markdown(context.quoted_input))
+        _documents(prose_source, _quoted_markdown(quote_boundary))
         if context.quoted_input
         else documents
     )
@@ -95,23 +102,22 @@ def evaluate(context: CheckContext, text: str | None, *, completed: bool) -> Che
     return Checks(revision=REVISION, rules=verdicts)
 
 
-def _quoted_markdown(quotes: Sequence[str]) -> MarkdownIt:
+def _quoted_markdown(boundary: str) -> MarkdownIt:
+    """Recognize a trusted quote marker chosen absent from the response."""
     markdown = MarkdownIt('commonmark', {'html': False})
 
     def quoted_input(state: StateInline, silent: bool) -> bool:
-        for quote in quotes:
-            if state.pos + len(quote) <= state.posMax and state.src.startswith(
-                quote, state.pos
-            ):
-                if not silent:
-                    state.push('quoted_input', '', 0)
-                state.pos += len(quote)
-                return True
-        return False
+        if state.pos + len(boundary) > state.posMax or not state.src.startswith(
+            boundary, state.pos
+        ):
+            return False
+        if not silent:
+            state.push('quoted_input', '', 0)
+        state.pos += len(boundary)
+        return True
 
     markdown.inline.ruler.before('text', 'quoted_input', quoted_input)
-    for quote in quotes:
-        markdown.inline.add_terminator_char(quote[0])
+    markdown.inline.add_terminator_char(boundary[0])
     return markdown
 
 
