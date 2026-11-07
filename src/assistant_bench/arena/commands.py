@@ -1,23 +1,19 @@
 """Publication, inspection and moderation of the arena's vote stores."""
 
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
+from pydantic import TypeAdapter, ValidationError
 
-from assistant_bench import jobs
 from assistant_bench.arena import d1, publication, votes
 from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
-from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.database import Database
-from assistant_bench.families import (
-    Choice,
-    load_cases,
-    load_family,
-)
-from assistant_bench.messages import InputError, code, count_of
-from assistant_bench.outputs import read_outputs
+from assistant_bench.families import Choice
+from assistant_bench.messages import InputError, code, count_of, error_lines
+from assistant_bench.outputs import Output, read_outputs
 from assistant_bench.runtime import open_context
 from assistant_bench.state import State
 
@@ -52,32 +48,59 @@ VoteIds = Annotated[
 @app.command()
 def prepare(family: FamilyArgument, target: publication.VotingTarget) -> None:
     """Prepare a cloud publication for review and print its immutable ID."""
-    selected = load_family(family)
-    systems = load_systems(load_export())
-    listed = jobs.listed_systems(selected, systems)
     with open_context() as context, d1.connect('private') as database:
         generation = context.state.output_generation(family)
         if generation.id is None:
             raise InputError(f'Family `{family}` has no sealed output collection.')
+        metadata = context.state.collection(generation.id)
+        if metadata.system_names_json is None:
+            raise InputError(
+                f'Collection `{generation.id}` has no frozen system names. '
+                f'Collect `{family}` again before preparing a publication.'
+            )
+        try:
+            names = TypeAdapter(dict[str, str]).validate_json(
+                metadata.system_names_json
+            )
+        except ValidationError as error:
+            raise InputError(error_lines(error, 'Collection system names')) from error
+        sources = context.closing_sources(generation.id)
         outputs = read_outputs(family, context.state, generation=generation)
         prepared = publication.prepare(
-            selected,
-            load_cases(selected, private_root=context.private_root),
+            sources.family,
+            sources.cases,
             outputs,
-            {system.name: system.display_name for system in listed},
+            names,
             target=target,
         )
         now = datetime.now(UTC)
         publication.stage(database, prepared, now)
         previous = publication.preparation(database, prepared.id)
+        if previous is not None:
+            original = context.state.collection_generation(previous.collection_id)
+            original_outputs = read_outputs(family, context.state, generation=original)
+            if _published_outputs(prepared, outputs) != _published_outputs(
+                prepared, original_outputs
+            ):
+                raise InputError(
+                    f'Publication `{prepared.id}` already pins collection '
+                    f'`{previous.collection_id}`, whose output facts differ. '
+                    'Explicitly regrade or rerun the changed outputs before publishing.'
+                )
+            typer.echo(
+                f'Reused prepared publication `{prepared.id}` with its original '
+                f'collection `{previous.collection_id}` and case revision '
+                f'`{previous.case_revision}`.'
+            )
+            return
         publication.record_preparation(
             database,
             publication.Preparation(
                 publication_id=prepared.id,
                 target=target,
                 collection_id=generation.id,
-                case_revision=context.case_revision,
-                prepared_at=now if previous is None else previous.prepared_at,
+                case_revision=metadata.case_revision,
+                prepared_at=now,
             ),
         )
     typer.echo(
@@ -86,6 +109,30 @@ def prepare(family: FamilyArgument, target: publication.VotingTarget) -> None:
         f'{count_of(len(prepared.outputs), "output")}. '
         f'Review it with `bench arena inspect {prepared.id}`.'
     )
+
+
+def _published_outputs(
+    prepared: publication.Publication, outputs: Sequence[Output]
+) -> dict[str, str]:
+    keys = {output.key for output in prepared.outputs}
+    projected: dict[str, str] = {}
+    for output in outputs:
+        key = publication.output_key(prepared.family, output)
+        if key not in keys:
+            continue
+        if key in projected:
+            raise InputError(
+                f'Publication `{prepared.id}` has duplicate output `{key}`.'
+            )
+        projected[key] = json.dumps(
+            output.model_dump(mode='json'), sort_keys=True, separators=(',', ':')
+        )
+    if projected.keys() != keys:
+        raise InputError(
+            f'Publication `{prepared.id}` is missing outputs '
+            'from its pinned collection.'
+        )
+    return projected
 
 
 @app.command()
