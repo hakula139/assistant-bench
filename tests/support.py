@@ -542,6 +542,34 @@ class RecordedTrial:
     recorder: TrialAccounting
 
 
+def run_host_job(
+    config: JobConfig,
+    *,
+    log: Path | None = None,
+    plugin_context: Path | None = None,
+) -> Path:
+    """Replace only the Harbor subprocess, retaining its job and cloud plugin."""
+    assert plugin_context is not None
+
+    async def run() -> None:
+        job = await Job.create(config)
+        plugin = ExecutionPlugin(context_file=str(plugin_context))
+        result = JobResult(
+            id=job.id,
+            started_at=datetime.now(UTC),
+            n_total_trials=len(job),
+            stats=JobStats(),
+        )
+        try:
+            await plugin.on_job_start(job)
+            result = await job.run()
+        finally:
+            await plugin.on_job_end(result)
+
+    asyncio.run(run())
+    return config.jobs_dir / config.job_name
+
+
 @asynccontextmanager
 async def executed_trial(
     context: RunContext,
