@@ -1,7 +1,10 @@
 """Command-owned materialization of pinned private case sources."""
 
+import io
 import os
+import re
 import subprocess
+import tarfile
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -13,7 +16,7 @@ from harbor.models.job.config import SourceJobConfig
 from assistant_bench import jobs, tasks
 from assistant_bench.arena.d1 import connect
 from assistant_bench.artifacts import ArtifactRepository
-from assistant_bench.families import Family, load_cases
+from assistant_bench.families import Case, Family, load_cases, load_family
 from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.state import State
@@ -26,6 +29,12 @@ REPOSITORY_VAR = 'BENCH_DATA_REPOSITORY'
 class PrivateSources:
     revision: str
     root: Path
+
+
+@dataclass(frozen=True)
+class ClosingSources:
+    family: Family
+    cases: tuple[Case, ...]
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,27 @@ class RunContext:
                 self.root,
                 private_root=self.private_root,
             )
+        )
+
+    def closing_sources(self, collection_id: str) -> ClosingSources:
+        """Materialize the exact public and private inputs frozen by collection."""
+        collection = self.state.collection(collection_id)
+        if collection.code_revision is None or collection.case_revision is None:
+            raise InputError(
+                'This collection has no verified source revisions. '
+                'Collect the family again before closing a tests round.'
+            )
+        root = self.root / 'closing' / collection_id
+        source = root / 'public'
+        if not source.exists():
+            _public_source(collection.code_revision, source)
+        private = root / 'private'
+        if not private.exists():
+            self.artifacts.source(collection.case_revision, private)
+        family = load_family(collection.family, root=source / 'families')
+        return ClosingSources(
+            family=family,
+            cases=tuple(load_cases(family, private_root=private / 'cases')),
         )
 
 
@@ -130,3 +160,44 @@ def _implementation_revision() -> str:
             'Runtime commands require a Git implementation checkout.'
         ) from error
     return revision
+
+
+def _public_source(revision: str, destination: Path) -> None:
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise InputError(
+            'A collection implementation revision must be a Git commit SHA.'
+        )
+    environment = os.environ.copy()
+    local_variables = subprocess.check_output(
+        ['git', 'rev-parse', '--local-env-vars'], text=True
+    ).splitlines()
+    for name in local_variables:
+        environment.pop(name, None)
+    try:
+        exists = subprocess.run(
+            ['git', '-C', str(REPO_ROOT), 'cat-file', '-e', f'{revision}^{{commit}}'],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if exists.returncode:
+            subprocess.run(
+                ['git', '-C', str(REPO_ROOT), 'fetch', '--no-tags', 'origin', revision],
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+        archive = subprocess.check_output(
+            ['git', '-C', str(REPO_ROOT), 'archive', revision, 'families'],
+            env=environment,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise InputError(
+            'The pinned implementation sources could not be materialized.'
+        ) from error
+    destination.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+        source.extractall(destination, filter='data')

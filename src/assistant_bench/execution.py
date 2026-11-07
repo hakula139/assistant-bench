@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
 from contextlib import ExitStack
 from contextvars import Token
 from datetime import UTC, datetime
@@ -14,7 +15,7 @@ from uuid import UUID, uuid4
 from harbor.job import Job
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
-from harbor.models.job.config import JobConfig
+from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.job.plugin import BaseJobPlugin
 from harbor.models.job.result import JobResult
 from harbor.models.trial.config import TrialConfig
@@ -65,7 +66,11 @@ def execute(
     context.state.create_run(run)
     path = context.root / f'execution-{run.id}.json'
     path.write_text(ExecutionInput(run=run, accounting=accounting).model_dump_json())
-    jobs.run_job(config, log=log, plugin_context=path)
+    try:
+        jobs.run_job(config, log=log, plugin_context=path)
+    except BaseException as error:
+        _cancel_unstarted(context.state, run.id, error)
+        raise
     if not context.state.complete_run(run.id):
         raise InputError('The execution has unsettled work and cannot complete.')
     return run
@@ -94,7 +99,7 @@ class ExecutionPlugin(BaseJobPlugin):
         plan = await JobPlan.from_config(
             job.config.model_copy(deep=True), job_id=job.id
         )
-        sources = []
+        sources: list[tuple[SourceJobConfig, Path]] = []
         for source in job.config.source_jobs:
             if source.type != 'local' or source.path is None:
                 raise InputError(
@@ -109,7 +114,7 @@ class ExecutionPlugin(BaseJobPlugin):
             )
             if change.action != DiffAction.REUSE
         ]
-        actual = tuple(job._remaining_trial_configs)
+        actual = tuple(job._remaining_trial_configs)  # pyright: ignore[reportPrivateUsage]
         if len(actual) != len(expected):
             raise InputError('Harbor changed the planned execution inventory.')
         for configured, (_, target, change) in zip(actual, expected, strict=True):
@@ -129,7 +134,6 @@ class ExecutionPlugin(BaseJobPlugin):
                 raise InputError('Harbor changed a planned trial before admission.')
 
         revision = self._state.source_revision(self._input.run.scope)
-        candidates: list[str] = []
         try:
             for configured, (index, _, change) in zip(actual, expected, strict=True):
                 if change.action == DiffAction.REGRADE:
@@ -141,15 +145,13 @@ class ExecutionPlugin(BaseJobPlugin):
                     index // (len(plan.task_configs) * len(job.config.agents)),
                     revision,
                 )
-                candidates.append(claim.id)
                 if not self._state.claim_attempt(claim):
                     raise InputError(
                         'Another execution already owns a planned paid slot.'
                     )
                 self._claims[configured.trial_name] = claim
-        except BaseException:
-            for claim_id in candidates:
-                self._state.cancel_claim(claim_id)
+        except BaseException as error:
+            _cancel_unstarted(self._state, self._input.run.id, error)
             raise
         job.on_trial_started(self._started)
         job.on_trial_ended(self._ended)
@@ -268,6 +270,7 @@ class ExecutionPlugin(BaseJobPlugin):
 
 def _audit(root: Path, secrets: set[str]) -> None:
     known = [value.encode() for value in secrets if value]
+    selected: list[tuple[Path, bytes]] = []
     for path in root.rglob('*'):
         if path.is_symlink():
             content = os.fsencode(os.readlink(path))
@@ -275,29 +278,59 @@ def _audit(root: Path, secrets: set[str]) -> None:
             content = path.read_bytes()
         else:
             continue
-        if any(value in content for value in known):
+        location = os.fsencode(path.relative_to(root))
+        if any(value in content or value in location for value in known):
             raise InputError(
                 'A selected artifact contains a known credential. Publication refused.'
             )
+        selected.append((path.relative_to(root), content))
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ('GITLEAKS_CONFIG', 'GITLEAKS_CONFIG_TOML')
+    }
     try:
-        result = subprocess.run(
-            [
-                'gitleaks',
-                'dir',
-                '--no-banner',
-                '--redact=100',
-                '--exit-code=1',
-                str(root),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    except FileNotFoundError as error:
+        with tempfile.TemporaryDirectory(prefix='bench-audit-') as temporary:
+            directory = Path(temporary)
+            audit = directory / 'files'
+            for relative, content in selected:
+                path = audit / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            result = subprocess.run(
+                [
+                    'gitleaks',
+                    'dir',
+                    '--redact=100',
+                    '--no-banner',
+                    '--no-color',
+                    '--ignore-gitleaks-allow',
+                    '--exit-code=42',
+                    '--max-target-megabytes=0',
+                    str(audit),
+                ],
+                cwd=directory,
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise InputError(
-            'The artifact audit requires `gitleaks` from the development shell.'
+            'The artifact audit could not run `gitleaks` from the development shell.'
         ) from error
     if result.returncode:
         raise InputError(
             'The artifact credential scan did not pass. Publication refused.'
+        )
+
+
+def _cancel_unstarted(state: State, run_id: str, error: BaseException) -> None:
+    try:
+        state.cancel_unstarted(run_id)
+    except Exception:
+        error.add_note(
+            f'Cleanup of run `{run_id}` could not be confirmed. '
+            'Its paid claims remain blocked until inspected.'
         )

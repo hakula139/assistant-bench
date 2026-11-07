@@ -87,6 +87,7 @@ class Collection:
 
     outputs: list[Output]
     spend: list[Spend]
+    generation: str
 
 
 def collect(
@@ -183,7 +184,7 @@ def collect(
         key=lambda output: (output.case, output.system, output.job, output.trial),
     )
 
-    write_outputs(
+    generation = write_outputs(
         family.name,
         outputs,
         context.state,
@@ -192,7 +193,7 @@ def collect(
         case_revision=context.case_revision,
         system_names={name: system.display_name for name, system in systems.items()},
     )
-    return Collection(outputs, summarize(entries))
+    return Collection(outputs, summarize(entries), generation)
 
 
 def read_trials(

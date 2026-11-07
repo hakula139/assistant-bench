@@ -264,6 +264,9 @@ class Family(BaseModel):
     name: str
     source: Literal['cases', 'tasks']
     settings: Settings
+    source_root: Path = Field(
+        default_factory=lambda: FAMILIES_DIR, exclude=True, repr=False
+    )
 
 
 class Case(BaseModel):
@@ -325,12 +328,13 @@ _TASK_MANIFEST = TypeAdapter(_TaskManifest)
 # ── Loading ──
 
 
-def family_names() -> list[str]:
+def family_names(*, root: Path | None = None) -> list[str]:
     """Return the name of every directory under `families/` holding a `family.toml`."""
-    return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
+    directory = FAMILIES_DIR if root is None else root
+    return sorted(path.parent.name for path in directory.glob('*/family.toml'))
 
 
-def load_family(name: str) -> Family:
+def load_family(name: str, *, root: Path | None = None) -> Family:
     """Read `family.toml` and infer where the family's tasks come from.
 
     Raises
@@ -341,10 +345,12 @@ def load_family(name: str) -> Family:
         public family's name does not start with its aspect, or the settings do
         not fit the source.
     """
-    directory = FAMILIES_DIR / name
+    source_root = FAMILIES_DIR if root is None else root
+    directory = source_root / name
     if not (directory / 'family.toml').is_file():
         raise InputError(
-            f'No family named `{name}`. Choose among {code(family_names())}.'
+            f'No family named `{name}`. '
+            f'Choose among {code(family_names(root=source_root))}.'
         )
 
     has_cases = (directory / 'cases.toml').is_file()
@@ -371,7 +377,10 @@ def load_family(name: str) -> Family:
             )
 
     family = Family(
-        name=name, source='cases' if has_cases else 'tasks', settings=settings
+        name=name,
+        source='cases' if has_cases else 'tasks',
+        settings=settings,
+        source_root=source_root,
     )
 
     _check_source_settings(family)
@@ -536,7 +545,7 @@ def _unread_case_entries(root: Path) -> list[Path]:
 def _case_entries(
     family: Family, private_root: Path | None
 ) -> Iterator[tuple[str, Case]]:
-    paths = [FAMILIES_DIR / family.name / 'cases.toml']
+    paths = [family.source_root / family.name / 'cases.toml']
     if private_root is not None:
         paths.append(private_root / f'{family.name}.toml')
 
@@ -608,7 +617,7 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
 
 def _task_roots(family: Family, private_root: Path | None) -> list[tuple[Path, str]]:
     """Return each root of a task family's tasks and the label it reports with."""
-    roots = [(FAMILIES_DIR / family.name / 'tasks', 'tasks')]
+    roots = [(family.source_root / family.name / 'tasks', 'tasks')]
     if private_root is not None:
         roots.append((private_root / family.name, f'cases/{family.name}'))
     return roots
@@ -629,7 +638,7 @@ def case_task(
     family: Family, case_id: str, *, private_root: Path | None = None
 ) -> Path:
     """Return a task's committed or explicitly selected private source directory."""
-    committed = FAMILIES_DIR / family.name / 'tasks'
+    committed = family.source_root / family.name / 'tasks'
     if (committed / case_id).is_dir() or private_root is None:
         return committed / case_id
     return private_root / family.name / case_id

@@ -200,6 +200,22 @@ class State:
             ).rows
         )
 
+    def cancel_unstarted(self, run_id: str) -> int:
+        """Release only this run's claimed slots that never crossed a start fence."""
+        return len(
+            self._database.execute(
+                """
+                UPDATE attempt_claims SET state = 'cancelled'
+                WHERE run_id = ? AND state = 'claimed' AND NOT EXISTS (
+                    SELECT 1 FROM attempt_starts
+                    WHERE claim_id = attempt_claims.id
+                )
+                RETURNING id
+                """,
+                (run_id,),
+            ).rows
+        )
+
     def begin_attempt(self, attempt: AttemptStart) -> bool:
         """Persist the mandatory start fence before any paid request.
 
