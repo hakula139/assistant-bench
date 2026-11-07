@@ -17,6 +17,7 @@ from assistant_bench.artifacts import ArtifactRef
 from assistant_bench.catalog import System
 from assistant_bench.database import D1Error, SQLiteDatabase
 from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.harnesses.accounting import AccountingError, RequestReceipt
 from assistant_bench.harnesses.endpoint import HEADERS_VAR
 from assistant_bench.messages import InputError
 from assistant_bench.runtime import RunContext
@@ -211,6 +212,72 @@ class TestExecute:
 
 
 class TestExecutionPlugin:
+    @pytest.mark.parametrize('confirmed', [True, False], ids=['known', 'missing'])
+    def test_cap_denial_settles_only_with_all_previously_admitted_receipts(
+        self,
+        run_context: RunContext,
+        family: Family,
+        system: System,
+        tmp_path: Path,
+        confirmed: bool,
+    ) -> None:
+        config = planned(run_context, family, system)
+        claim_id: str | None = None
+
+        async def request() -> None:
+            nonlocal claim_id
+            async with executed_trial(
+                run_context,
+                config,
+                system,
+                scope=family.name,
+                run_id='bounded-run',
+                max_requests=1,
+            ) as trial:
+                claim_id = trial.recorder.claim_id
+                trial.recorder.begin(START)
+                first = await trial.recorder.admit('openai-responses')
+                if confirmed:
+                    await trial.recorder.confirm(
+                        first,
+                        RequestReceipt(
+                            api='openai-responses',
+                            outcome='http_error',
+                            http_status=503,
+                            usage=None,
+                        ),
+                    )
+                try:
+                    await trial.recorder.admit('openai-responses')
+                finally:
+                    trial.recorder.finish(START + timedelta(seconds=1))
+
+        expected = AccountingError if confirmed else InputError
+        with pytest.raises(expected):
+            asyncio.run(request())
+
+        assert claim_id is not None
+        assert run_context.state.claim_state(claim_id) == (
+            'settled' if confirmed else 'uncertain'
+        )
+        (entry,) = read_ledger(family.name, run_context.state)
+        assert entry.responses == [None]
+        assert run_context.state.complete_run('bounded-run') == confirmed
+        (artifact,) = run_context.state.artifact_generation(family.name).artifacts
+        archive = run_context.artifacts.materialize(
+            ArtifactRef(
+                commit_sha=artifact.commit_sha,
+                path=artifact.path,
+                manifest_digest=artifact.manifest_digest,
+            ),
+            tmp_path / 'bounded-diagnostics',
+        )
+        result = TrialResult.model_validate_json(
+            (archive.job / archive.manifest.trial_name / 'result.json').read_text()
+        )
+        assert result.exception_info is not None
+        assert result.exception_info.exception_type == 'AccountingError'
+
     @pytest.mark.usefixtures('export')
     def test_a_mixed_regrade_and_rerun_only_admits_the_new_solution(
         self,
