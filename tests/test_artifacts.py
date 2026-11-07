@@ -28,6 +28,7 @@ from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
     FileEntry,
+    MaterializedTrial,
     TrialManifest,
     build_manifest,
 )
@@ -126,9 +127,10 @@ def trial(
 
 
 def publish(repository: PrivateRepository, trial: Trial) -> ArtifactRef:
-    return repository.client.publish_trial(
-        'run-a', 'artifact-a', trial.job, trial.manifest
+    (reference,) = repository.client.publish_trials(
+        [MaterializedTrial(trial.job, trial.manifest)]
     )
+    return reference
 
 
 def snapshot(trial: Trial) -> TrialManifest:
@@ -323,7 +325,132 @@ class TestArtifactRepository:
             assert not (tmp_path / 'client' / 'unrelated.txt').exists()
             assert source.is_relative_to(tmp_path / 'client')
 
-    class TestPublishTrial:
+    class TestPublishTrials:
+        def test_publishes_the_whole_batch_in_one_native_commit_in_input_order(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            archives = [
+                MaterializedTrial(trial.job, second),
+                MaterializedTrial(trial.job, trial.manifest),
+            ]
+
+            references = repository.client.publish_trials(archives)
+
+            head = git(repository.remote, 'rev-parse', 'main')
+            assert [reference.path for reference in references] == [
+                archive.manifest.path for archive in archives
+            ]
+            assert {reference.commit_sha for reference in references} == {head}
+            assert (
+                git(repository.remote, 'rev-list', f'{repository.revision}..main')
+                == head
+            )
+            expected_paths = {
+                f'{archive.manifest.path}/{path}'
+                for archive in archives
+                for path in [
+                    *(entry.path for entry in archive.manifest.files),
+                    'manifest.json',
+                ]
+            }
+            assert (
+                set(
+                    git(
+                        repository.remote, 'diff', '--name-only', f'{head}^', head
+                    ).splitlines()
+                )
+                == expected_paths
+            )
+            for archive, reference in zip(archives, references, strict=True):
+                restored = repository.client.materialize(
+                    reference, tmp_path / archive.manifest.artifact_id
+                )
+                assert restored.manifest == archive.manifest
+                for entry in archive.manifest.files:
+                    relative = Path(entry.path).relative_to('job')
+                    assert contents(restored.job / relative) == contents(
+                        archive.job / relative
+                    ), entry.path
+
+        def test_a_mixed_batch_keeps_original_references_and_repeats_without_writes(
+            self, repository: PrivateRepository, trial: Trial
+        ) -> None:
+            original = publish(repository, trial)
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            archives = [
+                MaterializedTrial(trial.job, second),
+                MaterializedTrial(trial.job, trial.manifest),
+            ]
+
+            references = repository.client.publish_trials(archives)
+            repeated = repository.client.publish_trials(archives)
+
+            assert references[1] == repeated[1] == original
+            assert references == repeated
+            assert references[0].commit_sha != original.commit_sha
+            assert (
+                git(repository.remote, 'rev-parse', 'main') == references[0].commit_sha
+            )
+            assert git(repository.remote, 'rev-parse', 'main^') == original.commit_sha
+            assert (
+                git(
+                    repository.remote,
+                    'show',
+                    f'{original.commit_sha}:{original.path}/manifest.json',
+                )
+                == trial.manifest.content().decode().strip()
+            )
+
+        def test_an_empty_batch_needs_no_remote_access(
+            self, repository: PrivateRepository, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            monkeypatch.setenv('TEST_GH_STATUS', '1')
+
+            references = repository.client.publish_trials([])
+
+            assert references == ()
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
+        @pytest.mark.parametrize(
+            'conflicting', [False, True], ids=['same', 'different']
+        )
+        def test_refuses_repeated_paths_before_publishing_either_archive(
+            self, repository: PrivateRepository, trial: Trial, conflicting: bool
+        ) -> None:
+            second = trial.manifest.model_copy(
+                update={'scope': 'other'} if conflicting else {}
+            )
+            archives = [
+                MaterializedTrial(trial.job, trial.manifest),
+                MaterializedTrial(trial.job, second),
+            ]
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(archives)
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
+        def test_a_later_changed_archive_prevents_the_entire_batch_push(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            changed = tmp_path / 'changed-job'
+            shutil.copytree(trial.job, changed, symlinks=True)
+            (changed / trial.result.trial_name / 'agent' / 'output.txt').write_text(
+                'Changed after audit.\n'
+            )
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(changed, second),
+                    ]
+                )
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
         @pytest.mark.parametrize(
             'failure',
             ['public', 'unreadable', 'wrong-repository', 'coerced-visibility'],
@@ -420,8 +547,8 @@ class TestArtifactRepository:
             (workspace / '.gitattributes').write_text('* text eol=lf\n')
             manifest = snapshot(trial)
 
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
@@ -433,12 +560,18 @@ class TestArtifactRepository:
             self, repository: PrivateRepository, trial: Trial
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
             hook = repository.remote / 'hooks' / 'pre-receive'
             hook.write_text('#!/bin/sh\nexit 1\n')
             hook.chmod(0o755)
 
             with pytest.raises(InputError):
-                publish(repository, trial)
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(trial.job, second),
+                    ]
+                )
 
             assert git(repository.remote, 'rev-parse', 'main') == before
 
@@ -488,8 +621,8 @@ class TestArtifactRepository:
             )
 
             with pytest.raises(InputError):
-                repository.client.publish_trial(
-                    'run-a', 'artifact-a', trial.job, changed
+                repository.client.publish_trials(
+                    [MaterializedTrial(trial.job, changed)]
                 )
 
             assert git(repository.remote, 'rev-parse', 'main') == reference.commit_sha
@@ -507,7 +640,7 @@ class TestArtifactRepository:
 
             assert git(repository.remote, 'rev-parse', 'main') == before
 
-        def test_concurrent_pushes_preserve_both_immutable_trials(
+        def test_concurrent_batches_preserve_every_immutable_trial(
             self,
             repository: PrivateRepository,
             trial: Trial,
@@ -530,15 +663,24 @@ class TestArtifactRepository:
                     'artifact_id': 'artifact-b',
                 }
             )
+            third = trial.manifest.model_copy(
+                update={'run_id': 'run-c', 'artifact_id': 'artifact-c'}
+            )
+            fourth = trial.manifest.model_copy(
+                update={'run_id': 'run-d', 'artifact_id': 'artifact-d'}
+            )
 
-            def push(manifest: TrialManifest) -> ArtifactRef:
-                return ArtifactRepository(SLUG).publish_trial(
-                    manifest.run_id, manifest.artifact_id, trial.job, manifest
+            def push(manifests: tuple[TrialManifest, ...]) -> tuple[ArtifactRef, ...]:
+                return ArtifactRepository(SLUG).publish_trials(
+                    [MaterializedTrial(trial.job, manifest) for manifest in manifests]
                 )
 
             with ThreadPoolExecutor(max_workers=2) as writers:
-                references = list(writers.map(push, [trial.manifest, second]))
+                batches = list(
+                    writers.map(push, [(trial.manifest, second), (third, fourth)])
+                )
 
+            references = [reference for batch in batches for reference in batch]
             for reference in references:
                 git(
                     repository.remote,
@@ -576,8 +718,8 @@ class TestArtifactRepository:
                         {**manifest.model_dump(), field: 'invalid-commit'}
                     )
 
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
@@ -741,8 +883,8 @@ class TestArtifactRepository:
             workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
             (workspace / 'external').symlink_to(outside)
             manifest = snapshot(trial)
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
 
             restored = repository.client.materialize(reference, tmp_path / 'restored')
