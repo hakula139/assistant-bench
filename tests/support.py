@@ -55,6 +55,7 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
+from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import Price, System, SystemConfig
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import (
@@ -528,10 +529,19 @@ def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
 # ── Git Repositories ──
 
 
-def _git(root: Path, *args: str) -> str:
+@dataclass(frozen=True)
+class PrivateRepository:
+    client: ArtifactRepository
+    remote: Path
+    seed: Path
+    metadata: Path
+    revision: str
+
+
+def git(root: Path, *args: str) -> str:
     """Run git in `root` and return its output, stripped."""
     return subprocess.run(
-        ['git', *args], cwd=root, check=True, stdout=subprocess.PIPE, text=True
+        ['git', *args], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -541,17 +551,17 @@ def new_repository(root: Path, files: Mapping[str, str]) -> str:
         file = root / path
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(content)
-    _git(root, 'init', '--quiet')
-    _git(root, 'config', 'user.email', 'test@example.com')
-    _git(root, 'config', 'user.name', 'Test')
+    git(root, 'init', '--quiet')
+    git(root, 'config', 'user.email', 'test@example.com')
+    git(root, 'config', 'user.name', 'Test')
     return commit_all(root, 'Initial files')
 
 
 def commit_all(root: Path, message: str) -> str:
     """Commit every change in the repository at `root`, and return the commit."""
-    _git(root, 'add', '.')
-    _git(root, 'commit', '--quiet', '-m', message)
-    return _git(root, 'rev-parse', 'HEAD')
+    git(root, 'add', '.')
+    git(root, 'commit', '--quiet', '-m', message)
+    return git(root, 'rev-parse', 'HEAD')
 
 
 # ── Stub Endpoint ──
