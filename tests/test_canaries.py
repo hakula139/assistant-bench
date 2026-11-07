@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -18,7 +19,9 @@ from assistant_bench.catalog import Api, Price, System, SystemIdentity
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprint
+from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.messages import InputError
+from assistant_bench.paths import REPO_ROOT
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Entry, read_ledger
 from assistant_bench.state import ArtifactGeneration, Run, State
@@ -60,9 +63,14 @@ def benchmark(
     )
 
 
-def prepare_probe(system: System, root: Path) -> canaries.Probe:
+def prepare_probe(
+    system: System, root: Path, *, source_root: Path = REPO_ROOT
+) -> canaries.Probe:
     (probe,) = canaries.prepare(
-        [benchmark(system, root)], {system.name: system}, root=root
+        [benchmark(system, root)],
+        {system.name: system},
+        root=root,
+        source_root=source_root,
     )
     return probe
 
@@ -323,20 +331,15 @@ class TestPrepare:
 
         assert first.protocol_digest != second.protocol_digest
 
-    def test_protocol_tracks_the_instruction_revision(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_protocol_tracks_the_instruction_revision(self, tmp_path: Path) -> None:
         system = make_system()
         first = prepare_probe(system, tmp_path)
         instruction = files('assistant_bench').joinpath('canary.md').read_text()
-        (tmp_path / 'canary.md').write_text(instruction + '\nAdditional inert text.\n')
+        source = tmp_path / 'src' / 'assistant_bench'
+        source.mkdir(parents=True)
+        (source / 'canary.md').write_text(instruction + '\nAdditional inert text.\n')
 
-        def resources(package: str) -> Path:
-            return tmp_path
-
-        monkeypatch.setattr(canaries, 'files', resources)
-
-        second = prepare_probe(system, tmp_path)
+        second = prepare_probe(system, tmp_path, source_root=tmp_path)
 
         assert first.source_generate == second.source_generate
         assert first.protocol_digest != second.protocol_digest
@@ -387,6 +390,60 @@ class TestPrepare:
 
 
 class TestRun:
+    def test_reads_the_audited_archive_after_live_trial_files_change(
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        run_context: RunContext,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        endpoint.response = completion('READY')
+        secret = endpoint.key_file.read_text().strip()
+        probe = prepare_probe(make_system(), tmp_path)
+        submitted = jobs.run_job
+        changed: list[Path] = []
+
+        def run_job(
+            config: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
+            path = submitted(
+                config,
+                log=log,
+                plugin_context=plugin_context,
+                source_root=source_root,
+            )
+            (result,) = path.glob('*/result.json')
+            payload = json.loads(result.read_text())
+            payload['agent_result']['metadata'].update(
+                response_model=secret, finish_reason=secret, request_id=secret
+            )
+            result.write_text(json.dumps(payload))
+            (result.parent / 'agent' / OUTPUT_FILE).write_text(secret)
+            changed.append(result)
+            return path
+
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        (record,) = canaries.run([probe], run_context)
+
+        assert record.success
+        assert record.output == 'READY'
+        assert record.finish_reason == 'stop'
+        assert record.response_models == ['large-2026']
+        assert secret not in record.model_dump_json()
+        assert (
+            run_context.state.baseline(probe.original.name, canaries.context_key(probe))
+            == record.model_dump_json()
+        )
+        assert canaries.read_records(probe.original.name, run_context.state) == [record]
+        assert secret in changed[0].read_text()
+        assert len(endpoint.requests) == len(host_jobs) == 1
+
     @pytest.mark.parametrize('echo', ['output', 'model', 'finish-reason', 'request-id'])
     def test_an_unaudited_probe_retains_only_sanitized_durable_accounting(
         self,
@@ -422,7 +479,7 @@ class TestRun:
         assert record.output == ''
         assert record.finish_reason is None
         assert record.latency_sec is None
-        assert record.error is not None
+        assert record.error == 'UnauditedTrial'
         assert not record.success
         assert secret not in record.model_dump_json()
         assert secret not in entry.model_dump_json()
@@ -500,9 +557,7 @@ class TestRun:
 
         (outcome,) = canaries.read_records(probe.original.name, run_context.state)
         assert outcome.job == probe.config.job_name
-        assert outcome.error == (
-            'InterruptedProbe' if failure == 'interrupt' else 'CalledProcessError'
-        )
+        assert outcome.error == 'UnauditedTrial'
         assert not outcome.success
         assert run_context.state.run(recorded[0]).job == outcome.job
         assert private_store.execute('SELECT run_id FROM canary_records').rows == [
