@@ -49,6 +49,7 @@ src/assistant_bench/
 ├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
 ├── state.py                                # Private run claims, immutable records and active collection pointers
+├── artifacts.py                            # Pinned private Git cases and immutable raw trial archives
 ├── database.py                             # The SQL protocol, SQLite adapter and D1 REST client
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
@@ -70,7 +71,7 @@ Imports point downward through these layers, so a module never imports one above
 7. `report`
 8. `outputs`, `harnesses`, and `scoring`
 9. `families`, `catalog`, and `state`
-10. `database`, `generation`, `messages`, `paths`, `diffs`, and `html`
+10. `artifacts`, `database`, `generation`, `messages`, `paths`, `diffs`, and `html`
 
 `families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
