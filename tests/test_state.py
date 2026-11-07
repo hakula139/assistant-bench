@@ -339,10 +339,14 @@ class TestState:
 
             assert sorted(results) == [False, True]
             assert not state.begin_attempt(attempt)
-            with pytest.raises(InputError):
-                state.begin_attempt(
-                    replace(attempt, started_at=start(owner, 1).started_at)
-                )
+            other = claim(run(), 'other-claim', slot='another-slot')
+            assert state.claim_attempt(other)
+            for changed in [
+                replace(attempt, claim_id=other.id),
+                replace(attempt, started_at=start(owner, 1).started_at),
+            ]:
+                with pytest.raises(InputError):
+                    state.begin_attempt(changed)
 
     class TestAdmitRequest:
         def test_repeated_request_id_cannot_authorize_another_send_after_reopening(
@@ -365,8 +369,14 @@ class TestState:
             assert sorted(results) == [False, True]
             with connect(tmp_path / 'state.sqlite') as reopened:
                 assert not reopened.admit_request(request)
-            with pytest.raises(InputError):
-                state.admit_request(replace(request, created_at='2025-01-01T00:00:00Z'))
+            following = start(owner, 1)
+            assert state.begin_attempt(following)
+            for changed in [
+                replace(request, attempt_id=following.id),
+                replace(request, created_at='2025-01-01T00:00:00Z'),
+            ]:
+                with pytest.raises(InputError):
+                    state.admit_request(changed)
             assert [row['request_id'] for row in state.requests(parent.scope)] == [
                 request.id
             ]
@@ -528,7 +538,136 @@ class TestState:
 
             assert state.entries('sample') == [original.model_dump_json()]
 
+    class TestRecordTrialArtifact:
+        def test_registers_a_regrade_without_paid_work_or_a_fabricated_entry(
+            self, state: State
+        ) -> None:
+            parent = run()
+            state.create_run(parent)
+            reference = (
+                parent.id,
+                'regraded-trial',
+                '00000000-0000-0000-0000-000000000001',
+                COMMIT,
+                'runs/run-a/trials/regraded-trial',
+                DIGEST,
+            )
+
+            state.record_trial_artifact(*reference)
+            state.record_trial_artifact(*reference)
+
+            artifact = state.trial_artifact(parent.id, 'regraded-trial')
+            assert artifact['source_trial_id'] == reference[2]
+            assert artifact['commit_sha'] == COMMIT
+            assert state.artifacts(parent.scope) == [artifact]
+            assert state.entries(parent.scope) == []
+            assert state.requests(parent.scope) == []
+            assert state.source_revision(parent.scope) == 0
+            assert state.complete_run(parent.id)
+
+        @pytest.mark.parametrize('operation', ['UPDATE', 'DELETE'])
+        def test_registry_provenance_and_content_are_immutable_to_sql_writers(
+            self, state: State, tmp_path: Path, operation: str
+        ) -> None:
+            parent, owner = claimed(state)
+            register(state, parent, owner)
+            original = state.trial_artifact(parent.id, owner.trial)
+            statement = (
+                "UPDATE trial_artifacts SET source_trial_id = 'another-origin'"
+                if operation == 'UPDATE'
+                else 'DELETE FROM trial_artifacts'
+            )
+
+            with (
+                closing(
+                    sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
+                ) as other,
+                pytest.raises(sqlite3.IntegrityError),
+            ):
+                other.execute(statement)
+
+            assert state.trial_artifact(parent.id, owner.trial) == original
+
     class TestSettleClaim:
+        @pytest.mark.parametrize('binding', ['missing', 'another-run', 'another-trial'])
+        def test_settlement_requires_the_same_run_and_trial_registry_identity(
+            self, state: State, tmp_path: Path, binding: str
+        ) -> None:
+            parent, owner = claimed(state)
+            assert state.begin_attempt(start(owner))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            registry_run, registry_trial = parent.id, owner.trial
+            if binding == 'another-run':
+                other = run('run-b')
+                state.create_run(other)
+                registry_run = other.id
+            elif binding == 'another-trial':
+                registry_trial = 'trial-b'
+            if binding != 'missing':
+                state.record_trial_artifact(
+                    registry_run,
+                    registry_trial,
+                    owner.trial,
+                    COMMIT,
+                    'runs/other',
+                    DIGEST,
+                )
+
+            with pytest.raises(InputError):
+                state.settle_claim(owner.id)
+
+            assert state.claim_state(owner.id) == 'claimed'
+            assert state.source_revision(parent.scope) == 0
+            assert not state.complete_run(parent.id)
+            with (
+                closing(
+                    sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
+                ) as sql,
+                pytest.raises(sqlite3.IntegrityError),
+            ):
+                sql.execute('PRAGMA foreign_keys = ON')
+                sql.execute(
+                    'INSERT INTO claim_artifacts (claim_id, run_id, trial_id) '
+                    'VALUES (?, ?, ?)',
+                    (owner.id, registry_run, registry_trial),
+                )
+
+        @pytest.mark.parametrize(
+            'uncertain', [False, True], ids=['claimed', 'uncertain']
+        )
+        def test_pending_receipts_keep_the_original_slot_until_terminal_confirmation(
+            self, state: State, uncertain: bool
+        ) -> None:
+            parent, owner = claimed(state)
+            first, second = start(owner), start(owner, 1)
+            for attempt in [first, second]:
+                assert state.begin_attempt(attempt)
+                assert state.admit_request(admission(attempt, attempt.id))
+            state.record_receipt(first.id, '{"usage":{"input_tokens":100}}')
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            register(state, parent, owner)
+            if uncertain:
+                state.mark_uncertain(owner.id)
+            original_state = state.claim_state(owner.id)
+
+            with pytest.raises(InputError):
+                state.settle_claim(owner.id)
+
+            assert state.claim_state(owner.id) == original_state
+            assert state.source_revision(parent.scope) == 0
+            assert not state.claim_attempt(claim(parent, 'competing'))
+            assert not state.complete_run(parent.id)
+            state.record_receipt(second.id, '{"usage":null}')
+            state.settle_claim(owner.id)
+            state.settle_claim(owner.id)
+            assert state.claim_state(owner.id) == 'settled'
+            assert state.source_revision(parent.scope) == 1
+            remaining = state.requests(parent.scope, unrecorded_only=True)
+            assert [(row['request_id'], row['receipt_json']) for row in remaining] == [
+                (second.id, '{"usage":null}')
+            ]
+            assert state.complete_run(parent.id)
+
         def test_requires_a_real_attempt_before_publishing_completion(
             self, state: State
         ) -> None:
