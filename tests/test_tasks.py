@@ -48,10 +48,14 @@ def installed_version(path: Path) -> str:
     return version(Task(path, disable_verification=True).config)
 
 
-def planned_actions(family: Family, job: JobConfig) -> list[tuple[str, DiffAction]]:
+def planned_actions(job: JobConfig) -> list[tuple[str, DiffAction]]:
     """Return the action Harbor plans for each trial against the family's jobs."""
     plan = asyncio.run(JobPlan.from_config(job))
-    diff = compare_job_trials(plan, load_source_trials(jobs.family_sources(family)))
+    sources = []
+    for source in job.source_jobs:
+        assert source.path is not None
+        sources.append((source, source.path))
+    diff = compare_job_trials(plan, load_source_trials(sources))
     return sorted((trial.task_name, trial.action) for trial in diff.trials)
 
 
@@ -85,7 +89,7 @@ class TestRenderTasks:
         family = load_family('smoke-text')
         (case, _) = load_cases(family)
 
-        (path,) = render_tasks(family, [case])
+        (path,) = render_tasks(family, [case], root=data_dir)
 
         assert path == data_dir / 'tasks' / 'smoke-text' / 'en-greeting'
         assert installed_version(path) == version(
@@ -98,18 +102,32 @@ class TestRenderTasks:
     ) -> None:
         family = load_family('smoke-text')
         cases = load_cases(family)
-        finish_job(jobs.job(family, [make_system()], render_tasks(family, cases)))
+        first = finish_job(
+            jobs.job(
+                family,
+                [make_system()],
+                render_tasks(family, cases, root=data_dir),
+                root=data_dir,
+                sources=[],
+            )
+        )
         edited = [cases[0].model_copy(update={'instruction': 'Reworded.'}), cases[1]]
 
-        job = jobs.job(family, [make_system()], render_tasks(family, edited))
+        job = jobs.job(
+            family,
+            [make_system()],
+            render_tasks(family, edited, root=data_dir),
+            root=data_dir,
+            sources=[jobs.job_source(first)],
+        )
 
-        assert planned_actions(family, job) == [
+        assert planned_actions(job) == [
             ('smoke-text/en-greeting', DiffAction.RERUN),
             ('smoke-text/zh-greeting', DiffAction.REUSE),
         ]
 
     def test_reruns_a_successful_case_at_the_new_deadline_then_reuses_its_success(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         system = make_system()
         family = with_settings(
@@ -117,25 +135,36 @@ class TestRenderTasks:
         )
         cases = load_cases(family)[:1]
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 900.0)
-        old = jobs.job(family, [system], render_tasks(family, cases)).model_copy(
-            update={'job_name': 'old-deadline'}
-        )
+        old = jobs.job(
+            family,
+            [system],
+            render_tasks(family, cases, root=data_dir),
+            root=data_dir,
+            sources=[],
+        ).model_copy(update={'job_name': 'old-deadline'})
         finish_generation(old, 'Earlier success.')
+        first = jobs.job_path(old)
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 3600.0)
 
-        new = jobs.job(family, [system], render_tasks(family, cases)).model_copy(
-            update={'job_name': 'new-deadline'}
-        )
-        assert planned_actions(family, new) == [
-            ('smoke-text/en-greeting', DiffAction.RERUN)
-        ]
+        new = jobs.job(
+            family,
+            [system],
+            render_tasks(family, cases, root=data_dir),
+            root=data_dir,
+            sources=[jobs.job_source(first)],
+        ).model_copy(update={'job_name': 'new-deadline'})
+        assert planned_actions(new) == [('smoke-text/en-greeting', DiffAction.RERUN)]
         finish_generation(new, 'Success at the current deadline.')
 
-        rerun = jobs.job(family, [system], render_tasks(family, cases))
-        assert planned_actions(family, rerun) == [
-            ('smoke-text/en-greeting', DiffAction.REUSE)
-        ]
-        (output,) = collection.collect(family, {system.name: system}).outputs
+        rerun = jobs.job(
+            family,
+            [system],
+            render_tasks(family, cases, root=data_dir),
+            root=data_dir,
+            sources=[jobs.job_source(first), jobs.job_source(jobs.job_path(new))],
+        )
+        assert planned_actions(rerun) == [('smoke-text/en-greeting', DiffAction.REUSE)]
+        (output,) = collection.read_trials(family, jobs.job_path(new))
         assert output.text == 'Success at the current deadline.'
         assert output.job == 'new-deadline'
 
@@ -148,7 +177,7 @@ class TestRenderTasks:
         (stale / 'instruction.md').write_text('Old.')
         (stale.parent / 'stray.md').write_text('Stray.')
 
-        render_tasks(family, load_cases(family))
+        render_tasks(family, load_cases(family), root=data_dir)
 
         assert sorted(
             path.name for path in (data_dir / 'tasks' / 'smoke-text').iterdir()
@@ -412,14 +441,21 @@ class TestChangedTasks:
     def test_names_a_task_edited_under_a_version_a_trial_recorded(
         self,
         families_dir: Path,
+        data_dir: Path,
         edit: str,
         version: str,
         expected: list[tuple[str, str]],
     ) -> None:
         family = voted_tasks(families_dir, 'again', 'echo')
         tasks = [case_task(family, task_id) for task_id in ('again', 'echo')]
-        finish_job(
-            jobs.job(family, jobs.family_systems(family, [make_system()]), tasks)
+        first = finish_job(
+            jobs.job(
+                family,
+                jobs.family_systems(family, [make_system()]),
+                tasks,
+                root=data_dir,
+                sources=[],
+            )
         )
         retired = tasks[0] / 'tests' / 'test.sh'
         retired.write_text(retired.read_text() + '# Edited.\n')
@@ -430,6 +466,6 @@ class TestChangedTasks:
             config.read_text().replace('version = "1.0.0"', f'version = "{version}"')
         )
 
-        changed = changed_tasks(family, tasks[1:])
+        changed = changed_tasks(family, tasks[1:], [jobs.job_source(first)])
 
         assert changed == expected
