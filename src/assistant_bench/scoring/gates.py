@@ -11,6 +11,7 @@ from zhon.cedict.simplified import CHARACTERS as SIMPLIFIED
 from zhon.cedict.traditional import CHARACTERS as TRADITIONAL
 
 from assistant_bench.families import Gate, Language, VotesSettings
+from assistant_bench.html import extract_html
 
 
 _TRADITIONAL_ONLY = frozenset(TRADITIONAL) - frozenset(SIMPLIFIED)
@@ -104,6 +105,9 @@ def failed_gates(
     stripped = text.strip()
     if not stripped:
         return [Gate.EMPTY, *failures]
+
+    if settings.render == 'html' and extract_html(text) is None:
+        failures.append(Gate.HTML)
 
     gates = settings.gates
     if (gates.min_chars is not None and len(stripped) < gates.min_chars) or (

@@ -148,6 +148,7 @@ dependencies = [
     { name = "harbor" },
     { name = "httpx" },
     { name = "httpx2" },
+    { name = "justhtml" },
     { name = "markdown-it-py" },
     { name = "numpy" },
     { name = "openai" },
@@ -186,6 +187,7 @@ requires-dist = [
     { name = "harbor", specifier = "==0.25.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx2", specifier = ">=2.16.0" },
+    { name = "justhtml", specifier = ">=3.16.0" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "openai", specifier = ">=3.46.0" },
@@ -1029,6 +1031,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
+]
+
+[[package]]
+name = "justhtml"
+version = "3.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/15/e46c6ffe3988d2c265bea933ed068c56c26ab6947c1e235cba2bae84b802/justhtml-3.16.0.tar.gz", hash = "sha256:600c95a6a9b766cffe50688a6335617fbcc33ef47f364317e92d6b8dd7a25ce9", size = 980187, upload-time = "2026-10-26T22:23:22.402Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/41/b6/c47694ec99f90cd544f0bd6ee7e3d7195fbf53ebf9d1203008d58c2afddc/justhtml-3.16.0-py3-none-any.whl", hash = "sha256:b7d02cff6ad712bdb58e1ebbcca8b8402dea61d1b5f92ee3b44db6b0b58ca68e", size = 177184, upload-time = "2026-10-26T22:23:20.881Z" },
 ]
 
 [[package]]

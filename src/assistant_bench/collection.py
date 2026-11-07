@@ -29,6 +29,7 @@ from assistant_bench.families import (
 )
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.html import extract_html
 from assistant_bench.jobs import (
     check_harness,
     current_inputs,
@@ -336,7 +337,16 @@ def _text(
     match family.source:
         case 'cases':
             output_file = origin.trial_dir / 'agent' / OUTPUT_FILE
-            return output_file.read_text() if output_file.exists() else None
+            if not output_file.exists():
+                return None
+            with output_file.open(newline='') as stream:
+                text = stream.read()
+            if (
+                isinstance(family.settings, VotesSettings)
+                and family.settings.render == 'html'
+            ):
+                return extract_html(text) or text
+            return text
         case 'tasks':
             match family.settings:
                 case VotesSettings() if reward is not None:
