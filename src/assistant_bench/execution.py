@@ -215,7 +215,7 @@ class ExecutionPlugin(BaseJobPlugin):
             await self._publish(event, recorder.secrets())
             self._state.settle_claim(claim.id)
         except BaseException:
-            self._state.mark_uncertain(recorder.claim_id)
+            await recorder.uncertain()
             raise
         finally:
             reset_trial(token)

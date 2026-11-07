@@ -112,7 +112,7 @@ def open_sources() -> Generator[PrivateSources]:
 @contextmanager
 def open_context() -> Generator[RunContext]:
     """Open cloud state and pinned sources for one disposable local execution."""
-    revision = _implementation_revision()
+    revision = implementation_revision()
     with (
         open_sources() as sources,
         connect('private') as database,
@@ -129,7 +129,8 @@ def open_context() -> Generator[RunContext]:
         )
 
 
-def _implementation_revision() -> str:
+def implementation_revision() -> str:
+    """Identify committed checkout inputs and refuse a mutable execution source."""
     try:
         variables = subprocess.check_output(
             ['git', 'rev-parse', '--local-env-vars'], text=True

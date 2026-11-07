@@ -19,11 +19,10 @@ from pydantic import TypeAdapter
 from typer.core import TyperGroup
 
 from assistant_bench import canaries, collection, execution, jobs, report
-from assistant_bench.arena import commands, local, votes
+from assistant_bench.arena import publication, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import connect
 from assistant_bench.arguments import (
-    FamilyArgument,
     FamilyArguments,
     SystemOptions,
     known_names,
@@ -35,7 +34,7 @@ from assistant_bench.catalog import (
     load_export,
     load_systems,
 )
-from assistant_bench.database import D1Error
+from assistant_bench.database import D1Error, Database
 from assistant_bench.families import (
     CheckersSettings,
     Family,
@@ -51,7 +50,12 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
-from assistant_bench.runtime import RunContext, open_context, open_sources
+from assistant_bench.runtime import (
+    RunContext,
+    implementation_revision,
+    open_context,
+    open_sources,
+)
 from assistant_bench.spend import (
     Accounting,
     Basis,
@@ -63,6 +67,7 @@ from assistant_bench.spend import (
     summarize,
     total_usd,
 )
+from assistant_bench.state import State
 from assistant_bench.tasks import (
     author_vendors,
     changed_tasks,
@@ -301,89 +306,101 @@ def collect(families: FamilyArguments = None) -> None:
 
 
 @app.command()
-def serve() -> None:
-    """Vote locally on cases that production does not publish."""
-    commands.serve()
-
-
-@app.command()
 def close(
-    family: FamilyArgument,
+    family: Annotated[str, typer.Argument(help='The family to close or replay.')],
     snapshot: Annotated[
-        Path | None,
+        str | None,
         typer.Option(
-            help='Close a saved vote snapshot instead of reading the store.',
-            exists=True,
-            dir_okay=False,
+            help='Replay this sealed cloud vote snapshot ID.',
         ),
     ] = None,
 ) -> None:
     """Close a round of the family and write its report.
 
-    A votes family takes the votes production can no longer undo, saves them to
-    votes/<family>/ in the data directory, and closes from that file. A tests
-    family aggregates its collected trials.
+    A voted round seals cloud vote cuts with their publication generations.
+    A tests family aggregates its collected trials and pinned source inputs.
     """
-    selected = load_family(family)
-    match selected.settings:
-        case VotesSettings():
-            closed = _close_votes(
-                selected,
-                _take_snapshot(selected) if snapshot is None else snapshot,
-            )
-        case TaskTestsSettings() | CheckersSettings():
-            if snapshot is not None:
-                raise InputError(
-                    f'Family `{family}` is scored by {selected.settings.scorer}, '
-                    'so it has no votes.'
-                )
-            closed = _close_tests(selected)
-        case _:
-            assert_never(selected.settings)
+    if snapshot is not None:
+        closed = _close_votes(family, snapshot)
+    else:
+        selected = load_family(family)
+        match selected.settings:
+            case VotesSettings():
+                closed = _close_votes(family, _take_snapshot(selected))
+            case TaskTestsSettings() | CheckersSettings():
+                closed = _close_tests(selected)
+            case _:
+                assert_never(selected.settings)
 
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
 
-def _take_snapshot(family: Family) -> Path:
-    """Save the family's available store cuts at one closing timestamp."""
+def _take_snapshot(family: Family) -> str:
+    """Seal independently captured stores and their exact collection mappings."""
     assert isinstance(family.settings, VotesSettings)
+    revision = implementation_revision()
     taken_at = datetime.now(UTC)
-    production = None
-    local_cut = None
-    with local.lock():
+    with connect('private') as database:
+        production = None
         if family.settings.public_voting:
-            with connect('production') as database:
-                production = votes.read_cut(database, family.name, taken_at)
-        if local.exists():
-            with local.database() as database:
-                local_cut = votes.read_cut(database, family.name, taken_at)
-
-    if production is None and local_cut is None:
-        raise InputError(
-            f'Family `{family.name}` has no active voting publication. '
-            'Publish production cases or run `uv run bench serve` first.'
+            with connect('production') as public_database:
+                production = _pin_cut(
+                    database, votes.read_cut(public_database, family.name, taken_at)
+                )
+        private = _pin_cut(database, votes.read_cut(database, family.name, taken_at))
+        if production is None and private is None:
+            raise InputError(
+                f'Family `{family.name}` has no active voting publication. '
+                'Prepare and publish a production or private voting round first.'
+            )
+        identity = votes.save_snapshot(
+            database,
+            votes.Snapshot(
+                family=family.name,
+                taken_at=taken_at,
+                closed_at=taken_at,
+                category_order=tuple(family.settings.categories),
+                closing_revision=revision,
+                production=production,
+                private=private,
+            ),
         )
+    typer.echo(f'Votes sealed as snapshot `{identity}`.')
+    return identity
 
-    path = votes.write_snapshot(
-        votes.Snapshot(
-            family=family.name,
-            taken_at=taken_at,
-            production=production,
-            local=local_cut,
+
+def _pin_cut(database: Database, cut: votes.Cut | None) -> votes.Cut | None:
+    if cut is None:
+        return None
+    prepared = publication.preparation(database, cut.inventory.id)
+    return cut.model_copy(
+        update={'output_generation': prepared.collection_id if prepared else None}
+    )
+
+
+def _close_votes(family: str, identity: str) -> report.Report:
+    with connect('private') as database:
+        snapshot = votes.read_snapshot(database, identity)
+        if snapshot.family != family:
+            raise InputError('The saved vote snapshot belongs to a different family.')
+        state = State(database)
+        outputs: dict[publication.VotingTarget, list[Output]] = {}
+        for target, cut in snapshot.cuts():
+            outputs[target] = (
+                read_outputs(
+                    family,
+                    state,
+                    generation=state.collection_generation(cut.output_generation),
+                )
+                if cut.output_generation is not None
+                else []
+            )
+        return report.close_votes(
+            votes.voting_input(snapshot, outputs),
+            snapshot.closed_at,
+            fingerprints=votes.fingerprints(snapshot),
+            system_names=votes.system_names(snapshot),
         )
-    )
-    typer.echo(f'Votes saved to `{path}`.')
-    return path
-
-
-def _close_votes(family: Family, path: Path) -> report.Report:
-    snapshot = votes.read_snapshot(path)
-    return report.close_votes(
-        votes.voting_input(snapshot, family, read_outputs(family.name)),
-        datetime.now(UTC),
-        fingerprints=votes.fingerprints(snapshot),
-        system_names=votes.system_names(snapshot),
-    )
 
 
 def _close_tests(family: Family) -> report.Report:
