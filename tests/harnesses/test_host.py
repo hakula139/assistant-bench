@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -6,19 +7,20 @@ from typing import Any
 
 import httpx2
 import pytest
-from harbor.job import Job
-from harbor.models.job.config import JobConfig
 from harbor.models.task import config as task_config
 from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from openai import AsyncOpenAI
 
-from assistant_bench import collection, jobs
+from assistant_bench import collection, execution, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import load_cases, load_family
+from assistant_bench.harnesses.endpoint import HEADERS_VAR
 from assistant_bench.harnesses.host import HostEnvironment
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Accounting
 from assistant_bench.tasks import render_tasks
-from support import StubEndpoint, make_system, response
+from support import StubEndpoint, make_system, response, run_host_job
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -35,10 +37,6 @@ OPERATIONS: dict[
 }
 
 
-async def run_in_process(config: JobConfig) -> None:
-    await (await Job.create(config)).run()
-
-
 class TestHostEnvironment:
     @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
     def test_records_the_harbor_deadline_after_closing_the_request_without_retrying(
@@ -48,10 +46,13 @@ class TestHostEnvironment:
         export: NixosConfigExport,
         model_requests: list[httpx2.Request],
         monkeypatch: pytest.MonkeyPatch,
+        run_context: RunContext,
         api: str,
     ) -> None:
         for name, value in endpoint.env.items():
             monkeypatch.setenv(name, value)
+        monkeypatch.setenv(HEADERS_VAR, json.dumps({'x-trace': 'synthetic-host-trace'}))
+        monkeypatch.setattr(jobs, 'run_job', run_host_job)
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 1.0)
         family = load_family('smoke-text')
         system = make_system(api=api)
@@ -59,21 +60,24 @@ class TestHostEnvironment:
         config = jobs.job(
             family,
             [system],
-            render_tasks(family, load_cases(family)[:1]),
+            render_tasks(family, load_cases(family)[:1], root=run_context.root),
+            root=run_context.root,
+            sources=[],
         ).model_copy(update={'job_name': 'deadline'})
 
-        async def expire() -> None:
-            task = asyncio.create_task(run_in_process(config))
-            try:
-                assert await asyncio.to_thread(endpoint.request_received.wait, 5)
-                await asyncio.wait_for(task, 10)
-            finally:
-                gate.set()
-                if not task.done():
-                    task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-
-        asyncio.run(expire())
+        try:
+            with pytest.raises(ExceptionGroup):
+                execution.execute(
+                    run_context,
+                    config,
+                    {system.name: Accounting.of(system)},
+                    scope=family.name,
+                    run_id='deadline-run',
+                    expected_source_revision=0,
+                )
+        finally:
+            gate.set()
+        assert endpoint.request_received.is_set()
 
         (result_file,) = (config.jobs_dir / config.job_name).glob('*/result.json')
         result = TrialResult.model_validate_json(result_file.read_text())
@@ -112,13 +116,15 @@ class TestHostEnvironment:
     @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
     def test_runs_generate_on_each_case_once_across_reruns(
         self,
-        data_dir: Path,
         endpoint: StubEndpoint,
         monkeypatch: pytest.MonkeyPatch,
+        run_context: RunContext,
         api: str,
     ) -> None:
         for name, value in endpoint.env.items():
             monkeypatch.setenv(name, value)
+        monkeypatch.setenv(HEADERS_VAR, json.dumps({'x-trace': 'synthetic-host-trace'}))
+        monkeypatch.setattr(jobs, 'run_job', run_host_job)
         family = load_family('smoke-text')
         cases = load_cases(family)
         system = make_system(api=api)
@@ -132,18 +138,45 @@ class TestHostEnvironment:
             }
         )
 
-        first = jobs.job(family, [system], render_tasks(family, cases))
-        asyncio.run(run_in_process(first))
-        rerun = jobs.job(family, [system], render_tasks(family, cases))
-        jobs.run_job(rerun)
+        first = jobs.job(
+            family,
+            [system],
+            render_tasks(family, cases, root=run_context.root),
+            root=run_context.root,
+            sources=run_context.sources(family),
+        )
+        execution.execute(
+            run_context,
+            first,
+            {system.name: Accounting.of(system)},
+            scope=family.name,
+            run_id='first-run',
+            expected_source_revision=run_context.source_revision(family),
+        )
+        run_context.refresh_sources(family)
+        rerun = jobs.job(
+            family,
+            [system],
+            render_tasks(family, cases, root=run_context.root),
+            root=run_context.root,
+            sources=run_context.sources(family),
+        )
+        execution.execute(
+            run_context,
+            rerun,
+            {system.name: Accounting.of(system)},
+            scope=family.name,
+            run_id='second-run',
+            expected_source_revision=run_context.source_revision(family),
+        )
 
         logs = [
             path.read_text()
-            for path in (data_dir / 'jobs' / 'smoke-text').glob('*/*/trial.log')
+            for path in (run_context.root / 'jobs' / 'smoke-text').glob('*/*/trial.log')
         ]
         assert logs
         assert not any('starts no container' in log for log in logs)
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = collection.collect(family, {system.name: system}, run_context).outputs
         assert [
             (output.case, output.error, output.text, output.output_tokens)
             for output in outputs

@@ -631,7 +631,9 @@ class TestState:
                 state.settle_claim(owner.id)
 
             assert state.claim_state(owner.id) == 'claimed'
-            assert state.source_revision(parent.scope) == 1
+            assert state.source_revision(parent.scope) == (
+                0 if binding == 'missing' else 1
+            )
             assert not state.complete_run(parent.id)
             with (
                 closing(
