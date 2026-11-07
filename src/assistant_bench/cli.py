@@ -300,6 +300,16 @@ def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None
 
 
 @app.command()
+def reset_canary(system: str) -> None:
+    """Clear baseline contexts and preserve the system's probe and spend history."""
+    with connect('private') as database:
+        count = State(database).reset_baseline(system)
+    typer.echo(
+        f'System `{system}`: cleared {count_of(count, "canary baseline context")}.'
+    )
+
+
+@app.command()
 def collect(families: FamilyArguments = None) -> None:
     """Collect the trials of every family with jobs, or of the named ones.
 

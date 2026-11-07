@@ -126,7 +126,7 @@ A fingerprint hashes a system's route, so an endpoint that starts serving anothe
 
 When the route serves another model, give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
 
-A canary refusal happens before new family trials start. For a failed probe, correct the reported failure and rerun. Canary baselines and past probe costs remain in private D1.
+A canary refusal happens before new family trials start. For a failed probe, correct the reported failure and rerun. After verifying that a route change is benign, run `uv run bench reset-canary <system>` to clear that system's baseline contexts. The command reports how many it cleared, requires only private D1 access and preserves probe records, request receipts and spend. A changed model needs a new system name. Canary baselines and past probe costs remain in private D1.
 
 ## Voting
 

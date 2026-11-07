@@ -342,6 +342,21 @@ class State:
             (scope, int(unrecorded_only)),
         ).rows
 
+    def trial_requests(self, run_id: str, trial_id: str) -> list[Row]:
+        """Read canonical receipts for admissions belonging to one exact trial."""
+        return self._database.execute(
+            """
+            SELECT requests.id AS request_id, receipts.receipt_json
+            FROM request_admissions AS requests
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            WHERE claims.run_id = ? AND claims.trial = ?
+            ORDER BY requests.created_at, requests.id
+            """,
+            (run_id, trial_id),
+        ).rows
+
     def record_entry(self, claim_id: str, entry_json: str) -> None:
         """Append one already-priced Entry without releasing its paid slot."""
         claim = self.get_claim(claim_id)
@@ -507,6 +522,20 @@ class State:
         if not rows:
             raise InputError(f'Trial `{trial_id}` has no registered artifacts.')
         return rows[0]
+
+    def trial_registered(
+        self, run_id: str, trial_id: str, source_trial_id: str
+    ) -> bool:
+        """Confirm an audited archive for the exact Harbor execution UUID."""
+        return bool(
+            self._database.execute(
+                """
+                SELECT 1 FROM trial_artifacts
+                WHERE run_id = ? AND trial_id = ? AND source_trial_id = ?
+                """,
+                (run_id, trial_id, source_trial_id),
+            ).rows
+        )
 
     def artifact_generation(self, scope: str) -> ArtifactGeneration:
         """Read the registry and its admission fence in one statement snapshot."""
@@ -792,9 +821,12 @@ class State:
             ).rows
         )
 
-    def reset_baseline(self, system: str) -> None:
-        self._database.execute(
-            'DELETE FROM canary_baselines WHERE system = ?', (system,)
+    def reset_baseline(self, system: str) -> int:
+        return len(
+            self._database.execute(
+                'DELETE FROM canary_baselines WHERE system = ? RETURNING context_key',
+                (system,),
+            ).rows
         )
 
     # ── Stored Metadata ──

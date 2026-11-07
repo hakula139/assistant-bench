@@ -28,7 +28,7 @@ from assistant_bench.families import (
     load_cases,
 )
 from assistant_bench.harnesses.generate import OUTPUT_FILE
-from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.harnesses.usage import combined_usage
 from assistant_bench.html import extract_html
 from assistant_bench.jobs import (
     check_harness,
@@ -294,7 +294,7 @@ def _output(
     reward = _reward(trial.result)
     text = _text(family, origin, case, reward, private_root=private_root)
     finish_reason = metadata.get('finish_reason')
-    usage = _usage(entry)
+    usage = combined_usage(entry.responses) if entry is not None else None
 
     return Output(
         trial=candidate.name,
@@ -435,22 +435,3 @@ def _latency(result: TrialResult, metadata: dict[str, Any]) -> float | None:
     if timing.started_at is None or timing.finished_at is None:
         return None
     return round((timing.finished_at - timing.started_at).total_seconds(), 3)
-
-
-def _usage(entry: Entry | None) -> MeasuredUsage | None:
-    if entry is None or any(usage is None for usage in entry.responses):
-        return None
-    measured = [usage for usage in entry.responses if usage is not None]
-    reasoning = [usage.reasoning_tokens for usage in measured]
-    return MeasuredUsage(
-        input_tokens=sum(usage.input_tokens for usage in measured),
-        cache_tokens=sum(usage.cache_tokens for usage in measured),
-        cache_write_tokens=sum(usage.cache_write_tokens for usage in measured),
-        output_tokens=sum(usage.output_tokens for usage in measured),
-        reasoning_tokens=(
-            sum(value for value in reasoning if value is not None)
-            if all(value is not None for value in reasoning)
-            else None
-        ),
-        cache_write_unpriced=any(usage.cache_write_unpriced for usage in measured),
-    )
