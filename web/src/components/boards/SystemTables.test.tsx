@@ -166,6 +166,27 @@ describe('vote counts', () => {
 describe('SystemStats', () => {
   afterEach(cleanup);
 
+  test.each([
+    {
+      name: 'with an interval',
+      interval: { lower: 950, upper: 1050 },
+      expected: '1,000 (950–1,050)',
+    },
+    { name: 'without an interval', interval: null, expected: '1,000' },
+  ])('shows the score $name', async ({ interval, expected }) => {
+    const { standings } = await round();
+
+    render(
+      <SystemStats
+        standing={{ ...standings[0], score: 1000, interval }}
+        round="2026-10-21"
+        roundHref="/writing/en/rounds/2026-10-21/"
+      />,
+    );
+
+    expect(screen.getByText('Score').nextElementSibling?.textContent).toBe(expected);
+  });
+
   test('opens what decisive means from the decisive count', async () => {
     const { standings } = await round();
     render(
