@@ -9,6 +9,7 @@ import httpx2
 import pytest
 from anthropic.types import Message, Usage
 
+from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     HEADERS_VAR,
@@ -23,6 +24,7 @@ from assistant_bench.harnesses.native import (
     NativeCompletionError,
     NativeLengthExceededError,
 )
+from assistant_bench.state import State
 from support import StubEndpoint, message, message_stream
 
 
@@ -215,16 +217,24 @@ class TestRequestMessages:
         assert client.is_closed()
 
     @pytest.mark.parametrize('base_path', ['/anthropic', '/anthropic/v1'])
+    @pytest.mark.parametrize(
+        'content_type',
+        ['text/event-stream', 'Text/Event-Stream; Charset=UTF-8'],
+        ids=['lowercase-mime', 'mixed-case-mime'],
+    )
     def test_sends_the_native_contract_with_explicit_credentials_and_version(
         self,
         endpoint: StubEndpoint,
+        private_state: State,
         messages_clients: list[anthropic.AsyncAnthropic],
         model_requests: list[httpx2.Request],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         base_path: str,
+        content_type: str,
     ) -> None:
         endpoint.stream = message_stream(message())
+        endpoint.content_type = content_type
         env = endpoint.env | {
             HEADERS_VAR: '{"x-trace":"bench","anthropic-version":"wrong-version"}',
             ANTHROPIC_BASE_URL_VAR: f'{endpoint.url}{base_path}',
@@ -248,6 +258,12 @@ class TestRequestMessages:
                     effort='high',
                     artifact=tmp_path / 'message.json',
                 )
+                (stored,) = private_state.requests('sample')
+                assert isinstance(stored['receipt_json'], str)
+                saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+                assert saved.usage is not None
+                assert saved.usage.input_tokens == 130
+                assert saved.usage.output_tokens == 40
 
         asyncio.run(run())
 
