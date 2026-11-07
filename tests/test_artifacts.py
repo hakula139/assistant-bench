@@ -33,7 +33,14 @@ from assistant_bench.artifacts import (
 )
 from assistant_bench.families import Family, load_family
 from assistant_bench.messages import InputError
-from support import FIXTURES, finish_generation, make_system, write_votes_family
+from support import (
+    FIXTURES,
+    PrivateRepository,
+    finish_generation,
+    git,
+    make_system,
+    write_votes_family,
+)
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -42,78 +49,9 @@ SLUG = 'example/private-data'
 CODE_REVISION = '1' * 40
 
 
-def git(root: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ['git', *arguments],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-
-@dataclass(frozen=True)
-class Repository:
-    client: ArtifactRepository
-    remote: Path
-    seed: Path
-    metadata: Path
-    revision: str
-
-
 @pytest.fixture
-def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repository:
-    for name in (
-        'GIT_DIR',
-        'GIT_WORK_TREE',
-        'GIT_INDEX_FILE',
-        'GIT_OBJECT_DIRECTORY',
-        'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-        'GIT_CONFIG_COUNT',
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
-    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
-    for name in ('GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME'):
-        monkeypatch.setenv(name, 'Test')
-    for name in ('GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'):
-        monkeypatch.setenv(name, 'test@example.com')
-    remote = tmp_path / 'remote.git'
-    git(tmp_path, 'init', '--quiet', '--bare', '--initial-branch=main', str(remote))
-    seed = tmp_path / 'seed'
-    seed.mkdir()
-    git(seed, 'init', '--quiet', '--initial-branch=main')
-    cases = seed / 'cases'
-    cases.mkdir()
-    (cases / 'sample.toml').write_bytes(b'cases = []\r\n')
-    (seed / 'unrelated.txt').write_text('Not a case source.\n')
-    git(seed, 'add', '.')
-    git(seed, 'commit', '--quiet', '-m', 'Add synthetic sources')
-    git(seed, 'remote', 'add', 'origin', str(remote))
-    git(seed, 'push', '--quiet', 'origin', 'main')
-    revision = git(seed, 'rev-parse', 'HEAD')
-    metadata = tmp_path / 'metadata.json'
-    metadata.write_text(
-        json.dumps(
-            {
-                'full_name': SLUG,
-                'private': True,
-                'ssh_url': str(remote),
-                'default_branch': 'main',
-            }
-        )
-    )
-    binary = tmp_path / 'bin'
-    binary.mkdir()
-    stub = binary / 'gh'
-    stub.write_text(
-        f'#!{sys.executable}\n' + (FIXTURES / 'artifacts' / 'gh.py').read_text()
-    )
-    stub.chmod(0o755)
-    monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
-    monkeypatch.setenv('TEST_GH_METADATA', str(metadata))
-    monkeypatch.delenv('TEST_GH_STATUS', raising=False)
-    return Repository(ArtifactRepository(SLUG), remote, seed, metadata, revision)
+def repository(private_repository: PrivateRepository) -> PrivateRepository:
+    return private_repository
 
 
 @dataclass(frozen=True)
@@ -127,7 +65,7 @@ class Trial:
 
 @pytest.fixture
 def trial(
-    repository: Repository, families_dir: Path, data_dir: Path, tmp_path: Path
+    repository: PrivateRepository, families_dir: Path, data_dir: Path, tmp_path: Path
 ) -> Trial:
     write_votes_family(families_dir, ['acme-large'], {'brief': 'reply'})
     family = load_family('f')
@@ -183,7 +121,7 @@ def trial(
     return Trial(family, job, task, result, manifest)
 
 
-def publish(repository: Repository, trial: Trial) -> ArtifactRef:
+def publish(repository: PrivateRepository, trial: Trial) -> ArtifactRef:
     return repository.client.publish_trial(
         'run-a', 'artifact-a', trial.job, trial.manifest
     )
@@ -310,7 +248,7 @@ class TestBuildManifest:
 class TestArtifactRepository:
     def test_inherited_git_locations_cannot_redirect_private_storage_operations(
         self,
-        repository: Repository,
+        repository: PrivateRepository,
         trial: Trial,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -331,7 +269,7 @@ class TestArtifactRepository:
 
     class TestHead:
         def test_reads_the_current_remote_main_without_changing_pinned_sources(
-            self, repository: Repository, tmp_path: Path
+            self, repository: PrivateRepository, tmp_path: Path
         ) -> None:
             pinned = repository.client.head()
             (repository.seed / 'cases' / 'sample.toml').write_text('cases = [1]\n')
@@ -350,7 +288,7 @@ class TestArtifactRepository:
         @pytest.mark.parametrize('failure', ['public', 'unreadable', 'missing-main'])
         def test_refuses_an_unavailable_private_main(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             monkeypatch: pytest.MonkeyPatch,
             failure: str,
         ) -> None:
@@ -368,7 +306,7 @@ class TestArtifactRepository:
 
     class TestSource:
         def test_materializes_only_case_sources_at_the_requested_revision(
-            self, repository: Repository, tmp_path: Path
+            self, repository: PrivateRepository, tmp_path: Path
         ) -> None:
             (repository.seed / 'cases' / 'sample.toml').write_text('cases = [1]\n')
             git(repository.seed, 'add', '.')
@@ -388,7 +326,7 @@ class TestArtifactRepository:
         )
         def test_checks_private_visibility_before_pushing_any_artifact(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             monkeypatch: pytest.MonkeyPatch,
             failure: str,
@@ -413,7 +351,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_returns_only_a_remotely_readable_reference_and_is_idempotent(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             reference = publish(repository, trial)
 
@@ -439,7 +377,7 @@ class TestArtifactRepository:
         @pytest.mark.parametrize('ancestor', ['runs', 'runs/run-a/trials'])
         def test_remote_ancestor_symlinks_cannot_write_outside_the_clone(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             ancestor: str,
@@ -472,7 +410,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_workspace_git_attributes_cannot_normalize_archived_bytes(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
             (workspace / '.gitattributes').write_text('* text eol=lf\n')
@@ -488,7 +426,7 @@ class TestArtifactRepository:
             assert (archived / '.gitattributes').read_bytes() == b'* text eol=lf\n'
 
         def test_does_not_return_a_durable_reference_when_the_push_is_rejected(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
             hook = repository.remote / 'hooks' / 'pre-receive'
@@ -503,7 +441,7 @@ class TestArtifactRepository:
         @pytest.mark.parametrize('change', ['content', 'outside'])
         def test_commit_hooks_cannot_publish_changes_beyond_the_audited_tree(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             monkeypatch: pytest.MonkeyPatch,
@@ -528,7 +466,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_refuses_overwriting_an_artifact_with_different_content(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             reference = publish(repository, trial)
             result = trial.job / trial.result.trial_name / 'agent' / 'output.txt'
@@ -553,7 +491,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == reference.commit_sha
 
         def test_rechecks_selected_files_after_the_manifest_was_built(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
             (trial.job / trial.result.trial_name / 'agent' / 'output.txt').write_text(
@@ -567,7 +505,7 @@ class TestArtifactRepository:
 
         def test_concurrent_pushes_preserve_both_immutable_trials(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             monkeypatch: pytest.MonkeyPatch,
@@ -619,7 +557,7 @@ class TestArtifactRepository:
 
     class TestMaterialize:
         def test_unknown_historical_revisions_survive_publication_and_restoration(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             manifest = TrialManifest.model_validate(
                 {
@@ -653,7 +591,7 @@ class TestArtifactRepository:
             ).read_bytes()
 
         def test_case_aliases_never_follow_a_previously_restored_symlink(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             outside = tmp_path / 'outside'
             outside.mkdir()
@@ -759,7 +697,7 @@ class TestArtifactRepository:
         )
         def test_refuses_remote_trees_that_differ_from_the_recorded_manifest(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             failure: str,
@@ -792,7 +730,7 @@ class TestArtifactRepository:
             assert not (tmp_path / 'restored').exists()
 
         def test_external_symlinks_preserve_targets_without_reading_or_writing_them(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             outside = tmp_path / 'outside.txt'
             outside.write_bytes(b'Private sentinel, never archive this file.\n')
@@ -826,7 +764,7 @@ class TestArtifactRepository:
             assert b'Private sentinel' not in archived
 
         def test_restores_original_bytes_modes_and_links_after_the_client_is_gone(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             reference = publish(repository, trial)
             originals = {
@@ -870,7 +808,7 @@ class TestArtifactRepository:
         )
         def test_retains_the_files_harbor_needs_for_reuse_and_regrade(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             minor_bump: bool,
