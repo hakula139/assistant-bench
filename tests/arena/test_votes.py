@@ -272,6 +272,9 @@ class TestPairVoteCounts:
             connection.executescript(
                 (MIGRATIONS_DIR / '0003_case_splits.sql').read_text()
             )
+            connection.executescript(
+                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
+            )
             database = SQLiteDatabase(connection)
             publication.publish(database, published, NOW, target='production')
             first = record_vote(

@@ -157,6 +157,22 @@ export async function publish(
   }
   statements.push(
     env.DB.prepare(
+      `INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys)
+       SELECT publication_id, low_system, high_system, json_group_array(case_key)
+       FROM (
+         SELECT DISTINCT a.publication_id, a.system AS low_system,
+           b.system AS high_system, a.case_key
+         FROM outputs AS a
+         JOIN outputs AS b
+           ON b.publication_id = a.publication_id AND b.case_key = a.case_key
+         WHERE a.publication_id = ? AND a.verdict = 'pass' AND b.verdict = 'pass'
+           AND a.system < b.system AND a.content_digest <> b.content_digest
+         ORDER BY low_system, high_system, a.case_key
+       ) GROUP BY publication_id, low_system, high_system`,
+    ).bind(id),
+  );
+  statements.push(
+    env.DB.prepare(
       `INSERT INTO active (family, publication_id, activated_at) VALUES (?, ?, 0)
        ON CONFLICT (family) DO UPDATE SET publication_id = excluded.publication_id`,
     ).bind(family, id),
