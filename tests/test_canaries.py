@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 import subprocess
 from dataclasses import replace
 from importlib.resources import files
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
+from harbor.models.trial.config import UserAgentConfig
 
 from assistant_bench import canaries, jobs
 from assistant_bench.catalog import Api, Price, System, SystemIdentity
@@ -193,6 +195,76 @@ class TestPrepare:
         assert jobs.job_path(first.config) != jobs.job_path(second.config)
         assert first.config.tasks[0].path != second.config.tasks[0].path
         assert first.protocol_digest == second.protocol_digest
+
+    @pytest.mark.parametrize('field', ['job_name', 'jobs_dir', 'tasks'])
+    def test_protocol_ignores_each_relocated_job_or_task_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
+    ) -> None:
+        system = make_system()
+        first = prepare_probe(system)
+        if field == 'job_name':
+            relocated = first.config.model_copy(update={'job_name': 'relocated-job'})
+        elif field == 'jobs_dir':
+            relocated = first.config.model_copy(update={'jobs_dir': tmp_path / 'jobs'})
+        else:
+            task = first.config.tasks[0]
+            assert task.path is not None
+            destination = tmp_path / 'relocated-task'
+            shutil.copytree(task.path, destination)
+            relocated = first.config.model_copy(
+                update={'tasks': [task.model_copy(update={'path': destination})]}
+            )
+
+        def probe_job(system: System, task: Path, root: Path) -> JobConfig:
+            return relocated
+
+        monkeypatch.setattr(jobs, 'probe_job', probe_job)
+
+        second = prepare_probe(system)
+
+        assert first.protocol_digest == second.protocol_digest
+
+    @pytest.mark.parametrize(
+        ('field', 'value'),
+        [
+            ('timeout_multiplier', 2.0),
+            ('agent_timeout_multiplier', 2.0),
+            ('verifier_timeout_multiplier', 2.0),
+            ('agent_setup_timeout_multiplier', 2.0),
+            ('environment_build_timeout_multiplier', 2.0),
+            ('extra_instructions', ['Answer in one sentence.']),
+            (
+                'user_agent',
+                UserAgentConfig.model_validate(
+                    {'name': 'nop', 'bridge': {'kind': 'acp'}}
+                ),
+            ),
+        ],
+        ids=[
+            'timeout',
+            'agent-timeout',
+            'verifier-timeout',
+            'agent-setup-timeout',
+            'environment-build-timeout',
+            'extra-instructions',
+            'simulated-user',
+        ],
+    )
+    def test_protocol_tracks_the_resolved_stable_job_configuration(
+        self, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+    ) -> None:
+        system = make_system()
+        first = prepare_probe(system)
+        changed = first.config.model_copy(update={field: value})
+
+        def probe_job(system: System, task: Path, root: Path) -> JobConfig:
+            return changed
+
+        monkeypatch.setattr(jobs, 'probe_job', probe_job)
+
+        second = prepare_probe(system)
+
+        assert first.protocol_digest != second.protocol_digest
 
     def test_protocol_tracks_the_instruction_revision(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

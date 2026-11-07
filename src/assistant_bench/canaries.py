@@ -107,15 +107,7 @@ def prepare(configs: Iterable[JobConfig], systems: Mapping[str, System]) -> list
         config = jobs.probe_job(actual, task, root / 'jobs')
         stable_config = config.model_dump(
             mode='json',
-            include={
-                'agents',
-                'environment',
-                'verifier',
-                'retry',
-                'n_attempts',
-                'n_concurrent_trials',
-                'timeout_multiplier',
-            },
+            exclude={'job_name', 'jobs_dir', 'tasks'},
         )
         digest = hashlib.sha256(
             json.dumps(
