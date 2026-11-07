@@ -264,6 +264,10 @@ export const gates = {
     term: 'Truncated',
     definition: 'The model stopped before finishing, as at its output limit.',
   },
+  html: {
+    term: 'HTML',
+    definition: 'The output violates the complete document or preview isolation contract.',
+  },
   length: { term: 'Length', definition: "The output falls outside the family's character bounds." },
   language: {
     term: 'Language',

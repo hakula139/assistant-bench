@@ -88,7 +88,7 @@ export type RenderSection = 'tests-then-votes';
 /** What a voted family's board calls its outputs and their figures. */
 export interface BoardLabels {
   /** One output, as cost labels such as "Cost / output" name it. */
-  unit: 'output' | 'solution';
+  unit: 'output' | 'solution' | 'page';
   gateFailures: Term;
   lengthBias: Term;
   /** The system page's section on output tokens and latency, and the note under its title. */

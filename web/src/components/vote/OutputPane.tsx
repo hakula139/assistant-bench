@@ -2,20 +2,24 @@ import { cn } from 'cn';
 import type { ReactNode } from 'react';
 
 import { Card, CardContent, CardTitle } from '@/components/ui/card';
+import { HtmlPreview } from '@/components/vote/HtmlPreview';
 import { Markdown, PlainText } from '@/components/vote/Markdown';
 import { band, panel, scroll } from '@/components/vote/panel';
-import type { PairView } from '@/lib/arena';
 
-interface OutputPaneProps {
+interface PaneProps {
   side: 'A' | 'B';
-  render: PairView['render'];
-  text: string;
   /** Renders text outputs as Markdown, with raw HTML disabled. */
   asMarkdown: boolean;
   controls: ReactNode;
   /** Receives the pane's scroll container, whose offset a reload restores. */
   scrollRef?: (element: HTMLDivElement | null) => void;
 }
+
+type OutputPaneProps = PaneProps &
+  (
+    | { render: 'html'; previewUrl: string; text?: never }
+    | { render: 'text' | 'diff'; text: string; previewUrl?: never }
+  );
 
 type DiffLine = 'file' | 'hunk' | 'added' | 'removed' | 'context';
 
@@ -80,6 +84,7 @@ export function OutputPane({
   side,
   render,
   text,
+  previewUrl,
   asMarkdown,
   controls,
   scrollRef,
@@ -97,24 +102,28 @@ export function OutputPane({
         </CardTitle>
         <div className="ml-auto min-h-7">{controls}</div>
       </div>
-      <CardContent
-        ref={scrollRef}
-        role="region"
-        aria-label={`Output ${side} contents`}
-        tabIndex={0}
-        className={cn(
-          scroll,
-          render === 'diff' ? 'px-0' : !asMarkdown && 'leading-relaxed whitespace-pre-wrap',
-        )}
-      >
-        {render === 'diff' ? (
-          <Diff text={text} />
-        ) : asMarkdown ? (
-          <Markdown text={text} />
-        ) : (
-          <PlainText text={text} />
-        )}
-      </CardContent>
+      {render === 'html' ? (
+        <HtmlPreview url={previewUrl} title={`Output ${side} preview`} />
+      ) : (
+        <CardContent
+          ref={scrollRef}
+          role="region"
+          aria-label={`Output ${side} contents`}
+          tabIndex={0}
+          className={cn(
+            scroll,
+            render === 'diff' ? 'px-0' : !asMarkdown && 'leading-relaxed whitespace-pre-wrap',
+          )}
+        >
+          {render === 'diff' ? (
+            <Diff text={text} />
+          ) : asMarkdown ? (
+            <Markdown text={text} />
+          ) : (
+            <PlainText text={text} />
+          )}
+        </CardContent>
+      )}
     </Card>
   );
 }

@@ -41,7 +41,7 @@ def extract_html(text: str) -> str | None:
             ):
                 return None
         if node.name in {'a', 'area'} and any(
-            value and not value.strip(_WHITESPACE).startswith('#')
+            not value.strip(_WHITESPACE).startswith('#')
             for key in ('href', 'xlink:href')
             if (value := attrs.get(key)) is not None
         ):

@@ -339,14 +339,14 @@ def _text(
             output_file = origin.trial_dir / 'agent' / OUTPUT_FILE
             if not output_file.exists():
                 return None
-            with output_file.open(newline='') as stream:
-                text = stream.read()
             if (
                 isinstance(family.settings, VotesSettings)
                 and family.settings.render == 'html'
             ):
+                with output_file.open(newline='') as stream:
+                    text = stream.read()
                 return extract_html(text) or text
-            return text
+            return output_file.read_text()
         case 'tasks':
             match family.settings:
                 case VotesSettings() if reward is not None:
