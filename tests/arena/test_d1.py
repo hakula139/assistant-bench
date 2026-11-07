@@ -12,6 +12,7 @@ from assistant_bench.messages import InputError
 
 ACCOUNT = 'synthetic-account'
 DATABASE = 'synthetic-database'
+PRIVATE_DATABASE = 'private-database'
 
 
 class TestConnect:
@@ -31,6 +32,11 @@ class TestConnect:
                 [[env.production.d1_databases]]
                 binding = "DB"
                 database_name = "arena-production"
+
+                [[env.private.d1_databases]]
+                binding = "DB"
+                database_name = "arena-private"
+                database_id = "{PRIVATE_DATABASE}"
             """)
         )
         monkeypatch.setattr(d1, 'WRANGLER_CONFIG', path)
@@ -50,6 +56,7 @@ class TestConnect:
         ],
         ids=['token-file', 'dotenv-file'],
     )
+    @pytest.mark.parametrize('target', ['staging', 'private'])
     def test_queries_with_only_the_token_from_its_credential_file(
         self,
         config: Path,
@@ -58,6 +65,7 @@ class TestConnect:
         variable: str,
         content: str,
         expected: str,
+        target: d1.TargetName,
     ) -> None:
         token = tmp_path / 'd1-token'
         token.write_text(content)
@@ -79,13 +87,14 @@ class TestConnect:
 
         monkeypatch.setattr(httpx, 'Client', mocked)
 
-        with d1.connect('staging') as database:
+        with d1.connect(target) as database:
             database.execute('SELECT 1')
 
         (request,) = requests
         assert request.headers['Authorization'] == f'Bearer {expected}'
+        identifier = PRIVATE_DATABASE if target == 'private' else DATABASE
         assert request.url.path == (
-            f'/client/v4/accounts/{ACCOUNT}/d1/database/{DATABASE}/query'
+            f'/client/v4/accounts/{ACCOUNT}/d1/database/{identifier}/query'
         )
         assert os.environ['CLOUDFLARE_API_TOKEN'] == 'ambient-token'
         assert os.environ['D1_UNRELATED_SETTING'] == 'from-process'
