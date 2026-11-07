@@ -257,14 +257,16 @@ def job(
         agents,
         tasks,
         source_jobs,
-        environment=_environment(systems),
+        environment=_environment(systems, family.source_root.parent),
         n_attempts=family.settings.samples,
         n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
         verify=tasks_source,
     )
 
 
-def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
+def _environment(
+    systems: list[System], source_root: Path | None = None
+) -> trial_config.EnvironmentConfig:
     if all(HARNESSES[system.harness].single_call for system in systems):
         return trial_config.EnvironmentConfig(
             import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
@@ -272,7 +274,15 @@ def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
     if any(system.version for system in systems):
         return trial_config.EnvironmentConfig(
             import_path='assistant_bench.harnesses.docker:InstalledDocker',
-            extra_docker_compose=[HOST_OVERLAY],
+            extra_docker_compose=[
+                source_root
+                / 'src'
+                / 'assistant_bench'
+                / 'harnesses'
+                / HOST_OVERLAY.name
+                if source_root is not None
+                else HOST_OVERLAY
+            ],
         )
     return trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER)
 
@@ -303,7 +313,7 @@ def current_inputs(
     resolved = family_systems(
         family, [system for system in systems if system.name in family.settings.systems]
     )
-    environment = _environment(resolved)
+    environment = _environment(resolved, family.source_root.parent)
     return {
         system.name: (
             _agent_config(system),
@@ -551,6 +561,7 @@ def run_job(
     *,
     log: Path | None = None,
     plugin_context: Path | None = None,
+    source_root: Path | None = None,
 ) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
@@ -590,8 +601,11 @@ def run_job(
                 '--plugin-kwarg',
                 f'context_file={plugin_context}',
             ]
+        environment = harbor_environment()
+        if source_root is not None:
+            environment['PYTHONPATH'] = str(source_root / 'src')
         if log is None:
-            subprocess.run(command, check=True, env=harbor_environment())
+            subprocess.run(command, check=True, env=environment)
         else:
             log.parent.mkdir(parents=True, exist_ok=True)
             with log.open('w') as output:
@@ -599,7 +613,7 @@ def run_job(
                 subprocess.run(
                     command,
                     check=True,
-                    env=harbor_environment(),
+                    env=environment,
                     stdout=output,
                     stderr=subprocess.STDOUT,
                 )

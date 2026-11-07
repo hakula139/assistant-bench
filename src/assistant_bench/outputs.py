@@ -173,9 +173,7 @@ def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
                 [
                     f'Family `{family.name}` pools outputs of several models:',
                     *conflicts,
-                    "Delete the minority job's trials of each system under "
-                    f'`jobs/{family.name}/` in the data directory and rerun them, '
-                    'or give the system a new name once its route is fixed, as '
+                    'Fix the route and give the system a new name, as '
                     '`docs/guide/running.md#model-swaps` describes.',
                 ]
             )
