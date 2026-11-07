@@ -87,7 +87,19 @@
         # Pre-commit Hooks
         # ------------------------------------------------------------------------------------------
         hooks = {
+          actionlint.enable = true;
+          check-yaml.enable = true;
+          cspell.enable = true;
+          deadnix.enable = true;
           dprint.enable = false;
+          editorconfig-checker.enable = true;
+          markdownlint-cli2.enable = true;
+          nixfmt.enable = true;
+          shellcheck.enable = true;
+          shfmt.enable = true;
+          sort-file-contents.enable = true;
+          statix.enable = true;
+          taplo.enable = true;
 
           lychee = {
             enable = true;
