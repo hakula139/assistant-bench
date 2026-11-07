@@ -157,7 +157,8 @@ class TrialManifest(_Model):
         paths = [entry.path for entry in self.files]
         if paths != sorted(set(paths)):
             raise ValueError('manifest files must be unique and sorted by path')
-        if list(self.directories) != sorted(set(self.directories)):
+        directories = set(self.directories)
+        if list(self.directories) != sorted(directories):
             raise ValueError('manifest directories must be unique and sorted by path')
         for directory in self.directories:
             parts = _path_parts(directory)
@@ -173,12 +174,18 @@ class TrialManifest(_Model):
         aliases: dict[str, str] = {}
         for path in (*self.directories, *paths):
             parts = _path_parts(path)
-            if path in self.directories and path in file_paths:
+            if path in directories and path in file_paths:
                 raise ValueError('a manifest path cannot be both a file and directory')
             for index in range(1, len(parts) + 1):
                 ancestor = '/'.join(parts[:index])
                 if index < len(parts) and ancestor in file_paths:
                     raise ValueError("a manifest file cannot be another path's parent")
+                if (
+                    3 <= index < len(parts)
+                    and parts[2] in TRIAL_DIRECTORIES
+                    and ancestor not in directories
+                ):
+                    raise ValueError('manifest directory parents must be listed')
                 previous = aliases.setdefault(ancestor.casefold(), ancestor)
                 if previous != ancestor:
                     raise ValueError('manifest paths cannot contain case aliases')
