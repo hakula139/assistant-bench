@@ -66,6 +66,12 @@ class Collection:
     created_at: str
 
 
+@dataclass(frozen=True)
+class OutputGeneration:
+    id: str | None
+    outputs: tuple[str, ...]
+
+
 class State:
     """Conditional claims and immutable domain-validated JSON records.
 
@@ -466,6 +472,9 @@ class State:
     def run_status(self, run_id: str) -> RunStatus:
         return cast(RunStatus, self._run_row(run_id)['status'])
 
+    def run(self, run_id: str) -> Run:
+        return self._run(run_id)
+
     # ── Output Generations ──
 
     def begin_collection(self, collection: Collection) -> None:
@@ -595,19 +604,38 @@ class State:
         ).rows
         return bool(current and current[0]['collection_id'] == collection)
 
+    def output_generation(self, family: str) -> OutputGeneration:
+        """Read the active generation and its ordered outputs in one SQL snapshot."""
+        rows = self._database.execute(
+            """
+            SELECT active.collection_id, outputs.output_json
+            FROM active_collections AS active
+            LEFT JOIN collection_outputs AS outputs
+                ON outputs.collection_id = active.collection_id
+            WHERE active.family = ? ORDER BY outputs.position
+            """,
+            (family,),
+        ).rows
+        return _generation(rows)
+
+    def collection_generation(self, collection: str) -> OutputGeneration:
+        """Read one complete immutable generation, refusing an unsealed import."""
+        rows = self._database.execute(
+            """
+            SELECT collections.id AS collection_id, outputs.output_json
+            FROM collections LEFT JOIN collection_outputs AS outputs
+                ON outputs.collection_id = collections.id
+            WHERE collections.id = ? AND collections.sealed = 1
+            ORDER BY outputs.position
+            """,
+            (collection,),
+        ).rows
+        if not rows:
+            raise InputError(f'Collection `{collection}` is not sealed.')
+        return _generation(rows)
+
     def outputs(self, family: str) -> list[str]:
-        return [
-            cast(str, row['output_json'])
-            for row in self._database.execute(
-                """
-                SELECT outputs.output_json FROM collection_outputs AS outputs
-                JOIN active_collections AS active
-                    ON active.collection_id = outputs.collection_id
-                WHERE active.family = ? ORDER BY outputs.position
-                """,
-                (family,),
-            ).rows
-        ]
+        return list(self.output_generation(family).outputs)
 
     # ── Canary History and Baselines ──
 
@@ -701,6 +729,17 @@ class State:
         if not rows:
             raise InputError(f'Collection `{collection}` is not recorded.')
         return rows[0]
+
+
+def _generation(rows: list[Row]) -> OutputGeneration:
+    return OutputGeneration(
+        id=cast(str, rows[0]['collection_id']) if rows else None,
+        outputs=tuple(
+            cast(str, row['output_json'])
+            for row in rows
+            if row['output_json'] is not None
+        ),
+    )
 
 
 def _claim(row: Row) -> Claim:

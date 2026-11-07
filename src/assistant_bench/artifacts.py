@@ -119,6 +119,12 @@ class TrialManifest(_Model):
         return self
 
 
+@dataclass(frozen=True)
+class MaterializedTrial:
+    job: Path
+    manifest: TrialManifest
+
+
 def build_manifest(
     source_job_dir: Path,
     *,
@@ -354,7 +360,9 @@ class ArtifactRepository:
                     commit_sha=commit, path=manifest.path, manifest_digest=digest
                 )
 
-    def materialize(self, reference: ArtifactRef, destination: Path) -> Path:
+    def materialize(
+        self, reference: ArtifactRef, destination: Path
+    ) -> MaterializedTrial:
         """Restore verified raw job files into an empty private directory.
 
         No JSON paths are rewritten. The execution layer prepares Harbor's
@@ -395,7 +403,7 @@ class ArtifactRepository:
                     )
                 restored[entry.path] = (mode, value)
             _restore(destination, restored)
-        return destination / 'job'
+        return MaterializedTrial(job=destination / 'job', manifest=manifest)
 
     def _metadata(self) -> _Repository:
         response = _command(['gh', 'api', f'repos/{self.repository_slug}'])
