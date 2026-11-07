@@ -50,6 +50,21 @@ describe('candidates', () => {
       { caseKey: 'first', systems: ['pro', 'small'] },
     ]);
   });
+
+  test('normalizes SQL system order before returning comparisons and matching vote history', () => {
+    const bmp = 'system-\ue000';
+    const astral = 'system-\u{10000}';
+    const facts = [{ low_system: bmp, high_system: astral, case_keys: '["first", "second"]' }];
+
+    const found = candidates(facts, []);
+    const remaining = candidates(facts, [{ case_key: 'first', a_system: bmp, b_system: astral }]);
+
+    expect(found).toEqual([
+      { caseKey: 'first', systems: [astral, bmp] },
+      { caseKey: 'second', systems: [astral, bmp] },
+    ]);
+    expect(remaining).toEqual([{ caseKey: 'second', systems: [astral, bmp] }]);
+  });
 });
 
 describe('draw', () => {

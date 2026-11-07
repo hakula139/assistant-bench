@@ -120,11 +120,12 @@ export function candidates(
     voted.map((vote) => key(vote.case_key, ...sorted(vote.a_system, vote.b_system))),
   );
 
-  return facts.flatMap(({ low_system: low, high_system: high, case_keys }) =>
-    (JSON.parse(case_keys) as string[]).flatMap((caseKey) =>
-      done.has(key(caseKey, low, high)) ? [] : [{ caseKey, systems: [low, high] as const }],
-    ),
-  );
+  return facts.flatMap(({ low_system: low, high_system: high, case_keys }) => {
+    const systems = sorted(low, high);
+    return (JSON.parse(case_keys) as string[]).flatMap((caseKey) =>
+      done.has(key(caseKey, ...systems)) ? [] : [{ caseKey, systems }],
+    );
+  });
 }
 
 async function ordered<T>(items: readonly T[], rank: (item: T) => Promise<string>) {
