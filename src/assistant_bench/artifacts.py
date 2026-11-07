@@ -33,6 +33,7 @@ JOB_FILES = (
 )
 TRIAL_FILES = ('config.json', 'lock.json', 'result.json', 'trial.log', 'exception.txt')
 TRIAL_DIRECTORIES = ('agent', 'verifier', 'artifacts')
+GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
 
 
 def audit_trial(root: Path, secrets: set[str]) -> None:
@@ -93,9 +94,6 @@ def audit_trial(root: Path, secrets: set[str]) -> None:
         raise InputError(
             'The artifact credential scan did not pass. Publication refused.'
         )
-
-
-GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
 
 
 # ── Models ──
