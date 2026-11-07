@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import ssl
 import sys
 from collections.abc import Callable, Generator, Iterator
@@ -279,6 +280,7 @@ def private_repository(
 
 @pytest.fixture
 def run_context(
+    request: pytest.FixtureRequest,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     private_store: SQLiteDatabase,
@@ -298,11 +300,24 @@ def run_context(
     monkeypatch.setenv(REPOSITORY_VAR, private_repository.client.repository_slug)
     root = tmp_path / 'execution'
     root.mkdir()
+    public = tmp_path / 'public'
+    public.mkdir(exist_ok=True)
+    source = Path(__file__).parents[1]
+    for name in ('pyproject.toml', 'uv.lock', 'systems.toml'):
+        shutil.copyfile(source / name, public / name)
+    shutil.copytree(
+        source / 'src',
+        public / 'src',
+        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
+    )
+    if 'families_dir' not in request.fixturenames:
+        shutil.copytree(source / 'families', public / 'families')
     private_root = private_repository.client.source(
         private_repository.revision, tmp_path / 'private-source'
     )
     return RunContext(
         root=root,
+        public_root=public,
         private_root=private_root,
         code_revision='1' * 40,
         case_revision=private_repository.revision,
@@ -331,7 +346,7 @@ def begun_trial(bound_trial: TrialAccounting) -> Iterator[TrialAccounting]:
 
 @pytest.fixture
 def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / 'families'
+    directory = tmp_path / 'public' / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
 
