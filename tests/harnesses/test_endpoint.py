@@ -10,6 +10,11 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench.catalog import EXPORT_VAR, Api
+from assistant_bench.harnesses.accounting import (
+    AccountingError,
+    RequestReceipt,
+    TrialAccounting,
+)
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -21,7 +26,8 @@ from assistant_bench.harnesses.endpoint import (
     Endpoint,
     preflight,
 )
-from support import StubEndpoint
+from assistant_bench.state import State
+from support import START, StubEndpoint, accounted_trial, completion, message, response
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -45,6 +51,7 @@ class TestLoopbackRequestsOnly:
 
 
 class TestEndpoint:
+    @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'anthropic-messages']
@@ -65,7 +72,7 @@ class TestEndpoint:
                             cast_to=httpx2.Response,
                             body={},
                         )
-                async with configured.client() as client:
+                async with configured.client(api) as client:
                     return await client.post(
                         f'{endpoint.url}/v1/responses', cast_to=httpx2.Response, body={}
                     )
@@ -112,7 +119,7 @@ class TestEndpoint:
                             body={},
                         )
                     return
-                async with configured.client() as client:
+                async with configured.client(api) as client:
                     await client.post(
                         f'{endpoint.url}/v1/responses',
                         cast_to=httpx2.Response,
@@ -131,7 +138,11 @@ class TestEndpoint:
             ids=['trusted-ca-ipv4', 'ipv6-bind'],
         )
         def test_uses_the_configured_trust_and_local_address(
-            self, request: pytest.FixtureRequest, fixture: str, address: str
+            self,
+            request: pytest.FixtureRequest,
+            private_state: State,
+            fixture: str,
+            address: str,
         ) -> None:
             endpoint: StubEndpoint = request.getfixturevalue(fixture)
             env = endpoint.env | {LOCAL_ADDRESS_VAR: address}
@@ -140,18 +151,134 @@ class TestEndpoint:
             configured = Endpoint.read(env.get, 'openai-responses')
 
             async def send(endpoint_config: Endpoint) -> httpx2.Response:
-                async with endpoint_config.http_client() as client:
+                async with endpoint_config.http_client('openai-responses') as client:
                     return await client.post(f'{endpoint.url}/v1/responses', json={})
 
             if endpoint.ca_file:
                 untrusted = Endpoint.read(endpoint.env.get, 'openai-responses')
-                with pytest.raises(httpx2.ConnectError):
-                    asyncio.run(send(untrusted))
-            reply = asyncio.run(send(configured))
+                with accounted_trial(private_state, scope='untrusted') as recorder:
+                    recorder.begin(START)
+                    with pytest.raises(httpx2.ConnectError):
+                        asyncio.run(send(untrusted))
+                    recorder.finish(START)
+            with accounted_trial(private_state, scope='trusted') as recorder:
+                recorder.begin(START)
+                reply = asyncio.run(send(configured))
+                recorder.finish(START)
 
             assert reply.status_code == 200
             (sent,) = endpoint.requests
             assert sent.path == '/v1/responses'
+
+        @pytest.mark.parametrize(
+            ('api', 'inputs', 'writes'),
+            [
+                ('openai-chat-completions', 120, 0),
+                ('openai-responses', 120, 0),
+                ('anthropic-messages', 130, 10),
+            ],
+        )
+        def test_each_native_sdk_returns_only_after_its_receipt_is_durable(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            private_state: State,
+            api: Api,
+            inputs: int,
+            writes: int,
+        ) -> None:
+            endpoint.response = {
+                'openai-chat-completions': completion(),
+                'openai-responses': response(),
+                'anthropic-messages': message(),
+            }[api]
+            configured = Endpoint.read(endpoint.env.get, api)
+
+            async def request() -> None:
+                if api == 'anthropic-messages':
+                    async with configured.messages_client() as client:
+                        await client.messages.create(
+                            model='acme/large',
+                            max_tokens=64,
+                            messages=[{'role': 'user', 'content': 'Hello.'}],
+                        )
+                else:
+                    async with configured.client(api) as client:
+                        if api == 'openai-responses':
+                            await client.responses.create(
+                                model='acme/large', input='Hello.'
+                            )
+                        else:
+                            await client.chat.completions.create(
+                                model='acme/large',
+                                messages=[{'role': 'user', 'content': 'Hello.'}],
+                            )
+                (stored,) = private_state.requests('sample')
+                assert isinstance(stored['receipt_json'], str)
+                saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+                assert saved.api == api
+                assert saved.usage is not None
+                assert saved.usage.input_tokens == inputs
+                assert saved.usage.cache_write_tokens == writes
+                assert saved.response_model == 'large-2026'
+                assert saved.provider_request_id == 'req-1'
+                assert 'Hello.' not in stored['receipt_json']
+                assert 'test-key' not in stored['receipt_json']
+                assert 'x-trace' not in stored['receipt_json']
+
+            asyncio.run(request())
+
+            assert len(endpoint.requests) == 1
+            assert not begun_trial.fatal
+
+        def test_a_refused_admission_does_not_reach_the_endpoint(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            async def refused(self: TrialAccounting, api: Api) -> str:
+                raise ValueError('Admission refused.')
+
+            monkeypatch.setattr(TrialAccounting, 'admit', refused)
+            configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+            async def request() -> None:
+                async with configured.http_client('openai-responses') as client:
+                    await client.post(f'{endpoint.url}/v1/responses', json={})
+
+            with pytest.raises(ValueError, match='Admission refused'):
+                asyncio.run(request())
+
+            assert endpoint.requests == []
+
+        def test_a_caught_receipt_failure_still_blocks_every_followup_request(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            private_state: State,
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+            def unavailable(self: State, request_id: str, receipt_json: str) -> None:
+                raise OSError('Database unavailable.')
+
+            monkeypatch.setattr(State, 'record_receipt', unavailable)
+
+            async def request() -> None:
+                async with configured.http_client('openai-responses') as client:
+                    with pytest.raises(AccountingError, match='receipt could not'):
+                        await client.post(f'{endpoint.url}/v1/responses', json={})
+                    with pytest.raises(AccountingError, match='cannot admit'):
+                        await client.post(f'{endpoint.url}/v1/responses', json={})
+
+            asyncio.run(request())
+
+            assert len(endpoint.requests) == 1
+            assert begun_trial.fatal
+            (stored,) = private_state.requests('sample')
+            assert stored['receipt_json'] is None
 
 
 class TestPreflight:
